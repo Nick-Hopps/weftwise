@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./llm-config.schema.json",
+  "title": "Agentic Wiki LLM Config",
+  "description": "Configuration for multi-model LLM routing. Each task (ingest, query, lint) can use a different provider and model. Supports the full set of Vercel AI SDK CallSettings parameters.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "defaults", "providers"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "description": "Config schema version. Must be 1."
+    },
+    "defaults": {
+      "$ref": "#/$defs/defaultRoute",
+      "description": "Default route applied to all tasks unless overridden."
+    },
+    "tasks": {
+      "type": "object",
+      "description": "Per-task route overrides. Unspecified fields inherit from defaults.",
+      "additionalProperties": false,
+      "properties": {
+        "ingest": { "$ref": "#/$defs/taskRoute" },
+        "query": { "$ref": "#/$defs/taskRoute" },
+        "lint": { "$ref": "#/$defs/taskRoute" }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "description": "Named provider profiles. Referenced by 'profile' in defaults/tasks.",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/providerProfile"
+      }
+    }
+  },
+  "$defs": {
+    "taskRoute": {
+      "type": "object",
+      "description": "Route override for a specific task. All fields are optional and inherit from defaults.",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Name of a provider profile from the 'providers' section."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Model ID to use (e.g., 'claude-sonnet-4-6', 'gpt-4o')."
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of output tokens to generate."
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Sampling temperature (0 = almost deterministic, 2 = very random). Recommended: set either temperature or topP, not both."
+        },
+        "topP": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Nucleus sampling: only tokens comprising the top P probability mass are considered (e.g. 0.1 = top 10%). Recommended: set either temperature or topP, not both."
+        },
+        "topK": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Only sample from the top K most likely tokens. Removes long-tail low-probability responses."
+        },
+        "presencePenalty": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "description": "Penalise tokens that already appear in the prompt. Positive values reduce repetition, negative values increase it."
+        },
+        "frequencyPenalty": {
+          "type": "number",
+          "minimum": -1,
+          "maximum": 1,
+          "description": "Penalise tokens proportional to how often they have appeared so far. Positive values reduce word/phrase repetition."
+        },
+        "stopSequences": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Generation stops when the model outputs one of these strings."
+        },
+        "seed": {
+          "type": "integer",
+          "description": "Integer seed for deterministic sampling (provider support varies)."
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum number of retries on transient API failures. 0 disables retries. Default: 2."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Additional HTTP headers sent with each LLM request (e.g. custom routing headers)."
+        },
+        "providerOptions": {
+          "type": "object",
+          "description": "Provider-specific options passed through to the AI SDK. Outer key = provider name (e.g. 'anthropic', 'openai'), inner object = provider-specific settings.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout in milliseconds before aborting the request. Default: 480000 (8 minutes)."
+        }
+      }
+    },
+    "defaultRoute": {
+      "allOf": [
+        { "$ref": "#/$defs/taskRoute" },
+        { "required": ["profile", "model"] }
+      ],
+      "description": "Default route must specify at least profile and model."
+    },
+    "anthropicProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "anthropic" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" }
+      }
+    },
+    "openaiProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "openai" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" }
+      }
+    },
+    "googleProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "google" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" }
+      }
+    },
+    "deepseekProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "deepseek" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" }
+      }
+    },
+    "mistralProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "mistral" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" }
+      }
+    },
+    "xaiProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "xai" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" }
+      }
+    },
+    "ollamaProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider"],
+      "properties": {
+        "provider": { "const": "ollama" },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "description": "Ollama server URL (default: http://localhost:11434)" }
+      }
+    },
+    "openaiCompatibleProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "name", "baseURL"],
+      "properties": {
+        "provider": { "const": "openai-compatible" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Human-readable name for this custom endpoint."
+        },
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseURL": { "type": "string", "format": "uri" },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Custom HTTP headers to send with requests."
+        }
+      }
+    },
+    "providerProfile": {
+      "oneOf": [
+        { "$ref": "#/$defs/anthropicProvider" },
+        { "$ref": "#/$defs/openaiProvider" },
+        { "$ref": "#/$defs/googleProvider" },
+        { "$ref": "#/$defs/deepseekProvider" },
+        { "$ref": "#/$defs/mistralProvider" },
+        { "$ref": "#/$defs/xaiProvider" },
+        { "$ref": "#/$defs/ollamaProvider" },
+        { "$ref": "#/$defs/openaiCompatibleProvider" }
+      ]
+    }
+  }
+}

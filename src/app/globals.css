@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 248 250 252; /* slate-50 */
+  --foreground: 9 9 11; /* zinc-950 */
+  --accent: 99 102 241; /* indigo-500 */
+  --accent-llm: 16 185 129; /* emerald-500 */
+  --surface: 255 255 255;
+  --border: 226 232 240; /* slate-200 */
+  --muted: 100 116 139; /* slate-500 */
+}
+
+.dark {
+  --background: 9 9 11; /* zinc-950 */
+  --foreground: 248 250 252; /* slate-50 */
+  --accent: 99 102 241; /* indigo-500 */
+  --accent-llm: 16 185 129; /* emerald-500 */
+  --surface: 24 24 27; /* zinc-900 */
+  --border: 63 63 70; /* zinc-700 */
+  --muted: 161 161 170; /* zinc-400 */
+}
+
+@layer base {
+  body {
+    background-color: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    @apply antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* @uiw/react-md-editor theme overrides */
+.wiki-editor-container .w-md-editor {
+  --color-border-default: theme('colors.zinc.200') !important;
+  --color-canvas-default: theme('colors.white') !important;
+  background-color: theme('colors.white') !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.dark .wiki-editor-container .w-md-editor {
+  --color-border-default: theme('colors.zinc.700') !important;
+  --color-canvas-default: theme('colors.zinc.900') !important;
+  background-color: theme('colors.zinc.900') !important;
+}
+
+.wiki-editor-container .w-md-editor-toolbar {
+  background-color: theme('colors.zinc.50') !important;
+  border-bottom: 1px solid theme('colors.zinc.200') !important;
+  padding: 6px 8px !important;
+}
+
+.dark .wiki-editor-container .w-md-editor-toolbar {
+  background-color: theme('colors.zinc.800') !important;
+  border-bottom-color: theme('colors.zinc.700') !important;
+}
+
+.wiki-editor-container .w-md-editor-toolbar button {
+  color: theme('colors.zinc.600') !important;
+}
+
+.wiki-editor-container .w-md-editor-toolbar button:hover {
+  color: theme('colors.indigo.600') !important;
+}
+
+.dark .wiki-editor-container .w-md-editor-toolbar button {
+  color: theme('colors.zinc.400') !important;
+}
+
+.dark .wiki-editor-container .w-md-editor-toolbar button:hover {
+  color: theme('colors.indigo.400') !important;
+}
+
+.wiki-editor-container .w-md-editor-text-input {
+  color: theme('colors.zinc.900') !important;
+  -webkit-text-fill-color: theme('colors.zinc.900') !important;
+}
+
+.dark .wiki-editor-container .w-md-editor-text-input {
+  color: theme('colors.slate.100') !important;
+  -webkit-text-fill-color: theme('colors.slate.100') !important;
+}
