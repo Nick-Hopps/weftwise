@@ -1,0 +1,74 @@
+{
+  "$schema": "./llm-config.schema.json",
+  "version": 1,
+  "defaults": {
+    "profile": "anthropic-default",
+    "model": "claude-sonnet-4-6",
+    "maxTokens": 4096,
+    "temperature": 0.2,
+    "timeoutMs": 480000,
+    "maxRetries": 2
+  },
+  "tasks": {
+    "ingest": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192
+    },
+    "query": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 4096,
+      "topP": 0.9,
+      "presencePenalty": 0.1,
+      "frequencyPenalty": 0.1,
+      "providerOptions": {
+        "anthropic": {
+          "thinking": { "type": "enabled", "budgetTokens": 5000 }
+        }
+      }
+    },
+    "lint": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 4096,
+      "temperature": 0
+    }
+  },
+  "providers": {
+    "anthropic-default": {
+      "provider": "anthropic",
+      "apiKeyEnv": "ANTHROPIC_API_KEY"
+    },
+    "openai-default": {
+      "provider": "openai",
+      "apiKeyEnv": "OPENAI_API_KEY"
+    },
+    "google-default": {
+      "provider": "google",
+      "apiKeyEnv": "GOOGLE_API_KEY"
+    },
+    "deepseek-default": {
+      "provider": "deepseek",
+      "apiKeyEnv": "DEEPSEEK_API_KEY"
+    },
+    "mistral-default": {
+      "provider": "mistral",
+      "apiKeyEnv": "MISTRAL_API_KEY"
+    },
+    "xai-default": {
+      "provider": "xai",
+      "apiKeyEnv": "XAI_API_KEY"
+    },
+    "ollama-local": {
+      "provider": "ollama",
+      "baseURL": "http://localhost:11434"
+    },
+    "custom-compatible": {
+      "provider": "openai-compatible",
+      "name": "custom",
+      "apiKeyEnv": "CUSTOM_LLM_API_KEY",
+      "baseURL": "https://api.example.com/v1"
+    }
+  }
+}

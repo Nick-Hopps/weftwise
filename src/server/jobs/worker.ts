@@ -1,0 +1,137 @@
+import * as queue from './queue';
+import * as events from './events';
+import type { Job } from '@/lib/contracts';
+
+type JobHandler = (
+  job: Job,
+  emit: (
+    type: string,
+    message: string,
+    data?: Record<string, unknown>
+  ) => void
+) => Promise<Record<string, unknown>>;
+
+const handlers = new Map<string, JobHandler>();
+
+const MAX_RETRIES = 2;
+const RETRY_DELAY_MS = 5_000;
+const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
+
+export function registerHandler(type: string, handler: JobHandler): void {
+  handlers.set(type, handler);
+}
+
+let cleanupFn: (() => void) | null = null;
+let isProcessing = false;
+
+/**
+ * Returns true if the error is likely transient and retryable
+ * (network timeouts, aborted requests, rate limits).
+ */
+function isRetryableError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return (
+    msg.includes('aborted') ||
+    msg.includes('timeout') ||
+    msg.includes('econnreset') ||
+    msg.includes('econnrefused') ||
+    msg.includes('fetch failed') ||
+    msg.includes('rate limit') ||
+    msg.includes('429') ||
+    msg.includes('503') ||
+    msg.includes('502')
+  );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function startWorker(pollIntervalMs = 2000): () => void {
+  const intervalId = setInterval(async () => {
+    // Prevent concurrent job execution — LLM handlers can run for minutes,
+    // and parallel git commits would corrupt the vault.
+    if (isProcessing) return;
+
+    const job = queue.claim();
+    if (!job) return;
+
+    isProcessing = true;
+
+    const handler = handlers.get(job.type);
+    if (!handler) {
+      queue.fail(job.id, new Error(`No handler registered for job type: ${job.type}`));
+      events.emit(job.id, 'job:failed', `No handler registered for job type: ${job.type}`);
+      isProcessing = false;
+      return;
+    }
+
+    const emit = (
+      type: string,
+      message: string,
+      data?: Record<string, unknown>
+    ): void => {
+      events.emit(job.id, type, message, data);
+    };
+
+    // Start heartbeat to extend lease during long-running jobs
+    const heartbeatId = setInterval(() => {
+      try {
+        queue.updateHeartbeat(job.id);
+      } catch {
+        // If heartbeat fails, the lease will expire and another worker can reclaim
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
+    const attempt = job.attemptCount;
+
+    try {
+      const result = await handler(job, emit);
+      queue.complete(job.id, result);
+      events.emit(job.id, 'job:completed', 'Job completed successfully', { result });
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      const errorData: Record<string, unknown> = { error: errorMessage };
+      if (error && typeof error === 'object') {
+        const e = error as Record<string, unknown>;
+        if (e.finishReason) errorData.finishReason = e.finishReason;
+        if (e.usage) errorData.usage = e.usage;
+      }
+
+      if (attempt <= MAX_RETRIES && isRetryableError(error)) {
+        // Retry: requeue the SAME job (preserves job ID for SSE tracking)
+        const delay = RETRY_DELAY_MS * attempt;
+        events.emit(
+          job.id,
+          'job:retrying',
+          `Retrying (attempt ${attempt + 1}/${MAX_RETRIES + 1}) after ${delay}ms...`,
+          { attempt, maxRetries: MAX_RETRIES },
+        );
+        await sleep(delay);
+        queue.requeue(job.id);
+      } else {
+        queue.fail(job.id, error);
+        events.emit(job.id, 'job:failed', errorMessage, errorData);
+      }
+    } finally {
+      clearInterval(heartbeatId);
+      isProcessing = false;
+    }
+  }, pollIntervalMs);
+
+  const cleanup = () => {
+    clearInterval(intervalId);
+    cleanupFn = null;
+  };
+
+  cleanupFn = cleanup;
+  return cleanup;
+}
+
+export function stopWorker(): void {
+  if (cleanupFn) {
+    cleanupFn();
+  }
+}
