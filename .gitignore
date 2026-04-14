@@ -20,6 +20,9 @@ node_modules/
 .DS_Store
 *.pem
 
+# coding agents
+.claude/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
