@@ -59,17 +59,22 @@ If the answer synthesises information in a way that would be valuable as a stand
 
 export function buildQueryUserPrompt(
   question: string,
-  relevantPages: { slug: string; title: string; content: string }[],
+  relevantPages: { slug: string; title: string; content: string; isCurrent?: boolean }[],
 ): string {
+  const currentPage = relevantPages.find((p) => p.isCurrent);
   const pagesSection =
     relevantPages.length === 0
       ? 'No relevant wiki pages found.'
       : relevantPages
-          .map(
-            (p) =>
-              `### [[${p.title}]] (slug: \`${p.slug}\`)\n${p.content.slice(0, 8_000)}`,
-          )
+          .map((p) => {
+            const marker = p.isCurrent ? ' — currently open page the user is viewing' : '';
+            return `### [[${p.title}]] (slug: \`${p.slug}\`)${marker}\n${p.content.slice(0, 8_000)}`;
+          })
           .join('\n\n---\n\n');
+
+  const currentPageHint = currentPage
+    ? `\nThe user is currently viewing the page \`${currentPage.slug}\` ("${currentPage.title}"). If the question uses vague references like "this", "this page", "here", or asks for a summary/explanation without naming a topic, assume they are asking about that page.\n`
+    : '';
 
   return `## Relevant wiki pages
 
@@ -78,7 +83,7 @@ ${pagesSection}
 ---
 
 ## User question
-
+${currentPageHint}
 <user_input>
 ${question}
 </user_input>

@@ -47,22 +47,46 @@ export interface QueryContextPage {
   slug: string;
   title: string;
   content: string;
+  isCurrent?: boolean;
 }
 
-export function prepareQueryContext(question: string): QueryContextPage[] {
-  const searchResults = pagesRepo.searchPages(question);
-  const topResults = searchResults.slice(0, TOP_N_FTS);
+export function prepareQueryContext(
+  question: string,
+  currentPageSlug?: string,
+): QueryContextPage[] {
+  const contextBySlug = new Map<string, QueryContextPage>();
 
-  return topResults
-    .map((r) => {
-      const doc = readPageBySlug(r.page.slug);
-      return {
-        slug: r.page.slug,
-        title: r.page.title,
-        content: doc?.body ?? r.snippet,
-      };
-    })
-    .filter((p) => p.content.trim().length > 0);
+  // Always inject the page the user is currently viewing (if any). A question
+  // typed from inside a page is almost certainly "about this page", and the
+  // raw question rarely contains enough keywords for FTS5 alone to recover it
+  // (short prompts, pronouns, CJK without a segmenter).
+  if (currentPageSlug) {
+    const page = pagesRepo.getPageBySlug(currentPageSlug);
+    const doc = readPageBySlug(currentPageSlug);
+    if (page && doc && doc.body.trim().length > 0) {
+      contextBySlug.set(currentPageSlug, {
+        slug: currentPageSlug,
+        title: page.title,
+        content: doc.body,
+        isCurrent: true,
+      });
+    }
+  }
+
+  const searchResults = pagesRepo.searchPages(question);
+  for (const r of searchResults.slice(0, TOP_N_FTS)) {
+    if (contextBySlug.has(r.page.slug)) continue;
+    const doc = readPageBySlug(r.page.slug);
+    const content = doc?.body ?? r.snippet;
+    if (content.trim().length === 0) continue;
+    contextBySlug.set(r.page.slug, {
+      slug: r.page.slug,
+      title: r.page.title,
+      content,
+    });
+  }
+
+  return [...contextBySlug.values()];
 }
 
 export function streamQueryAnswer(
@@ -114,8 +138,11 @@ Return only the structured citations for the draft answer above. Do not rewrite 
 // runQuery — one-shot mode (used by save-as-page and fallback)
 // ---------------------------------------------------------------------------
 
-export async function runQuery(question: string): Promise<QueryResult> {
-  const context = prepareQueryContext(question);
+export async function runQuery(
+  question: string,
+  currentPageSlug?: string,
+): Promise<QueryResult> {
+  const context = prepareQueryContext(question, currentPageSlug);
 
   if (context.length === 0) {
     return {

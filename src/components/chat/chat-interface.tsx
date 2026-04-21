@@ -1,6 +1,6 @@
 'use client';
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { Send, StopCircle, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -94,7 +94,22 @@ interface ChatInterfaceProps {
 
 export function ChatInterface({ variant = 'standalone', hideHeader = false }: ChatInterfaceProps = {}) {
   const router = useRouter();
+  const pathname = usePathname();
   const queryClient = useQueryClient();
+
+  // Derive the currently-open wiki page slug from the route so that questions
+  // typed in the context panel's chat tab are always answered with that page
+  // in context — even when FTS over the raw question returns nothing.
+  const currentPageSlug = useMemo(() => {
+    if (!pathname) return undefined;
+    const match = pathname.match(/^\/wiki\/(.+)$/);
+    if (!match) return undefined;
+    try {
+      return decodeURIComponent(match[1]);
+    } catch {
+      return match[1];
+    }
+  }, [pathname]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -192,7 +207,9 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       const response = await apiFetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify(
+          currentPageSlug ? { question, pageSlug: currentPageSlug } : { question },
+        ),
         signal: abortRef.current.signal,
       });
 
@@ -243,7 +260,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, pendingAction, performReset]);
+  }, [input, isLoading, pendingAction, performReset, currentPageSlug]);
 
   // Abort any in-flight SSE stream when the component unmounts to avoid
   // leaking work and stale setState calls after the panel closes.
