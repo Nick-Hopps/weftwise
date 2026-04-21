@@ -22,6 +22,11 @@ const QueryBodySchema = z.object({
     pageSlug: z.string(),
     excerpt: z.string(),
   })).optional(),
+  // Slug of the wiki page the user is currently viewing. When the chat is
+  // invoked from a page, this must always be included so the page itself is
+  // added to the LLM context even when FTS over the raw question returns 0
+  // hits (common for short / CJK / pronoun-style questions).
+  pageSlug: z.string().trim().min(1).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -43,7 +48,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { question, saveAsPage, pageTitle, answer, citations } = parsed.data;
+  const { question, saveAsPage, pageTitle, answer, citations, pageSlug } = parsed.data;
 
   // Save-only mode: enqueue save-to-wiki job
   if (saveAsPage && pageTitle && pageTitle.trim().length > 0 && answer) {
@@ -65,7 +70,7 @@ export async function POST(request: NextRequest) {
 
   // Save-as-page + question: one-shot JSON mode
   if (saveAsPage) {
-    const result = await runQuery(question.trim());
+    const result = await runQuery(question.trim(), pageSlug);
     let saveJobId: string | null = null;
     if (pageTitle && pageTitle.trim().length > 0) {
       const job = queue.enqueue('save-to-wiki', {
@@ -106,7 +111,7 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        const context = prepareQueryContext(trimmedQuestion);
+        const context = prepareQueryContext(trimmedQuestion, pageSlug);
 
         if (context.length === 0) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
