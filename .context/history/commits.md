@@ -5,4 +5,4 @@
 
 | Date | Context-Id | Commit | Summary | Decisions | Bugs | Risk |
 |------|-----------|--------|---------|-----------|------|------|
-| 2026-04-21 | `019db0f6` | `pending` | chore(context): 初始化 .context/ 决策审计链 | 引入 .context/ 审计基础设施；current/ 与 session.log 入 gitignore；commits.jsonl 启用 merge=union | — | low |
+| 2026-04-21 | `019db0f6` | `ebed0b9` | chore(context): 初始化 .context/ 决策审计链 | 引入 .context/ 审计基础设施；current/ 与 session.log 入 gitignore；commits.jsonl 启用 merge=union | — | low |
