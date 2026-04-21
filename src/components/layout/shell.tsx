@@ -1,129 +1,112 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useUIStore } from '@/stores/ui-store';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
-import { RightPanel } from './right-panel';
+import { ContextPanel } from './context-panel';
 
 interface ShellProps {
   children: React.ReactNode;
 }
 
 export function Shell({ children }: ShellProps) {
-  const { sidebarOpen, rightPanelOpen, rightPanelWidth, toggleSidebar, toggleRightPanel, setRightPanelWidth } = useUIStore();
-  // Close sidebar drawer on mobile after navigation
+  const {
+    sidebarOpen,
+    toggleSidebar,
+    contextPanelOpen,
+    contextPanelWidth,
+    setContextPanelWidth,
+  } = useUIStore();
+
+  // Apply panel width only post-hydration to avoid SSR/client mismatch.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+
   const closeSidebarIfMobile = () => {
-    if (window.innerWidth < 1024 && sidebarOpen) {
-      toggleSidebar();
-    }
+    if (window.innerWidth < 1024 && sidebarOpen) toggleSidebar();
   };
 
-  const handleResizeStart = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = useUIStore.getState().rightPanelWidth;
+  const handleResizeStart = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startWidth = useUIStore.getState().contextPanelWidth;
 
-    const onMove = (ev: PointerEvent) => {
-      const delta = startX - ev.clientX;
-      setRightPanelWidth(startWidth + delta);
-    };
+      const onMove = (ev: PointerEvent) => {
+        const delta = startX - ev.clientX;
+        setContextPanelWidth(startWidth + delta);
+      };
 
-    const onUp = () => {
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
+      const onUp = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
 
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-  }, [setRightPanelWidth]);
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    },
+    [setContextPanelWidth],
+  );
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-[rgb(var(--background))]">
-      {/* Top header — full width */}
+    <div className="flex flex-col h-screen overflow-hidden bg-canvas">
       <Header />
 
-      {/* Body: sidebar + workspace + right panel */}
       <div className="flex flex-1 overflow-hidden relative">
-
-        {/* ── Left Sidebar ── */}
-        {/* Desktop: inline panel */}
+        {/* Left Sidebar — desktop inline */}
         <div
-          className={`
-            hidden lg:flex flex-col shrink-0
-            transition-all duration-200 ease-in-out overflow-hidden
-            ${sidebarOpen ? 'w-[280px]' : 'w-0'}
-          `}
+          className={`hidden lg:flex flex-col shrink-0 overflow-hidden transition-[width] duration-base ease-standard ${
+            sidebarOpen ? 'w-sidebar' : 'w-0'
+          }`}
         >
           {sidebarOpen && <Sidebar />}
         </div>
 
-        {/* Mobile/Tablet: overlay drawer */}
+        {/* Left Sidebar — mobile overlay */}
         {sidebarOpen && (
-          <div className="lg:hidden absolute inset-0 z-30 flex">
-            {/* Backdrop */}
+          <div className="lg:hidden absolute inset-0 z-overlay flex">
             <button
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+              type="button"
+              className="absolute inset-0 bg-overlay/40 backdrop-blur-sm"
               onClick={toggleSidebar}
               aria-label="Close sidebar"
               tabIndex={-1}
             />
-            {/* Drawer */}
-            <div className="relative z-10 flex flex-col h-full">
+            <div className="relative z-10 flex h-full">
               <Sidebar onNavigate={closeSidebarIfMobile} />
             </div>
           </div>
         )}
 
-        {/* ── Center Workspace ── */}
-        <main
-          className="flex-1 overflow-y-auto bg-[rgb(var(--background))]"
-          id="main-content"
-        >
+        {/* Center */}
+        <main id="main-content" className="flex-1 overflow-y-auto bg-canvas">
           {children}
         </main>
 
-        {/* ── Right Context Panel ── */}
-        {/* Desktop: resize handle + inline panel */}
-        {rightPanelOpen && (
-          <div
-            onPointerDown={handleResizeStart}
-            className="hidden lg:flex items-center justify-center shrink-0 w-1 cursor-col-resize group hover:bg-indigo-400/30 active:bg-indigo-400/50 transition-colors"
-            aria-label="Resize context panel"
-          >
-            <div className="w-0.5 h-8 rounded-full bg-[rgb(var(--border))] group-hover:bg-indigo-400 group-active:bg-indigo-500 transition-colors" />
-          </div>
-        )}
-        <div
-          className={`
-            hidden lg:flex flex-col shrink-0
-            overflow-hidden
-            ${rightPanelOpen ? '' : 'w-0'}
-          `}
-          style={rightPanelOpen ? { width: rightPanelWidth } : undefined}
-        >
-          {rightPanelOpen && <RightPanel />}
-        </div>
-
-        {/* Mobile/Tablet: overlay drawer from the right */}
-        {rightPanelOpen && (
-          <div className="lg:hidden absolute inset-0 z-30 flex justify-end">
-            {/* Backdrop */}
-            <button
-              className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-              onClick={toggleRightPanel}
-              aria-label="Close context panel"
-              tabIndex={-1}
-            />
-            {/* Drawer */}
-            <div className="relative z-10 flex flex-col h-full">
-              <RightPanel />
+        {/* Context Panel — desktop docked (mobile handled by ContextPanelSheet in providers) */}
+        {contextPanelOpen && (
+          <>
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize context panel"
+              onPointerDown={handleResizeStart}
+              className="hidden lg:flex items-center justify-center shrink-0 w-1 cursor-col-resize group hover:bg-accent/30 active:bg-accent/50 transition-colors"
+            >
+              <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-accent group-active:bg-accent-active transition-colors" />
             </div>
-          </div>
+            <div
+              className="hidden lg:flex shrink-0 overflow-hidden"
+              style={hydrated ? { width: contextPanelWidth } : undefined}
+            >
+              <ContextPanel variant="docked" />
+            </div>
+          </>
         )}
       </div>
     </div>

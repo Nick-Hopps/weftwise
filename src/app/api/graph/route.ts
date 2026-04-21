@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
+import { isMetaPage } from '@/server/db/repos/pages-repo';
 import { requireAuth } from '@/server/middleware/auth';
 
 export const runtime = 'nodejs';
 
 // GET /api/graph
-// Returns { nodes, edges } from wikilinks
+// Returns { nodes, edges } from wikilinks. Meta pages (tagged `meta`) are
+// excluded so the graph represents only the business knowledge network.
 export async function GET(request: NextRequest) {
   const authError = requireAuth(request);
   if (authError) return authError;
 
-  const pages = pagesRepo.getAllPages();
+  const pages = pagesRepo.getAllPages().filter((p) => !isMetaPage(p));
   const links = pagesRepo.getAllLinks();
 
   const inboundCount = new Map<string, number>();

@@ -1,4 +1,5 @@
 import { registerHandler } from '../jobs/worker';
+import * as queue from '../jobs/queue';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import { getRawSourceContent, getRawSourceBuffer, updateSourcePageLinks } from '../sources/source-store';
@@ -296,6 +297,19 @@ async function runIngestJob(
     `Ingest complete: ${result.pagesCreated.length} created, ${result.pagesUpdated.length} updated`,
     { result }
   );
+
+  // Chain a lint job so the knowledge base is self-healing — users never
+  // trigger lint manually any more.
+  try {
+    const lintJob = queue.enqueue('lint');
+    emit('ingest:lint-queued', `Lint job ${lintJob.id.slice(0, 8)} queued`, { lintJobId: lintJob.id });
+  } catch (err) {
+    // Non-fatal: lint can always be re-run; ingest itself succeeded.
+    emit(
+      'ingest:lint-queue-failed',
+      `Failed to enqueue follow-up lint job: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   return result as unknown as Record<string, unknown>;
 }

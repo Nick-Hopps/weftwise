@@ -1,212 +1,172 @@
 'use client';
 
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import { Menu, Moon, Search, SidebarOpen, SidebarClose, Sun, Sparkles } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
+import { IconButton } from '@/components/ui/icon-button';
+import { Kbd } from '@/components/ui/kbd';
+import { apiFetch } from '@/lib/api-fetch';
+import { cn } from '@/lib/cn';
 
-function SunIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="5" />
-      <line x1="12" y1="1" x2="12" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="23" />
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-      <line x1="1" y1="12" x2="3" y2="12" />
-      <line x1="21" y1="12" x2="23" y2="12" />
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-    </svg>
-  );
+interface PageLite {
+  slug: string;
+  title: string;
 }
 
-function MoonIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
-  );
+async function fetchPagesLite(): Promise<PageLite[]> {
+  const res = await apiFetch('/api/pages');
+  if (!res.ok) return [];
+  return res.json();
 }
 
-function HamburgerIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <line x1="3" y1="12" x2="21" y2="12" />
-      <line x1="3" y1="6" x2="21" y2="6" />
-      <line x1="3" y1="18" x2="21" y2="18" />
-    </svg>
-  );
+function titleForSlug(slug: string, pages: PageLite[] | undefined): string {
+  return pages?.find((p) => p.slug === slug)?.title ?? slug;
 }
 
-function SearchIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="11" cy="11" r="8" />
-      <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  );
-}
+function Breadcrumb({ pathname }: { pathname: string }) {
+  const { data: pages } = useQuery({ queryKey: ['pages'], queryFn: fetchPagesLite, staleTime: 30_000 });
 
-function PanelRightIcon() {
+  const segments: Array<{ label: string; href?: string }> = [];
+  if (pathname === '/' || pathname === '') {
+    segments.push({ label: 'Dashboard' });
+  } else if (pathname.startsWith('/wiki/')) {
+    const slug = pathname.replace(/^\/wiki\//, '');
+    segments.push({ label: 'Wiki', href: '/' });
+    segments.push({ label: titleForSlug(slug, pages) });
+  } else {
+    segments.push({ label: pathname.replace(/^\/+/, ''), href: pathname });
+  }
+
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <line x1="15" y1="3" x2="15" y2="21" />
-    </svg>
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0">
+      {segments.map((seg, idx) => {
+        const last = idx === segments.length - 1;
+        return (
+          <span key={idx} className="flex items-center gap-1.5 min-w-0">
+            {idx > 0 && (
+              <span aria-hidden className="text-foreground-tertiary text-xs">/</span>
+            )}
+            {seg.href && !last ? (
+              <Link
+                href={seg.href}
+                className="text-sm text-foreground-secondary hover:text-foreground transition-colors truncate"
+              >
+                {seg.label}
+              </Link>
+            ) : (
+              <span
+                className={cn(
+                  'text-sm truncate',
+                  last ? 'text-foreground font-medium' : 'text-foreground-secondary',
+                )}
+              >
+                {seg.label}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </nav>
   );
 }
 
 export function Header() {
-  const { toggleSidebar, toggleRightPanel, toggleCommandPalette, toggleDarkMode, darkMode } =
-    useUIStore();
+  const pathname = usePathname() ?? '/';
+  const {
+    sidebarOpen,
+    toggleSidebar,
+    toggleCommandPalette,
+    toggleDarkMode,
+    darkMode,
+    contextPanelOpen,
+    toggleContextPanel,
+    openContextPanel,
+  } = useUIStore();
+
+  const isWikiRoute = pathname.startsWith('/wiki/');
 
   return (
-    <header
-      className="
-        flex items-center justify-between
-        h-12 px-3
-        border-b border-[rgb(var(--border))]
-        bg-[rgb(var(--surface))]
-        shrink-0
-        z-10
-      "
-    >
-      {/* Left: sidebar toggle + title */}
-      <div className="flex items-center gap-2">
-        <button
+    <header className="flex items-center gap-3 h-header px-3 border-b border-border bg-surface shrink-0 z-header">
+      {/* Left: sidebar toggle + logo + breadcrumb */}
+      <div className="flex items-center gap-2 min-w-0 flex-1">
+        <IconButton
+          size="base"
           onClick={toggleSidebar}
-          aria-label="Toggle sidebar"
-          className="
-            p-1.5 rounded-md
-            text-[rgb(var(--muted))]
-            hover:text-[rgb(var(--foreground))]
-            hover:bg-[rgb(var(--border))]
-            transition-colors
-          "
+          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          className="lg:inline-flex"
         >
-          <HamburgerIcon />
-        </button>
-        <span className="text-sm font-semibold tracking-tight text-[rgb(var(--foreground))]">
-          LLM Wiki
-        </span>
+          {sidebarOpen ? <SidebarClose className="lg:hidden xl:inline" /> : <SidebarOpen />}
+          <span className="lg:hidden">
+            <Menu />
+          </span>
+        </IconButton>
+
+        <Link href="/" className="flex items-center gap-2 px-1 focus-ring rounded-sm">
+          <span className="inline-flex h-6 w-6 items-center justify-center rounded-sm bg-accent text-accent-fg">
+            <span className="text-xs font-bold">W</span>
+          </span>
+          <span className="hidden sm:inline text-sm font-semibold tracking-tight text-foreground">
+            Agentic Wiki
+          </span>
+        </Link>
+
+        <span aria-hidden className="hidden md:inline text-xs text-foreground-tertiary mx-1">/</span>
+        <div className="hidden md:flex min-w-0">
+          <Breadcrumb pathname={pathname} />
+        </div>
       </div>
 
-      {/* Center: search */}
+      {/* Center: search trigger */}
       <button
+        type="button"
         onClick={toggleCommandPalette}
         aria-label="Open search (Ctrl+K)"
-        className="
-          hidden sm:flex items-center gap-2
-          px-3 py-1.5 rounded-md
-          text-xs text-[rgb(var(--muted))]
-          border border-[rgb(var(--border))]
-          bg-[rgb(var(--background))]
-          hover:border-indigo-400 hover:text-[rgb(var(--foreground))]
-          transition-colors
-          min-w-[160px]
-        "
+        className="hidden sm:flex items-center gap-2 h-8 w-[280px] max-w-[40vw] px-3 rounded-md border border-border bg-canvas text-xs text-foreground-tertiary hover:bg-subtle hover:border-border-strong transition-colors focus-ring"
       >
-        <SearchIcon />
-        <span className="flex-1 text-left">Search…</span>
-        <kbd className="text-[10px] font-mono opacity-60">⌘K</kbd>
+        <Search className="h-3.5 w-3.5" />
+        <span className="flex-1 text-left">Search pages, ask AI…</span>
+        <Kbd>⌘K</Kbd>
       </button>
 
       {/* Right: icon actions */}
-      <div className="flex items-center gap-1">
-        <button
+      <div className="flex items-center gap-1 shrink-0">
+        <IconButton
+          size="base"
           onClick={toggleCommandPalette}
           aria-label="Search"
-          className="
-            sm:hidden p-1.5 rounded-md
-            text-[rgb(var(--muted))]
-            hover:text-[rgb(var(--foreground))]
-            hover:bg-[rgb(var(--border))]
-            transition-colors
-          "
+          className="sm:hidden"
         >
-          <SearchIcon />
-        </button>
+          <Search />
+        </IconButton>
 
-        <button
-          onClick={toggleDarkMode}
-          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="
-            p-1.5 rounded-md
-            text-[rgb(var(--muted))]
-            hover:text-[rgb(var(--foreground))]
-            hover:bg-[rgb(var(--border))]
-            transition-colors
-          "
+        <IconButton
+          size="base"
+          onClick={() => openContextPanel('chat')}
+          aria-label="Ask your wiki (⌘J)"
+          title="Ask your wiki (⌘J)"
         >
-          {darkMode ? <SunIcon /> : <MoonIcon />}
-        </button>
+          <Sparkles />
+        </IconButton>
 
-        <button
-          onClick={toggleRightPanel}
-          aria-label="Toggle context panel"
-          className="
-            p-1.5 rounded-md
-            text-[rgb(var(--muted))]
-            hover:text-[rgb(var(--foreground))]
-            hover:bg-[rgb(var(--border))]
-            transition-colors
-          "
+        <IconButton size="base" onClick={toggleDarkMode} aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
+          {darkMode ? <Sun /> : <Moon />}
+        </IconButton>
+
+        <IconButton
+          size="base"
+          onClick={toggleContextPanel}
+          aria-label={contextPanelOpen ? 'Close context panel' : 'Open context panel'}
+          className={cn(contextPanelOpen && 'bg-subtle text-foreground')}
         >
-          <PanelRightIcon />
-        </button>
+          {/* Simple panel-right glyph */}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <line x1="15" y1="3" x2="15" y2="21" />
+          </svg>
+          <span className="sr-only">{isWikiRoute ? 'context' : 'chat'}</span>
+        </IconButton>
       </div>
     </header>
   );

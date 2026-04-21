@@ -1,39 +1,104 @@
 'use client';
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { Send, StopCircle, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/input';
 import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
 import { apiFetch } from '@/lib/api-fetch';
 import type { ChatMessage, Citation } from './message-list';
+
+type PendingAction = { kind: 'reset' } | null;
+
+const RESET_INTENT_PATTERNS: RegExp[] = [
+  /重置.*(当前)?.*(wiki|知识库|数据|内容|页面)/i,
+  /清空.*(当前)?.*(wiki|知识库|数据|内容|页面)/i,
+  /(把|将).*(wiki|知识库).*(清|重置|清空|清除|删除)/i,
+  /(reset|wipe|clear|erase)\s+(the\s+)?(wiki|knowledge\s*base|everything|all)/i,
+  /(start|begin)\s+over\s+(the\s+)?(wiki|knowledge\s*base)?/i,
+];
+
+function detectResetIntent(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  return RESET_INTENT_PATTERNS.some((p) => p.test(normalized));
+}
+
+function detectConfirmation(text: string): 'yes' | 'no' | 'unclear' {
+  const normalized = text.trim().toLowerCase();
+  if (!normalized) return 'unclear';
+
+  if (/^(是|对|确认|确定|好|好的|是的|同意|继续|执行|没错|请继续)[!！。.?？]?$/.test(normalized)) {
+    return 'yes';
+  }
+  if (/^(y|yes|yep|yeah|confirm|ok|okay|do it|proceed|go ahead)[!.?]?$/.test(normalized)) {
+    return 'yes';
+  }
+  if (/^(否|不|不要|取消|放弃|别|停|算了|先不|再想想)[!！。.?？]?$/.test(normalized)) {
+    return 'no';
+  }
+  if (/^(n|no|nope|cancel|abort|stop|nevermind|never mind)[!.?]?$/.test(normalized)) {
+    return 'no';
+  }
+  return 'unclear';
+}
 
 interface SSEEvent {
   event: string;
   data: unknown;
 }
 
-function parseSSEEvents(chunk: string): SSEEvent[] {
-  const events: SSEEvent[] = [];
-  let currentEvent = '';
-
-  for (const line of chunk.split('\n')) {
-    if (line.startsWith('event: ')) {
-      currentEvent = line.slice(7).trim();
-    } else if (line.startsWith('data: ')) {
-      try {
-        const data = JSON.parse(line.slice(6));
-        events.push({ event: currentEvent, data });
-        currentEvent = '';
-      } catch {
-        // Incomplete JSON fragment — skip
+/**
+ * Incremental SSE parser. Browsers may deliver a frame split across multiple
+ * `reader.read()` chunks; callers keep a rolling buffer and call `parse()` —
+ * only complete `\n\n`-terminated frames are consumed, the remainder stays in
+ * the buffer for the next read.
+ */
+function createSSEParser() {
+  let buffer = '';
+  return {
+    push(chunk: string, onEvent: (ev: SSEEvent) => void) {
+      buffer += chunk;
+      let boundary: number;
+      // Events are separated by a blank line (\n\n).
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        let eventName = '';
+        let dataLine = '';
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+          else if (line.startsWith('data: ')) dataLine = line.slice(6);
+        }
+        if (!dataLine) continue;
+        try {
+          const data = JSON.parse(dataLine);
+          onEvent({ event: eventName, data });
+        } catch {
+          /* malformed JSON — drop this frame */
+        }
       }
-    }
-  }
-  return events;
+    },
+    reset() {
+      buffer = '';
+    },
+  };
 }
 
-export function ChatInterface() {
+interface ChatInterfaceProps {
+  variant?: 'standalone' | 'embedded';
+  hideHeader?: boolean;
+}
+
+export function ChatInterface({ variant = 'standalone', hideHeader = false }: ChatInterfaceProps = {}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
@@ -51,22 +116,76 @@ export function ChatInterface() {
     });
   };
 
+  const performReset = useCallback(async () => {
+    setIsLoading(true);
+    setMessages((prev) => [...prev, { role: 'assistant', content: '正在重置 wiki…' }]);
+    try {
+      const res = await apiFetch('/api/reset', { method: 'POST' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      await queryClient.invalidateQueries({ queryKey: ['pages'] });
+      router.refresh();
+      updateLastAssistant((msg) => ({
+        ...msg,
+        content:
+          '✅ Wiki 已重置。所有页面、数据源与任务记录都已清空，你可以重新摄入内容了。',
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      updateLastAssistant((m) => ({ ...m, content: `❌ 重置失败：${msg}` }));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [queryClient, router]);
+
   const sendMessage = useCallback(async () => {
     const question = input.trim();
     if (!question || isLoading) return;
-
     setInput('');
+
+    if (pendingAction?.kind === 'reset') {
+      setMessages((prev) => [...prev, { role: 'user', content: question }]);
+      const decision = detectConfirmation(question);
+      if (decision === 'yes') {
+        setPendingAction(null);
+        await performReset();
+        return;
+      }
+      if (decision === 'no') {
+        setPendingAction(null);
+        setMessages((prev) => [...prev, { role: 'assistant', content: '好的，已取消重置，wiki 保持不变。' }]);
+        return;
+      }
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content:
+            '我没太确定你的意思。请回复 **“是”** 执行重置，或 **“否”** 取消（重置会清空所有页面和数据源，无法恢复）。',
+        },
+      ]);
+      return;
+    }
+
+    if (detectResetIntent(question)) {
+      setMessages((prev) => [...prev, { role: 'user', content: question }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content:
+            '⚠️ 你确定要 **重置当前 wiki** 吗？\n\n这会 **清空所有页面、数据源和任务记录**，且 **无法恢复**。\n\n请回复 **“是”** 确认执行，或 **“否”** 取消。',
+        },
+      ]);
+      setPendingAction({ kind: 'reset' });
+      return;
+    }
+
     setIsLoading(true);
-
-    // Add user message immediately
     setMessages((prev) => [...prev, { role: 'user', content: question }]);
-
-    // Add placeholder assistant message
-    setMessages((prev) => [
-      ...prev,
-      { role: 'assistant', content: '', citations: [] },
-    ]);
-
+    setMessages((prev) => [...prev, { role: 'assistant', content: '', citations: [] }]);
     abortRef.current = new AbortController();
 
     try {
@@ -87,17 +206,15 @@ export function ChatInterface() {
       const reader = response.body.getReader();
       readerRef.current = reader;
       const decoder = new TextDecoder();
+      const parser = createSSEParser();
       let fullContent = '';
 
       try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-
           const chunk = decoder.decode(value, { stream: true });
-          const events = parseSSEEvents(chunk);
-
-          for (const { event, data } of events) {
+          parser.push(chunk, ({ event, data }) => {
             if (event === 'answer-delta') {
               const delta = (data as { delta: string }).delta;
               fullContent += delta;
@@ -106,8 +223,7 @@ export function ChatInterface() {
               const citations = (data as { citations: Citation[] }).citations;
               updateLastAssistant((msg) => ({ ...msg, citations }));
             }
-            // 'done' event — stream finished naturally
-          }
+          });
         }
       } finally {
         reader.releaseLock();
@@ -115,23 +231,28 @@ export function ChatInterface() {
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        // Remove the empty placeholder on user-initiated abort
         setMessages((prev) => {
           const last = prev[prev.length - 1];
-          if (last?.role === 'assistant' && !last.content) {
-            return prev.slice(0, -1);
-          }
+          if (last?.role === 'assistant' && !last.content) return prev.slice(0, -1);
           return prev;
         });
         return;
       }
-      const errMsg =
-        err instanceof Error ? err.message : 'Something went wrong';
+      const errMsg = err instanceof Error ? err.message : 'Something went wrong';
       updateLastAssistant((msg) => ({ ...msg, content: errMsg }));
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading]);
+  }, [input, isLoading, pendingAction, performReset]);
+
+  // Abort any in-flight SSE stream when the component unmounts to avoid
+  // leaking work and stale setState calls after the panel closes.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      readerRef.current?.cancel().catch(() => {});
+    };
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -150,26 +271,36 @@ export function ChatInterface() {
   const handleClear = () => {
     if (isLoading) handleStop();
     setMessages([]);
+    setPendingAction(null);
   };
 
-  return (
-    <div className="flex flex-col h-full bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
-        <h2 className="text-sm font-semibold text-zinc-900 dark:text-slate-100">
-          Ask your Wiki
-        </h2>
-        {messages.length > 0 && (
-          <button
-            onClick={handleClear}
-            className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+  const containerClass =
+    variant === 'embedded'
+      ? 'flex flex-col h-full bg-surface overflow-hidden'
+      : 'flex flex-col h-full bg-surface rounded-md border border-border overflow-hidden';
 
-      {/* Messages */}
+  return (
+    <div className={containerClass}>
+      {!hideHeader && (
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h2 className="text-sm font-semibold text-foreground">Ask your Wiki</h2>
+          {messages.length > 0 && (
+            <Button intent="ghost" size="sm" onClick={handleClear}>
+              <Trash2 className="h-3 w-3" />
+              Clear
+            </Button>
+          )}
+        </div>
+      )}
+      {hideHeader && messages.length > 0 && (
+        <div className="flex items-center justify-end px-3 py-1">
+          <Button intent="ghost" size="sm" onClick={handleClear}>
+            <Trash2 className="h-3 w-3" />
+            Clear
+          </Button>
+        </div>
+      )}
+
       <MessageList
         messages={messages}
         isStreaming={isLoading}
@@ -179,9 +310,8 @@ export function ChatInterface() {
         }}
       />
 
-      {/* Save to Wiki (after last assistant message) */}
       {lastAssistantMessage && !isLoading && lastAssistantMessage.content && (
-        <div className="px-4 pb-2">
+        <div className="px-3 pb-2">
           <SaveToWikiButton
             answer={lastAssistantMessage.content}
             citations={lastAssistantMessage.citations ?? []}
@@ -189,33 +319,32 @@ export function ChatInterface() {
         </div>
       )}
 
-      {/* Input area */}
-      <div className="border-t border-zinc-200 dark:border-zinc-700 p-3">
+      <div className="border-t border-border p-3">
         <div className="flex gap-2 items-end">
-          <textarea
+          <Textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask a question..."
+            placeholder="Ask a question…"
             rows={2}
-            className="flex-1 resize-none rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-800/50 px-3 py-2.5 text-sm text-zinc-900 dark:text-slate-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500 dark:focus:border-indigo-400 transition-all"
+            className="flex-1 resize-none"
           />
           {isLoading ? (
-            <button
-              onClick={handleStop}
-              className="px-3 py-2 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors shadow-sm"
-            >
+            <Button intent="danger" size="base" onClick={handleStop}>
+              <StopCircle className="h-3.5 w-3.5" />
               Stop
-            </button>
+            </Button>
           ) : (
-            <button
+            <Button
+              intent="primary"
+              size="base"
               onClick={sendMessage}
               disabled={!input.trim()}
-              className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors shadow-sm"
             >
+              <Send className="h-3.5 w-3.5" />
               Send
-            </button>
+            </Button>
           )}
         </div>
       </div>

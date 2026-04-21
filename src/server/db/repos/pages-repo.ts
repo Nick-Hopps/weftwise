@@ -3,6 +3,24 @@ import { getDb, getRawDb } from '../client';
 import { pages, wikiLinks } from '../schema';
 import type { WikiPage, WikiLink } from '@/lib/contracts';
 
+/**
+ * Meta pages are system-generated (Index, Change Log, …) tagged with `meta`
+ * in their frontmatter. They must not participate in search, graph rendering,
+ * or backlink computation. They remain readable and writable by the
+ * ingest/lint pipelines via explicit getPageBySlug reads.
+ */
+export function isMetaPage(page: Pick<WikiPage, 'tags'>): boolean {
+  return (page.tags ?? []).includes('meta');
+}
+
+/**
+ * Return the set of slugs currently owned by meta pages. Derived from the
+ * `meta` tag so it stays correct wherever the meta files live on disk.
+ */
+export function getMetaSlugs(): Set<string> {
+  return new Set(getAllPages().filter(isMetaPage).map((p) => p.slug));
+}
+
 export function getAllPages(): WikiPage[] {
   const db = getDb();
   const rows = db.select().from(pages).orderBy(asc(pages.title)).all();
@@ -66,7 +84,7 @@ export function getBacklinks(slug: string): WikiPage[] {
   const result: WikiPage[] = [];
   for (const sourceSlug of sourceSlugs) {
     const page = getPageBySlug(sourceSlug);
-    if (page) result.push(page);
+    if (page && !isMetaPage(page)) result.push(page);
   }
   return result;
 }
@@ -130,20 +148,22 @@ export function searchPages(query: string): SearchResult[] {
     rank: number;
   }>;
 
-  return rows.map((row) => ({
-    page: {
-      slug: row.slug,
-      title: row.title,
-      path: row.path,
-      summary: row.summary ?? '',
-      contentHash: row.content_hash,
-      tags: safeParseJson<string[]>(row.tags, []),
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    },
-    snippet: row.snippet,
-    rank: row.rank,
-  }));
+  return rows
+    .map((row) => ({
+      page: {
+        slug: row.slug,
+        title: row.title,
+        path: row.path,
+        summary: row.summary ?? '',
+        contentHash: row.content_hash,
+        tags: safeParseJson<string[]>(row.tags, []),
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      },
+      snippet: row.snippet,
+      rank: row.rank,
+    }))
+    .filter((r) => !isMetaPage(r.page));
 }
 
 export function updateFtsEntry(
@@ -185,11 +205,14 @@ export function getTitleToSlugMap(): Map<string, string> {
 export function getAllLinks(): WikiLink[] {
   const db = getDb();
   const rows = db.select().from(wikiLinks).all();
-  return rows.map((row) => ({
-    sourceSlug: row.sourceSlug,
-    targetSlug: row.targetSlug,
-    context: row.context ?? '',
-  }));
+  const metaSlugs = getMetaSlugs();
+  return rows
+    .filter((row) => !metaSlugs.has(row.sourceSlug) && !metaSlugs.has(row.targetSlug))
+    .map((row) => ({
+      sourceSlug: row.sourceSlug,
+      targetSlug: row.targetSlug,
+      context: row.context ?? '',
+    }));
 }
 
 export function setLinksForPage(
