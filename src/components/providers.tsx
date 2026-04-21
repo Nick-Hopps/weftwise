@@ -6,6 +6,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { GlobalJobTracker } from '@/components/shared/global-job-tracker';
 import { CommandPalette } from '@/components/search/command-palette';
 import { ContextPanelSheet } from '@/components/layout/context-panel-sheet';
+import { SettingsDialog } from '@/components/layout/settings-dialog';
 
 // Create QueryClient inside component to avoid cross-request sharing in SSR.
 function makeQueryClient() {
@@ -69,6 +70,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       {children}
       <CommandPalette />
       <ContextPanelSheet />
+      <SettingsDialog />
       <GlobalJobTracker />
     </QueryClientProvider>
   );

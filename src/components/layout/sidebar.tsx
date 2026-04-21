@@ -17,6 +17,7 @@ import { IconButton } from '@/components/ui/icon-button';
 import { Input } from '@/components/ui/input';
 import { SectionLabel } from '@/components/ui/panel';
 import { Separator } from '@/components/ui/separator';
+import { useUIStore } from '@/stores/ui-store';
 import { cn } from '@/lib/cn';
 
 interface PageItem {
@@ -70,6 +71,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   const pathname = usePathname();
   const [filter, setFilter] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const openSettingsDialog = useUIStore((s) => s.openSettingsDialog);
 
   const { data: allPages = [], isLoading } = useQuery({
     queryKey: ['pages'],
@@ -109,7 +111,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   };
 
   return (
-    <div className="flex flex-col h-full w-sidebar bg-canvas border-r border-border overflow-hidden">
+    <div className="flex flex-col h-full w-full bg-canvas border-r border-border overflow-hidden">
       {/* Top quick action (primary CTA) */}
       <div className="px-2 py-2 shrink-0">
         <Link
@@ -235,7 +237,12 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
         <span className="text-xs text-foreground-tertiary px-1">
           {totalAll} {totalAll === 1 ? 'page' : 'pages'}
         </span>
-        <IconButton size="sm" aria-label="Settings">
+        <IconButton
+          size="sm"
+          aria-label="Open settings"
+          title="Settings"
+          onClick={openSettingsDialog}
+        >
           <Settings2 />
         </IconButton>
       </div>
