@@ -7,7 +7,7 @@
  * and the force simulation survive the transition.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { Compass, Maximize2, Minimize2, Network, Target } from 'lucide-react';
@@ -47,6 +47,8 @@ interface LayoutPreset {
   padding: number;
 }
 
+// Single layout preset — fullscreen no longer re-runs cose; it just reuses
+// the compact positions and adjusts zoom, so a second preset would be dead code.
 const LAYOUT_COMPACT: LayoutPreset = {
   idealEdgeLength: 90,
   nodeRepulsion: 6000,
@@ -54,18 +56,17 @@ const LAYOUT_COMPACT: LayoutPreset = {
   padding: 20,
 };
 
-// Fullscreen uses modestly wider spacing but relies primarily on a proper
-// fit-to-viewport + zoom bounds — we don't explode spring lengths because
-// fit() then has to compute enormous scale-outs that defeat readability.
-const LAYOUT_FULLSCREEN: LayoutPreset = {
-  idealEdgeLength: 130,
-  nodeRepulsion: 10000,
-  gravity: 0.2,
-  padding: 80,
-};
-
-function buildStylesheet(theme: ThemeSnapshot, highlightSlug?: string): cytoscape.StylesheetStyle[] {
-  const style: cytoscape.StylesheetStyle[] = [
+/**
+ * Selector styles lean on three JS-applied classes to build a focal hierarchy
+ * when a page is active:
+ *   - `.focused` — the current page (one node)
+ *   - `.neighbor` + `.incident` — directly connected nodes and edges
+ *   - `.dimmed` — everything else, pushed into the background
+ * When no slug is active we don't add any of these classes, so the graph
+ * reverts to a neutral all-on-one-plane view.
+ */
+function buildStylesheet(theme: ThemeSnapshot): cytoscape.StylesheetStyle[] {
+  return [
     {
       selector: 'node',
       style: {
@@ -89,6 +90,7 @@ function buildStylesheet(theme: ThemeSnapshot, highlightSlug?: string): cytoscap
         'border-width': 1.5,
         'border-color': theme.nodeBorder,
         'border-opacity': 0.65,
+        'z-index': 1,
       },
     },
     {
@@ -97,27 +99,6 @@ function buildStylesheet(theme: ThemeSnapshot, highlightSlug?: string): cytoscap
         'background-color': theme.orphan,
         'border-color': theme.orphan,
         'text-opacity': 0.35,
-      },
-    },
-    {
-      selector: 'node:hover, node.labelled, node.neighbor',
-      style: { 'text-opacity': 1 },
-    },
-    {
-      selector: 'node.neighbor',
-      style: {
-        'border-color': theme.active,
-        'border-opacity': 0.9,
-        'border-width': 2,
-      },
-    },
-    {
-      selector: 'edge.incident',
-      style: {
-        'line-color': theme.active,
-        'target-arrow-color': theme.active,
-        opacity: 0.95,
-        width: 1.8,
       },
     },
     {
@@ -130,30 +111,105 @@ function buildStylesheet(theme: ThemeSnapshot, highlightSlug?: string): cytoscap
         'arrow-scale': 0.6,
         'curve-style': 'bezier',
         opacity: 0.65,
+        'z-index': 1,
+      },
+    },
+    {
+      selector: 'node:hover, node.labelled, node.neighbor, node.focused',
+      style: { 'text-opacity': 1 },
+    },
+    {
+      selector: 'node.neighbor',
+      style: {
+        'border-color': theme.active,
+        'border-opacity': 0.9,
+        'border-width': 2,
+        'z-index': 5,
+      },
+    },
+    {
+      selector: 'edge.incident',
+      style: {
+        'line-color': theme.active,
+        'target-arrow-color': theme.active,
+        opacity: 0.95,
+        width: 1.8,
+        'z-index': 5,
+      },
+    },
+    {
+      selector: 'node.focused',
+      style: {
+        'background-color': theme.active,
+        'background-opacity': 1,
+        'border-color': theme.active,
+        'border-opacity': 1,
+        'border-width': 3,
+        'text-opacity': 1,
+        'font-weight': 700,
+        'z-index': 10,
+      },
+    },
+    {
+      selector: 'node.dimmed',
+      style: {
+        opacity: 0.22,
+        'text-opacity': 0,
+        'z-index': 0,
+      },
+    },
+    {
+      selector: 'edge.dimmed',
+      style: {
+        opacity: 0.08,
+        'z-index': 0,
       },
     },
   ];
+}
 
-  if (highlightSlug) {
-    style.push({
-      selector: `node[id = "${CSS.escape(highlightSlug)}"]`,
-      style: {
-        'background-color': theme.active,
-        'border-color': theme.active,
-        'border-width': 2.5,
-        'text-opacity': 1,
-        'font-weight': 'bold',
-      },
-    });
-  }
+/**
+ * Apply three-tier highlight classes based on the currently focused slug.
+ * Always clears prior classes first so toggling between pages is clean.
+ */
+function applyHighlight(cy: cytoscape.Core, slug?: string): void {
+  cy.batch(() => {
+    cy.elements().removeClass('focused neighbor incident dimmed');
+    if (!slug) return;
+    const current = cy.getElementById(slug);
+    if (current.empty()) return;
 
-  return style;
+    const neighbors = current.neighborhood('node');
+    const incident = current.connectedEdges();
+
+    current.addClass('focused');
+    neighbors.addClass('neighbor');
+    incident.addClass('incident');
+
+    const focusSet = current.union(neighbors);
+    cy.nodes().difference(focusSet).addClass('dimmed');
+    cy.edges().difference(incident).addClass('dimmed');
+  });
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 // ── Force simulation ─────────────────────────────────────────────────────────
 
 interface SimulationHandle {
   stop: () => void;
+  /**
+   * Drive alpha to 0 so the tick loop runs but stops applying force/velocity.
+   * Used when the viewport is about to be resized — without this, the gravity
+   * term (which pulls toward cy.extent()'s center) would drag nodes back
+   * toward the new center of the enlarged fullscreen canvas, violating the
+   * "positions must not change when switching views" contract. Natural
+   * reheating via grab/free is preserved, so user interaction still feels alive.
+   */
+  freeze: () => void;
 }
 
 interface ForceParams {
@@ -264,6 +320,9 @@ function startForceSimulation(cy: cytoscape.Core, params: ForceParams): Simulati
       if (rafId !== null) cancelAnimationFrame(rafId);
       rafId = null;
     },
+    freeze: () => {
+      alpha = 0;
+    },
   };
 }
 
@@ -277,6 +336,11 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
   const cyRef = useRef<cytoscape.Core | null>(null);
   const simRef = useRef<SimulationHandle | null>(null);
+  // Snapshot captured on entering fullscreen, consumed on exiting. Storing the
+  // pre-fullscreen zoom lets us restore it verbatim instead of reverse-scaling
+  // (1/0.85) — user zoom interactions inside fullscreen would otherwise cause
+  // accumulated drift on repeated toggles.
+  const preFullscreenZoomRef = useRef<number | null>(null);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -334,7 +398,7 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
         const cy = cytoscape({
           container: compactRef.current,
           elements,
-          style: buildStylesheet(readGraphTheme(), currentSlug),
+          style: buildStylesheet(readGraphTheme()),
           minZoom: 0.25,
           maxZoom: 4,
           userZoomingEnabled: true,
@@ -362,10 +426,11 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
         });
 
         const preset = LAYOUT_COMPACT;
+        // animate:false — run cose synchronously so the initial jump is invisible.
+        // The loading overlay stays until layoutstop, then the canvas fades in.
         const layout = cy.layout({
           name: 'cose',
-          animate: true,
-          animationDuration: 500,
+          animate: false,
           randomize: true,
           nodeRepulsion: () => preset.nodeRepulsion,
           idealEdgeLength: () => preset.idealEdgeLength,
@@ -385,10 +450,11 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
           if (currentSlug && cy.getElementById(currentSlug).nonempty()) {
             cy.center(cy.getElementById(currentSlug));
           }
+          applyHighlight(cy, currentSlug);
+          // Hand control to the fade-in overlay now that positions are final.
+          setIsLoading(false);
         });
         layout.run();
-
-        setIsLoading(false);
       })
       .catch(() => {
         if (cancelled) return;
@@ -402,81 +468,76 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-apply stylesheet + neighbor highlighting on theme / highlight change
+  // Re-apply stylesheet on theme change; refresh focus classes on any trigger.
+  // isLoading is a dep so that when layoutstop flips it to false we re-run
+  // with the *current* slug — the closure inside the data-fetch effect would
+  // otherwise pin to the slug at mount time, leaving a user who navigated
+  // during load looking at the wrong node highlighted.
   useEffect(() => {
     const cy = cyRef.current;
-    if (!cy) return;
-    cy.style(buildStylesheet(readGraphTheme(), currentSlug));
-    cy.nodes().removeClass('neighbor');
-    cy.edges().removeClass('incident');
-    if (currentSlug) {
-      const current = cy.getElementById(currentSlug);
-      if (current.nonempty()) {
-        current.neighborhood('node').addClass('neighbor');
-        current.connectedEdges().addClass('incident');
-      }
-    }
-  }, [darkMode, currentSlug]);
+    if (!cy || isLoading) return;
+    cy.style(buildStylesheet(readGraphTheme()));
+    applyHighlight(cy, currentSlug);
+  }, [darkMode, currentSlug, isLoading]);
 
-  // Migrate the cy container between compact and fullscreen hosts, then
-  // re-run the layout with mode-appropriate spacing and force a fit so nodes
-  // breathe in fullscreen without drifting off-canvas in the compact footprint.
-  useEffect(() => {
+  // Migrate the cy container between compact and fullscreen hosts without
+  // re-running the layout — node positions (including user-dragged ones) are
+  // preserved verbatim. useLayoutEffect runs synchronously after the Portal
+  // commits but before paint, so cy.mount sees the fullscreen container
+  // already in the DOM and cy.resize reads post-reflow dimensions. Doing this
+  // in a plain useEffect + rAF would leave a frame where the container is
+  // 0×0 and the subsequent zoom animation starts from a degenerate state.
+  //
+  // Before touching the viewport we freeze the force simulation: cy.resize()
+  // changes cy.extent() and thus the gravity center, which would otherwise
+  // drag every node toward the new center until alpha decays. Freezing pins
+  // alpha at 0; the grab/free listeners still reheat it on user interaction.
+  //
+  // Zoom is *snapshotted* on enter and restored on exit, not reverse-scaled.
+  // Scroll-wheel zoom inside fullscreen must not leak back into the compact
+  // footprint as unpredictable scale drift.
+  //
+  // This effect's body is skipped on the initial mount because cy is still
+  // null at that point (created asynchronously after the /api/graph fetch).
+  useLayoutEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
     const nextHost = isFullscreen ? fullscreenRef.current : compactRef.current;
     if (!nextHost) return;
+
+    simRef.current?.freeze();
+
     cy.mount(nextHost);
+    cy.resize();
 
-    const preset = isFullscreen ? LAYOUT_FULLSCREEN : LAYOUT_COMPACT;
+    let targetZoom: number;
+    if (isFullscreen) {
+      preFullscreenZoomRef.current = cy.zoom();
+      targetZoom = cy.zoom() * 2;
+    } else if (preFullscreenZoomRef.current !== null) {
+      targetZoom = preFullscreenZoomRef.current;
+      preFullscreenZoomRef.current = null;
+    } else {
+      // Never entered fullscreen (or snapshot already consumed) — nothing to do.
+      return;
+    }
 
-    simRef.current?.stop();
-    simRef.current = null;
+    const clamped = Math.min(Math.max(targetZoom, cy.minZoom()), cy.maxZoom());
 
-    const rafId = requestAnimationFrame(() => {
-      cy.resize();
+    // Center the whole graph in the new viewport AND set zoom in one pass.
+    // Using `center: { eles }` overrides pan so the graph bounding box is
+    // centered; otherwise the pan carried over from the compact container
+    // leaves the cluster hugging the left edge of the fullscreen canvas.
+    if (prefersReducedMotion()) {
+      cy.zoom(clamped);
+      cy.center(cy.elements());
+      return;
+    }
 
-      const layout = cy.layout({
-        name: 'cose',
-        animate: true,
-        animationDuration: 320,
-        animationEasing: 'ease-out' as unknown as cytoscape.Css.TransitionTimingFunction,
-        randomize: false,
-        nodeRepulsion: () => preset.nodeRepulsion,
-        idealEdgeLength: () => preset.idealEdgeLength,
-        edgeElasticity: () => 80,
-        gravity: preset.gravity,
-        numIter: 400,
-        fit: false, // we handle fit explicitly after layoutstop for deterministic zoom
-        padding: preset.padding,
-      } as cytoscape.LayoutOptions);
-
-      layout.one('layoutstop', () => {
-        // Explicit fit — the cose layout's own `fit` ran before all animation
-        // frames completed, leaving the view stale.
-        cy.fit(cy.elements(), preset.padding);
-
-        // Pull back slightly so the graph has breathing room rather than
-        // bumping against padding on one axis (fit zooms to the tightest fit).
-        if (isFullscreen) {
-          cy.zoom({
-            level: cy.zoom() * 0.85,
-            renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 },
-          });
-          cy.center(cy.elements());
-        }
-
-        simRef.current = startForceSimulation(cy, {
-          repulsion: preset.nodeRepulsion / 2.5,
-          idealEdgeLen: preset.idealEdgeLength,
-        });
-      });
-      layout.run();
-    });
-
-    return () => cancelAnimationFrame(rafId);
-    // currentSlug intentionally excluded — highlight-shift handled in its own effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    cy.animate(
+      { zoom: clamped, center: { eles: cy.elements() } },
+      { duration: 240, easing: 'ease-out' },
+    );
   }, [isFullscreen]);
 
   // Esc to exit fullscreen
@@ -541,12 +602,29 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
           }}
         />
 
-        <div ref={compactRef} className={cn('w-full h-full relative z-0', isFullscreen && 'invisible')} />
+        {/* Canvas starts hidden and fades in once cose settles — the
+            synchronous layout burst happens under the overlay, so users
+            never see nodes jump from random positions into place. */}
+        <div
+          ref={compactRef}
+          className={cn(
+            'w-full h-full relative z-0 motion-safe:transition-opacity motion-safe:duration-300',
+            isLoading ? 'opacity-0' : 'opacity-100',
+            isFullscreen && 'invisible',
+          )}
+        />
 
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center gap-2 text-xs text-foreground-tertiary z-10">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
-            Drawing graph
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-foreground-tertiary z-10 motion-safe:animate-fade-in"
+          >
+            <span className="relative inline-flex h-2 w-2">
+              <span className="absolute inset-0 rounded-full bg-accent motion-safe:animate-ping opacity-60" />
+              <span className="relative inline-block h-2 w-2 rounded-full bg-accent" />
+            </span>
+            <span className="tracking-wide">Drawing graph</span>
           </div>
         )}
 
