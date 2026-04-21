@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api-fetch';
+import { cn } from '@/lib/cn';
 
 interface WikiLinkProps {
   href: string;
@@ -34,7 +35,6 @@ export default function WikiLink({
   const fetchPreview = useCallback(async () => {
     if (broken) return;
 
-    // Check cache first
     if (previewCache.has(slug)) {
       setPreview(previewCache.get(slug) ?? null);
       setShowPeek(true);
@@ -66,7 +66,6 @@ export default function WikiLink({
 
   const handleMouseEnter = () => {
     clearTimeout(hideTimerRef.current);
-    // Small delay before showing to avoid flash on quick mouse passes
     fetchTimerRef.current = setTimeout(fetchPreview, 300);
   };
 
@@ -79,7 +78,7 @@ export default function WikiLink({
     return (
       <span
         title="Page not found"
-        className="text-red-500 dark:text-red-400 underline decoration-dashed underline-offset-2 cursor-help"
+        className="text-danger underline decoration-dashed underline-offset-4 cursor-help"
       >
         {children}
       </span>
@@ -95,34 +94,36 @@ export default function WikiLink({
       <Link
         href={href}
         data-wiki-slug={slug}
-        className="text-indigo-600 dark:text-indigo-400 transition-all duration-150 hover:underline hover:underline-offset-2 hover:text-indigo-700 dark:hover:text-indigo-300"
+        className="text-accent underline decoration-1 underline-offset-4 decoration-accent/40 hover:decoration-accent transition-colors duration-fast"
       >
         {children}
       </Link>
 
-      {/* Peek popover */}
       {showPeek && (
         <div
-          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 z-40 pointer-events-none"
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 z-tooltip pointer-events-none"
           onMouseEnter={() => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }}
           onMouseLeave={handleMouseLeave}
         >
-          <div className="pointer-events-auto rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-lg p-3">
+          <div className={cn(
+            'pointer-events-auto rounded-lg border border-border',
+            'bg-surface shadow-md p-3 animate-slide-down',
+          )}>
             {loading ? (
-              <div className="h-4 w-3/4 rounded bg-zinc-200 dark:bg-zinc-700 animate-pulse" />
+              <div className="h-4 w-3/4 rounded bg-subtle animate-pulse" />
             ) : preview ? (
               <>
-                <p className="text-sm font-semibold text-zinc-900 dark:text-slate-100 truncate">
+                <p className="text-sm font-semibold text-foreground truncate">
                   {preview.title}
                 </p>
                 {preview.summary && (
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-3">
+                  <p className="text-xs text-foreground-secondary mt-1 line-clamp-3">
                     {preview.summary}
                   </p>
                 )}
               </>
             ) : (
-              <p className="text-xs text-zinc-400 italic">No preview available</p>
+              <p className="text-xs text-foreground-tertiary italic">No preview available</p>
             )}
           </div>
         </div>

@@ -79,3 +79,4 @@ This document is intentionally abstract. It describes the idea, not a specific i
 - Cross-validation of the wiki using multiple models may be necessary to avoid introducing erroneous knowledge through hallucinations.
 - For different tasks, consider using different models to reduce token costs.
 - Consider using openclaw to automate the transfer of knowledge.
+- Generate an "alter ego" for the current user by simulating the user's cognitive and thinking patterns, guiding the agent to use expressions more aligned with the user's cognition.

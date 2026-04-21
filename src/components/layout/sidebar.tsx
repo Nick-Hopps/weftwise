@@ -1,44 +1,46 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { useUIStore } from '@/stores/ui-store';
+import {
+  ChevronDown,
+  FileText,
+  Pin,
+  Plus,
+  Search,
+  Settings2,
+} from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
-
-const SIDEBAR_PAGE_LIMIT = 100;
-
-function ChevronLeftIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="15 18 9 12 15 6" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="12" y1="5" x2="12" y2="19" />
-      <line x1="5" y1="12" x2="19" y2="12" />
-    </svg>
-  );
-}
-
-function FileIcon() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-    </svg>
-  );
-}
+import { IconButton } from '@/components/ui/icon-button';
+import { Input } from '@/components/ui/input';
+import { SectionLabel } from '@/components/ui/panel';
+import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/cn';
 
 interface PageItem {
   slug: string;
   title: string;
+  path: string;
+  tags: string[];
   updatedAt: string;
+}
+
+function isMetaPage(page: PageItem): boolean {
+  return (page.tags ?? []).includes('meta');
+}
+
+function sortMetaPages(pages: PageItem[]): PageItem[] {
+  return [...pages].sort((a, b) => {
+    const aIsIndex = /(^|\/)index$/.test(a.slug);
+    const bIsIndex = /(^|\/)index$/.test(b.slug);
+    if (aIsIndex !== bIsIndex) return aIsIndex ? -1 : 1;
+    const aIsLog = /(^|\/)log$/.test(a.slug);
+    const bIsLog = /(^|\/)log$/.test(b.slug);
+    if (aIsLog !== bIsLog) return aIsLog ? -1 : 1;
+    return a.title.localeCompare(b.title);
+  });
 }
 
 async function fetchPages(): Promise<PageItem[]> {
@@ -47,158 +49,195 @@ async function fetchPages(): Promise<PageItem[]> {
   return res.json();
 }
 
+function groupKeyFor(page: PageItem): string {
+  const path = page.path ?? '';
+  if (path.includes('/')) return path.split('/')[0];
+  const slug = page.slug ?? '';
+  if (slug.includes('/')) return slug.split('/')[0];
+  return 'Uncategorized';
+}
+
+function formatGroupName(raw: string): string {
+  if (!raw) return 'Uncategorized';
+  return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 interface SidebarProps {
   onNavigate?: () => void;
 }
 
 export function Sidebar({ onNavigate }: SidebarProps = {}) {
-  const { toggleSidebar } = useUIStore();
   const pathname = usePathname();
-  const [showAllPages, setShowAllPages] = useState(false);
+  const [filter, setFilter] = useState('');
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
-  const { data: pages = [], isLoading } = useQuery({
+  const { data: allPages = [], isLoading } = useQuery({
     queryKey: ['pages'],
     queryFn: fetchPages,
     staleTime: 30_000,
   });
 
-  // Sort by updatedAt descending for recent pages
-  const recentPages = [...pages]
-    .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1))
-    .slice(0, 8);
+  const visiblePages = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return allPages
+      .filter((p) => !isMetaPage(p))
+      .filter((p) => (q ? p.title.toLowerCase().includes(q) : true))
+      .sort((a, b) => a.title.localeCompare(b.title));
+  }, [allPages, filter]);
 
-  // All pages sorted alphabetically
-  const allPages = [...pages].sort((a, b) =>
-    a.title.localeCompare(b.title)
+  const metaPages = useMemo(
+    () => sortMetaPages(allPages.filter(isMetaPage)),
+    [allPages],
   );
 
+  const groups = useMemo(() => {
+    const map = new Map<string, PageItem[]>();
+    for (const page of visiblePages) {
+      const key = groupKeyFor(page);
+      const arr = map.get(key) ?? [];
+      arr.push(page);
+      map.set(key, arr);
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [visiblePages]);
+
+  const totalVisible = visiblePages.length;
+  const totalAll = allPages.filter((p) => !(p.tags ?? []).includes('meta')).length;
   const isActive = (slug: string) => pathname === `/wiki/${slug}`;
+  const toggleGroup = (key: string) => {
+    setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
-    <div
-      className="
-        flex flex-col h-full
-        w-[280px]
-        bg-[rgb(var(--surface))]
-        border-r border-[rgb(var(--border))]
-        overflow-hidden
-      "
-    >
-      {/* Sidebar header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-[rgb(var(--border))] shrink-0">
-        <span className="text-xs font-semibold uppercase tracking-widest text-[rgb(var(--muted))]">
-          Pages
-        </span>
-        <button
-          onClick={toggleSidebar}
-          aria-label="Collapse sidebar"
-          className="p-1 rounded-md text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))] hover:bg-[rgb(var(--border))] transition-colors"
+    <div className="flex flex-col h-full w-sidebar bg-canvas border-r border-border overflow-hidden">
+      {/* Top quick action (primary CTA) */}
+      <div className="px-2 py-2 shrink-0">
+        <Link
+          href="/"
+          onClick={onNavigate}
+          className="flex items-center gap-2 h-8 px-2.5 rounded-md text-sm font-medium text-accent bg-accent/8 hover:bg-accent/12 transition-colors focus-ring"
         >
-          <ChevronLeftIcon />
-        </button>
+          <Plus className="h-3.5 w-3.5" />
+          <span>New Ingest</span>
+        </Link>
       </div>
+
+      {/* Filter */}
+      <div className="px-2 pb-2 shrink-0">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-foreground-tertiary pointer-events-none" />
+          <Input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Filter pages…"
+            aria-label="Filter pages"
+            className="h-8 pl-8 text-sm"
+          />
+        </div>
+      </div>
+
+      <Separator />
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto py-2">
+        {metaPages.length > 0 && (
+          <div className="px-2 mb-3">
+            <SectionLabel className="px-2 py-1 flex items-center gap-1.5">
+              <Pin className="h-3 w-3" />
+              Meta
+            </SectionLabel>
+            <nav aria-label="Meta pages">
+              {metaPages.map((page) => (
+                <Link
+                  key={page.slug}
+                  href={`/wiki/${page.slug}`}
+                  onClick={onNavigate}
+                  className={cn(
+                    'flex items-center gap-2 h-8 px-2 rounded-md text-sm transition-colors focus-ring',
+                    isActive(page.slug)
+                      ? 'bg-subtle text-foreground font-medium'
+                      : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
+                  )}
+                >
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
+                  <span className="truncate">{page.title}</span>
+                </Link>
+              ))}
+            </nav>
+          </div>
+        )}
+
         {isLoading ? (
-          <div className="px-4 py-3 space-y-2">
+          <div className="px-3 py-3 space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-6 rounded bg-[rgb(var(--border))] animate-pulse" />
+              <div key={i} className="h-4 rounded bg-subtle animate-pulse" />
             ))}
           </div>
-        ) : pages.length === 0 ? (
-          <p className="px-4 py-6 text-xs text-[rgb(var(--muted))] italic text-center">
+        ) : totalAll === 0 ? (
+          <p className="px-4 py-6 text-xs text-foreground-tertiary italic text-center">
             No pages yet. Ingest a source to get started.
           </p>
+        ) : totalVisible === 0 ? (
+          <p className="px-4 py-6 text-xs text-foreground-tertiary italic text-center">
+            No pages match &ldquo;{filter}&rdquo;.
+          </p>
         ) : (
-          <>
-            {/* Recent Pages */}
-            <div className="px-2 mb-4">
-              <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-[rgb(var(--muted))]">
-                Recent
-              </p>
-              <nav aria-label="Recent pages">
-                {recentPages.map((page) => (
-                  <Link
-                    key={page.slug}
-                    href={`/wiki/${page.slug}`}
-                    onClick={onNavigate}
-                    className={`
-                      w-full flex items-center gap-2
-                      px-2 py-1.5 rounded-md text-sm
-                      transition-colors
-                      ${isActive(page.slug)
-                        ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400'
-                        : 'text-[rgb(var(--foreground))] hover:bg-[rgb(var(--border))]'
-                      }
-                    `}
+          <div className="px-2 space-y-2">
+            {groups.map(([groupKey, items]) => {
+              const collapsed = collapsedGroups[groupKey] === true;
+              return (
+                <div key={groupKey}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(groupKey)}
+                    aria-expanded={!collapsed}
+                    className="w-full flex items-center justify-between px-2 h-6 rounded-md text-xs font-medium text-foreground-tertiary hover:text-foreground hover:bg-subtle transition-colors focus-ring"
                   >
-                    <span className="text-[rgb(var(--muted))]">
-                      <FileIcon />
+                    <span className="flex items-center gap-1.5 uppercase tracking-wider">
+                      <ChevronDown
+                        className={cn('h-3 w-3 transition-transform', collapsed && '-rotate-90')}
+                      />
+                      {formatGroupName(groupKey)}
                     </span>
-                    <span className="truncate">{page.title}</span>
-                  </Link>
-                ))}
-              </nav>
-            </div>
-
-            {/* All Pages */}
-            <div className="px-2">
-              <p className="px-2 py-1 text-[11px] font-medium uppercase tracking-wider text-[rgb(var(--muted))]">
-                All Pages ({allPages.length})
-              </p>
-              <nav aria-label="All pages">
-                {(showAllPages ? allPages : allPages.slice(0, SIDEBAR_PAGE_LIMIT)).map((page) => (
-                  <Link
-                    key={page.slug}
-                    href={`/wiki/${page.slug}`}
-                    onClick={onNavigate}
-                    className={`
-                      w-full flex items-center gap-2
-                      px-2 py-1.5 rounded-md text-sm
-                      transition-colors
-                      ${isActive(page.slug)
-                        ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400'
-                        : 'text-[rgb(var(--foreground))] hover:bg-[rgb(var(--border))]'
-                      }
-                    `}
-                  >
-                    <span className="text-[rgb(var(--muted))]">
-                      <FileIcon />
+                    <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
+                      {items.length}
                     </span>
-                    <span className="truncate">{page.title}</span>
-                  </Link>
-                ))}
-              </nav>
-              {!showAllPages && allPages.length > SIDEBAR_PAGE_LIMIT && (
-                <button
-                  onClick={() => setShowAllPages(true)}
-                  className="w-full px-2 py-2 text-xs text-[rgb(var(--muted))] hover:text-[rgb(var(--foreground))] transition-colors"
-                >
-                  Show all {allPages.length} pages
-                </button>
-              )}
-            </div>
-          </>
+                  </button>
+                  {!collapsed && (
+                    <nav aria-label={`${groupKey} pages`} className="mt-0.5">
+                      {items.map((page) => (
+                        <Link
+                          key={page.slug}
+                          href={`/wiki/${page.slug}`}
+                          onClick={onNavigate}
+                          className={cn(
+                            'flex items-center gap-2 h-8 pl-5 pr-2 rounded-md text-sm transition-colors focus-ring',
+                            isActive(page.slug)
+                              ? 'bg-accent-subtle text-accent-strong font-medium'
+                              : 'text-foreground hover:bg-subtle',
+                          )}
+                        >
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
+                          <span className="truncate">{page.title}</span>
+                        </Link>
+                      ))}
+                    </nav>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {/* Bottom action */}
-      <div className="p-3 border-t border-[rgb(var(--border))] shrink-0">
-        <Link
-          href="/ingest"
-          onClick={onNavigate}
-          className="
-            w-full flex items-center justify-center gap-2
-            px-3 py-2 rounded-md
-            bg-emerald-500 hover:bg-emerald-600
-            text-white text-sm font-medium
-            transition-colors
-          "
-        >
-          <PlusIcon />
-          New Ingest
-        </Link>
+      {/* Footer */}
+      <div className="shrink-0 border-t border-border px-2 py-2 flex items-center justify-between">
+        <span className="text-xs text-foreground-tertiary px-1">
+          {totalAll} {totalAll === 1 ? 'page' : 'pages'}
+        </span>
+        <IconButton size="sm" aria-label="Settings">
+          <Settings2 />
+        </IconButton>
       </div>
     </div>
   );

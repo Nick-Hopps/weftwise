@@ -1,7 +1,10 @@
 'use client';
 import { useState, useRef, useEffect } from 'react';
+import { Bookmark, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import { normalizeSlug } from '@/lib/slug';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { Citation } from './message-list';
 
 interface SaveToWikiButtonProps {
@@ -10,11 +13,7 @@ interface SaveToWikiButtonProps {
   onSaved?: (slug: string) => void;
 }
 
-export function SaveToWikiButton({
-  answer,
-  citations,
-  onSaved,
-}: SaveToWikiButtonProps) {
+export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -23,17 +22,13 @@ export function SaveToWikiButton({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-    }
+    if (isOpen) setTimeout(() => inputRef.current?.focus(), 50);
   }, [isOpen]);
 
   const handleSave = async () => {
     if (!title.trim()) return;
-
     setIsLoading(true);
     setError(null);
-
     try {
       const response = await apiFetch('/api/query', {
         method: 'POST',
@@ -45,18 +40,13 @@ export function SaveToWikiButton({
           citations,
         }),
       });
-
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as {
-          error?: string;
-        };
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${response.status}`);
       }
-
       const data = (await response.json()) as { jobId?: string };
       if (data.jobId) {
         setSavedJobId(data.jobId);
-        // Dispatch event so GlobalJobTracker picks it up
         window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
         onSaved?.(normalizeSlug(title));
       }
@@ -74,58 +64,49 @@ export function SaveToWikiButton({
 
   if (savedJobId) {
     return (
-      <div className="flex items-center gap-2 mt-2">
-        <span className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-          Saving to wiki...
-        </span>
-        <span className="text-xs text-zinc-400 font-mono">{savedJobId.slice(0, 8)}</span>
+      <div className="flex items-center gap-2 text-xs">
+        <Check className="h-3 w-3 text-success" />
+        <span className="text-success font-medium">Saving to wiki…</span>
+        <span className="text-foreground-tertiary font-mono">{savedJobId.slice(0, 8)}</span>
       </div>
     );
   }
 
+  if (!isOpen) {
+    return (
+      <Button intent="ghost" size="sm" onClick={() => setIsOpen(true)}>
+        <Bookmark className="h-3 w-3" />
+        Save to Wiki
+      </Button>
+    );
+  }
+
   return (
-    <div className="relative mt-2">
-      {!isOpen ? (
-        <button
-          onClick={() => setIsOpen(true)}
-          className="text-xs px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-600 text-white font-medium transition-colors"
+    <div className="flex flex-col gap-2 p-3 rounded-md border border-border bg-surface shadow-md w-72">
+      <p className="text-xs font-medium text-foreground-secondary">Save as wiki page</p>
+      <Input
+        ref={inputRef}
+        type="text"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Page title…"
+      />
+      {error && <p className="text-xs text-danger">{error}</p>}
+      <div className="flex gap-2">
+        <Button
+          intent="primary"
+          size="sm"
+          onClick={handleSave}
+          disabled={isLoading || !title.trim()}
+          className="flex-1"
         >
-          Save to Wiki
-        </button>
-      ) : (
-        <div className="flex flex-col gap-2 p-3 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-md w-72">
-          <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-            Save as wiki page
-          </p>
-          <input
-            ref={inputRef}
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Page title..."
-            className="text-sm px-2 py-1.5 rounded-md border border-zinc-300 dark:border-zinc-600 bg-transparent text-zinc-900 dark:text-slate-100 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          {error && (
-            <p className="text-xs text-red-500">{error}</p>
-          )}
-          <div className="flex gap-2">
-            <button
-              onClick={handleSave}
-              disabled={isLoading || !title.trim()}
-              className="flex-1 text-xs px-2 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium transition-colors"
-            >
-              {isLoading ? 'Saving...' : 'Save'}
-            </button>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="text-xs px-2 py-1.5 rounded-md border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+          {isLoading ? 'Saving…' : 'Save'}
+        </Button>
+        <Button intent="outline" size="sm" onClick={() => setIsOpen(false)}>
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }

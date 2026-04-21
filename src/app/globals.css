@@ -2,88 +2,297 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================================
+ * Design Tokens — three layers
+ *   1. BASE: primitive values (color triples, raw sizes)
+ *   2. SEMANTIC: roles (bg/fg/border/accent/state/prose/graph/editor)
+ *   3. COMPONENT: layout-specific (header-height, panel-width, ...)
+ *
+ * Colors stored as `R G B` triples so Tailwind `<alpha-value>` can compose
+ * them via `rgb(var(--token) / <alpha-value>)`.
+ * ============================================================================= */
+
 :root {
-  --background: 248 250 252; /* slate-50 */
-  --foreground: 9 9 11; /* zinc-950 */
-  --accent: 99 102 241; /* indigo-500 */
-  --accent-llm: 16 185 129; /* emerald-500 */
-  --surface: 255 255 255;
-  --border: 226 232 240; /* slate-200 */
-  --muted: 100 116 139; /* slate-500 */
+  /* ─── BASE · Brand (Linear violet) ──────────────────────────────────────── */
+  --base-violet-50:  242 242 252;
+  --base-violet-100: 229 229 250;
+  --base-violet-200: 204 202 245;
+  --base-violet-500:  94  92 230;   /* #5E5CE6 */
+  --base-violet-600:  79  78 211;   /* #4F4ED3 */
+  --base-violet-700:  63  62 184;   /* #3F3EB8 */
+
+  /* ─── BASE · Neutral (warm gray) ────────────────────────────────────────── */
+  --base-neutral-0:   255 255 255;
+  --base-neutral-50:  250 250 250;
+  --base-neutral-100: 244 244 245;
+  --base-neutral-150: 236 236 238;
+  --base-neutral-200: 234 234 234;
+  --base-neutral-300: 228 228 231;
+  --base-neutral-400: 212 212 216;
+  --base-neutral-500: 161 161 170;
+  --base-neutral-600: 113 113 122;
+  --base-neutral-700:  82  82  91;
+  --base-neutral-800:  63  63  70;
+  --base-neutral-900:  29  29  31;
+  --base-neutral-950:  17  17  17;
+
+  /* ─── BASE · Status ─────────────────────────────────────────────────────── */
+  --base-success-50:  236 250 243;
+  --base-success-500:  24 160  88;
+  --base-success-600:  16 128  70;
+  --base-info-500:      0 122 255;
+  --base-warning-50:  254 245 228;
+  --base-warning-500: 245 166  35;
+  --base-danger-50:   254 242 242;
+  --base-danger-500:  229  72  77;
+  --base-danger-600:  200  56  60;
+
+  /* ─── BASE · Spacing (4px baseline) ─────────────────────────────────────── */
+  --space-0:    0px;
+  --space-1:    4px;
+  --space-1_5:  6px;
+  --space-2:    8px;
+  --space-2_5: 10px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+
+  /* ─── BASE · Radii ──────────────────────────────────────────────────────── */
+  --radius-none: 0;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:  10px;
+  --radius-full: 9999px;
+
+  /* ─── BASE · Shadows ────────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.03);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.02);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.08), 0 4px 12px rgb(0 0 0 / 0.04);
+
+  /* ─── BASE · Motion ─────────────────────────────────────────────────────── */
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 240ms;
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ─── SEMANTIC · Surface / Background ───────────────────────────────────── */
+  --color-bg-canvas:   var(--base-neutral-50);
+  --color-bg-surface:  var(--base-neutral-0);
+  --color-bg-subtle:   var(--base-neutral-100);
+  --color-bg-elevated: var(--base-neutral-0);
+  --color-bg-overlay:   15  15  18;
+
+  /* ─── SEMANTIC · Foreground ─────────────────────────────────────────────── */
+  /* Darkened one step from Linear reference to meet WCAG AA on #FAFAFA:
+   *   secondary: #52525B → 8.1:1  · tertiary: #71717A → 4.6:1
+   * Pre-fix values (600/500) failed AA for tertiary (2.9:1). */
+  --color-fg-primary:   var(--base-neutral-900);
+  --color-fg-secondary: var(--base-neutral-700);
+  --color-fg-tertiary:  var(--base-neutral-600);
+  --color-fg-disabled:  var(--base-neutral-400);
+  --color-fg-inverse:   var(--base-neutral-0);
+
+  /* ─── SEMANTIC · Border ─────────────────────────────────────────────────── */
+  --color-border-default: var(--base-neutral-200);
+  --color-border-subtle:  var(--base-neutral-150);
+  --color-border-strong:  var(--base-neutral-300);
+  --color-border-accent:  var(--base-violet-500);
+
+  /* ─── SEMANTIC · Accent ─────────────────────────────────────────────────── */
+  --color-accent-primary:        var(--base-violet-500);
+  --color-accent-primary-hover:  var(--base-violet-600);
+  --color-accent-primary-active: var(--base-violet-700);
+  --color-accent-subtle:         var(--base-violet-50);
+  --color-accent-fg:             var(--base-neutral-0);
+  --color-accent-strong-fg:      var(--base-violet-700);
+
+  /* ─── SEMANTIC · State ──────────────────────────────────────────────────── */
+  --color-success-fg:     var(--base-success-600);
+  --color-success-bg:     var(--base-success-50);
+  --color-success-border: var(--base-success-500);
+  --color-warning-fg:     var(--base-warning-500);
+  --color-warning-bg:     var(--base-warning-50);
+  --color-warning-border: var(--base-warning-500);
+  --color-danger-fg:      var(--base-danger-600);
+  --color-danger-bg:      var(--base-danger-50);
+  --color-danger-border:  var(--base-danger-500);
+  --color-info-fg:        var(--base-info-500);
+
+  /* ─── SEMANTIC · Input & Focus ──────────────────────────────────────────── */
+  --color-input-bg:           var(--base-neutral-0);
+  --color-input-border:       var(--base-neutral-200);
+  --color-input-border-focus: var(--base-violet-500);
+  --color-input-placeholder:  var(--base-neutral-500);
+  --color-focus-ring:         var(--base-violet-500);
+  --color-selection-bg:       var(--base-violet-100);
+
+  /* ─── SEMANTIC · Prose (wiki reading) ───────────────────────────────────── */
+  --color-prose-heading: var(--base-neutral-900);
+  --color-prose-body:    var(--base-neutral-800);
+  --color-prose-muted:   var(--base-neutral-600);
+  --color-code-bg:       var(--base-neutral-100);
+  --color-code-fg:       var(--base-neutral-900);
+  --color-quote-border:  var(--base-neutral-300);
+
+  /* ─── SEMANTIC · Graph (Cytoscape) ──────────────────────────────────────── */
+  --color-graph-canvas:      var(--base-neutral-50);
+  --color-graph-node:        var(--base-violet-500);
+  --color-graph-node-border: var(--base-violet-700);
+  --color-graph-orphan:      var(--base-neutral-400);
+  --color-graph-edge:        var(--base-neutral-300);
+  --color-graph-label:       var(--base-neutral-900);
+  --color-graph-active:      var(--base-violet-600);
+
+  /* ─── COMPONENT · Shell ─────────────────────────────────────────────────── */
+  --header-height:            48px;
+  --sidebar-width:            240px;
+  --sidebar-width-collapsed:  0px;
+  --context-panel-width:      320px;
+  --content-max-width:        65ch;
+
+  /* ─── COMPONENT · z-index ───────────────────────────────────────────────── */
+  --z-header:   20;
+  --z-overlay:  30;
+  --z-sheet:    40;
+  --z-command:  50;
+  --z-tooltip:  60;
 }
 
+/* Dark theme ------------------------------------------------------------------ */
 .dark {
-  --background: 9 9 11; /* zinc-950 */
-  --foreground: 248 250 252; /* slate-50 */
-  --accent: 99 102 241; /* indigo-500 */
-  --accent-llm: 16 185 129; /* emerald-500 */
-  --surface: 24 24 27; /* zinc-900 */
-  --border: 63 63 70; /* zinc-700 */
-  --muted: 161 161 170; /* zinc-400 */
+  --color-bg-canvas:   var(--base-neutral-950);
+  --color-bg-surface:   26  26  26;
+  --color-bg-subtle:    34  34  34;
+  --color-bg-elevated:  42  42  42;
+  --color-bg-overlay:    0   0   0;
+
+  --color-fg-primary:   237 237 237;
+  --color-fg-secondary: var(--base-neutral-400);  /* #D4D4D8 → 10.7:1 on #111111 */
+  --color-fg-tertiary:  var(--base-neutral-500);  /* #A1A1AA → 6.8:1  on #111111 */
+  --color-fg-disabled:  var(--base-neutral-700);
+  --color-fg-inverse:   var(--base-neutral-900);
+
+  --color-border-default:  44  44  44;
+  --color-border-subtle:   34  34  34;
+  --color-border-strong:   58  58  58;
+
+  --color-accent-primary:        110 106 246;
+  --color-accent-primary-hover:  138 135 248;
+  --color-accent-primary-active: var(--base-violet-500);
+  --color-accent-subtle:          35  35  56;
+  --color-accent-fg:             var(--base-neutral-0);
+  --color-accent-strong-fg:      var(--base-violet-200);
+
+  --color-input-bg:          26 26 26;
+  --color-input-border:       var(--color-border-default);
+  --color-input-placeholder:  var(--base-neutral-600);
+  --color-focus-ring:         110 106 246;
+  --color-selection-bg:       var(--color-accent-subtle);
+
+  --color-prose-heading: 237 237 237;
+  --color-prose-body:    var(--base-neutral-400);
+  --color-prose-muted:   var(--base-neutral-500);
+  --color-code-bg:       var(--color-bg-subtle);
+  --color-code-fg:       237 237 237;
+  --color-quote-border:  var(--color-border-strong);
+
+  --color-graph-canvas:      var(--base-neutral-950);
+  --color-graph-node:        var(--color-accent-primary);
+  --color-graph-node-border: 138 135 248;
+  --color-graph-orphan:      var(--base-neutral-700);
+  --color-graph-edge:        var(--color-border-strong);
+  --color-graph-label:       var(--color-fg-primary);
+  --color-graph-active:      138 135 248;
+
+  --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.35);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.45);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.55), 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
 }
 
+/* =============================================================================
+ * Base Layer
+ * ============================================================================= */
 @layer base {
-  body {
-    background-color: rgb(var(--background));
-    color: rgb(var(--foreground));
-    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-    @apply antialiased;
-    transition: background-color 0.2s ease, color 0.2s ease;
-  }
-
   html {
     scroll-behavior: smooth;
   }
+
+  body {
+    background-color: rgb(var(--color-bg-canvas));
+    color: rgb(var(--color-fg-primary));
+    font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition:
+      background-color var(--duration-base) var(--ease-standard),
+      color var(--duration-base) var(--ease-standard);
+  }
+
+  ::selection {
+    background-color: rgb(var(--color-selection-bg));
+    color: rgb(var(--color-fg-primary));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
-/* @uiw/react-md-editor theme overrides */
-.wiki-editor-container .w-md-editor {
-  --color-border-default: theme('colors.zinc.200') !important;
-  --color-canvas-default: theme('colors.white') !important;
-  background-color: theme('colors.white') !important;
-  border: none !important;
-  box-shadow: none !important;
+/* =============================================================================
+ * @uiw/react-md-editor theme bridge
+ *   Expose Primer color variables that md-editor consumes, pointing them at
+ *   our semantic tokens. Apply by wrapping editor/preview with
+ *   `.wiki-editor-theme`.
+ * ============================================================================= */
+.wiki-editor-theme {
+  --color-fg-default:        rgb(var(--color-prose-body));
+  --color-fg-muted:          rgb(var(--color-prose-muted));
+  --color-fg-subtle:         rgb(var(--color-fg-tertiary));
+  --color-canvas-default:    rgb(var(--color-bg-surface));
+  --color-canvas-subtle:     rgb(var(--color-bg-subtle));
+  --color-border-default:    rgb(var(--color-border-default));
+  --color-border-muted:      rgb(var(--color-border-subtle));
+  --color-neutral-muted:     rgb(var(--color-bg-subtle));
+  --color-accent-fg:         rgb(var(--color-accent-primary));
+  --color-accent-emphasis:   rgb(var(--color-accent-primary));
+  --color-accent-muted:      rgb(var(--color-accent-subtle));
+  --color-danger-fg:         rgb(var(--color-danger-fg));
+  --color-danger-emphasis:   rgb(var(--color-danger-border));
+  --color-success-fg:        rgb(var(--color-success-fg));
+  --color-success-emphasis:  rgb(var(--color-success-border));
+  --color-attention-fg:      rgb(var(--color-warning-fg));
+  --color-attention-emphasis:rgb(var(--color-warning-border));
+  --color-attention-subtle:  rgb(var(--color-warning-bg));
 }
 
-.dark .wiki-editor-container .w-md-editor {
-  --color-border-default: theme('colors.zinc.700') !important;
-  --color-canvas-default: theme('colors.zinc.900') !important;
-  background-color: theme('colors.zinc.900') !important;
+/* =============================================================================
+ * Cytoscape container theme anchor — JS reads CSS vars from this scope.
+ * ============================================================================= */
+.theme-graph {
+  color: rgb(var(--color-graph-label));
+  background-color: rgb(var(--color-graph-canvas));
 }
 
-.wiki-editor-container .w-md-editor-toolbar {
-  background-color: theme('colors.zinc.50') !important;
-  border-bottom: 1px solid theme('colors.zinc.200') !important;
-  padding: 6px 8px !important;
-}
-
-.dark .wiki-editor-container .w-md-editor-toolbar {
-  background-color: theme('colors.zinc.800') !important;
-  border-bottom-color: theme('colors.zinc.700') !important;
-}
-
-.wiki-editor-container .w-md-editor-toolbar button {
-  color: theme('colors.zinc.600') !important;
-}
-
-.wiki-editor-container .w-md-editor-toolbar button:hover {
-  color: theme('colors.indigo.600') !important;
-}
-
-.dark .wiki-editor-container .w-md-editor-toolbar button {
-  color: theme('colors.zinc.400') !important;
-}
-
-.dark .wiki-editor-container .w-md-editor-toolbar button:hover {
-  color: theme('colors.indigo.400') !important;
-}
-
-.wiki-editor-container .w-md-editor-text-input {
-  color: theme('colors.zinc.900') !important;
-  -webkit-text-fill-color: theme('colors.zinc.900') !important;
-}
-
-.dark .wiki-editor-container .w-md-editor-text-input {
-  color: theme('colors.slate.100') !important;
-  -webkit-text-fill-color: theme('colors.slate.100') !important;
+/* =============================================================================
+ * Utility: unified focus ring for interactive elements (apply via `focus-ring`)
+ * ============================================================================= */
+@layer utilities {
+  .focus-ring {
+    @apply outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-canvas;
+  }
 }

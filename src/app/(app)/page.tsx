@@ -1,9 +1,23 @@
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import { getDb } from '@/server/db/client';
 import { sources } from '@/server/db/schema';
-import LintButton from './_components/lint-button';
-import ResetButton from './_components/reset-button';
+import { DashboardHero } from './_components/dashboard-hero';
+import { DashboardIngestPanel } from './_components/dashboard-ingest-panel';
+import { SectionLabel } from '@/components/ui/panel';
+import { Tag } from '@/components/ui/tag';
+
+const MiniGraphView = dynamic(
+  () => import('@/components/graph/mini-graph-view').then((m) => ({ default: m.MiniGraphView })),
+  {
+    loading: () => (
+      <div className="w-full h-full rounded-md border border-border bg-canvas flex items-center justify-center text-xs text-foreground-tertiary">
+        Loading graph…
+      </div>
+    ),
+  },
+);
 
 function countSources(): number {
   try {
@@ -15,10 +29,11 @@ function countSources(): number {
   }
 }
 
-function getRecentPages(limit = 5) {
+function getRecentPages(limit = 10) {
   try {
     const all = pagesRepo.getAllPages();
     return all
+      .filter((p) => !(p.tags ?? []).includes('meta'))
       .sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1))
       .slice(0, limit);
   } catch {
@@ -28,13 +43,12 @@ function getRecentPages(limit = 5) {
 
 function getStats() {
   try {
-    const pages = pagesRepo.getAllPages();
+    const pages = pagesRepo.getAllPages().filter((p) => !(p.tags ?? []).includes('meta'));
     const links = pagesRepo.getAllLinks();
-    const sourceCount = countSources();
     return {
       pageCount: pages.length,
       linkCount: links.length,
-      sourceCount,
+      sourceCount: countSources(),
     };
   } catch {
     return { pageCount: 0, linkCount: 0, sourceCount: 0 };
@@ -44,122 +58,113 @@ function getStats() {
 export default function DashboardPage() {
   const stats = getStats();
   const recentPages = getRecentPages();
+  const isEmpty = stats.pageCount === 0;
 
-  return (
-    <div className="max-w-4xl mx-auto px-6 py-8 space-y-8">
-      {/* Page title */}
-      <div>
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-slate-50">Dashboard</h1>
-        <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-          Overview of your knowledge base
-        </p>
+  // ── Empty state: centered first-run ───────────────────────────────────────
+  if (isEmpty) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-10 sm:py-16 space-y-8">
+        <DashboardHero pageCount={0} />
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-base font-semibold text-foreground">
+              Start with your first source
+            </h2>
+            <p className="text-sm text-foreground-secondary">
+              Upload a document or paste text — the agent will create the pages for you.
+            </p>
+          </div>
+          <DashboardIngestPanel />
+        </section>
       </div>
+    );
+  }
 
-      {/* Stats grid */}
-      <section>
-        <h2 className="text-xs font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
-          Wiki Stats
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+  // ── Populated state: 8:4 split (desktop), stacked (mobile) ────────────────
+  return (
+    <div className="max-w-[1200px] mx-auto w-full px-6 py-6 space-y-6">
+      {/* Hero + stats row */}
+      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <DashboardHero pageCount={stats.pageCount} compact />
+        <div className="grid grid-cols-3 gap-2 lg:w-auto lg:min-w-[380px]">
           <StatCard label="Pages" value={stats.pageCount} />
           <StatCard label="Links" value={stats.linkCount} />
           <StatCard label="Sources" value={stats.sourceCount} />
         </div>
-      </section>
+      </div>
 
-      {/* Recent pages */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-xs font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest">
-            Recent Pages
-          </h2>
-          <Link
-            href="/graph"
-            className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
-          >
-            View graph
-          </Link>
-        </div>
-
-        {recentPages.length === 0 ? (
-          <p className="text-sm text-zinc-400 dark:text-zinc-500 italic">
-            No pages yet. Ingest a source to get started.
-          </p>
-        ) : (
-          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800 rounded-xl border border-zinc-100 dark:border-zinc-800 overflow-hidden">
+      {/* Main 8:4 grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left column — Recent Pages as dense list */}
+        <section aria-labelledby="recent-pages-heading" className="lg:col-span-8">
+          <div className="flex items-center justify-between mb-2">
+            <SectionLabel id="recent-pages-heading">Recent Pages</SectionLabel>
+            <span className="text-xs text-foreground-tertiary font-mono">
+              {recentPages.length}
+            </span>
+          </div>
+          <ul className="rounded-md border border-border bg-surface divide-y divide-border">
             {recentPages.map((page) => (
               <li key={page.slug}>
                 <Link
                   href={`/wiki/${page.slug}`}
-                  className="flex items-center justify-between px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors group"
+                  className="group flex items-center gap-3 h-11 px-3 hover:bg-subtle transition-colors focus-ring rounded-md"
                 >
-                  <span className="text-sm font-medium text-zinc-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-                    {page.title}
+                  <span className="text-foreground-tertiary text-xs font-mono w-4 shrink-0">≡</span>
+                  <span className="flex-1 min-w-0 flex items-center gap-3">
+                    <span className="text-sm font-medium text-foreground group-hover:text-accent-strong transition-colors truncate">
+                      {page.title}
+                    </span>
+                    {page.summary && (
+                      <span className="hidden md:inline text-xs text-foreground-tertiary truncate">
+                        {page.summary}
+                      </span>
+                    )}
                   </span>
-                  <span className="text-xs text-zinc-400 dark:text-zinc-500 shrink-0 ml-4">
+                  {page.tags && page.tags.length > 0 && (
+                    <span className="hidden lg:flex gap-1 shrink-0">
+                      {page.tags.slice(0, 2).map((t) => (
+                        <Tag key={t} tone="neutral">
+                          {t}
+                        </Tag>
+                      ))}
+                    </span>
+                  )}
+                  <time className="text-xs font-mono text-foreground-tertiary shrink-0">
                     {formatDate(page.updatedAt)}
-                  </span>
+                  </time>
                 </Link>
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
 
-      {/* Quick actions */}
-      <section>
-        <h2 className="text-xs font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest mb-3">
-          Quick Actions
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Ingest Source */}
-          <Link
-            href="/ingest"
-            className="flex flex-col gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-md transition-all group"
-          >
-            <span className="text-2xl">+</span>
-            <span className="font-semibold text-zinc-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-              Ingest Source
-            </span>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              Import documents, PDFs, or text files into your wiki
-            </span>
-          </Link>
+        {/* Right column — Ingest + Graph */}
+        <aside className="lg:col-span-4 space-y-4">
+          <section aria-labelledby="add-knowledge-heading" className="space-y-2">
+            <SectionLabel id="add-knowledge-heading">Add Knowledge</SectionLabel>
+            <DashboardIngestPanel compact />
+          </section>
 
-          {/* Ask Wiki — opens command palette */}
-          <Link
-            href="/?cmd=1"
-            className="flex flex-col gap-2 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-md transition-all group"
-          >
-            <span className="text-2xl">?</span>
-            <span className="font-semibold text-zinc-800 dark:text-slate-200 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
-              Ask Wiki
-            </span>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              Ask a question and get answers from your knowledge base
-            </span>
-          </Link>
-
-          {/* Run Lint — client action */}
-          <LintButton />
-
-          {/* Reset Wiki — danger action */}
-          <ResetButton />
-        </div>
-      </section>
+          <section aria-labelledby="wiki-graph-heading" className="space-y-2">
+            <SectionLabel id="wiki-graph-heading">Wiki Graph</SectionLabel>
+            <div className="h-60">
+              <MiniGraphView fill />
+            </div>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
-
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-5 py-4 flex flex-col gap-1">
-      <span className="text-3xl font-bold text-zinc-900 dark:text-slate-50 tabular-nums">
+    <div className="rounded-md border border-border bg-surface px-4 py-3 flex flex-col gap-0.5">
+      <span className="text-xl font-semibold text-foreground tabular-nums leading-none">
         {value}
       </span>
-      <span className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide font-medium">
+      <span className="text-xs text-foreground-secondary font-medium">
         {label}
       </span>
     </div>
@@ -171,7 +176,6 @@ function formatDate(iso: string): string {
     return new Date(iso).toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
-      year: 'numeric',
     });
   } catch {
     return iso;
