@@ -134,13 +134,13 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
           ) : (
             <ul className="space-y-0.5">
               {backlinks.map((link) => (
-                <li key={link.slug}>
+                <li key={link.slug} className="min-w-0">
                   <Link
                     href={`/wiki/${link.slug}`}
-                    className="flex items-center gap-2 h-8 px-2 rounded-md text-sm text-foreground hover:bg-subtle transition-colors focus-ring"
+                    className="flex items-center gap-2 h-8 px-2 rounded-md text-sm text-foreground hover:bg-subtle transition-colors focus-ring min-w-0 w-full"
                   >
                     <Link2 className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" aria-hidden />
-                    <span className="truncate">{link.title}</span>
+                    <span className="truncate min-w-0 flex-1">{link.title}</span>
                   </Link>
                 </li>
               ))}
@@ -148,14 +148,13 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
           )}
         </section>
 
-        {/* Graph */}
+        {/* Graph — compact, interactive neighborhood view */}
         <section aria-labelledby="ctx-graph" className="flex-1 min-h-0">
-          <SectionLabel id="ctx-graph" className="mb-2">
-            Graph
-          </SectionLabel>
-          <div className="h-56">
-            <MiniGraphView currentSlug={slug} />
+          <div className="flex items-baseline justify-between mb-2">
+            <SectionLabel id="ctx-graph">Graph</SectionLabel>
+            <span className="text-[10px] text-foreground-tertiary italic">drag · scroll · click</span>
           </div>
+          <MiniGraphView currentSlug={slug} />
         </section>
       </div>
     </div>

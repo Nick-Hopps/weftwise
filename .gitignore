@@ -28,6 +28,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# playwright / ad-hoc screenshots
+.playwright-mcp/
+/*.png
+
 # local env files
 .env
 .env*.local

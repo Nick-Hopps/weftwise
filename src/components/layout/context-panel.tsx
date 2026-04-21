@@ -76,7 +76,7 @@ export function ContextPanel({ variant = 'docked' }: ContextPanelProps) {
     <aside
       ref={rootRef}
       className={cn(
-        'flex flex-col h-full bg-surface',
+        'flex flex-col h-full w-full min-w-0 bg-surface',
         variant === 'docked' ? 'border-l border-border' : '',
       )}
       aria-label="Context panel"
