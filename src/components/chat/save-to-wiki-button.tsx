@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Bookmark, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import { normalizeSlug } from '@/lib/slug';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Citation } from './message-list';
@@ -20,6 +21,7 @@ export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButto
   const [savedJobId, setSavedJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const { id: subjectId } = useCurrentSubject();
 
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 50);
@@ -27,6 +29,10 @@ export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButto
 
   const handleSave = async () => {
     if (!title.trim()) return;
+    if (!subjectId) {
+      setError('Subject is still loading. Please retry in a moment.');
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
@@ -38,6 +44,7 @@ export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButto
           pageTitle: title.trim(),
           answer,
           citations,
+          subjectId,
         }),
       });
       if (!response.ok) {

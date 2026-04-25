@@ -48,26 +48,41 @@ async function main() {
     console.log(`Reclaimed ${reclaimed} expired running job(s)`);
   }
 
-  // Rollback pending (uncommitted) operations from crashed runs
+  // Rollback pending (uncommitted) operations from crashed runs.
+  // Reconstruct the full Changeset (incl. subject metadata) so the rollback
+  // path can reindex the right subject.
   const pendingOps = sqlite.prepare(
     "SELECT * FROM operations WHERE status = 'pending'"
   ).all() as Array<{
-    id: string; job_id: string; pre_head: string; post_head: string | null;
-    changeset_json: string; status: string;
+    id: string;
+    job_id: string;
+    subject_id: string | null;
+    pre_head: string;
+    post_head: string | null;
+    changeset_json: string;
+    status: string;
   }>;
+  const subjectsRepo = await import('./db/repos/subjects-repo');
   for (const op of pendingOps) {
     if (!op.pre_head) continue;
     try {
+      const subject = op.subject_id ? subjectsRepo.getById(op.subject_id) : null;
+      if (!subject) {
+        console.warn(`Skipping operation ${op.id}: subject ${op.subject_id} no longer exists`);
+        continue;
+      }
       const changeset: Changeset = {
         id: op.id,
         jobId: op.job_id,
+        subjectId: subject.id,
+        subjectSlug: subject.slug,
         entries: JSON.parse(op.changeset_json),
         preHead: op.pre_head,
         postHead: op.post_head,
         status: 'pending',
       };
       await rollbackChangeset(changeset);
-      console.log(`Rolled back pending operation ${op.id}`);
+      console.log(`Rolled back pending operation ${op.id} (subject: ${subject.slug})`);
     } catch (err) {
       console.error(`Failed to rollback operation ${op.id}:`, err);
     }

@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/input';
 import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
 import { apiFetch } from '@/lib/api-fetch';
+import { useUIStore } from '@/stores/ui-store';
 import type { ChatMessage, Citation } from './message-list';
 
 type PendingAction = { kind: 'reset' } | null;
@@ -135,17 +136,31 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     setIsLoading(true);
     setMessages((prev) => [...prev, { role: 'assistant', content: '正在重置 wiki…' }]);
     try {
-      const res = await apiFetch('/api/reset', { method: 'POST' });
+      // Chat reset is always subject-scoped. If the bootstrap hasn't resolved
+      // a subject yet we MUST refuse — sending an empty body to /api/reset
+      // would clear every subject in the database.
+      const subjectId = useUIStore.getState().currentSubjectId;
+      if (!subjectId) {
+        throw new Error('Subject is still loading. Please retry in a moment.');
+      }
+      const res = await apiFetch('/api/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId }),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      await queryClient.invalidateQueries({ queryKey: ['pages'] });
+      await Promise.all(
+        ['pages', 'page-detail', 'graph', 'search', 'jobs', 'backlinks', 'context', 'frontmatter']
+          .map((key) => queryClient.invalidateQueries({ queryKey: [key] })),
+      );
       router.refresh();
       updateLastAssistant((msg) => ({
         ...msg,
         content:
-          '✅ Wiki 已重置。所有页面、数据源与任务记录都已清空，你可以重新摄入内容了。',
+          '✅ 当前 subject 已重置。该 subject 的页面、数据源与任务记录都已清空，你可以重新摄入内容了。',
       }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -204,12 +219,15 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     abortRef.current = new AbortController();
 
     try {
+      const subjectId = useUIStore.getState().currentSubjectId;
+      const queryBody: Record<string, unknown> = { question };
+      if (currentPageSlug) queryBody.pageSlug = currentPageSlug;
+      if (subjectId) queryBody.subjectId = subjectId;
+
       const response = await apiFetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          currentPageSlug ? { question, pageSlug: currentPageSlug } : { question },
-        ),
+        body: JSON.stringify(queryBody),
         signal: abortRef.current.signal,
       });
 

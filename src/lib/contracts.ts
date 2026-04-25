@@ -1,3 +1,14 @@
+export type SubjectId = string;
+
+export interface Subject {
+  id: SubjectId;
+  slug: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface WikiPage {
   slug: string;
   title: string;
@@ -7,12 +18,15 @@ export interface WikiPage {
   tags: string[];
   createdAt: string;
   updatedAt: string;
+  subjectId: SubjectId;
 }
 
 export interface WikiLink {
   sourceSlug: string;
   targetSlug: string;
   context: string;
+  subjectId: SubjectId;
+  targetSubjectId: SubjectId;
 }
 
 export interface Job {
@@ -27,6 +41,7 @@ export interface Job {
   leaseExpiresAt: string | null;
   heartbeatAt: string | null;
   attemptCount: number;
+  subjectId: SubjectId | null;
 }
 
 export interface JobEvent {
@@ -44,6 +59,7 @@ export interface Source {
   contentHash: string;
   parsedAt: string | null;
   metadataJson: string;
+  subjectId: SubjectId;
 }
 
 export interface IngestResult {
@@ -76,9 +92,10 @@ export interface ChangesetEntry {
 export interface Changeset {
   id: string;
   jobId: string;
+  subjectId: SubjectId;
+  subjectSlug: string;
   entries: ChangesetEntry[];
   preHead: string;
   postHead: string | null;
   status: 'pending' | 'applied' | 'rolled-back';
 }
-

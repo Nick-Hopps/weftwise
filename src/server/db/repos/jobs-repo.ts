@@ -1,11 +1,12 @@
 import { eq, and, asc } from 'drizzle-orm';
 import { getDb, getRawDb } from '../client';
 import { jobs, jobEvents } from '../schema';
-import type { Job, JobEvent } from '@/lib/contracts';
+import type { Job, JobEvent, SubjectId } from '@/lib/contracts';
 
 export function enqueueJob(
   type: Job['type'],
-  params: Record<string, unknown> = {}
+  params: Record<string, unknown> = {},
+  subjectId: SubjectId | null = null
 ): Job {
   const db = getDb();
   const id = crypto.randomUUID();
@@ -15,6 +16,7 @@ export function enqueueJob(
     id,
     type,
     status: 'pending',
+    subjectId,
     paramsJson: JSON.stringify(params),
     resultJson: null,
     createdAt,
@@ -31,6 +33,7 @@ export function enqueueJob(
       id: job.id,
       type: job.type,
       status: job.status,
+      subjectId: job.subjectId,
       paramsJson: job.paramsJson,
       resultJson: job.resultJson,
       createdAt: job.createdAt,
@@ -53,7 +56,6 @@ export function claimNextJob(type?: Job['type']): Job | null {
   const startedAt = now.toISOString();
   const leaseExpiresAt = new Date(now.getTime() + LEASE_DURATION_MS).toISOString();
 
-  // Atomic claim: grab pending jobs OR running jobs with expired leases
   const stmt = type
     ? sqlite.prepare(`
         UPDATE jobs SET status = 'running', started_at = ?, heartbeat_at = ?,
@@ -124,21 +126,22 @@ export function getJob(id: string): Job | null {
 export interface JobFilter {
   status?: Job['status'];
   type?: Job['type'];
+  subjectId?: SubjectId;
 }
 
 export function listJobs(filter?: JobFilter): Job[] {
   const db = getDb();
-
   let query = db.select().from(jobs).$dynamic();
 
-  if (filter?.status && filter?.type) {
-    query = query.where(
-      and(eq(jobs.status, filter.status), eq(jobs.type, filter.type))
-    );
-  } else if (filter?.status) {
-    query = query.where(eq(jobs.status, filter.status));
-  } else if (filter?.type) {
-    query = query.where(eq(jobs.type, filter.type));
+  const clauses = [];
+  if (filter?.status) clauses.push(eq(jobs.status, filter.status));
+  if (filter?.type) clauses.push(eq(jobs.type, filter.type));
+  if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
+
+  if (clauses.length === 1) {
+    query = query.where(clauses[0]);
+  } else if (clauses.length > 1) {
+    query = query.where(and(...clauses));
   }
 
   const rows = query.orderBy(asc(jobs.createdAt)).all();
@@ -168,7 +171,6 @@ export function failJob(id: string, error: unknown): void {
       ? { message: error.message, stack: error.stack }
       : { message: String(error) };
 
-  // Extract AI SDK diagnostic fields (NoObjectGeneratedError, etc.)
   if (error && typeof error === 'object') {
     const e = error as Record<string, unknown>;
     if (e.usage) errorObj.usage = e.usage;
@@ -225,8 +227,6 @@ export function appendJobEvent(
 
 export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
   if (afterId) {
-    // Efficient cursor-based query: find the cursor event's timestamp, then
-    // fetch only events strictly after it, avoiding a full-table scan + JS slice.
     const sqlite = getRawDb();
     const rows = sqlite.prepare(`
       SELECT je.*
@@ -241,7 +241,6 @@ export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
       data_json: string | null; created_at: string;
     }>;
 
-    // If cursor not found (subquery returns nothing), fall through to return all events
     if (rows.length > 0 || sqlite.prepare(`SELECT 1 FROM job_events WHERE id = ?`).get(afterId)) {
       return rows.map((row) => ({
         id: row.id,
@@ -265,12 +264,11 @@ export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
   return rows.map(rowToJobEvent);
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 interface JobRow {
   id: string;
   type: string;
   status: string;
+  subject_id: string | null;
   params_json: string;
   result_json: string | null;
   created_at: string;
@@ -286,6 +284,7 @@ function rowToJobFromRaw(row: JobRow): Job {
     id: row.id,
     type: row.type as Job['type'],
     status: row.status as Job['status'],
+    subjectId: row.subject_id ?? null,
     paramsJson: row.params_json ?? '{}',
     resultJson: row.result_json ?? null,
     createdAt: row.created_at,
@@ -302,6 +301,7 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
     id: row.id,
     type: row.type as Job['type'],
     status: row.status as Job['status'],
+    subjectId: row.subjectId ?? null,
     paramsJson: row.paramsJson ?? '{}',
     resultJson: row.resultJson ?? null,
     createdAt: row.createdAt,

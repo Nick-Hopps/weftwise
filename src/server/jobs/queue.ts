@@ -1,11 +1,12 @@
 import * as jobsRepo from '../db/repos/jobs-repo';
-import type { Job } from '@/lib/contracts';
+import type { Job, SubjectId } from '@/lib/contracts';
 
 export function enqueue(
   type: Job['type'],
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  subjectId: SubjectId | null = null
 ): Job {
-  return jobsRepo.enqueueJob(type, params ?? {});
+  return jobsRepo.enqueueJob(type, params ?? {}, subjectId);
 }
 
 export function claim(type?: Job['type']): Job | null {
@@ -24,10 +25,7 @@ export function get(jobId: string): Job | null {
   return jobsRepo.getJob(jobId);
 }
 
-export function list(filter?: {
-  status?: Job['status'];
-  type?: Job['type'];
-}): Job[] {
+export function list(filter?: jobsRepo.JobFilter): Job[] {
   return jobsRepo.listJobs(filter);
 }
 

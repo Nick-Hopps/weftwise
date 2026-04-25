@@ -1,25 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queue from '@/server/jobs/queue';
 import { saveRawSource } from '@/server/sources/source-store';
-import { requireAuth } from '@/server/middleware/auth';
+import { requireAuth, requireCsrf } from '@/server/middleware/auth';
+import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 
 export const runtime = 'nodejs';
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
 export async function POST(request: NextRequest) {
-  // C2 fix: check authentication on mutation endpoint
   const authError = requireAuth(request);
   if (authError) return authError;
+  const csrfError = requireCsrf(request);
+  if (csrfError) return csrfError;
 
   try {
     const contentType = request.headers.get('content-type') ?? '';
 
     let filename: string;
     let content: Buffer | string;
+    let bodyForSubject: unknown = null;
 
     if (contentType.includes('multipart/form-data')) {
-      // Handle file upload via multipart/form-data
       const formData = await request.formData();
       const file = formData.get('file') as File | null;
 
@@ -30,7 +32,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // H5 fix: reject files larger than 50MB
       if (file.size > MAX_FILE_SIZE) {
         return NextResponse.json(
           { error: `File too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum is 50MB.` },
@@ -48,9 +49,23 @@ export async function POST(request: NextRequest) {
 
       const arrayBuffer = await file.arrayBuffer();
       content = Buffer.from(arrayBuffer);
+
+      // Subject can be supplied via form fields too
+      const formSubjectId = formData.get('subjectId');
+      const formSubjectSlug = formData.get('subjectSlug');
+      if (typeof formSubjectId === 'string' || typeof formSubjectSlug === 'string') {
+        bodyForSubject = {
+          subjectId: typeof formSubjectId === 'string' ? formSubjectId : undefined,
+          subjectSlug: typeof formSubjectSlug === 'string' ? formSubjectSlug : undefined,
+        };
+      }
     } else {
-      // Handle JSON body: { text: string, filename: string }
-      const body = await request.json() as { text?: string; filename?: string };
+      const body = await request.json() as {
+        text?: string;
+        filename?: string;
+        subjectId?: string;
+        subjectSlug?: string;
+      };
       const { text, filename: jsonFilename } = body;
 
       if (!text || typeof text !== 'string') {
@@ -59,7 +74,6 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-
       if (!jsonFilename || typeof jsonFilename !== 'string') {
         return NextResponse.json(
           { error: 'Missing or invalid "filename" field in JSON body' },
@@ -69,16 +83,23 @@ export async function POST(request: NextRequest) {
 
       filename = jsonFilename;
       content = text;
+      bodyForSubject = body;
     }
 
-    // Save raw source to vault
-    const { id: sourceId } = saveRawSource(filename, content);
+    const resolution = resolveSubjectFromRequest(request, { body: bodyForSubject });
+    if (resolution.error) return resolution.error;
+    const { subject } = resolution;
 
-    // Enqueue ingest job
-    const job = queue.enqueue('ingest', { sourceId, filename });
+    const { id: sourceId } = saveRawSource(subject, filename, content);
+
+    const job = queue.enqueue(
+      'ingest',
+      { sourceId, filename, subjectId: subject.id },
+      subject.id,
+    );
 
     return NextResponse.json(
-      { jobId: job.id, sourceId },
+      { jobId: job.id, sourceId, subjectId: subject.id, subjectSlug: subject.slug },
       { status: 202 }
     );
   } catch (error) {

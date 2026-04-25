@@ -1,5 +1,8 @@
 'use client';
 
+import { useCallback } from 'react';
+import { useUIStore } from '@/stores/ui-store';
+
 /**
  * Thin wrapper around `fetch` for client-side API calls.
  *
@@ -28,4 +31,65 @@ export function apiFetch(
 
   // Cookie-based auth: credentials: 'same-origin' ensures cookies are sent
   return fetch(input, { ...init, credentials: 'same-origin' });
+}
+
+const SUBJECT_AGNOSTIC_EXACT = new Set([
+  '/api/session',
+  '/api/reset',
+]);
+
+const SUBJECT_AGNOSTIC_PREFIXES = [
+  '/api/subjects', // /api/subjects and /api/subjects/[id]
+  '/api/jobs',     // /api/jobs, /api/jobs/[id], /api/jobs/[id]/events
+];
+
+function isSubjectAgnostic(pathname: string): boolean {
+  if (SUBJECT_AGNOSTIC_EXACT.has(pathname)) return true;
+  return SUBJECT_AGNOSTIC_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+function appendSubjectId(path: string, subjectId: string): string {
+  // Skip routes that are subject-agnostic by design.
+  const queryStart = path.indexOf('?');
+  const pathname = queryStart === -1 ? path : path.slice(0, queryStart);
+  if (isSubjectAgnostic(pathname)) return path;
+  // Don't override an explicit subjectId already on the URL.
+  if (queryStart !== -1) {
+    const search = new URLSearchParams(path.slice(queryStart + 1));
+    if (search.has('subjectId')) return path;
+  }
+  const sep = queryStart === -1 ? '?' : '&';
+  return `${path}${sep}subjectId=${encodeURIComponent(subjectId)}`;
+}
+
+/**
+ * Hook returning a subject-aware variant of {@link apiFetch}.
+ *
+ * Reads the current subject from {@link useUIStore} and auto-appends
+ * `?subjectId=<id>` to GET URLs whose path is not already subject-scoped.
+ *
+ * For POST/PATCH/DELETE the caller still owns the body — pass `subjectId`
+ * inside `body` (or as a query param) when needed. The hook only handles the
+ * common read-side ergonomic case.
+ *
+ * SSR / non-React callers should keep using the bare {@link apiFetch}.
+ */
+export function useApiFetch(): (
+  input: string,
+  init?: RequestInit,
+) => Promise<Response> {
+  const subjectId = useUIStore((s) => s.currentSubjectId);
+
+  return useCallback(
+    (input: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'GET' && subjectId) {
+        return apiFetch(appendSubjectId(input, subjectId), init);
+      }
+      return apiFetch(input, init);
+    },
+    [subjectId],
+  );
 }

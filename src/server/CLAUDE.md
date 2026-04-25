@@ -20,7 +20,7 @@ Route Handler / Worker Handler
 │  jobs/       queue / worker / events                    │ ← 异步任务基础设施
 │  db/         client / schema / repos/*                  │ ← Drizzle + SQLite
 │  git/        git-service                                │ ← simple-git 封装
-│  middleware/ auth                                       │ ← 鉴权/CSRF
+│  middleware/ auth / subject                             │ ← 鉴权/CSRF + subject 解析
 │  config/     env                                        │ ← 环境变量
 └─────────────────────────────────────────────────────────┘
 ```
@@ -30,9 +30,10 @@ Route Handler / Worker Handler
 - **Worker 进程入口**：`worker-entry.ts`
   - 自加载 `.env`；
   - 初始化 DB；
+  - **确保 `general` subject 存在**（首次启动 seed）；
   - FTS 自愈（空索引重建）；
   - 回收过期租约的任务 (`queue.reclaimExpired`)；
-  - 回滚 `operations` 表中 `status='pending'` 的记录（崩溃恢复）；
+  - 回滚 `operations` 表中 `status='pending'` 的记录（按 `operations.subject_id` 仅 reindex 该 subject，缺失则 warn 跳过）；
   - 确保 vault git 仓库存在；
   - 启动 `startWorker(pollMs)` 轮询；
   - 注册 `SIGTERM` / `SIGINT` 优雅关停。
@@ -46,17 +47,19 @@ Route Handler / Worker Handler
 | `jobs/queue` | `enqueue / claim / complete / fail / get / list / requeue / reclaimExpired` |
 | `jobs/worker` | `registerHandler / startWorker / stopWorker` |
 | `jobs/events` | `emit`（写 `job_events` 并推送到 SSE 订阅者） |
-| `wiki/wiki-transaction` | `createChangeset / validateChangeset / applyChangeset / rollbackChangeset` |
-| `wiki/wiki-store` | `readPageBySlug / writeVaultFiles / deleteVaultFile` |
+| `wiki/wiki-transaction` | `createChangeset(jobId, subject, entries) / validateChangeset / applyChangeset / rollbackChangeset` |
+| `wiki/wiki-store` | `readPageBySlug(subjectSlug, slug) / writeVaultFiles / deleteVaultFile / scanWikiPages(subjectSlug?)` |
 | `wiki/markdown` | `parseWikiDocument / serializeWikiDocument`（单一真相 round-trip） |
-| `wiki/wikilinks` | `extractWikiLinks / resolveWikiLinkTarget / normalizeWikiLink` |
-| `wiki/indexer` | `indexTouchedPages / rebuildSearchIndex`（写 pages + wiki_links + FTS） |
+| `wiki/wikilinks` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink` |
+| `wiki/indexer` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex`（写 pages + wiki_links + FTS） |
+| `wiki/page-identity` | `parseWikiPath / wikiPathFor(subjectSlug, slug) / normalizeSlug / GENERAL_SUBJECT_SLUG` |
 | `llm/provider-registry` | `generateStructuredOutput / streamTextResponse` |
 | `llm/task-router` | `resolveTask`（合并 defaults / task / override） |
-| `db/client` | `getDb / getRawDb` |
-| `db/repos/*` | `pagesRepo / jobsRepo / sourcesRepo` 的 CRUD + FTS search |
+| `db/client` | `getDb / getRawDb`（启动时自迁移 legacy schema → subject-aware） |
+| `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo` 的 CRUD + FTS search（全部要求 `subjectId`） |
 | `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead` |
 | `middleware/auth` | `requireAuth / requireCsrf / createSessionResponse` |
+| `middleware/subject` | `resolveSubjectFromRequest(request, { required?, body? })` |
 | `config/env` | `getConfig / vaultPath` |
 
 ## 关键依赖与配置
@@ -72,15 +75,16 @@ Route Handler / Worker Handler
 
 | 表 | 用途 |
 |----|------|
-| `pages` | wiki 页面索引（slug PK + title + path + summary + tags + hashes） |
-| `page_aliases` | slug 重命名映射（旧→新） |
-| `wiki_links` | 每条 `[[link]]` 的 source/target/context |
-| `sources` | 原始源文件元数据 |
-| `page_sources` | 页面 ↔ 源 多对多溯源 |
-| `jobs` | 任务队列（带 `lease_expires_at` / `heartbeat_at` / `attempt_count`） |
+| `subjects` | first-class 主题（`id` PK + `slug` UNIQUE + `name` + `description`），`general` 必须存在 |
+| `pages` | wiki 页面索引（**复合 PK `(subject_id, slug)`** + `path UNIQUE` + title + summary + tags + hashes） |
+| `page_aliases` | slug 重命名映射（PK `(subject_id, old_slug, new_slug)`） |
+| `wiki_links` | 每条 `[[link]]` 的 source/target/context；`subject_id` + `target_subject_id` 让 graph/lint 能 join |
+| `sources` | 原始源文件元数据（带 `subject_id`） |
+| `page_sources` | 页面 ↔ 源 多对多溯源（PK `(subject_id, page_slug, source_id)`） |
+| `jobs` | 任务队列（带 `subject_id` + `lease_expires_at` / `heartbeat_at` / `attempt_count`） |
 | `job_events` | SSE 事件持久化，供断线续播 |
-| `operations` | Saga changeset 及其 `preHead` / `postHead`，供崩溃回滚 |
-| `pages_fts` | FTS5 虚拟表，title + summary + body |
+| `operations` | Saga changeset 及其 `preHead` / `postHead` / `subject_id`，供崩溃回滚 |
+| `pages_fts` | FTS5 虚拟表，title + summary + body（含 UNINDEXED `subject_id` / `slug`） |
 
 ## 测试与质量
 
@@ -97,7 +101,9 @@ Route Handler / Worker Handler
   - 写 vault 时再抢 `acquireVaultLock`（`wiki/vault-mutex.ts`）；
   - git 提交的原子性保证同一时刻只有一次成功。
 - **崩溃后 SQLite 与 git 不一致？**
-  启动时扫 `operations` 表的 `pending` 记录，调 `rollbackChangeset(pre_head)` 把 git 强制回退并清数据库对应变更。
+  启动时扫 `operations` 表的 `pending` 记录，调 `rollbackChangeset(pre_head)` 把 git 强制回退并清数据库对应变更；按 `operations.subject_id` 仅 reindex 该 subject。
+- **如何为新接口注入 subject？**
+  顶部调 `const { subject, error } = resolveSubjectFromRequest(request, { required: true, body })`；error 非空直接 `return error`。
 
 ## 相关文件清单（顶层）
 
@@ -112,6 +118,7 @@ src/server/
 ├── sources/      → 见 sources/CLAUDE.md
 ├── git/git-service.ts
 ├── middleware/auth.ts
+├── middleware/subject.ts            # resolveSubjectFromRequest 单一真实源
 └── config/env.ts
 ```
 
@@ -120,6 +127,7 @@ src/server/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化：梳理后端分层与交叉引用 |
+| 2026-04-25 | 引入 Subject：subjects 表 + 复合 PK + middleware/subject + 全链路 subjectId |
 
 ---
 

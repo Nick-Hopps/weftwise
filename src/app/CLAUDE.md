@@ -15,28 +15,33 @@
 |------|------|
 | `layout.tsx`（根）| 应用根 layout，注入全局 `<html>` / `<body>` / providers |
 | `(app)/layout.tsx` | 带 `Shell` + `ErrorBoundary` 的主应用布局 |
-| `(app)/page.tsx` | Dashboard 首页（空态 / 有内容两种布局） |
-| `(app)/wiki/[...slug]/page.tsx` | 动态 wiki 页面（SSR 渲染 + `PageRenderer`） |
+| `(app)/page.tsx` | Dashboard 首页（按 `currentSubject` 过滤，空态 / 有内容两种布局） |
+| `(app)/wiki/[...slug]/page.tsx` | 动态 wiki 页面（SSR）：`?s=<slug>` 优先于 cookie；找不到页时通过 `findPageInOtherSubjects` 渲染"是否在其他 subject"提示 |
+| `(app)/subjects/page.tsx` | 🆕 Subject 管理页：卡片网格 + 创建 / 重命名 / 删除（当前激活 + 非空 subject 都禁用删除并 hover 提示原因；slug 通过 `?new=1` 自动展开创建表单） |
 | `globals.css` | Tailwind + 自定义 CSS 变量（设计 token） |
 
 ## 对外接口 —— `src/app/api/*`
 
 | 路由 | 方法 | 说明 |
 |------|------|------|
-| `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`text` + `filename`），存原始源到 `vault/sources/`，入队 `ingest` 任务；返回 `{ jobId, sourceId }` |
-| `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；用于 Chat UI |
-| `/api/lint` | POST | 入队 `lint` 任务；返回 `jobId` |
-| `/api/jobs` | GET | 列出任务（支持 `status` / `type` filter） |
+| `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
+| `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（pageCount>0 → 409） |
+| `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/`，入队 `ingest` 任务；返回 `{ jobId, sourceId }` |
+| `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
+| `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
+| `/api/jobs` | GET | 列出任务（支持 `status` / `type` / `subjectId` filter） |
 | `/api/jobs/[id]` | GET | 取单个任务详情 |
 | `/api/jobs/[id]/events` | GET (SSE) | Server-Sent Events 流，供前端实时追踪任务进度；支持 `Last-Event-Id` 续播 |
-| `/api/pages` | GET | 列出所有 wiki 页面（排除 `meta` tag） |
-| `/api/pages/[...slug]` | GET | 读取单个页面（包含 frontmatter、body、backlinks） |
-| `/api/search` | GET | FTS5 全文搜索（`?q=...`） |
-| `/api/graph` | GET | 返回图视图需要的节点 + 边数据 |
+| `/api/pages` | GET | 列出 wiki 页面（按 `?subjectId` 过滤，排除 `meta` tag） |
+| `/api/pages/[...slug]` | GET | 读取单个页面（含 frontmatter、body、backlinks）；404 时返回 `otherSubjects: [{subjectId, slug, title}]` 提示 |
+| `/api/search` | GET | FTS5 全文搜索（`?q=...&subjectId=...`） |
+| `/api/graph` | GET | 返回图视图需要的节点 + 边数据（`?subjectId=...`） |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
-| `/api/reset` | POST | **危险**操作：清空 vault + SQLite（需 auth + CSRF） |
+| `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录（需 auth + CSRF） |
 
 > **鉴权约定**：所有 **写** 或 **敏感读** 路由都在顶部调 `requireAuth(request)`；浏览器发起的 POST 还要调 `requireCsrf(request)`（Origin 校验）。SSE 因 EventSource 不能发 header，允许 `?apiKey=` query 兜底（见 `src/server/middleware/auth.ts:55`）。
+>
+> **Subject 解析约定**：所有 subject-scoped 路由顶部调 `resolveSubjectFromRequest(request, { required, body })`。优先级：`?subjectId=` UUID > `?s=` slug > body subjectId/Slug > cookie `wiki_subject` > general 兜底；`required:true` 时缺失返回 400。
 
 ## 关键依赖与配置
 
@@ -50,7 +55,8 @@
   1. 新建 `src/app/api/<name>/route.ts`；
   2. 顶部加 `export const runtime = 'nodejs'`；
   3. 先 `requireAuth` 再 `requireCsrf`；
-  4. **不要**在这里跑 LLM 或 git；调 `queue.enqueue(...)` 即可，并在对应 `src/server/services/*` 注册 handler。
+  4. 解析 body 后 `resolveSubjectFromRequest(request, { required: true, body })`；error 非空直接 `return error`；
+  5. **不要**在这里跑 LLM 或 git；调 `queue.enqueue(<type>, subject.id, params)` 即可，并在对应 `src/server/services/*` 注册 handler。
 - **新增页面**：在 `(app)/` 下新建目录或文件；默认会套用 `Shell` 布局。私有子组件放 `_components/`。
 
 ## 相关文件清单
@@ -61,12 +67,15 @@ src/app/
 ├── globals.css
 ├── (app)/
 │   ├── layout.tsx
-│   ├── page.tsx                         # Dashboard
-│   ├── wiki/[...slug]/page.tsx          # Wiki 渲染
+│   ├── page.tsx                         # Dashboard（按 currentSubject 过滤）
+│   ├── wiki/[...slug]/page.tsx          # Wiki 渲染（?s= 优先）
+│   ├── subjects/page.tsx                # 🆕 Subject 管理页
 │   └── _components/
 │       ├── dashboard-hero.tsx
 │       └── dashboard-ingest-panel.tsx
 └── api/
+    ├── subjects/route.ts                # 🆕 GET 列表 / POST 创建
+    ├── subjects/[id]/route.ts           # 🆕 GET / PATCH / DELETE
     ├── ingest/route.ts
     ├── query/route.ts
     ├── lint/route.ts
@@ -93,6 +102,7 @@ src/app/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |
+| 2026-04-25 | Subject：新增 `/api/subjects` + `(app)/subjects` 管理页；既有路由全部 subject 化（`resolveSubjectFromRequest`） |
 
 ---
 

@@ -12,7 +12,8 @@ import {
   Search,
   Settings2,
 } from 'lucide-react';
-import { apiFetch } from '@/lib/api-fetch';
+import { useApiFetch } from '@/lib/api-fetch';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { IconButton } from '@/components/ui/icon-button';
 import { Input } from '@/components/ui/input';
 import { SectionLabel } from '@/components/ui/panel';
@@ -44,12 +45,6 @@ function sortMetaPages(pages: PageItem[]): PageItem[] {
   });
 }
 
-async function fetchPages(): Promise<PageItem[]> {
-  const res = await apiFetch('/api/pages');
-  if (!res.ok) return [];
-  return res.json();
-}
-
 function groupKeyFor(page: PageItem): string {
   const path = page.path ?? '';
   if (path.includes('/')) return path.split('/')[0];
@@ -72,11 +67,18 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   const [filter, setFilter] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const openSettingsDialog = useUIStore((s) => s.openSettingsDialog);
+  const apiFetch = useApiFetch();
+  const { id: subjectId } = useCurrentSubject();
 
   const { data: allPages = [], isLoading } = useQuery({
-    queryKey: ['pages'],
-    queryFn: fetchPages,
+    queryKey: ['pages', subjectId],
+    queryFn: async () => {
+      const res = await apiFetch('/api/pages');
+      if (!res.ok) return [] as PageItem[];
+      return (await res.json()) as PageItem[];
+    },
     staleTime: 30_000,
+    enabled: !!subjectId,
   });
 
   const visiblePages = useMemo(() => {

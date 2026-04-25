@@ -3,11 +3,14 @@
 import { useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '@/lib/api-fetch';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 
 interface WikiLinkProps {
   href: string;
   slug: string;
+  /** Subject slug when the link explicitly targets a different subject. */
+  subjectSlug?: string;
   children: React.ReactNode;
   broken?: boolean;
 }
@@ -17,12 +20,20 @@ interface PagePreview {
   summary: string;
 }
 
-// Simple in-memory cache to avoid redundant fetches
+// Simple in-memory cache to avoid redundant fetches.
+// Keyed by `<subjectSlug>:<slug>` so same-slug pages from different subjects
+// don't collide — including same-subject links, which fall back to the active
+// subject slug rather than the bare slug.
 const previewCache = new Map<string, PagePreview | null>();
+
+function previewCacheKey(slug: string, subjectSlug: string): string {
+  return `${subjectSlug}:${slug}`;
+}
 
 export default function WikiLink({
   href,
   slug,
+  subjectSlug,
   children,
   broken = false,
 }: WikiLinkProps) {
@@ -31,21 +42,27 @@ export default function WikiLink({
   const [loading, setLoading] = useState(false);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const fetchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const { slug: currentSubjectSlug } = useCurrentSubject();
 
   const fetchPreview = useCallback(async () => {
     if (broken) return;
 
-    if (previewCache.has(slug)) {
-      setPreview(previewCache.get(slug) ?? null);
+    const effectiveSubjectSlug = subjectSlug ?? currentSubjectSlug;
+    const cacheKey = previewCacheKey(slug, effectiveSubjectSlug);
+
+    if (previewCache.has(cacheKey)) {
+      setPreview(previewCache.get(cacheKey) ?? null);
       setShowPeek(true);
       return;
     }
 
     setLoading(true);
     try {
-      const res = await apiFetch(`/api/pages/${slug}`);
+      const previewPath =
+        `/api/pages/${slug}?s=${encodeURIComponent(effectiveSubjectSlug)}`;
+      const res = await apiFetch(previewPath);
       if (!res.ok) {
-        previewCache.set(slug, null);
+        previewCache.set(cacheKey, null);
         setPreview(null);
       } else {
         const data = await res.json();
@@ -53,16 +70,16 @@ export default function WikiLink({
           title: data.title ?? slug,
           summary: data.summary ?? '',
         };
-        previewCache.set(slug, p);
+        previewCache.set(cacheKey, p);
         setPreview(p);
       }
     } catch {
-      previewCache.set(slug, null);
+      previewCache.set(cacheKey, null);
     } finally {
       setLoading(false);
       setShowPeek(true);
     }
-  }, [slug, broken]);
+  }, [slug, subjectSlug, currentSubjectSlug, broken]);
 
   const handleMouseEnter = () => {
     clearTimeout(hideTimerRef.current);

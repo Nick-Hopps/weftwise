@@ -4,7 +4,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Link2, FileText } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api-fetch';
+import { useApiFetch } from '@/lib/api-fetch';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { SectionLabel } from '@/components/ui/panel';
 import { Tag } from '@/components/ui/tag';
 
@@ -34,12 +35,6 @@ interface PageDetail {
   backlinks: { slug: string; title: string }[];
 }
 
-async function fetchPageDetail(slug: string): Promise<PageDetail | null> {
-  const res = await apiFetch(`/api/pages/${slug}`);
-  if (!res.ok) return null;
-  return res.json();
-}
-
 function formatDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString(undefined, {
@@ -57,10 +52,17 @@ interface ContextTabProps {
 }
 
 export function ContextPanelContextTab({ slug }: ContextTabProps) {
+  const apiFetch = useApiFetch();
+  const { id: subjectId } = useCurrentSubject();
   const { data: pageDetail, isLoading } = useQuery({
-    queryKey: ['page-detail', slug],
-    queryFn: () => (slug ? fetchPageDetail(slug) : null),
-    enabled: !!slug,
+    queryKey: ['page-detail', subjectId, slug],
+    queryFn: async () => {
+      if (!slug) return null;
+      const res = await apiFetch(`/api/pages/${slug}`);
+      if (!res.ok) return null;
+      return (await res.json()) as PageDetail;
+    },
+    enabled: !!slug && !!subjectId,
     staleTime: 30_000,
   });
 
@@ -154,7 +156,7 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
             <SectionLabel id="ctx-graph">Graph</SectionLabel>
             <span className="text-[10px] text-foreground-tertiary italic">drag · scroll · click</span>
           </div>
-          <MiniGraphView currentSlug={slug} />
+          <MiniGraphView key={subjectId ?? 'no-subject'} currentSlug={slug} />
         </section>
       </div>
     </div>

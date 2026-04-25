@@ -2,10 +2,19 @@ import { registerHandler } from '../jobs/worker';
 import * as queue from '../jobs/queue';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
-import { getRawSourceContent, getRawSourceBuffer, updateSourcePageLinks } from '../sources/source-store';
+import * as subjectsRepo from '../db/repos/subjects-repo';
+import {
+  getRawSourceContent,
+  getRawSourceBuffer,
+  updateSourcePageLinks,
+} from '../sources/source-store';
 import { parseSourceAsync, requiresBuffer } from '../sources/parser-registry';
-import { readPageBySlug } from '../wiki/wiki-store';
-import { createChangeset, validateChangeset, applyChangeset } from '../wiki/wiki-transaction';
+import { readPageInSubject } from '../wiki/wiki-store';
+import {
+  createChangeset,
+  validateChangeset,
+  applyChangeset,
+} from '../wiki/wiki-transaction';
 import type { WikiDocument } from '../wiki/markdown';
 import { serializeWikiDocument } from '../wiki/markdown';
 import { serializeFrontmatter } from '../wiki/frontmatter';
@@ -21,24 +30,17 @@ import {
   buildPageBodyUserPrompt,
   buildIndexUserPrompt,
 } from '../llm/prompts/ingest-prompt';
-import { wikiPathFromSlug } from '../wiki/page-identity';
+import { buildWikiPath } from '../wiki/page-identity';
 import type { ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-/** Max source text characters to send to the LLM. */
 const SOURCE_TEXT_LIMIT = 30_000;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+interface IngestParams {
+  sourceId: string;
+  filename: string;
+  subjectId: string;
+}
 
-/**
- * Build the full serialized content for log.md.
- * Preserves the existing frontmatter and appends the new log entry to the body.
- */
 function buildLogContent(
   existingLog: WikiDocument | null,
   logEntry: string
@@ -50,7 +52,7 @@ function buildLogContent(
         title: 'Ingest Log',
         created: now,
         updated: now,
-        tags: ['log'],
+        tags: ['log', 'meta'],
         sources: [],
       },
       body: logEntry,
@@ -70,42 +72,47 @@ function buildLogContent(
   return serializeWikiDocument(updatedDoc);
 }
 
-// ---------------------------------------------------------------------------
-// Core handler — multi-phase ingest
-// ---------------------------------------------------------------------------
-
 async function runIngestJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void
 ): Promise<Record<string, unknown>> {
-  const params = JSON.parse(job.paramsJson) as { sourceId: string; filename: string };
-  const { sourceId, filename } = params;
+  const params = JSON.parse(job.paramsJson) as Partial<IngestParams>;
+  const { sourceId, filename, subjectId } = params;
 
-  // Step 1: Read source file
-  emit('ingest:start', `Reading source: ${filename}`);
+  if (!sourceId || !filename) {
+    throw new Error('Ingest job missing sourceId or filename');
+  }
+  if (!subjectId) {
+    throw new Error('Ingest job missing subjectId — re-queue with a subject');
+  }
+
+  const subject = subjectsRepo.getById(subjectId);
+  if (!subject) {
+    throw new Error(`Subject ${subjectId} not found`);
+  }
+
+  emit('ingest:start', `Reading source: ${filename}`, { subject: subject.slug });
 
   let textContent: string;
   let bufferContent: Buffer | null = null;
 
   if (requiresBuffer(filename)) {
-    bufferContent = getRawSourceBuffer(filename);
+    bufferContent = getRawSourceBuffer(subject.slug, filename);
     if (!bufferContent) {
       throw new Error(`Source file not found: ${filename}`);
     }
     textContent = '';
   } else {
-    const raw = getRawSourceContent(filename);
+    const raw = getRawSourceContent(subject.slug, filename);
     if (!raw) {
       throw new Error(`Source file not found: ${filename}`);
     }
     textContent = raw;
   }
 
-  // Step 2: Parse source file
   emit('ingest:parsing', `Parsing source: ${filename}`);
   const parsed = await parseSourceAsync(filename, textContent, bufferContent);
 
-  // Step 3: Truncate source text to budget
   const isTruncated = parsed.cleanText.length > SOURCE_TEXT_LIMIT;
   if (isTruncated) {
     emit(
@@ -115,22 +122,27 @@ async function runIngestJob(
   }
   const truncatedText = parsed.cleanText.slice(0, SOURCE_TEXT_LIMIT);
 
-  // Step 4: Get existing wiki state
-  emit('ingest:reading-wiki', 'Reading current wiki state');
-  const existingPages = pagesRepo.getAllPages().map((p) => ({
+  emit('ingest:reading-wiki', `Reading current wiki state (subject: ${subject.slug})`);
+  const existingPages = pagesRepo.getAllPages(subject.id).map((p) => ({
     slug: p.slug,
     title: p.title,
     summary: p.summary,
   }));
 
-  // ── Phase A: Generate page plan (no body content) ──────────────────────────
+  const subjectCtx = {
+    slug: subject.slug,
+    name: subject.name,
+    description: subject.description,
+  };
+
+  // ── Phase A: Generate page plan ────────────────────────────────────────────
 
   emit('ingest:llm', 'Phase A: Generating page plan via LLM...', { phase: 'plan' });
   const plan = await generateStructuredOutput(
     'ingest',
     IngestPlanSchema,
     PLAN_SYSTEM_PROMPT,
-    buildPlanUserPrompt(truncatedText, existingPages),
+    buildPlanUserPrompt(truncatedText, existingPages, subjectCtx),
     { maxTokens: 8192 },
   );
 
@@ -142,7 +154,7 @@ async function runIngestJob(
     }
   );
 
-  // ── Phase B: Generate body for each page individually ──────────────────────
+  // ── Phase B: Generate body for each page ───────────────────────────────────
 
   const allPageTitles = [
     ...existingPages.map((p) => p.title),
@@ -163,7 +175,7 @@ async function runIngestJob(
       'ingest',
       PageBodySchema,
       PAGE_BODY_SYSTEM_PROMPT,
-      buildPageBodyUserPrompt(page, truncatedText, allPageTitles),
+      buildPageBodyUserPrompt(page, truncatedText, allPageTitles, subjectCtx),
       { maxTokens: 8192 },
     );
 
@@ -184,11 +196,11 @@ async function runIngestJob(
     'ingest',
     IndexBodySchema,
     INDEX_BODY_SYSTEM_PROMPT,
-    buildIndexUserPrompt(allPagesForIndex),
+    buildIndexUserPrompt(allPagesForIndex, subjectCtx),
     { maxTokens: 4096 },
   );
 
-  // ── Step 5: Build changeset entries ────────────────────────────────────────
+  // ── Build changeset entries ────────────────────────────────────────────────
 
   const now = new Date().toISOString();
   const entries: ChangesetEntry[] = [];
@@ -196,7 +208,7 @@ async function runIngestJob(
   for (const page of plan.pages) {
     let createdTime = now;
     if (page.action === 'update') {
-      const existing = readPageBySlug(page.slug);
+      const existing = readPageInSubject(subject.slug, page.slug);
       if (existing?.frontmatter.created) {
         createdTime = existing.frontmatter.created;
       }
@@ -216,42 +228,41 @@ async function runIngestJob(
     );
     entries.push({
       action: page.action,
-      path: wikiPathFromSlug(page.slug),
+      path: buildWikiPath(subject.slug, page.slug),
       content,
     });
   }
 
-  // index.md update
+  // index.md update (subject-scoped)
   if (indexResult.indexBody) {
-    const existingIndex = readPageBySlug('index');
+    const existingIndex = readPageInSubject(subject.slug, 'index');
     const indexContent = serializeFrontmatter(
       {
-        title: existingIndex?.frontmatter.title ?? 'Index',
+        title: existingIndex?.frontmatter.title ?? `${subject.name} — Index`,
         created: existingIndex?.frontmatter.created ?? now,
         updated: now,
-        tags: existingIndex?.frontmatter.tags ?? ['index'],
+        tags: existingIndex?.frontmatter.tags ?? ['index', 'meta'],
         sources: existingIndex?.frontmatter.sources ?? [],
       },
       indexResult.indexBody,
     );
     entries.push({
-      action: 'update',
-      path: 'wiki/index.md',
+      action: existingIndex ? 'update' : 'create',
+      path: buildWikiPath(subject.slug, 'index'),
       content: indexContent,
     });
   }
 
-  // log.md update
-  const existingLog = readPageBySlug('log');
+  // log.md update (subject-scoped)
+  const existingLog = readPageInSubject(subject.slug, 'log');
   entries.push({
-    action: 'update',
-    path: 'wiki/log.md',
+    action: existingLog ? 'update' : 'create',
+    path: buildWikiPath(subject.slug, 'log'),
     content: buildLogContent(existingLog, plan.logEntry),
   });
 
-  // Step 6: Create and validate changeset
   emit('ingest:validating', 'Validating changeset');
-  const changeset = createChangeset(job.id, entries);
+  const changeset = createChangeset(job.id, subject, entries);
   const validation = validateChangeset(changeset);
 
   if (!validation.valid) {
@@ -264,8 +275,6 @@ async function runIngestJob(
     throw new Error(`Changeset validation failed: ${errorSummary}`);
   }
 
-  // Step 7: Apply changeset (atomic saga: files + SQLite + git)
-  // Include source linkage in the saga so it rolls back with the changeset
   const pageSlugs = plan.pages.map((p) => p.slug);
   const sourceOps = {
     sourceId,
@@ -277,7 +286,6 @@ async function runIngestJob(
   emit('ingest:applying', 'Applying changeset (files + SQLite + source links + git commit)');
   const applied = await applyChangeset(changeset, sourceOps);
 
-  // Step 9: Build and return result
   const result: IngestResult = {
     pagesCreated: plan.pages
       .filter((p) => p.action === 'create')
@@ -298,13 +306,11 @@ async function runIngestJob(
     { result }
   );
 
-  // Chain a lint job so the knowledge base is self-healing — users never
-  // trigger lint manually any more.
+  // Chain a lint job for this subject so the knowledge base stays clean.
   try {
-    const lintJob = queue.enqueue('lint');
+    const lintJob = queue.enqueue('lint', { subjectId: subject.id }, subject.id);
     emit('ingest:lint-queued', `Lint job ${lintJob.id.slice(0, 8)} queued`, { lintJobId: lintJob.id });
   } catch (err) {
-    // Non-fatal: lint can always be re-run; ingest itself succeeded.
     emit(
       'ingest:lint-queue-failed',
       `Failed to enqueue follow-up lint job: ${err instanceof Error ? err.message : String(err)}`,
@@ -314,8 +320,5 @@ async function runIngestJob(
   return result as unknown as Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// Register handler
-// ---------------------------------------------------------------------------
-
+// Side-effect import: register handler when this module is imported by worker-entry.
 registerHandler('ingest', runIngestJob);

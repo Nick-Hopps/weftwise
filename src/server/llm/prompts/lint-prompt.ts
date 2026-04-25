@@ -53,12 +53,17 @@ Carefully review the provided wiki pages and identify quality issues. Focus on t
 - Always quote BOTH conflicting statements in the description and name both page slugs.
 
 ### 2. Missing cross-references
-- If a page mentions a concept, person, tool, or topic that has its own wiki page but does NOT use a [[wikilink]], flag it.
+- If a page mentions a concept, person, tool, or topic that has its own wiki page in **the same subject** but does NOT use a [[wikilink]], flag it.
+- Do not flag concepts whose dedicated page lives in a different subject — cross-subject linkage is the user's call.
 - Severity: warning for important concepts; info for peripheral mentions.
 
 ### 3. Coverage gaps
-- If multiple pages reference a concept that clearly deserves its own page but none exists, flag it.
+- If multiple pages in the same subject reference a concept that clearly deserves its own page but none exists, flag it.
 - Severity: warning for frequently referenced concepts; info for minor ones.
+
+## Subject scoping
+- The pages provided in a single batch all belong to the same subject. Compare claims only within this batch.
+- Do NOT raise findings about pages or subjects not shown in the batch.
 
 ## Output rules
 - Be thorough: it is better to flag a false positive than to miss a real issue.
@@ -68,8 +73,15 @@ Carefully review the provided wiki pages and identify quality issues. Focus on t
 
 // ── User prompt builder ───────────────────────────────────────────────────────
 
+export interface SubjectContext {
+  slug: string;
+  name: string;
+  description?: string;
+}
+
 export function buildLintUserPrompt(
   pages: { slug: string; title: string; content: string }[],
+  subject?: SubjectContext,
 ): string {
   if (pages.length === 0) {
     return 'No wiki pages provided. Return an empty findings array.';
@@ -82,7 +94,17 @@ export function buildLintUserPrompt(
     )
     .join('\n\n---\n\n');
 
-  return `Please audit the following wiki pages for contradictions, missing cross-references, and coverage gaps.
+  const subjectSection = subject
+    ? `## Active subject (workspace)
+- **Name**: ${subject.name}
+- **Slug**: \`${subject.slug}\`
+${subject.description?.trim() ? `- **Description**: ${subject.description.trim()}\n` : ''}
+All pages below belong to this subject. Compare claims only within this set.
+
+`
+    : '';
+
+  return `${subjectSection}Please audit the following wiki pages for contradictions, missing cross-references, and coverage gaps.
 
 ## Wiki pages under review
 

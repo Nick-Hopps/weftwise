@@ -8,7 +8,8 @@ import {
   runQuery,
   streamQueryAnswer,
 } from '@/server/services/query-service';
-import { requireAuth } from '@/server/middleware/auth';
+import { requireAuth, requireCsrf } from '@/server/middleware/auth';
+import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
 
 export const runtime = 'nodejs';
@@ -22,16 +23,16 @@ const QueryBodySchema = z.object({
     pageSlug: z.string(),
     excerpt: z.string(),
   })).optional(),
-  // Slug of the wiki page the user is currently viewing. When the chat is
-  // invoked from a page, this must always be included so the page itself is
-  // added to the LLM context even when FTS over the raw question returns 0
-  // hits (common for short / CJK / pronoun-style questions).
   pageSlug: z.string().trim().min(1).optional(),
+  subjectId: z.string().optional(),
+  subjectSlug: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
   const authError = requireAuth(request);
   if (authError) return authError;
+  const csrfError = requireCsrf(request);
+  if (csrfError) return csrfError;
 
   let body: unknown;
   try {
@@ -48,19 +49,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const resolution = resolveSubjectFromRequest(request, { body: parsed.data });
+  if (resolution.error) return resolution.error;
+  const { subject } = resolution;
+
   const { question, saveAsPage, pageTitle, answer, citations, pageSlug } = parsed.data;
 
   // Save-only mode: enqueue save-to-wiki job
   if (saveAsPage && pageTitle && pageTitle.trim().length > 0 && answer) {
-    const job = queue.enqueue('save-to-wiki', {
-      answer,
-      title: pageTitle.trim(),
-      citations: citations ?? [],
-    });
+    const job = queue.enqueue(
+      'save-to-wiki',
+      {
+        answer,
+        title: pageTitle.trim(),
+        citations: citations ?? [],
+        subjectId: subject.id,
+      },
+      subject.id,
+    );
     return NextResponse.json({
       jobId: job.id,
       answer,
       citations: citations ?? [],
+      subjectId: subject.id,
     }, { status: 202 });
   }
 
@@ -70,20 +81,26 @@ export async function POST(request: NextRequest) {
 
   // Save-as-page + question: one-shot JSON mode
   if (saveAsPage) {
-    const result = await runQuery(question.trim(), pageSlug);
+    const result = await runQuery(question.trim(), subject, pageSlug);
     let saveJobId: string | null = null;
     if (pageTitle && pageTitle.trim().length > 0) {
-      const job = queue.enqueue('save-to-wiki', {
-        answer: result.answer,
-        title: pageTitle.trim(),
-        citations: result.citations,
-      });
+      const job = queue.enqueue(
+        'save-to-wiki',
+        {
+          answer: result.answer,
+          title: pageTitle.trim(),
+          citations: result.citations,
+          subjectId: subject.id,
+        },
+        subject.id,
+      );
       saveJobId = job.id;
     }
     return NextResponse.json({
       answer: result.answer,
       citations: result.citations,
       saveJobId,
+      subjectId: subject.id,
     });
   }
 
@@ -111,12 +128,12 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        const context = prepareQueryContext(trimmedQuestion, pageSlug);
+        const context = prepareQueryContext(trimmedQuestion, subject.id, pageSlug);
 
         if (context.length === 0) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
           emit('citations', { citations: [] });
-          emit('done', {});
+          emit('done', { subjectId: subject.id });
           closeStream();
           return;
         }
@@ -125,6 +142,7 @@ export async function POST(request: NextRequest) {
           QUERY_STREAM_SYSTEM_PROMPT,
           trimmedQuestion,
           context,
+          subject,
           request.signal,
         );
 
@@ -141,13 +159,14 @@ export async function POST(request: NextRequest) {
             trimmedQuestion,
             fullAnswer,
             context,
+            subject,
           );
         } catch {
           streamedCitations = [];
         }
 
         emit('citations', { citations: streamedCitations });
-        emit('done', {});
+        emit('done', { subjectId: subject.id });
       } catch (error) {
         if (!request.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error);

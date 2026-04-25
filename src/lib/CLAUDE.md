@@ -10,11 +10,11 @@
 
 | 文件 | 说明 |
 |------|------|
-| `contracts.ts` | **全应用领域类型单一真实源**：`WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry` |
+| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry` |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
-| `api-fetch.ts` | 客户端 `fetch` 封装，自动处理 auth header / cookie / 错误文本 |
-| `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景） |
+| `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
+| `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query |
 | `theme/read-theme-vars.ts` | 从 `document.documentElement` 读 CSS 变量（主题同步） |
 
 ## 对外接口（关键类型）
@@ -22,19 +22,21 @@
 ### `contracts.ts` 导出
 
 ```ts
-WikiPage       { slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
-WikiLink       { sourceSlug, targetSlug, context }
-Job            { id, type: 'ingest'|'lint'|'save-to-wiki', status, paramsJson,
-                 resultJson, createdAt, startedAt, completedAt,
+SubjectId      = string  // uuid 或 'subject-general' / 'subject-<uuid>' legacy 形式
+Subject        { id: SubjectId, slug, name, description, createdAt, updatedAt }
+WikiPage       { subjectId, slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
+WikiLink       { subjectId, sourceSlug, targetSubjectId, targetSlug, context }
+Job            { id, type: 'ingest'|'lint'|'save-to-wiki', status, subjectId: SubjectId|null,
+                 paramsJson, resultJson, createdAt, startedAt, completedAt,
                  leaseExpiresAt, heartbeatAt, attemptCount }
 JobEvent       { id, jobId, type, message, dataJson, createdAt }
-Source         { id, filename, contentHash, parsedAt, metadataJson }
+Source         { id, subjectId, filename, contentHash, parsedAt, metadataJson }
 IngestResult   { pagesCreated: string[], pagesUpdated: string[],
                  linksAdded: number, commitSha: string }
 QueryResult    { answer, citations: { pageSlug, excerpt }[], savedAsPage }
 LintFinding    { type, severity, pageSlug, description, suggestedFix }
 ChangesetEntry { action: 'create'|'update'|'delete', path, content }
-Changeset      { id, jobId, entries, preHead, postHead,
+Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
                  status: 'pending'|'applied'|'rolled-back' }
 ```
 
@@ -47,9 +49,17 @@ Changeset      { id, jobId, entries, preHead, postHead,
 约定所有客户端 HTTP 调用都通过它，以统一错误处理与 auth：
 
 ```ts
+// 通用版（适合 SSR / 没有 subject 的场景）
 apiFetch<T>(path: string, init?: RequestInit): Promise<T>
 // - 默认 credentials: 'include'
 // - 如果响应 !ok，抛带 status/body 的 Error
+
+// 客户端组件首选：自动注入 subjectId
+useApiFetch(): typeof apiFetch
+// - GET 自动在 URL 上注入 ?subjectId=<currentSubjectId>
+// - SUBJECT_AGNOSTIC 路径用 exact + prefix 双匹配自动跳过注入
+//   覆盖 /api/subjects/[id] / /api/jobs/[id] / /api/jobs/[id]/events 等
+// - POST/PUT/PATCH 由调用方在 body 中显式带 subjectId（防止隐式注入到不该带的字段）
 ```
 
 ### `cn.ts`
@@ -96,6 +106,7 @@ src/lib/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化 |
+| 2026-04-25 | Subject：contracts 增加 `Subject` / `SubjectId` 与 `subjectId` 字段；`useApiFetch()` hook 自动注入 subjectId；markdown-client 跨主题 `?s=` href |
 
 ---
 

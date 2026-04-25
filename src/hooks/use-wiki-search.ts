@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { apiFetch } from '@/lib/api-fetch';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
 
 export interface SearchResult {
   page: {
@@ -23,11 +24,12 @@ export function useWikiSearch(
 ): UseWikiSearchResult {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const { id: subjectId } = useCurrentSubject();
 
   useEffect(() => {
     const trimmed = query.trim();
 
-    if (!trimmed) {
+    if (!trimmed || !subjectId) {
       setResults([]);
       setIsLoading(false);
       return;
@@ -38,10 +40,10 @@ export function useWikiSearch(
 
     const timer = setTimeout(async () => {
       try {
-        const response = await apiFetch(
-          `/api/search?q=${encodeURIComponent(trimmed)}`,
-          { signal: controller.signal }
-        );
+        const url =
+          `/api/search?q=${encodeURIComponent(trimmed)}` +
+          `&subjectId=${encodeURIComponent(subjectId)}`;
+        const response = await apiFetch(url, { signal: controller.signal });
         if (!response.ok) {
           setResults([]);
           return;
@@ -63,7 +65,7 @@ export function useWikiSearch(
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, debounceMs]);
+  }, [query, debounceMs, subjectId]);
 
   return { results, isLoading };
 }
