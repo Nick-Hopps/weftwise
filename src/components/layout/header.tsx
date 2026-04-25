@@ -7,7 +7,9 @@ import { Menu, Moon, Search, SidebarOpen, SidebarClose, Sun, Sparkles } from 'lu
 import { useUIStore } from '@/stores/ui-store';
 import { IconButton } from '@/components/ui/icon-button';
 import { Kbd } from '@/components/ui/kbd';
-import { apiFetch } from '@/lib/api-fetch';
+import { useApiFetch } from '@/lib/api-fetch';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
+import { SubjectSwitcher } from './subject-switcher';
 import { cn } from '@/lib/cn';
 
 interface PageLite {
@@ -15,18 +17,23 @@ interface PageLite {
   title: string;
 }
 
-async function fetchPagesLite(): Promise<PageLite[]> {
-  const res = await apiFetch('/api/pages');
-  if (!res.ok) return [];
-  return res.json();
-}
-
 function titleForSlug(slug: string, pages: PageLite[] | undefined): string {
   return pages?.find((p) => p.slug === slug)?.title ?? slug;
 }
 
 function Breadcrumb({ pathname }: { pathname: string }) {
-  const { data: pages } = useQuery({ queryKey: ['pages'], queryFn: fetchPagesLite, staleTime: 30_000 });
+  const apiFetch = useApiFetch();
+  const { id: subjectId } = useCurrentSubject();
+  const { data: pages } = useQuery({
+    queryKey: ['pages', subjectId],
+    queryFn: async () => {
+      const res = await apiFetch('/api/pages');
+      if (!res.ok) return [] as PageLite[];
+      return (await res.json()) as PageLite[];
+    },
+    staleTime: 30_000,
+    enabled: !!subjectId,
+  });
 
   const segments: Array<{ label: string; href?: string }> = [];
   if (pathname === '/' || pathname === '') {
@@ -111,6 +118,8 @@ export function Header() {
             Agentic Wiki
           </span>
         </Link>
+
+        <SubjectSwitcher />
 
         <span aria-hidden className="hidden md:inline text-xs text-foreground-tertiary mx-1">/</span>
         <div className="hidden md:flex min-w-0">

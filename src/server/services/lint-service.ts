@@ -5,15 +5,20 @@
  *                           stale sources. No LLM required.
  * Phase 2 (semantic):      contradictions, missing cross-references, coverage
  *                           gaps detected by the LLM.
+ *
+ * Lint runs per-subject. A job with `subjectId === null` falls back to scanning
+ * every subject; per-subject jobs (the common case) only audit pages within
+ * that subject.
  */
 
 import { createHash } from 'crypto';
 import fs from 'fs';
-import path from 'path';
 import { registerHandler } from '../jobs/worker';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
+import * as subjectsRepo from '../db/repos/subjects-repo';
 import { scanWikiPages } from '../wiki/wiki-store';
+import { vaultPath } from '../config/env';
 import { parseFrontmatter, validateFrontmatter } from '../wiki/frontmatter';
 import { generateStructuredOutput } from '../llm/provider-registry';
 import {
@@ -21,75 +26,82 @@ import {
   LINT_SYSTEM_PROMPT,
   buildLintUserPrompt,
 } from '../llm/prompts/lint-prompt';
-import { vaultPath } from '../config/env';
-import type { LintFinding, Job } from '@/lib/contracts';
+import type { LintFinding, Job, Subject } from '@/lib/contracts';
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/** Pages that are excluded from orphan detection (they act as root/index nodes). */
 const ORPHAN_EXCLUDE_SLUGS = new Set(['index', 'log']);
+const MAX_SEMANTIC_PROMPT_CHARS = 120_000;
 
-// ── Phase 1: Deterministic checks ────────────────────────────────────────────
+// ── Phase 1: Deterministic checks per subject ────────────────────────────────
 
-/**
- * Run all deterministic lint checks synchronously.
- * Returns a (possibly empty) list of findings.
- */
-function runDeterministicChecks(): LintFinding[] {
+function runDeterministicChecksForSubject(subject: Subject): LintFinding[] {
   const findings: LintFinding[] = [];
-
-  findings.push(...checkBrokenLinks());
-  findings.push(...checkOrphanPages());
-  findings.push(...checkMissingFrontmatter());
-  findings.push(...checkStaleSources());
-
+  findings.push(...checkBrokenLinks(subject));
+  findings.push(...checkOrphanPages(subject));
+  findings.push(...checkMissingFrontmatter(subject));
+  findings.push(...checkStaleSources(subject));
   return findings;
 }
 
-/**
- * Check for wikilinks whose target page does not exist in the DB.
- */
-function checkBrokenLinks(): LintFinding[] {
+function checkBrokenLinks(subject: Subject): LintFinding[] {
   const findings: LintFinding[] = [];
-  const allLinks = pagesRepo.getAllLinks();
-  const allPages = pagesRepo.getAllPages();
+  const allLinks = pagesRepo.getAllLinks(subject.id);
+  const allPages = pagesRepo.getAllPages(subject.id);
   const slugSet = new Set(allPages.map((p) => p.slug));
 
   for (const link of allLinks) {
-    if (!slugSet.has(link.targetSlug)) {
+    // Same-subject link to a missing page
+    if (link.targetSubjectId === subject.id && !slugSet.has(link.targetSlug)) {
       findings.push({
         type: 'broken-link',
         severity: 'warning',
         pageSlug: link.sourceSlug,
-        description: `Broken wikilink: [[${link.targetSlug}]] referenced from "${link.sourceSlug}" does not exist.`,
+        description: `Broken wikilink: [[${link.targetSlug}]] referenced from "${link.sourceSlug}" does not exist in subject "${subject.slug}".`,
         suggestedFix: `Create a page with slug "${link.targetSlug}" or update the link to point to an existing page.`,
       });
+      continue;
+    }
+
+    // Cross-subject link: verify the target page exists in the target subject
+    if (link.targetSubjectId !== subject.id) {
+      const exists = pagesRepo.getPageBySlug(link.targetSubjectId, link.targetSlug);
+      if (!exists) {
+        const targetSubject = subjectsRepo.getById(link.targetSubjectId);
+        const targetSubjectSlug = targetSubject?.slug ?? link.targetSubjectId;
+        findings.push({
+          type: 'broken-link',
+          severity: 'warning',
+          pageSlug: link.sourceSlug,
+          description: `Broken cross-subject wikilink: [[${targetSubjectSlug}:${link.targetSlug}]] referenced from "${link.sourceSlug}" does not exist.`,
+          suggestedFix: `Create the target page in subject "${targetSubjectSlug}", or remove the cross-subject reference.`,
+        });
+      }
     }
   }
 
   return findings;
 }
 
-/**
- * Check for pages that have no inbound links (orphans).
- * Excludes index and log pages as they are structural root nodes.
- */
-function checkOrphanPages(): LintFinding[] {
+function checkOrphanPages(subject: Subject): LintFinding[] {
   const findings: LintFinding[] = [];
-  const allPages = pagesRepo.getAllPages();
-  const allLinks = pagesRepo.getAllLinks();
-
-  const linkedSlugs = new Set(allLinks.map((l) => l.targetSlug));
+  const allPages = pagesRepo.getAllPages(subject.id);
+  const allLinks = pagesRepo.getAllLinks(); // cross-subject backlinks count as inbound
+  const inboundSlugs = new Set<string>();
+  for (const link of allLinks) {
+    if (link.targetSubjectId === subject.id) {
+      inboundSlugs.add(link.targetSlug);
+    }
+  }
 
   for (const page of allPages) {
     if (ORPHAN_EXCLUDE_SLUGS.has(page.slug)) continue;
-    if (!linkedSlugs.has(page.slug)) {
+    if ((page.tags ?? []).includes('meta')) continue;
+    if (!inboundSlugs.has(page.slug)) {
       findings.push({
         type: 'orphan',
         severity: 'info',
         pageSlug: page.slug,
-        description: `Orphan page: "${page.slug}" has no inbound links from any other wiki page.`,
-        suggestedFix: `Link to this page from at least one related page, or from the index page.`,
+        description: `Orphan page: "${page.slug}" in subject "${subject.slug}" has no inbound links.`,
+        suggestedFix: `Link to this page from at least one related page, or from the subject's index page.`,
       });
     }
   }
@@ -97,12 +109,9 @@ function checkOrphanPages(): LintFinding[] {
   return findings;
 }
 
-/**
- * Scan all wiki files and validate their YAML frontmatter.
- */
-function checkMissingFrontmatter(): LintFinding[] {
+function checkMissingFrontmatter(subject: Subject): LintFinding[] {
   const findings: LintFinding[] = [];
-  const wikiFiles = scanWikiPages();
+  const wikiFiles = scanWikiPages(subject.slug);
 
   for (const file of wikiFiles) {
     try {
@@ -113,7 +122,7 @@ function checkMissingFrontmatter(): LintFinding[] {
           type: 'missing-frontmatter',
           severity: 'warning',
           pageSlug: file.slug,
-          description: `Invalid frontmatter in "${file.slug}": ${validation.errors.join('; ')}.`,
+          description: `Invalid frontmatter in "${file.slug}" (subject: ${subject.slug}): ${validation.errors.join('; ')}.`,
           suggestedFix: `Add or fix the required YAML frontmatter fields: title, created, updated, tags, sources.`,
         });
       }
@@ -123,7 +132,7 @@ function checkMissingFrontmatter(): LintFinding[] {
         type: 'missing-frontmatter',
         severity: 'warning',
         pageSlug: file.slug,
-        description: `Failed to parse frontmatter in "${file.slug}": ${msg}.`,
+        description: `Failed to parse frontmatter in "${file.slug}" (subject: ${subject.slug}): ${msg}.`,
         suggestedFix: `Ensure the page has a valid YAML frontmatter block delimited by "---".`,
       });
     }
@@ -132,30 +141,34 @@ function checkMissingFrontmatter(): LintFinding[] {
   return findings;
 }
 
-/**
- * Check for sources whose on-disk content has changed since the DB hash was recorded.
- */
-function checkStaleSources(): LintFinding[] {
+function rawSourcePathsToCheck(subjectSlug: string, filename: string): string[] {
+  return [
+    vaultPath('raw', subjectSlug, filename),
+    vaultPath('raw', filename), // legacy flat layout
+  ];
+}
+
+function checkStaleSources(subject: Subject): LintFinding[] {
   const findings: LintFinding[] = [];
-  const allPages = pagesRepo.getAllPages();
+  const allPages = pagesRepo.getAllPages(subject.id);
 
   for (const page of allPages) {
-    const sources = sourcesRepo.getSourcesForPage(page.slug);
+    const sources = sourcesRepo.getSourcesForPage(subject.id, page.slug);
     for (const source of sources) {
-      const rawFilePath = path.join(vaultPath('raw'), path.basename(source.filename));
-      if (!fs.existsSync(rawFilePath)) {
-        // Source file missing entirely
+      const candidates = rawSourcePathsToCheck(subject.slug, source.filename);
+      const found = candidates.find((p) => fs.existsSync(p));
+      if (!found) {
         findings.push({
           type: 'stale-source',
           severity: 'info',
           pageSlug: page.slug,
-          description: `Source file "${source.filename}" linked to "${page.slug}" no longer exists on disk.`,
+          description: `Source file "${source.filename}" linked to "${page.slug}" (subject: ${subject.slug}) no longer exists on disk.`,
           suggestedFix: `Re-ingest the source or remove the association from the database.`,
         });
         continue;
       }
 
-      const diskContent = fs.readFileSync(rawFilePath);
+      const diskContent = fs.readFileSync(found);
       const diskHash = createHash('sha256')
         .update(diskContent)
         .digest('hex')
@@ -166,7 +179,7 @@ function checkStaleSources(): LintFinding[] {
           type: 'stale-source',
           severity: 'info',
           pageSlug: page.slug,
-          description: `Source file "${source.filename}" for page "${page.slug}" has changed on disk (stored hash: ${source.contentHash}, current hash: ${diskHash}).`,
+          description: `Source file "${source.filename}" for page "${page.slug}" (subject: ${subject.slug}) has changed on disk (stored hash: ${source.contentHash}, current hash: ${diskHash}).`,
           suggestedFix: `Re-ingest the source file to update the wiki page content.`,
         });
       }
@@ -176,36 +189,20 @@ function checkStaleSources(): LintFinding[] {
   return findings;
 }
 
-// ── Phase 2: Semantic checks via LLM ─────────────────────────────────────────
+// ── Phase 2: Semantic checks per subject ─────────────────────────────────────
 
-/**
- * Run semantic lint checks using the configured LLM.
- * Returns findings for contradictions, missing cross-references, and coverage gaps.
- */
-// Maximum total characters of page content to send to the LLM in a single
-// semantic check batch, to avoid exceeding model context limits.
-const MAX_SEMANTIC_PROMPT_CHARS = 120_000;
+async function runSemanticChecksForSubject(subject: Subject): Promise<LintFinding[]> {
+  const wikiFiles = scanWikiPages(subject.slug);
+  if (wikiFiles.length === 0) return [];
 
-async function runSemanticChecks(): Promise<LintFinding[]> {
-  const wikiFiles = scanWikiPages();
-
-  if (wikiFiles.length === 0) {
-    return [];
-  }
+  const allPages = pagesRepo.getAllPages(subject.id);
+  const titleBySlug = new Map(allPages.map((p) => [p.slug, p.title]));
 
   const pagesForPrompt = wikiFiles.map((f) => ({
     slug: f.slug,
-    title: f.slug, // Use slug as title fallback; frontmatter title resolved below
+    title: titleBySlug.get(f.slug) ?? f.slug,
     content: f.content,
   }));
-
-  // Enrich with DB titles where available
-  const allPages = pagesRepo.getAllPages();
-  const titleBySlug = new Map(allPages.map((p) => [p.slug, p.title]));
-  for (const p of pagesForPrompt) {
-    const dbTitle = titleBySlug.get(p.slug);
-    if (dbTitle) p.title = dbTitle;
-  }
 
   // Split pages into batches that fit within the LLM context limit
   const batches: (typeof pagesForPrompt)[] = [];
@@ -227,9 +224,14 @@ async function runSemanticChecks(): Promise<LintFinding[]> {
   }
 
   const allFindings: LintFinding[] = [];
+  const subjectCtx = {
+    slug: subject.slug,
+    name: subject.name,
+    description: subject.description,
+  };
 
   for (const batch of batches) {
-    const userPrompt = buildLintUserPrompt(batch);
+    const userPrompt = buildLintUserPrompt(batch, subjectCtx);
     const result = await generateStructuredOutput(
       'lint',
       LintResultSchema,
@@ -253,39 +255,64 @@ async function runSemanticChecks(): Promise<LintFinding[]> {
 
 // ── Main job handler ──────────────────────────────────────────────────────────
 
+interface LintParams {
+  subjectId?: string;
+}
+
 async function runLintJob(
-  _job: Job,
+  job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
-  const allFindings: LintFinding[] = [];
+  const params = JSON.parse(job.paramsJson) as LintParams;
+  const targetSubjectId = params.subjectId ?? job.subjectId ?? null;
 
-  // Phase 1 — deterministic checks
-  emit('lint:deterministic:start', 'Running deterministic checks...');
-  const deterministicFindings = runDeterministicChecks();
-  allFindings.push(...deterministicFindings);
+  const targets: Subject[] = targetSubjectId
+    ? (() => {
+        const found = subjectsRepo.getById(targetSubjectId);
+        if (!found) throw new Error(`Subject ${targetSubjectId} not found`);
+        return [found];
+      })()
+    : subjectsRepo.listSubjects();
+
   emit(
-    'lint:deterministic:done',
-    `Found ${deterministicFindings.length} issue(s)`,
-    { findings: deterministicFindings },
+    'lint:scope',
+    targetSubjectId
+      ? `Linting subject: ${targets[0].slug}`
+      : `Linting all ${targets.length} subject(s)`,
+    { subjectIds: targets.map((s) => s.id) }
   );
 
-  // Phase 2 — semantic checks
-  emit('lint:semantic:start', 'Running LLM semantic analysis...');
-  try {
-    const semanticFindings = await runSemanticChecks();
-    allFindings.push(...semanticFindings);
-    emit(
-      'lint:semantic:done',
-      `Found ${semanticFindings.length} issue(s)`,
-      { findings: semanticFindings },
+  const allFindings: (LintFinding & { subjectId: string; subjectSlug: string })[] = [];
+
+  for (const subject of targets) {
+    emit('lint:deterministic:start', `Subject "${subject.slug}": running deterministic checks...`);
+    const deterministicFindings = runDeterministicChecksForSubject(subject);
+    allFindings.push(
+      ...deterministicFindings.map((f) => ({ ...f, subjectId: subject.id, subjectSlug: subject.slug })),
     );
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    emit('lint:semantic:error', `Semantic analysis failed: ${msg}`);
-    // Phase 1 results remain valid; do not rethrow
+    emit(
+      'lint:deterministic:done',
+      `Subject "${subject.slug}": ${deterministicFindings.length} deterministic finding(s)`,
+      { findings: deterministicFindings, subject: subject.slug }
+    );
+
+    emit('lint:semantic:start', `Subject "${subject.slug}": running LLM semantic analysis...`);
+    try {
+      const semanticFindings = await runSemanticChecksForSubject(subject);
+      allFindings.push(
+        ...semanticFindings.map((f) => ({ ...f, subjectId: subject.id, subjectSlug: subject.slug })),
+      );
+      emit(
+        'lint:semantic:done',
+        `Subject "${subject.slug}": ${semanticFindings.length} semantic finding(s)`,
+        { findings: semanticFindings, subject: subject.slug }
+      );
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      emit('lint:semantic:error', `Subject "${subject.slug}": semantic analysis failed: ${msg}`);
+    }
   }
 
-  // Summary event
   emit(
     'lint:complete',
     `Lint complete: ${allFindings.length} total finding(s)`,
@@ -302,5 +329,4 @@ async function runLintJob(
   return { findings: allFindings };
 }
 
-// Register this handler when the module is imported
 registerHandler('lint', runLintJob);

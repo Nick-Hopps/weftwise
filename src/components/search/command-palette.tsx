@@ -96,10 +96,11 @@ export function CommandPalette() {
     setAskLoading(true);
     setAskAnswer('');
     try {
+      const subjectId = useUIStore.getState().currentSubjectId;
       const res = await apiFetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify(subjectId ? { question, subjectId } : { question }),
         signal: askAbortRef.current.signal,
       });
       if (!res.ok || !res.body) {

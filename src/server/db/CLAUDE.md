@@ -6,7 +6,9 @@
 
 1. 启动并持有**全局唯一** better-sqlite3 连接（`client.ts`）。
 2. 声明 Drizzle schema（`schema.ts`）—— 但实际建表是启动时的原生 `CREATE TABLE IF NOT EXISTS`（见 `client.ts` 的 `ensureTables`，含 FTS5 虚拟表与触发器）。
-3. 对外提供 `repos/*` —— 面向领域的 CRUD + 聚合查询。
+3. **legacy schema 自迁移**（`client.ts::ensureTables`）：检测到旧的 `pages.slug PK / sources` 没 `subject_id` 等 → 用 `pragma foreign_keys=OFF` 包裹 `_new + INSERT FROM + DROP + RENAME`，所有 legacy 行继承 `general` subject_id。
+4. 启动时确保 `general` subject 存在（`ensureSubjectsAndGeneral()`）。
+5. 对外提供 `repos/*` —— 面向领域的 CRUD + 聚合查询。
 
 ## 入口与启动
 
@@ -15,35 +17,52 @@
 
 ## 对外接口（`repos/`）
 
+### `subjects-repo.ts` 🆕
+
+- `listSubjects(): Subject[]` —— 按 `name asc`
+- `getById(id) / getBySlug(slug) / getBySlugOrThrow(slug)`
+- `create({ slug, name, description? }): Subject` —— slug 必须 `^[a-z0-9][a-z0-9-]*$`，冲突 throw `SubjectError('slug-conflict')`
+- `rename(id, { name?, description? })` —— 不允许改 slug
+- `countPages(subjectId): number`
+- `deleteIfEmpty(id): void` —— 非空抛 `SubjectError('not-empty')`，由 API 层转 409
+- 错误类：`SubjectError` 含 `code: 'invalid-slug' | 'slug-conflict' | 'not-empty' | 'not-found'`
+
 ### `pages-repo.ts`
 
+> **所有方法第一形参强制 `subjectId`**（除显式跨主题查询外）。
+
 - `createPage / upsertPage / updatePage / deletePage`
-- `getPageBySlug(slug): WikiPage | null`
-- `getAllPages(): WikiPage[]`
-- `getAllLinks(): WikiLink[]`
-- `searchPages(query): WikiPage[]`（FTS5）
-- `getBacklinks(slug): WikiLink[]`
+- `getPageBySlug(subjectId, slug): WikiPage | null`
+- `getAllPages(subjectId): WikiPage[]`
+- `getAllLinks(subjectId?): WikiLink[]`（不传时全量，用于 graph 全景图）
+- `searchPages(subjectId, query): WikiPage[]`（FTS5 + `subject_id` filter）
+- `getBacklinks(subjectId, slug): WikiLink[]`
+- `getMetaPageKeys(subjectId): Set<string>`（复合键 `<subjectId>:<slug>` 防跨主题误命中）
+- `findPageInOtherSubjects(slug): { subjectId, slug, title }[]`（404 兜底提示用）
 
 ### `jobs-repo.ts`
 
-- `enqueueJob(type, params): Job`
+- `enqueueJob(type, subjectId, params): Job` —— `subject_id` 写入 jobs；`ingest` / `save-to-wiki` 必填，全量 `lint` / `reset` 可为 NULL
 - `claimNextJob(type?): Job | null` —— 原子"pending → running"并写 `lease_expires_at`
 - `updateHeartbeat(id)`
 - `completeJob / failJob / requeueJob / reclaimExpiredJobs`
-- `getJob / listJobs({ status?, type? })`
+- `getJob / listJobs({ status?, type?, subjectId? })`
 - `listJobEvents(jobId, afterId?)`
 
 ### `sources-repo.ts`
 
-- `upsertSource / findByHash / linkPageToSource`
+- `upsertSource(subjectId, payload) / findByHash(subjectId, hash) / linkPageToSource(subjectId, pageSlug, sourceId)`
 
 ## 关键依赖与配置
 
 - **依赖**：`better-sqlite3@11`、`drizzle-orm@0.38`、`drizzle-kit@0.29`（生成迁移用）。
 - **PRAGMA**：`journal_mode=WAL`、`foreign_keys=ON`、`busy_timeout=5000`。
-- **FTS5**：`pages_fts(title, summary, body)` + 同步触发器（`pages_ai / pages_ad / pages_au`）。
+- **FTS5**：`pages_fts(title, summary, body, subject_id UNINDEXED, slug UNINDEXED)` + 同步触发器（`pages_ai / pages_ad / pages_au`，触发器同时复制 subject_id/slug）。
 - **环境**：`DATABASE_PATH`（默认 `./data/wiki.db`）。
-- 迁移命令：`npm run db:generate` / `npm run db:migrate`（目前实际建表走 `client.ts::ensureTables`，迁移脚本可作为补充）。
+- 迁移命令：
+  - `npm run db:generate` / `npm run db:migrate`：drizzle-kit 生成/应用结构性迁移
+  - `npm run db:migrate-subjects`：一次性脚本（`scripts/migrate-introduce-subject.ts`），把 legacy DB / vault 升级为 subject-aware（备份 → backfill → vault git mv）
+  - 目前实际建表 + 自迁移走 `client.ts::ensureTables`
 
 ## 数据模型
 
@@ -51,13 +70,15 @@
 
 | 表 | 主键 | 关键约束 |
 |----|------|---------|
-| `pages` | `slug` | `content_hash` 必填，`tags` 存 JSON 字符串 |
-| `page_aliases` | `(old_slug, new_slug)` | 复合主键 |
-| `wiki_links` | `id`（自增） | 无唯一约束 → 一对多关系可重复 |
-| `sources` | `id` | `content_hash` 用于去重 |
-| `jobs` | `id` | `lease_expires_at` + `heartbeat_at` 驱动 worker 租约 |
+| `subjects` | `id` | `slug` UNIQUE；`general` 必须存在；`description` 默认 `''` |
+| `pages` | `(subject_id, slug)` 复合 PK | 同时 `path` UNIQUE；跨 subject 同名 slug 合法但 path 不能撞 |
+| `page_aliases` | `(subject_id, old_slug, new_slug)` | 复合主键，alias 不跨 subject |
+| `wiki_links` | `id`（自增） | `subject_id` + `target_subject_id` 必填，allows graph join |
+| `sources` | `id` | `subject_id` 必填；`content_hash` 用于去重 |
+| `page_sources` | `(subject_id, page_slug, source_id)` | 多对多溯源 |
+| `jobs` | `id` | `subject_id` 可空（全局型 lint / reset）；ingest/save-to-wiki 必填 |
 | `job_events` | `id` | 顺序由 `created_at` 决定；SSE 用 `Last-Event-Id` 续播 |
-| `operations` | `id` | Saga 状态机 (`pending / applied / rolled-back`) |
+| `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back` |
 
 ## 扩展指南
 
@@ -85,12 +106,13 @@
 
 ```
 src/server/db/
-├── client.ts          # 单例连接 + ensureTables + FTS
-├── schema.ts          # Drizzle schema
+├── client.ts          # 单例连接 + ensureTables + FTS + legacy 自迁移
+├── schema.ts          # Drizzle schema（subjects / pages 复合 PK / target_subject_id）
 └── repos/
-    ├── pages-repo.ts
-    ├── jobs-repo.ts
-    └── sources-repo.ts
+    ├── subjects-repo.ts  # 🆕 主题 CRUD + countPages + deleteIfEmpty
+    ├── pages-repo.ts     # 全部强制 subjectId
+    ├── jobs-repo.ts      # 写入/查询带 subject_id
+    └── sources-repo.ts   # subject-scoped
 ```
 
 ## 变更记录 (Changelog)
@@ -98,6 +120,7 @@ src/server/db/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化 |
+| 2026-04-25 | Subject：复合 PK / target_subject_id / subjects-repo / FTS5 带 subject filter / 启动自迁移 |
 
 ---
 

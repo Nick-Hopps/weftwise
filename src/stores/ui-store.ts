@@ -10,6 +10,9 @@ export const SIDEBAR_WIDTH_MAX = 400;
 export const SIDEBAR_WIDTH_DEFAULT = 240;
 export const CONTEXT_PANEL_WIDTH = 360;
 
+export const GENERAL_SUBJECT_SLUG = 'general';
+export const SUBJECT_COOKIE_NAME = 'wiki_subject';
+
 interface UIState {
   sidebarOpen: boolean;
   sidebarWidth: number;
@@ -22,6 +25,14 @@ interface UIState {
   commandPaletteOpen: boolean;
   darkMode: boolean;
   settingsDialogOpen: boolean;
+
+  /**
+   * Currently selected subject. `null` until a subject is chosen or rehydrated;
+   * `currentSubjectSlug` defaults to "general" so server requests have a sane
+   * fallback before the bootstrap query resolves.
+   */
+  currentSubjectId: string | null;
+  currentSubjectSlug: string;
 
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
@@ -39,6 +50,8 @@ interface UIState {
   toggleDarkMode: () => void;
   openSettingsDialog: () => void;
   closeSettingsDialog: () => void;
+
+  setCurrentSubject: (subject: { id: string; slug: string }) => void;
 }
 
 function applyDarkMode(enabled: boolean) {
@@ -52,10 +65,16 @@ function clampSidebarWidth(width: number): number {
   return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, width));
 }
 
-// Persist migration: v1 → v2 → v3.
+function syncSubjectCookie(slug: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${SUBJECT_COOKIE_NAME}=${encodeURIComponent(slug)}; path=/; SameSite=Lax; max-age=31536000`;
+}
+
+// Persist migration: v1 → v2 → v3 → v4.
 // v1: rightPanelOpen/chatOpen/rightPanelWidth
 // v2: contextPanelOpen/contextPanelTab/contextPanelWidth
 // v3: drops contextPanelWidth (right panel is now fixed), adds sidebarWidth.
+// v4: adds currentSubjectId/currentSubjectSlug for first-class subjects.
 interface LegacyPersistedState {
   darkMode?: boolean;
   rightPanelOpen?: boolean;
@@ -65,17 +84,33 @@ interface LegacyPersistedState {
   contextPanelTab?: ContextPanelTab;
   contextPanelWidth?: number;
   sidebarWidth?: number;
+  currentSubjectId?: string | null;
+  currentSubjectSlug?: string;
 }
 
 function migratePersisted(persisted: unknown, version: number) {
   const prev = (persisted ?? {}) as LegacyPersistedState;
 
+  const baseV3 = {
+    darkMode: !!prev.darkMode,
+    contextPanelOpen: prev.contextPanelOpen ?? false,
+    contextPanelTab: prev.contextPanelTab ?? 'context',
+    sidebarWidth: clampSidebarWidth(prev.sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT),
+  };
+
+  if (version >= 4) {
+    return {
+      ...baseV3,
+      currentSubjectId: prev.currentSubjectId ?? null,
+      currentSubjectSlug: prev.currentSubjectSlug ?? GENERAL_SUBJECT_SLUG,
+    };
+  }
+
   if (version >= 3) {
     return {
-      darkMode: !!prev.darkMode,
-      contextPanelOpen: prev.contextPanelOpen ?? false,
-      contextPanelTab: prev.contextPanelTab ?? 'context',
-      sidebarWidth: clampSidebarWidth(prev.sidebarWidth ?? SIDEBAR_WIDTH_DEFAULT),
+      ...baseV3,
+      currentSubjectId: null,
+      currentSubjectSlug: GENERAL_SUBJECT_SLUG,
     };
   }
 
@@ -85,6 +120,8 @@ function migratePersisted(persisted: unknown, version: number) {
       contextPanelOpen: prev.contextPanelOpen ?? false,
       contextPanelTab: prev.contextPanelTab ?? 'context',
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+      currentSubjectId: null,
+      currentSubjectSlug: GENERAL_SUBJECT_SLUG,
     };
   }
 
@@ -104,6 +141,8 @@ function migratePersisted(persisted: unknown, version: number) {
     contextPanelOpen: open,
     contextPanelTab: tab,
     sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+    currentSubjectId: null,
+    currentSubjectSlug: GENERAL_SUBJECT_SLUG,
   };
 }
 
@@ -118,6 +157,8 @@ export const useUIStore = create<UIState>()(
       commandPaletteOpen: false,
       darkMode: false,
       settingsDialogOpen: false,
+      currentSubjectId: null,
+      currentSubjectSlug: GENERAL_SUBJECT_SLUG,
 
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
@@ -142,19 +183,29 @@ export const useUIStore = create<UIState>()(
         }),
       openSettingsDialog: () => set({ settingsDialogOpen: true }),
       closeSettingsDialog: () => set({ settingsDialogOpen: false }),
+
+      setCurrentSubject: (subject) => {
+        set({ currentSubjectId: subject.id, currentSubjectSlug: subject.slug });
+        syncSubjectCookie(subject.slug);
+      },
     }),
     {
       name: 'ui-store',
-      version: 3,
+      version: 4,
       migrate: migratePersisted,
       partialize: (s) => ({
         darkMode: s.darkMode,
         contextPanelOpen: s.contextPanelOpen,
         contextPanelTab: s.contextPanelTab,
         sidebarWidth: s.sidebarWidth,
+        currentSubjectId: s.currentSubjectId,
+        currentSubjectSlug: s.currentSubjectSlug,
       }),
       onRehydrateStorage: () => (state) => {
-        if (state) applyDarkMode(state.darkMode);
+        if (state) {
+          applyDarkMode(state.darkMode);
+          syncSubjectCookie(state.currentSubjectSlug);
+        }
       },
     },
   ),

@@ -5,6 +5,10 @@
  *   createChangeset → validateChangeset → applyChangeset
  *                                             ↓ (on error)
  *                                        rollbackChangeset
+ *
+ * Subject-aware: every changeset is scoped to exactly one subject. Cross-subject
+ * wikilinks are validated against the target subject's pages but never written
+ * to a different subject's vault.
  */
 
 import { randomUUID } from 'crypto';
@@ -20,13 +24,10 @@ import { parseFrontmatter } from './frontmatter';
 import { extractWikiLinks } from './wikilinks';
 import { getRawDb } from '../db/client';
 import * as pagesRepo from '../db/repos/pages-repo';
-import { slugFromWikiPath } from './page-identity';
+import * as subjectsRepo from '../db/repos/subjects-repo';
+import { parseWikiPath } from './page-identity';
 import { acquireVaultLock } from './vault-mutex';
-import type { Changeset, ChangesetEntry } from '@/lib/contracts';
-
-// ---------------------------------------------------------------------------
-// createChangeset
-// ---------------------------------------------------------------------------
+import type { Changeset, ChangesetEntry, Subject } from '@/lib/contracts';
 
 /**
  * Build an in-memory Changeset object from a list of entries.
@@ -34,11 +35,14 @@ import type { Changeset, ChangesetEntry } from '@/lib/contracts';
  */
 export function createChangeset(
   jobId: string,
+  subject: Pick<Subject, 'id' | 'slug'>,
   entries: ChangesetEntry[]
 ): Changeset {
   return {
     id: randomUUID(),
     jobId,
+    subjectId: subject.id,
+    subjectSlug: subject.slug,
     entries,
     preHead: '',
     postHead: null,
@@ -46,150 +50,171 @@ export function createChangeset(
   };
 }
 
-// ---------------------------------------------------------------------------
-// validateChangeset
-// ---------------------------------------------------------------------------
-
 /**
- * Validate all entries in a changeset:
- * - `create` / `update` entries must have valid frontmatter.
- * - All wikilinks in the body must be parseable.
- * - `delete` entries need only a non-empty path.
+ * Validate a changeset.  Errors block the apply; warnings are surfaced to the
+ * caller so they can decide whether to proceed.
  *
- * Returns `{ valid, errors }` without throwing.
+ * Cross-subject wikilinks (`[[other-subject:Page]]`) are checked against the
+ * referenced subject's page set; missing target subjects yield warnings.
  */
 export function validateChangeset(
   changeset: Changeset
 ): { valid: boolean; errors: string[]; warnings: string[] } {
   const errors: string[] = [];
+  const warnings: string[] = [];
 
+  // Verify the subject still exists.
+  const subject = subjectsRepo.getById(changeset.subjectId);
+  if (!subject) {
+    errors.push(`Subject ${changeset.subjectId} no longer exists`);
+    return { valid: false, errors, warnings };
+  }
+
+  // Verify every changeset path belongs to the changeset's subject.
   for (const entry of changeset.entries) {
-    if (entry.action === 'delete') {
-      if (!entry.path || entry.path.trim() === '') {
-        errors.push(`Delete entry has an empty path`);
-      }
+    if (!entry.path || entry.path.trim() === '') {
+      errors.push(`${entry.action} entry has an empty path`);
       continue;
     }
 
-    // create / update
+    const parts = parseWikiPath(entry.path);
+    if (!parts) {
+      errors.push(`[${entry.path}] Path is not a valid wiki path`);
+      continue;
+    }
+    if (parts.subjectSlug !== subject.slug) {
+      errors.push(
+        `[${entry.path}] Path subject "${parts.subjectSlug}" does not match changeset subject "${subject.slug}"`
+      );
+    }
+  }
+
+  // Per-entry frontmatter + wikilink syntax validation.
+  for (const entry of changeset.entries) {
+    if (entry.action === 'delete') continue;
     if (entry.content === null || entry.content === undefined) {
       errors.push(`Entry "${entry.path}" has no content for action "${entry.action}"`);
       continue;
     }
-
-    // Validate frontmatter
-    let body = entry.content;
     try {
       const parsed = parseFrontmatter(entry.content);
-      const result = validateFrontmatter(
-        parsed.data as unknown as Record<string, unknown>
-      );
+      const result = validateFrontmatter(parsed.data as unknown as Record<string, unknown>);
       if (!result.valid) {
         for (const err of result.errors) {
           errors.push(`[${entry.path}] Frontmatter: ${err}`);
         }
       }
-      body = parsed.body;
     } catch (err) {
-      errors.push(
-        `[${entry.path}] Could not parse frontmatter: ${String(err)}`
-      );
+      errors.push(`[${entry.path}] Could not parse frontmatter: ${String(err)}`);
       continue;
     }
 
-    // Validate wikilinks (extraction should not throw, but guard anyway)
     try {
-      extractWikiLinks(body);
+      const { body } = parseFrontmatter(entry.content);
+      extractWikiLinks(body, { currentSubjectSlug: subject.slug });
     } catch (err) {
       errors.push(`[${entry.path}] Could not parse wikilinks: ${String(err)}`);
     }
   }
 
-  // Link target validation: check wikilinks resolve to known pages
-  const knownSlugs = new Set(pagesRepo.getAllPages().map((p) => p.slug));
-  // Include pending creates from this changeset
+  // Link-target validation: known slugs in the changeset's subject + any creates
+  // that this changeset is about to add.
+  const knownSlugs = new Set(pagesRepo.getAllPages(subject.id).map((p) => p.slug));
   for (const entry of changeset.entries) {
-    if (entry.action === 'create') {
-      knownSlugs.add(slugFromWikiPath(entry.path));
+    if (entry.action !== 'create') continue;
+    const parts = parseWikiPath(entry.path);
+    if (parts && parts.subjectSlug === subject.slug) {
+      knownSlugs.add(parts.slug);
     }
   }
-  // Include aliases
-  const titleMap = pagesRepo.getTitleToSlugMap();
 
-  const warnings: string[] = [];
+  const titleMap = pagesRepo.getTitleToSlugMap(subject.id);
+  const targetSubjectCache = new Map<string, Subject | null>();
+  const resolveSubject = (slug: string): Subject | null => {
+    if (targetSubjectCache.has(slug)) return targetSubjectCache.get(slug) ?? null;
+    const found = subjectsRepo.getBySlug(slug);
+    targetSubjectCache.set(slug, found);
+    return found;
+  };
+
   for (const entry of changeset.entries) {
     if (entry.action === 'delete' || !entry.content) continue;
+    let body: string;
     try {
-      const { body } = parseFrontmatter(entry.content);
-      const links = extractWikiLinks(body);
-      for (const link of links) {
-        const target = link.target;
-        if (!knownSlugs.has(target) && !titleMap.has(target) && !titleMap.has(target.toLowerCase())) {
+      ({ body } = parseFrontmatter(entry.content));
+    } catch {
+      continue;
+    }
+
+    const links = extractWikiLinks(body, { currentSubjectSlug: subject.slug });
+    for (const link of links) {
+      const targetSubjectSlug = link.targetSubjectSlug || subject.slug;
+
+      if (targetSubjectSlug === subject.slug) {
+        if (
+          !knownSlugs.has(link.target) &&
+          !titleMap.has(link.target) &&
+          !titleMap.has(link.target.toLowerCase())
+        ) {
           warnings.push(`[${entry.path}] Unresolved wikilink: [[${link.raw}]]`);
         }
+        continue;
       }
-    } catch {
-      // Already caught in frontmatter validation above
+
+      const targetSubject = resolveSubject(targetSubjectSlug);
+      if (!targetSubject) {
+        warnings.push(`[${entry.path}] Unknown subject in wikilink: [[${link.raw}]]`);
+        continue;
+      }
+      const exists = pagesRepo.getPageBySlug(targetSubject.id, link.target);
+      if (!exists) {
+        warnings.push(`[${entry.path}] Unresolved cross-subject wikilink: [[${link.raw}]]`);
+      }
     }
   }
 
   return { valid: errors.length === 0, errors, warnings };
 }
 
-// ---------------------------------------------------------------------------
-// applyChangeset
-// ---------------------------------------------------------------------------
-
-/**
- * Execute a changeset as an atomic saga:
- *
- * 1. Snapshot the current git HEAD (preHead).
- * 2. Write / delete vault files on disk.
- * 3. Update the SQLite index inside a single transaction.
- * 4. Commit the vault changes to git.
- * 5. Record the operation in the `operations` table.
- * 6. Return the updated changeset with `status = 'applied'` and `postHead`.
- *
- * On any failure the saga calls `rollbackChangeset` and re-throws.
- */
 export interface SourceLinkOps {
   sourceId: string;
   pageSlugs: string[];
-  linkPageSource: (pageSlug: string, sourceId: string) => void;
+  linkPageSource: (subjectId: string, pageSlug: string, sourceId: string) => void;
   updateSourcePageLinks: (sourceId: string, pageSlugs: string[]) => void;
 }
 
 export async function applyChangeset(
   changeset: Changeset,
-  sourceOps?: SourceLinkOps,
+  sourceOps?: SourceLinkOps
 ): Promise<Changeset> {
-  // Acquire mutex to prevent concurrent vault writes
   const release = await acquireVaultLock();
 
   try {
-    // Step 0 — record pending operation before any writes
     const db = getRawDb();
     const operationId = changeset.id;
     db
       .prepare(
-        `INSERT OR REPLACE INTO operations (id, job_id, pre_head, post_head, changeset_json, status) VALUES (?, ?, '', NULL, ?, 'pending')`
+        `INSERT OR REPLACE INTO operations
+         (id, job_id, subject_id, pre_head, post_head, changeset_json, status)
+         VALUES (?, ?, ?, '', NULL, ?, 'pending')`
       )
-      .run(operationId, changeset.jobId, JSON.stringify(changeset.entries));
+      .run(
+        operationId,
+        changeset.jobId,
+        changeset.subjectId,
+        JSON.stringify(changeset.entries)
+      );
 
-    // Step 1 — snapshot current HEAD
     const preHead = await getVaultHead();
     const working = { ...changeset, preHead };
 
-    // Update operation with actual preHead
     db
       .prepare(`UPDATE operations SET pre_head = ? WHERE id = ?`)
       .run(preHead, operationId);
 
     try {
-      // Step 2 — write / delete vault files
       const writeEntries: { path: string; content: string }[] = [];
       const deleteEntries: string[] = [];
-
       for (const entry of working.entries) {
         if (entry.action === 'create' || entry.action === 'update') {
           if (entry.content !== null && entry.content !== undefined) {
@@ -205,54 +230,40 @@ export async function applyChangeset(
         deleteVaultFile(p);
       }
 
-      // Step 3 — collect affected slugs and update SQLite in a transaction
-      const touchedSlugs = [
-        ...new Set(
-          working.entries.map((e) => slugFromWikiPath(e.path))
-        ),
-      ];
+      const touchedSlugs = collectTouchedSlugs(working.subjectSlug, working.entries);
 
       const updateIndex = db.transaction(() => {
-        indexTouchedPages(touchedSlugs);
+        indexTouchedPages(working.subjectId, touchedSlugs);
 
-        // Include source linkage inside the same transaction (Gap-4 fix)
         if (sourceOps) {
           for (const slug of sourceOps.pageSlugs) {
-            sourceOps.linkPageSource(slug, sourceOps.sourceId);
+            sourceOps.linkPageSource(working.subjectId, slug, sourceOps.sourceId);
           }
         }
       });
       updateIndex();
 
-      // Update sidecar metadata (outside SQLite tx, but after git commit captures it)
       if (sourceOps) {
         try {
           sourceOps.updateSourcePageLinks(sourceOps.sourceId, sourceOps.pageSlugs);
         } catch {
-          // Best-effort: sidecar update is recoverable via rebuild
+          // best-effort sidecar update
         }
       }
 
-      // Step 4 — git commit
       const affectedPaths = working.entries.map((e) => e.path);
       const postHead = await commitVaultChanges(
-        `Apply changeset ${working.id} (job: ${working.jobId})`,
+        `[subject:${working.subjectSlug}] Apply changeset ${working.id} (job: ${working.jobId})`,
         affectedPaths
       );
 
-      // Step 5 — update operation record to 'applied'
       db
         .prepare(
           `UPDATE operations SET post_head = ?, status = 'applied' WHERE id = ?`
         )
         .run(postHead, operationId);
 
-      // Step 6 — return updated changeset
-      return {
-        ...working,
-        postHead,
-        status: 'applied',
-      };
+      return { ...working, postHead, status: 'applied' };
     } catch (err) {
       await rollbackChangeset({ ...working, preHead });
       throw err;
@@ -262,39 +273,42 @@ export async function applyChangeset(
   }
 }
 
-// ---------------------------------------------------------------------------
-// rollbackChangeset
-// ---------------------------------------------------------------------------
-
 /**
- * Revert the vault to the git commit recorded in `changeset.preHead`,
- * and roll back any SQLite index changes made by the changeset (H2 fix).
+ * Revert the vault to the changeset's preHead and reindex slugs in the
+ * affected subject. Idempotent — calling it multiple times is safe.
  */
 export async function rollbackChangeset(changeset: Changeset): Promise<void> {
   if (!changeset.preHead) return;
   await restoreToHead(changeset.preHead);
 
-  // Roll back SQLite index: re-index affected slugs from the restored filesystem state
   try {
     const sqlite = getRawDb();
-    const touchedSlugs = [
-      ...new Set(changeset.entries.map((e) => slugFromWikiPath(e.path))),
-    ];
+    const touchedSlugs = collectTouchedSlugs(changeset.subjectSlug, changeset.entries);
     const reindex = sqlite.transaction(() => {
-      indexTouchedPages(touchedSlugs);
+      indexTouchedPages(changeset.subjectId, touchedSlugs);
     });
     reindex();
   } catch {
-    // Best-effort: if re-indexing fails, at least git is restored
+    // best effort
   }
 
-  // Mark operation as rolled back if it was already persisted
   try {
     const sqlite = getRawDb();
     sqlite
       .prepare(`UPDATE operations SET status = ? WHERE id = ?`)
       .run('rolled-back', changeset.id);
   } catch {
-    // Ignore — the row may not exist yet
+    // ignore — operation row may not exist yet
   }
+}
+
+function collectTouchedSlugs(subjectSlug: string, entries: ChangesetEntry[]): string[] {
+  const slugs = new Set<string>();
+  for (const entry of entries) {
+    const parts = parseWikiPath(entry.path);
+    if (!parts) continue;
+    if (parts.subjectSlug !== subjectSlug) continue;
+    slugs.add(parts.slug);
+  }
+  return [...slugs];
 }

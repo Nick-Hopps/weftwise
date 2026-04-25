@@ -3,40 +3,72 @@ import {
   text,
   integer,
   primaryKey,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
 
-export const pages = sqliteTable('pages', {
-  slug: text('slug').primaryKey(),
-  title: text('title').notNull(),
-  path: text('path').notNull(),
-  summary: text('summary').default(''),
-  contentHash: text('content_hash').notNull(),
-  tags: text('tags').default('[]'),
+export const subjects = sqliteTable('subjects', {
+  id: text('id').primaryKey(),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
 
+export const pages = sqliteTable(
+  'pages',
+  {
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'restrict' }),
+    slug: text('slug').notNull(),
+    title: text('title').notNull(),
+    path: text('path').notNull(),
+    summary: text('summary').default(''),
+    contentHash: text('content_hash').notNull(),
+    tags: text('tags').default('[]'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.subjectId, t.slug] }),
+    pathUnique: uniqueIndex('pages_path_unique').on(t.path),
+  })
+);
+
 export const pageAliases = sqliteTable(
   'page_aliases',
   {
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
     oldSlug: text('old_slug').notNull(),
     newSlug: text('new_slug').notNull(),
     createdAt: text('created_at').notNull(),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.oldSlug, t.newSlug] }),
+    pk: primaryKey({ columns: [t.subjectId, t.oldSlug, t.newSlug] }),
   })
 );
 
 export const wikiLinks = sqliteTable('wiki_links', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  subjectId: text('subject_id')
+    .notNull()
+    .references(() => subjects.id, { onDelete: 'cascade' }),
   sourceSlug: text('source_slug').notNull(),
+  targetSubjectId: text('target_subject_id')
+    .notNull()
+    .references(() => subjects.id, { onDelete: 'restrict' }),
   targetSlug: text('target_slug').notNull(),
   context: text('context').default(''),
 });
 
 export const sources = sqliteTable('sources', {
   id: text('id').primaryKey(),
+  subjectId: text('subject_id')
+    .notNull()
+    .references(() => subjects.id, { onDelete: 'restrict' }),
   filename: text('filename').notNull(),
   contentHash: text('content_hash').notNull(),
   parsedAt: text('parsed_at'),
@@ -46,11 +78,14 @@ export const sources = sqliteTable('sources', {
 export const pageSources = sqliteTable(
   'page_sources',
   {
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
     pageSlug: text('page_slug').notNull(),
     sourceId: text('source_id').notNull(),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.pageSlug, t.sourceId] }),
+    pk: primaryKey({ columns: [t.subjectId, t.pageSlug, t.sourceId] }),
   })
 );
 
@@ -58,6 +93,9 @@ export const jobs = sqliteTable('jobs', {
   id: text('id').primaryKey(),
   type: text('type').notNull(),
   status: text('status').notNull().default('pending'),
+  subjectId: text('subject_id').references(() => subjects.id, {
+    onDelete: 'set null',
+  }),
   paramsJson: text('params_json').default('{}'),
   resultJson: text('result_json'),
   createdAt: text('created_at').notNull(),
@@ -80,6 +118,9 @@ export const jobEvents = sqliteTable('job_events', {
 export const operations = sqliteTable('operations', {
   id: text('id').primaryKey(),
   jobId: text('job_id').notNull(),
+  subjectId: text('subject_id').references(() => subjects.id, {
+    onDelete: 'set null',
+  }),
   preHead: text('pre_head').notNull(),
   postHead: text('post_head'),
   changesetJson: text('changeset_json').notNull(),

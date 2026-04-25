@@ -1,10 +1,14 @@
 /**
  * Query service — answers user questions from wiki content using the LLM,
  * and optionally persists the answer as a new wiki page via the job queue.
+ *
+ * Every code path is subject-scoped: search, citation context, and
+ * save-as-page all operate within a single Subject.
  */
 
 import * as pagesRepo from '../db/repos/pages-repo';
-import { readPageBySlug } from '../wiki/wiki-store';
+import * as subjectsRepo from '../db/repos/subjects-repo';
+import { readPageInSubject } from '../wiki/wiki-store';
 import {
   generateStructuredOutput,
   streamTextResponse,
@@ -19,16 +23,15 @@ import {
   validateChangeset,
   applyChangeset,
 } from '../wiki/wiki-transaction';
-import { wikiPathFromSlug, slugFromTitle } from '../wiki/page-identity';
+import { buildWikiPath, slugFromTitle } from '../wiki/page-identity';
 import { serializeFrontmatter } from '../wiki/frontmatter';
 import { registerHandler } from '../jobs/worker';
-import type { QueryResult, Job } from '@/lib/contracts';
+import type { QueryResult, Job, Subject, SubjectId } from '@/lib/contracts';
 
-// Maximum number of FTS search results to load as context for the LLM
 const TOP_N_FTS = 5;
 
 export const NO_QUERY_CONTEXT_ANSWER =
-  'No relevant content was found in the wiki to answer this question. Try ingesting more sources or rephrasing your query.';
+  'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
 export const QUERY_STREAM_SYSTEM_PROMPT = `${QUERY_SYSTEM_PROMPT}
 
@@ -39,10 +42,6 @@ export const QUERY_STREAM_SYSTEM_PROMPT = `${QUERY_SYSTEM_PROMPT}
 
 const QueryCitationsSchema = QueryResponseSchema.pick({ citations: true });
 
-// ---------------------------------------------------------------------------
-// Query context + streaming
-// ---------------------------------------------------------------------------
-
 export interface QueryContextPage {
   slug: string;
   title: string;
@@ -52,17 +51,17 @@ export interface QueryContextPage {
 
 export function prepareQueryContext(
   question: string,
+  subjectId: SubjectId,
   currentPageSlug?: string,
 ): QueryContextPage[] {
+  const subject = subjectsRepo.getById(subjectId);
+  if (!subject) return [];
+
   const contextBySlug = new Map<string, QueryContextPage>();
 
-  // Always inject the page the user is currently viewing (if any). A question
-  // typed from inside a page is almost certainly "about this page", and the
-  // raw question rarely contains enough keywords for FTS5 alone to recover it
-  // (short prompts, pronouns, CJK without a segmenter).
   if (currentPageSlug) {
-    const page = pagesRepo.getPageBySlug(currentPageSlug);
-    const doc = readPageBySlug(currentPageSlug);
+    const page = pagesRepo.getPageBySlug(subjectId, currentPageSlug);
+    const doc = readPageInSubject(subject.slug, currentPageSlug);
     if (page && doc && doc.body.trim().length > 0) {
       contextBySlug.set(currentPageSlug, {
         slug: currentPageSlug,
@@ -73,10 +72,10 @@ export function prepareQueryContext(
     }
   }
 
-  const searchResults = pagesRepo.searchPages(question);
+  const searchResults = pagesRepo.searchPages(subjectId, question);
   for (const r of searchResults.slice(0, TOP_N_FTS)) {
     if (contextBySlug.has(r.page.slug)) continue;
-    const doc = readPageBySlug(r.page.slug);
+    const doc = readPageInSubject(subject.slug, r.page.slug);
     const content = doc?.body ?? r.snippet;
     if (content.trim().length === 0) continue;
     contextBySlug.set(r.page.slug, {
@@ -89,16 +88,25 @@ export function prepareQueryContext(
   return [...contextBySlug.values()];
 }
 
+function subjectCtxFrom(subject: Subject) {
+  return {
+    slug: subject.slug,
+    name: subject.name,
+    description: subject.description,
+  };
+}
+
 export function streamQueryAnswer(
   systemPrompt: string,
   question: string,
   context: QueryContextPage[],
+  subject: Subject,
   abortSignal?: AbortSignal,
 ) {
   return streamTextResponse(
     'query',
     systemPrompt,
-    buildQueryUserPrompt(question, context),
+    buildQueryUserPrompt(question, context, subjectCtxFrom(subject)),
     abortSignal,
   );
 }
@@ -107,12 +115,13 @@ export async function generateQueryCitations(
   question: string,
   fullAnswer: string,
   context: QueryContextPage[],
+  subject: Subject,
 ): Promise<{ pageSlug: string; excerpt: string }[]> {
   const response = await generateStructuredOutput(
     'query',
     QueryCitationsSchema,
     QUERY_SYSTEM_PROMPT,
-    `${buildQueryUserPrompt(question, context)}
+    `${buildQueryUserPrompt(question, context, subjectCtxFrom(subject))}
 
 ## Draft answer to cite
 
@@ -123,7 +132,6 @@ ${fullAnswer}
 Return only the structured citations for the draft answer above. Do not rewrite the answer.`,
   );
 
-  // Post-validate citations: check excerpts actually appear in the source pages
   return response.citations.map((c) => {
     const page = context.find((p) => p.slug === c.pageSlug);
     if (!page) return { ...c, excerpt: `[unverified] ${c.excerpt}` };
@@ -134,15 +142,12 @@ Return only the structured citations for the draft answer above. Do not rewrite 
   });
 }
 
-// ---------------------------------------------------------------------------
-// runQuery — one-shot mode (used by save-as-page and fallback)
-// ---------------------------------------------------------------------------
-
 export async function runQuery(
   question: string,
+  subject: Subject,
   currentPageSlug?: string,
 ): Promise<QueryResult> {
-  const context = prepareQueryContext(question, currentPageSlug);
+  const context = prepareQueryContext(question, subject.id, currentPageSlug);
 
   if (context.length === 0) {
     return {
@@ -156,6 +161,7 @@ export async function runQuery(
     QUERY_STREAM_SYSTEM_PROMPT,
     question,
     context,
+    subject,
   );
 
   let answer = '';
@@ -165,7 +171,7 @@ export async function runQuery(
 
   let citations: { pageSlug: string; excerpt: string }[] = [];
   try {
-    citations = await generateQueryCitations(question, answer, context);
+    citations = await generateQueryCitations(question, answer, context, subject);
   } catch {
     citations = [];
   }
@@ -173,24 +179,21 @@ export async function runQuery(
   return { answer, citations, savedAsPage: null };
 }
 
-// ---------------------------------------------------------------------------
-// saveQueryAsPage — runs inside the worker to avoid concurrent vault writes
-// ---------------------------------------------------------------------------
-
 export async function saveQueryAsPage(
   answer: string,
   title: string,
   citations: { pageSlug: string; excerpt: string }[],
+  subject: Subject,
   jobId: string,
 ): Promise<string> {
   const slug = slugFromTitle(title);
   const now = new Date().toISOString();
-  const wikiPath = wikiPathFromSlug(slug);
+  const wikiPath = buildWikiPath(subject.slug, slug);
 
-  const existing = pagesRepo.getPageBySlug(slug);
+  const existing = pagesRepo.getPageBySlug(subject.id, slug);
   if (existing) {
     throw new Error(
-      `A page with slug "${slug}" already exists ("${existing.title}"). Choose a different title or update the existing page.`,
+      `A page with slug "${slug}" already exists in subject "${subject.slug}" ("${existing.title}"). Choose a different title or update the existing page.`,
     );
   }
 
@@ -217,7 +220,7 @@ export async function saveQueryAsPage(
     body,
   );
 
-  const changeset = createChangeset(jobId, [
+  const changeset = createChangeset(jobId, subject, [
     { action: 'create', path: wikiPath, content },
   ]);
 
@@ -232,10 +235,6 @@ export async function saveQueryAsPage(
   return slug;
 }
 
-// ---------------------------------------------------------------------------
-// Worker handler for save-to-wiki jobs
-// ---------------------------------------------------------------------------
-
 async function runSaveToWikiJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
@@ -244,13 +243,29 @@ async function runSaveToWikiJob(
     answer: string;
     title: string;
     citations: { pageSlug: string; excerpt: string }[];
+    subjectId?: string;
   };
 
-  emit('save:start', `Saving answer as wiki page: ${params.title}`);
-  const slug = await saveQueryAsPage(params.answer, params.title, params.citations, job.id);
-  emit('save:complete', `Saved as wiki page: ${slug}`, { slug });
+  const subjectId = params.subjectId ?? job.subjectId;
+  if (!subjectId) {
+    throw new Error('save-to-wiki job missing subjectId');
+  }
+  const subject = subjectsRepo.getById(subjectId);
+  if (!subject) {
+    throw new Error(`Subject ${subjectId} not found`);
+  }
 
-  return { slug };
+  emit('save:start', `Saving answer to subject "${subject.slug}" as page: ${params.title}`);
+  const slug = await saveQueryAsPage(
+    params.answer,
+    params.title,
+    params.citations,
+    subject,
+    job.id,
+  );
+  emit('save:complete', `Saved as wiki page: ${slug}`, { slug, subject: subject.slug });
+
+  return { slug, subjectId: subject.id };
 }
 
 registerHandler('save-to-wiki', runSaveToWikiJob);

@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from '../client';
 import { sources, pageSources } from '../schema';
-import type { Source } from '@/lib/contracts';
+import type { Source, SubjectId } from '@/lib/contracts';
 
 export function upsertSource(source: Source): Source {
   const db = getDb();
@@ -9,6 +9,7 @@ export function upsertSource(source: Source): Source {
     .insert(sources)
     .values({
       id: source.id,
+      subjectId: source.subjectId,
       filename: source.filename,
       contentHash: source.contentHash,
       parsedAt: source.parsedAt,
@@ -17,6 +18,7 @@ export function upsertSource(source: Source): Source {
     .onConflictDoUpdate({
       target: sources.id,
       set: {
+        subjectId: source.subjectId,
         filename: source.filename,
         contentHash: source.contentHash,
         parsedAt: source.parsedAt,
@@ -33,32 +35,43 @@ export function getSource(id: string): Source | null {
   return row ? rowToSource(row) : null;
 }
 
-export function getSourceByFilename(filename: string): Source | null {
+export function getSourceByFilename(
+  subjectId: SubjectId,
+  filename: string
+): Source | null {
   const db = getDb();
   const row = db
     .select()
     .from(sources)
-    .where(eq(sources.filename, filename))
+    .where(and(eq(sources.subjectId, subjectId), eq(sources.filename, filename)))
     .get();
   return row ? rowToSource(row) : null;
 }
 
-export function getSourceByHash(hash: string): Source | null {
+export function getSourceByHash(
+  subjectId: SubjectId,
+  hash: string
+): Source | null {
   const db = getDb();
   const row = db
     .select()
     .from(sources)
-    .where(eq(sources.contentHash, hash))
+    .where(and(eq(sources.subjectId, subjectId), eq(sources.contentHash, hash)))
     .get();
   return row ? rowToSource(row) : null;
 }
 
-export function getSourcesForPage(pageSlug: string): Source[] {
+export function getSourcesForPage(
+  subjectId: SubjectId,
+  pageSlug: string
+): Source[] {
   const db = getDb();
   const links = db
     .select()
     .from(pageSources)
-    .where(eq(pageSources.pageSlug, pageSlug))
+    .where(
+      and(eq(pageSources.subjectId, subjectId), eq(pageSources.pageSlug, pageSlug))
+    )
     .all();
 
   const result: Source[] = [];
@@ -69,25 +82,33 @@ export function getSourcesForPage(pageSlug: string): Source[] {
   return result;
 }
 
-export function linkPageSource(pageSlug: string, sourceId: string): void {
+export function linkPageSource(
+  subjectId: SubjectId,
+  pageSlug: string,
+  sourceId: string
+): void {
   const db = getDb();
   db
     .insert(pageSources)
-    .values({ pageSlug, sourceId })
+    .values({ subjectId, pageSlug, sourceId })
     .onConflictDoNothing()
     .run();
 }
 
-export function unlinkPageSources(pageSlug: string): void {
+export function unlinkPageSources(subjectId: SubjectId, pageSlug: string): void {
   const db = getDb();
-  db.delete(pageSources).where(eq(pageSources.pageSlug, pageSlug)).run();
+  db
+    .delete(pageSources)
+    .where(
+      and(eq(pageSources.subjectId, subjectId), eq(pageSources.pageSlug, pageSlug))
+    )
+    .run();
 }
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 function rowToSource(row: typeof sources.$inferSelect): Source {
   return {
     id: row.id,
+    subjectId: row.subjectId,
     filename: row.filename,
     contentHash: row.contentHash,
     parsedAt: row.parsedAt ?? null,

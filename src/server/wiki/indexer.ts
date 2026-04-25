@@ -4,44 +4,39 @@
  */
 
 import { createHash } from 'crypto';
-import { readPageBySlug, scanWikiPages } from './wiki-store';
-import { wikiPathFromSlug } from './page-identity';
+import { readPageInSubject, scanWikiPages } from './wiki-store';
+import { buildWikiPath } from './page-identity';
 import { parseFrontmatter } from './frontmatter';
 import * as pagesRepo from '../db/repos/pages-repo';
+import * as subjectsRepo from '../db/repos/subjects-repo';
 import { getRawDb } from '../db/client';
-import type { WikiPage } from '@/lib/contracts';
-import type { TitleResolver } from './wikilinks';
+import type { WikiPage, SubjectId, Subject } from '@/lib/contracts';
+import type { TitleResolver, ExtractedLink } from './wikilinks';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Compute a short SHA-256 prefix for a block of content.
- * Used as the `contentHash` field on WikiPage rows.
- */
 export function contentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 16);
 }
 
-/**
- * Build a WikiPage record from parsed document data and raw file content.
- */
+interface SubjectAwareFrontmatter {
+  title: string;
+  created: string;
+  updated: string;
+  tags: string[];
+  summary?: string;
+}
+
 function buildWikiPage(
+  subjectId: SubjectId,
+  subjectSlug: string,
   slug: string,
   rawContent: string,
-  frontmatter: {
-    title: string;
-    created: string;
-    updated: string;
-    tags: string[];
-    summary?: string;
-  }
+  frontmatter: SubjectAwareFrontmatter
 ): WikiPage {
   return {
+    subjectId,
     slug,
     title: frontmatter.title || slug,
-    path: wikiPathFromSlug(slug),
+    path: buildWikiPath(subjectSlug, slug),
     summary: frontmatter.summary ?? '',
     contentHash: contentHash(rawContent),
     tags: frontmatter.tags ?? [],
@@ -50,115 +45,166 @@ function buildWikiPage(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
-/**
- * Build a TitleResolver from the current pages in the database.
- * Matches page titles case-insensitively so that wikilinks like
- * [[JavaScript 闭包原理与应用]] resolve to the correct slug.
- */
-function buildTitleResolver(): TitleResolver {
-  const titleMap = pagesRepo.getTitleToSlugMap();
+function buildTitleResolver(subjectId: SubjectId): TitleResolver {
+  const titleMap = pagesRepo.getTitleToSlugMap(subjectId);
   return (title: string) => titleMap.get(title) ?? titleMap.get(title.toLowerCase());
 }
 
+function resolveLinkTargetSubject(
+  link: ExtractedLink,
+  fallbackSubject: Subject
+): { targetSubjectId: SubjectId; targetSlug: string } | null {
+  const { targetSubjectSlug, target } = link;
+  if (!targetSubjectSlug || targetSubjectSlug === fallbackSubject.slug) {
+    return { targetSubjectId: fallbackSubject.id, targetSlug: target };
+  }
+  const targetSubject = subjectsRepo.getBySlug(targetSubjectSlug);
+  if (!targetSubject) return null;
+  return { targetSubjectId: targetSubject.id, targetSlug: target };
+}
+
 /**
- * Update the SQLite index for the specified slugs only.
+ * Update the SQLite index for a set of slugs within a single subject.
  *
  * For each slug:
- * - If the wiki file exists: upsert the page row, update the FTS entry, and
- *   replace wiki_links for this page.
- * - If the file has been deleted: remove the page row, FTS entry, and any
- *   outgoing wiki_links.
+ * - If the file exists: upsert page row, update FTS, replace outgoing links.
+ * - If the file is missing: remove the page row, FTS entry, and outgoing links.
  */
-export function indexTouchedPages(slugs: string[]): void {
+export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
   if (slugs.length === 0) return;
+  const subject = subjectsRepo.getById(subjectId);
+  if (!subject) return;
 
-  const resolver = buildTitleResolver();
+  const resolver = buildTitleResolver(subjectId);
 
   for (const slug of slugs) {
-    const doc = readPageBySlug(slug, resolver);
+    const doc = readPageInSubject(subject.slug, slug, {
+      currentSubjectSlug: subject.slug,
+      titleResolver: resolver,
+    });
 
     if (doc === null) {
-      // File was deleted — clean up all traces
-      pagesRepo.deletePage(slug);
-      pagesRepo.deleteFtsEntry(slug);
-    } else {
-      const rawContent = JSON.stringify(doc.frontmatter) + doc.body;
-      const page = buildWikiPage(slug, rawContent, doc.frontmatter);
-
-      pagesRepo.upsertPage(page);
-      pagesRepo.updateFtsEntry(slug, page.title, page.summary, doc.body);
-      pagesRepo.setLinksForPage(
-        slug,
-        doc.links.map((link) => ({ targetSlug: link.target, context: link.raw }))
-      );
+      pagesRepo.deletePage(subjectId, slug);
+      continue;
     }
+
+    const rawContent = JSON.stringify(doc.frontmatter) + doc.body;
+    const page = buildWikiPage(subjectId, subject.slug, slug, rawContent, doc.frontmatter);
+
+    pagesRepo.upsertPage(page);
+    pagesRepo.updateFtsEntry(subjectId, slug, page.title, page.summary, doc.body);
+
+    const outgoing = doc.links
+      .map((link) => {
+        const resolved = resolveLinkTargetSubject(link, subject);
+        if (!resolved) return null;
+        return { ...resolved, context: link.raw };
+      })
+      .filter((l): l is { targetSubjectId: SubjectId; targetSlug: string; context: string } => l !== null);
+
+    pagesRepo.setLinksForPage(subjectId, slug, outgoing);
   }
 }
 
 /**
- * Full rebuild of the pages + wiki_links tables.
+ * Full rebuild of the pages + wiki_links tables across all subjects.
  *
- * Uses a two-pass approach:
- * 1. Scan and insert all pages (to build a complete title→slug map).
+ * Two-pass per subject:
+ * 1. Upsert every page so the title→slug map is complete.
  * 2. Re-extract and store wikilinks using the title resolver.
  */
 export function rebuildPageIndex(): void {
   const sqlite = getRawDb();
-  const pages = scanWikiPages();
 
   const rebuild = sqlite.transaction(() => {
     sqlite.exec('DELETE FROM pages_fts');
     sqlite.exec('DELETE FROM wiki_links');
     sqlite.exec('DELETE FROM pages');
 
-    // Pass 1 — upsert every page so the title→slug map is complete
-    for (const { slug, content } of pages) {
-      const { data: frontmatter } = parseFrontmatter(content);
-      const page = buildWikiPage(slug, content, frontmatter);
-      pagesRepo.upsertPage(page);
-      pagesRepo.updateFtsEntry(slug, page.title, page.summary, content);
+    const allSubjects = subjectsRepo.listSubjects();
+    const scanned = scanWikiPages();
+
+    // Group scanned pages by subject slug
+    const bySubject = new Map<string, typeof scanned>();
+    for (const entry of scanned) {
+      const existing = bySubject.get(entry.subjectSlug) ?? [];
+      existing.push(entry);
+      bySubject.set(entry.subjectSlug, existing);
     }
 
-    // Pass 2 — resolve wikilinks with the full title map
-    const resolver = buildTitleResolver();
-    for (const { slug } of pages) {
-      const doc = readPageBySlug(slug, resolver);
-      if (!doc) continue;
-      pagesRepo.setLinksForPage(
-        slug,
-        doc.links.map((link) => ({ targetSlug: link.target, context: link.raw }))
-      );
+    // Pass 1 — upsert pages and FTS rows for every known subject
+    for (const subject of allSubjects) {
+      const entries = bySubject.get(subject.slug) ?? [];
+      for (const entry of entries) {
+        const { data: frontmatter } = parseFrontmatter(entry.content);
+        const page = buildWikiPage(
+          subject.id,
+          subject.slug,
+          entry.slug,
+          entry.content,
+          frontmatter
+        );
+        pagesRepo.upsertPage(page);
+        pagesRepo.updateFtsEntry(
+          subject.id,
+          entry.slug,
+          page.title,
+          page.summary,
+          entry.content
+        );
+      }
+    }
+
+    // Pass 2 — resolve wikilinks with full title maps
+    for (const subject of allSubjects) {
+      const resolver = buildTitleResolver(subject.id);
+      const entries = bySubject.get(subject.slug) ?? [];
+      for (const entry of entries) {
+        const doc = readPageInSubject(subject.slug, entry.slug, {
+          currentSubjectSlug: subject.slug,
+          titleResolver: resolver,
+        });
+        if (!doc) continue;
+
+        const outgoing = doc.links
+          .map((link) => {
+            const resolved = resolveLinkTargetSubject(link, subject);
+            if (!resolved) return null;
+            return { ...resolved, context: link.raw };
+          })
+          .filter((l): l is { targetSubjectId: SubjectId; targetSlug: string; context: string } => l !== null);
+
+        pagesRepo.setLinksForPage(subject.id, entry.slug, outgoing);
+      }
     }
   });
   rebuild();
 }
 
 /**
- * Rebuild the FTS5 search index from the current pages table contents.
- *
- * Steps:
- * 1. Truncate the pages_fts virtual table.
- * 2. Re-insert every page's title, summary, and body.
+ * Rebuild the FTS5 search index from the on-disk vault.
  */
 export function rebuildSearchIndex(): void {
   const sqlite = getRawDb();
-
   sqlite.exec('DELETE FROM pages_fts');
 
-  const pages = scanWikiPages();
-  for (const { slug } of pages) {
-    const doc = readPageBySlug(slug);
-    if (!doc) continue;
+  const allSubjects = subjectsRepo.listSubjects();
+  const scanned = scanWikiPages();
 
-    pagesRepo.updateFtsEntry(
-      slug,
-      doc.frontmatter.title || slug,
-      doc.frontmatter.summary ?? '',
-      doc.body
-    );
+  for (const subject of allSubjects) {
+    const entries = scanned.filter((e) => e.subjectSlug === subject.slug);
+    for (const entry of entries) {
+      const doc = readPageInSubject(subject.slug, entry.slug, {
+        currentSubjectSlug: subject.slug,
+      });
+      if (!doc) continue;
+      pagesRepo.updateFtsEntry(
+        subject.id,
+        entry.slug,
+        doc.frontmatter.title || entry.slug,
+        doc.frontmatter.summary ?? '',
+        doc.body
+      );
+    }
   }
 }

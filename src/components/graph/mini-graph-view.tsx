@@ -366,7 +366,12 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
     let cancelled = false;
     setIsLoading(true);
 
-    apiFetch('/api/graph')
+    const subjectId = useUIStore.getState().currentSubjectId;
+    const graphUrl = subjectId
+      ? `/api/graph?subjectId=${encodeURIComponent(subjectId)}`
+      : '/api/graph';
+
+    apiFetch(graphUrl)
       .then((res) => res.json())
       .then((data: WikiGraphData) => {
         if (cancelled) return;

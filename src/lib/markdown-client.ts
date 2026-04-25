@@ -18,6 +18,7 @@ import WikiLinkComponent from '@/components/wiki/wiki-link';
 interface WikiLinkNode {
   type: 'wikiLink';
   target: string;
+  targetSubjectSlug: string | null;
   alias: string | null;
   data?: {
     hName?: string;
@@ -32,10 +33,57 @@ import { normalizeSlug } from '@/lib/slug';
 // remarkWikiLinks plugin
 // ---------------------------------------------------------------------------
 // Scans all Text nodes and replaces `[[...]]` spans with WikiLinkNode nodes.
+//
+// Mirror of src/server/wiki/wikilinks.ts. Recognises:
+//   [[Page]]                        — same subject as the page being rendered
+//   [[Page|Alias]]                  — same subject, with display alias
+//   [[Page#Section]]                — same subject, with section anchor
+//   [[other-subject:Page]]          — cross-subject link
+//   [[other-subject:Page|Alias]]    — cross-subject with alias
+// The `subject:` prefix only activates when the prefix matches a kebab-case
+// slug; otherwise the entire token is treated as a page title.
 
 const WIKILINK_RE = /\[\[([^\[\]]+?)\]\]/g;
+const SUBJECT_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 type SlugResolver = (title: string) => string | undefined;
+
+interface ParsedWikiLinkInner {
+  targetSubjectSlug: string | null;
+  pagePart: string;
+  rawTitle: string;
+  alias: string | null;
+}
+
+function parseWikiLinkInner(inner: string): ParsedWikiLinkInner {
+  const pipeIdx = inner.indexOf('|');
+  const beforeAlias = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
+  const aliasRaw =
+    pipeIdx === -1 ? null : inner.slice(pipeIdx + 1).trim() || null;
+
+  let targetSubjectSlug: string | null = null;
+  let body = beforeAlias;
+  const colonIdx = beforeAlias.indexOf(':');
+  if (colonIdx > 0) {
+    const candidate = beforeAlias.slice(0, colonIdx).trim();
+    if (SUBJECT_SLUG_RE.test(candidate)) {
+      targetSubjectSlug = candidate;
+      body = beforeAlias.slice(colonIdx + 1);
+    }
+  }
+
+  const hashIdx = body.indexOf('#');
+  const pagePart = hashIdx === -1 ? body : body.slice(0, hashIdx);
+  const rawTitle = pagePart.trim();
+
+  return { targetSubjectSlug, pagePart, rawTitle, alias: aliasRaw };
+}
+
+function buildWikiLinkHref(target: string, subjectSlug: string | null): string {
+  return subjectSlug
+    ? `/wiki/${target}?s=${subjectSlug}`
+    : `/wiki/${target}`;
+}
 
 /**
  * Create a remarkWikiLinks plugin that optionally resolves page titles
@@ -86,31 +134,32 @@ function splitTextForWikiLinks(text: string, resolver?: SlugResolver): MdastNode
     }
 
     const inner = match[1];
-    const pipeIdx = inner.indexOf('|');
-    const targetPart = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
-    const aliasPart = pipeIdx === -1 ? null : inner.slice(pipeIdx + 1).trim() || null;
-
-    // Strip section anchor
-    const hashIdx = targetPart.indexOf('#');
-    const pagePart = hashIdx === -1 ? targetPart : targetPart.slice(0, hashIdx);
-    const rawTitle = pagePart.trim();
+    const { targetSubjectSlug, pagePart, rawTitle, alias } =
+      parseWikiLinkInner(inner);
     const target = resolver?.(rawTitle) ?? normalizeSlug(rawTitle);
 
     if (target) {
+      const href = buildWikiLinkHref(target, targetSubjectSlug);
+      const hProperties: Record<string, string> = {
+        href,
+        'data-wiki-link': target,
+      };
+      if (targetSubjectSlug) {
+        hProperties['data-wiki-subject'] = targetSubjectSlug;
+      }
+
       const wikiLinkNode: WikiLinkNode = {
         type: 'wikiLink',
         target,
-        alias: aliasPart,
+        targetSubjectSlug,
+        alias,
         data: {
           hName: 'a',
-          hProperties: {
-            href: `/wiki/${target}`,
-            'data-wiki-link': target,
-          },
+          hProperties,
           hChildren: [
             {
               type: 'text',
-              value: aliasPart ?? (pagePart.trim() || target),
+              value: alias ?? (pagePart.trim() || target),
             },
           ],
         },
@@ -179,9 +228,14 @@ export function renderMarkdown(
             | string
             | undefined;
           if (wikiSlug) {
+            const wikiSubject =
+              (props['data-wiki-subject' as keyof typeof props] as
+                | string
+                | undefined) ?? null;
             return createElement(WikiLinkComponent, {
-              href: `/wiki/${wikiSlug}`,
+              href: buildWikiLinkHref(wikiSlug, wikiSubject),
               slug: wikiSlug,
+              subjectSlug: wikiSubject ?? undefined,
               children: props.children,
             });
           }

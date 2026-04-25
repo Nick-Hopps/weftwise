@@ -12,10 +12,12 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const status = searchParams.get('status') as Job['status'] | null;
   const type = searchParams.get('type') as Job['type'] | null;
+  const subjectId = searchParams.get('subjectId');
 
   const jobs = queue.list({
     ...(status ? { status } : {}),
     ...(type ? { type } : {}),
+    ...(subjectId ? { subjectId } : {}),
   });
 
   return NextResponse.json(jobs);

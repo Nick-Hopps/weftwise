@@ -3,6 +3,7 @@ import path from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { vaultPath } from '../config/env';
 import * as sourcesRepo from '../db/repos/sources-repo';
+import type { Subject, SubjectId } from '@/lib/contracts';
 
 export interface SavedSourceResult {
   id: string;
@@ -11,69 +12,76 @@ export interface SavedSourceResult {
 
 interface SourceMetadataFile {
   id: string;
+  subjectId: SubjectId;
+  subjectSlug: string;
   filename: string;
   contentHash: string;
   savedAt: string;
 }
 
+function rawDirFor(subjectSlug: string): string {
+  return vaultPath('raw', subjectSlug);
+}
+
+function sourcesMetaDirFor(subjectSlug: string): string {
+  return vaultPath('.llm-wiki', 'sources', subjectSlug);
+}
+
 /**
- * Persist a raw source file to vault/raw/<filename>, record its hash,
- * write a metadata JSON sidecar, and upsert the sources DB record.
+ * Persist a raw source file to vault/raw/<subjectSlug>/<filename>, record its
+ * hash, write a metadata JSON sidecar, and upsert the sources DB record.
+ *
+ * Source de-duplication is scoped by subject: the same content can exist
+ * independently in two subjects.
  */
 export function saveRawSource(
+  subject: Pick<Subject, 'id' | 'slug'>,
   filename: string,
-  content: Buffer | string,
+  content: Buffer | string
 ): SavedSourceResult {
-  // 1. Write raw file to vault/raw/<filename>
-  const rawDir = vaultPath('raw');
+  const rawDir = rawDirFor(subject.slug);
   fs.mkdirSync(rawDir, { recursive: true });
 
-  // Sanitize filename to prevent path traversal (C1 fix)
   const safeFilename = path.basename(filename);
   if (!safeFilename || safeFilename === '.' || safeFilename === '..') {
     throw new Error(`Invalid filename: ${filename}`);
   }
   const rawFilePath = path.join(rawDir, safeFilename);
-  // Verify resolved path is still within rawDir
   const resolved = path.resolve(rawFilePath);
   if (!resolved.startsWith(path.resolve(rawDir))) {
     throw new Error(`Filename escapes raw directory: ${filename}`);
   }
   fs.writeFileSync(rawFilePath, content);
 
-  // 2. Compute SHA-256 hash (first 16 hex chars)
   const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
   const contentHash = createHash('sha256').update(buf).digest('hex').slice(0, 16);
 
-  // 3. Check for existing source with same hash + filename (dedup)
-  const existing = sourcesRepo.getSourceByHash(contentHash);
+  const existing = sourcesRepo.getSourceByHash(subject.id, contentHash);
   if (existing && path.basename(existing.filename) === safeFilename) {
-    // Reuse existing source record, just update the timestamp
     sourcesRepo.upsertSource({
       ...existing,
-      parsedAt: null, // reset so it gets re-parsed
+      parsedAt: null,
     });
     return { id: existing.id, contentHash };
   }
 
-  // 4. Generate a new source ID
   const id = randomUUID();
-
-  // 5. Write metadata JSON sidecar
-  const metaDir = vaultPath('.llm-wiki', 'sources');
+  const metaDir = sourcesMetaDirFor(subject.slug);
   fs.mkdirSync(metaDir, { recursive: true });
   const metaFilePath = path.join(metaDir, `${id}.json`);
   const metaContent: SourceMetadataFile = {
     id,
-    filename: safeFilename, // store sanitized filename for consistency
+    subjectId: subject.id,
+    subjectSlug: subject.slug,
+    filename: safeFilename,
     contentHash,
     savedAt: new Date().toISOString(),
   };
   fs.writeFileSync(metaFilePath, JSON.stringify(metaContent, null, 2), 'utf-8');
 
-  // 6. Upsert sources table with sanitized filename
   sourcesRepo.upsertSource({
     id,
+    subjectId: subject.id,
     filename: safeFilename,
     contentHash,
     parsedAt: null,
@@ -83,67 +91,109 @@ export function saveRawSource(
   return { id, contentHash };
 }
 
-/**
- * Read the metadata JSON for a source by ID.
- * Returns null if no sidecar file exists.
- */
 export function getSourceMetadata(id: string): Record<string, unknown> | null {
-  const metaFilePath = vaultPath('.llm-wiki', 'sources', `${id}.json`);
-  try {
-    const raw = fs.readFileSync(metaFilePath, 'utf-8');
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return null;
+  // Sidecar lookup: walk subject subdirectories, fall back to legacy flat path.
+  const metaRoot = vaultPath('.llm-wiki', 'sources');
+  if (!fs.existsSync(metaRoot)) return null;
+
+  for (const entry of fs.readdirSync(metaRoot, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      const candidate = path.join(metaRoot, entry.name, `${id}.json`);
+      if (fs.existsSync(candidate)) {
+        try {
+          return JSON.parse(fs.readFileSync(candidate, 'utf-8'));
+        } catch {
+          return null;
+        }
+      }
+    }
   }
+
+  // Legacy flat layout
+  const legacy = vaultPath('.llm-wiki', 'sources', `${id}.json`);
+  if (fs.existsSync(legacy)) {
+    try {
+      return JSON.parse(fs.readFileSync(legacy, 'utf-8'));
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
-/**
- * Read the raw content of a source file by original filename as UTF-8 text.
- * Returns null if the file does not exist.
- */
-export function getRawSourceContent(filename: string): string | null {
+export function getRawSourceContent(
+  subjectSlug: string,
+  filename: string
+): string | null {
   const safeFilename = path.basename(filename);
-  const rawFilePath = vaultPath('raw', safeFilename);
-  const resolved = path.resolve(rawFilePath);
-  if (!resolved.startsWith(path.resolve(vaultPath('raw')))) {
-    return null;
+  const rawDir = rawDirFor(subjectSlug);
+  const candidate = path.join(rawDir, safeFilename);
+  const resolved = path.resolve(candidate);
+  if (resolved.startsWith(path.resolve(rawDir))) {
+    try {
+      return fs.readFileSync(candidate, 'utf-8');
+    } catch {
+      // fall through to legacy
+    }
   }
-  try {
-    return fs.readFileSync(rawFilePath, 'utf-8');
-  } catch {
-    return null;
+
+  // Legacy flat layout: vault/raw/<filename>
+  const legacy = vaultPath('raw', safeFilename);
+  const legacyResolved = path.resolve(legacy);
+  if (legacyResolved.startsWith(path.resolve(vaultPath('raw')))) {
+    try {
+      return fs.readFileSync(legacy, 'utf-8');
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
-/**
- * Read the raw content of a source file as a Buffer (for binary formats like PDF).
- * Returns null if the file does not exist.
- */
-export function getRawSourceBuffer(filename: string): Buffer | null {
+export function getRawSourceBuffer(
+  subjectSlug: string,
+  filename: string
+): Buffer | null {
   const safeFilename = path.basename(filename);
-  const rawFilePath = vaultPath('raw', safeFilename);
-  const resolved = path.resolve(rawFilePath);
-  if (!resolved.startsWith(path.resolve(vaultPath('raw')))) {
-    return null;
+  const rawDir = rawDirFor(subjectSlug);
+  const candidate = path.join(rawDir, safeFilename);
+  const resolved = path.resolve(candidate);
+  if (resolved.startsWith(path.resolve(rawDir))) {
+    try {
+      return fs.readFileSync(candidate);
+    } catch {
+      // fall through to legacy
+    }
   }
-  try {
-    return fs.readFileSync(rawFilePath);
-  } catch {
-    return null;
+
+  const legacy = vaultPath('raw', safeFilename);
+  const legacyResolved = path.resolve(legacy);
+  if (legacyResolved.startsWith(path.resolve(vaultPath('raw')))) {
+    try {
+      return fs.readFileSync(legacy);
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 /**
- * Update source metadata sidecar with page linkage info for rebuild.
+ * Update the metadata sidecar with the slugs of pages this source contributed
+ * to. Best-effort — failures here do not block the saga.
  */
 export function updateSourcePageLinks(sourceId: string, pageSlugs: string[]): void {
-  const metaFilePath = vaultPath('.llm-wiki', 'sources', `${sourceId}.json`);
+  const meta = getSourceMetadata(sourceId);
+  if (!meta) return;
+  const subjectSlug =
+    typeof meta.subjectSlug === 'string' ? meta.subjectSlug : null;
+  const candidatePath = subjectSlug
+    ? path.join(sourcesMetaDirFor(subjectSlug), `${sourceId}.json`)
+    : vaultPath('.llm-wiki', 'sources', `${sourceId}.json`);
   try {
-    const raw = fs.readFileSync(metaFilePath, 'utf-8');
-    const meta = JSON.parse(raw) as Record<string, unknown>;
-    meta.linkedPages = pageSlugs;
-    fs.writeFileSync(metaFilePath, JSON.stringify(meta, null, 2), 'utf-8');
+    const updated = { ...meta, linkedPages: pageSlugs };
+    fs.writeFileSync(candidatePath, JSON.stringify(updated, null, 2), 'utf-8');
   } catch {
-    // If sidecar doesn't exist, skip
+    // best-effort
   }
 }

@@ -1,8 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useUIStore } from '@/stores/ui-store';
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from '@tanstack/react-query';
+import { GENERAL_SUBJECT_SLUG, useUIStore } from '@/stores/ui-store';
+import { apiFetch } from '@/lib/api-fetch';
 import { GlobalJobTracker } from '@/components/shared/global-job-tracker';
 import { CommandPalette } from '@/components/search/command-palette';
 import { ContextPanelSheet } from '@/components/layout/context-panel-sheet';
@@ -60,6 +65,79 @@ function GlobalHotkeys() {
   return null;
 }
 
+interface SubjectsBootResponse {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  pageCount: number;
+}
+
+async function fetchSubjects(): Promise<SubjectsBootResponse[]> {
+  const res = await apiFetch('/api/subjects');
+  if (!res.ok) return [];
+  return res.json();
+}
+
+/**
+ * Reconcile the persisted subject with the server's truth on boot.
+ *
+ * - Persists the `subjects` query under the same key SubjectSwitcher uses, so
+ *   the dropdown opens with no spinner.
+ * - If the persisted `currentSubjectId` is missing on the server (deleted
+ *   elsewhere), fall back to "general"; otherwise leave the persisted choice
+ *   untouched.
+ * - Always rewrites the store with a canonical `{id, slug}` so the cookie
+ *   used by server middleware stays in sync.
+ */
+function SubjectsBootstrap() {
+  const setCurrentSubject = useUIStore((s) => s.setCurrentSubject);
+  const currentSubjectId = useUIStore((s) => s.currentSubjectId);
+  const currentSubjectSlug = useUIStore((s) => s.currentSubjectSlug);
+
+  const { data: subjects } = useQuery({
+    queryKey: ['subjects'],
+    queryFn: fetchSubjects,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (!subjects || subjects.length === 0) return;
+
+    // Cross-subject deep links (e.g. `/wiki/foo?s=frontend`) win over the
+    // persisted choice — the SSR pages already use `?s` to pick a subject, so
+    // the client store has to follow or sidebar/graph/search drift apart.
+    // Read window.location directly so we don't drag the whole tree into a
+    // useSearchParams Suspense boundary.
+    const overrideSlug =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('s')
+        : null;
+    const override = overrideSlug
+      ? subjects.find((s) => s.slug === overrideSlug)
+      : null;
+
+    const persistedMatch = currentSubjectId
+      ? subjects.find((s) => s.id === currentSubjectId)
+      : null;
+
+    const target =
+      override ??
+      persistedMatch ??
+      subjects.find((s) => s.slug === GENERAL_SUBJECT_SLUG) ??
+      subjects[0];
+
+    // Skip the no-op case so we don't churn the cookie (and any downstream
+    // listeners) on every render that subscribes to the same subject.
+    if (target.id === currentSubjectId && target.slug === currentSubjectSlug) {
+      return;
+    }
+    setCurrentSubject({ id: target.id, slug: target.slug });
+  }, [subjects, currentSubjectId, currentSubjectSlug, setCurrentSubject]);
+
+  return null;
+}
+
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(makeQueryClient);
 
@@ -67,6 +145,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={queryClient}>
       <DarkModeInitializer />
       <GlobalHotkeys />
+      <SubjectsBootstrap />
       {children}
       <CommandPalette />
       <ContextPanelSheet />

@@ -52,14 +52,26 @@ Answer the user's question using ONLY the wiki page content provided. Do not use
 - If information comes from multiple pages, cite each source separately.
 - Excerpts should be the key sentence(s) that support the claim — keep them concise.
 
+## Subject scoping
+- The provided pages all belong to the same subject (workspace). Treat them as the only available knowledge.
+- Do NOT cite or reference pages from other subjects, even if the user mentions them.
+- If the question can only be answered from another subject, say so plainly and ask the user to switch subjects.
+
 ## Saving as a page
 If the answer synthesises information in a way that would be valuable as a standalone wiki page (e.g., a comparison, a how-to guide, a glossary entry), suggest a title for it. The system will offer the user a chance to save it.`;
 
 // ── User prompt builder ───────────────────────────────────────────────────────
 
+export interface SubjectContext {
+  slug: string;
+  name: string;
+  description?: string;
+}
+
 export function buildQueryUserPrompt(
   question: string,
   relevantPages: { slug: string; title: string; content: string; isCurrent?: boolean }[],
+  subject?: SubjectContext,
 ): string {
   const currentPage = relevantPages.find((p) => p.isCurrent);
   const pagesSection =
@@ -72,11 +84,21 @@ export function buildQueryUserPrompt(
           })
           .join('\n\n---\n\n');
 
+  const subjectSection = subject
+    ? `## Active subject (workspace)
+- **Name**: ${subject.name}
+- **Slug**: \`${subject.slug}\`
+${subject.description?.trim() ? `- **Description**: ${subject.description.trim()}\n` : ''}
+All pages below are scoped to this subject. Do not invent information from other subjects.
+
+`
+    : '';
+
   const currentPageHint = currentPage
     ? `\nThe user is currently viewing the page \`${currentPage.slug}\` ("${currentPage.title}"). If the question uses vague references like "this", "this page", "here", or asks for a summary/explanation without naming a topic, assume they are asking about that page.\n`
     : '';
 
-  return `## Relevant wiki pages
+  return `${subjectSection}## Relevant wiki pages
 
 ${pagesSection}
 

@@ -16,12 +16,13 @@
 | 文件 | 说明 |
 |------|------|
 | `shell.tsx` | 主 Shell，含 Header + Sidebar + 主内容 + 可伸缩 ContextPanel（`pointer` 事件实现拖拽宽度）|
-| `header.tsx` | 顶栏：logo、命令面板触发、dark mode toggle、context panel toggle |
-| `sidebar.tsx` | 左侧目录树（wiki pages + 最近访问） |
+| `header.tsx` | 顶栏：logo、`<SubjectSwitcher />`、面包屑、命令面板触发、dark mode toggle、context panel toggle |
+| `sidebar.tsx` | 左侧目录树（按 `currentSubjectId` 过滤的 wiki pages + 最近访问） |
+| `subject-switcher.tsx` | 🆕 cmdk + 自定义浮层；显示 subjects 列表；⌘O 唤起；切换时写 store + cookie + invalidate 8 个 query key + `router.refresh()` |
 | `context-panel.tsx` | 右侧上下文面板容器（Tabs: context / chat） |
 | `context-panel-sheet.tsx` | 移动端抽屉版本（off-canvas） |
-| `context-panel-context-tab.tsx` | "上下文"Tab：backlinks + frontmatter + mini-graph |
-| `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface` |
+| `context-panel-context-tab.tsx` | "上下文"Tab：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
+| `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface`，发问 body 含 subjectId |
 
 ### `ui/` — 设计系统
 
@@ -37,23 +38,24 @@
 ### `wiki/` — wiki 页面渲染
 
 - `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）
-- `wiki-link.tsx` —— `[[target]]` 的 client 组件，支持 hover peek
+- `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
+- `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `frontmatter-display.tsx` —— 页头 meta 信息展示
 - `page-skeleton.tsx` —— loading skeleton
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling）
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key
 - `message-list.tsx`
-- `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`
+- `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`，body 带 `subjectId`
 
 ### `search/`
 
-- `command-palette.tsx` —— `cmd+k` 全局命令面板，双模式：`/go` FTS 导航、`/ask` LLM 问答
+- `command-palette.tsx` —— `cmd+k` 全局命令面板，双模式：`/go` FTS 导航、`/ask` LLM 问答；命令包含 `Switch subject` `Manage subjects`；fetch 自动带 subjectId
 
 ### `graph/`
 
-- `mini-graph-view.tsx` —— 基于 cytoscape 的迷你图（仪表盘 + 上下文 Tab 共用）
+- `mini-graph-view.tsx` —— 基于 cytoscape 的迷你图（仪表盘 + 上下文 Tab 共用）；外层 `<div key={currentSubjectId}>` 强制 cytoscape 重挂载，避免切换 subject 时闪烁
 
 ### `shared/`
 
@@ -62,7 +64,7 @@
 
 ### `providers.tsx`
 
-客户端 providers：TanStack Query 的 `QueryClientProvider`、主题初始化等。
+客户端 providers：TanStack Query 的 `QueryClientProvider`、主题初始化、内置 `<SubjectsBootstrap />`（启动时按 `?s=` URL > 持久化 > general 兜底初始化 `currentSubject*`，并通过引用比较跳过重复 set 防循环）。
 
 ### `error-boundary.tsx`
 
@@ -76,7 +78,7 @@ React 错误边界，包裹 `(app)/layout.tsx` 主内容。
 
 - 所有可能用到客户端状态或事件的文件顶部 `'use client'`。
 - 样式一律走 Tailwind + `cn()`（`@/lib/cn`）合并类名。颜色引用 CSS 变量（`bg-surface`、`text-foreground-secondary` 等），主题切换由 `useUIStore::darkMode` 驱动。
-- 与后端通信：**仅使用** `@/lib/api-fetch`（会自动带 cookie / API key header）；**禁止** 在组件里手写 `fetch('/api/...')`。
+- 与后端通信：**仅使用** `@/lib/api-fetch`（会自动带 cookie / API key header）；客户端组件优先使用 `useApiFetch()` hook 自动注入 `?subjectId`；POST 由调用方在 body 中显式带 `subjectId`，**禁止** 手写 `fetch('/api/...')`。
 
 ## 关键依赖
 
@@ -115,8 +117,8 @@ src/components/
 ├── providers.tsx
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
-├── layout/       {shell, header, sidebar, context-panel*}
-├── wiki/         {page-renderer, wiki-link, frontmatter-display, page-skeleton}
+├── layout/       {shell, header, sidebar, subject-switcher, context-panel*}
+├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton}
 ├── chat/         {chat-interface, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── graph/        {mini-graph-view}
@@ -128,6 +130,7 @@ src/components/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化；对应最近一次 `refactor(ui): 统一设计系统与上下文面板` 后的结构 |
+| 2026-04-25 | Subject：SubjectSwitcher (⌘O) / wiki-page-elsewhere / 各客户端组件接入 subjectId / wiki-link 缓存 key 加 subject |
 
 ---
 

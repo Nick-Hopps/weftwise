@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FileUp, UploadCloud } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
+import { useUIStore } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Panel, PanelHeader, PanelTitle, SectionLabel } from '@/components/ui/panel';
@@ -63,8 +64,10 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
     setCreatedPages([]);
     setUploading(true);
     try {
+      const subjectId = useUIStore.getState().currentSubjectId;
       const formData = new FormData();
       formData.append('file', file);
+      if (subjectId) formData.append('subjectId', subjectId);
       const res = await apiFetch('/api/ingest', { method: 'POST', body: formData });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -100,11 +103,14 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
     }
     setUploading(true);
     try {
+      const subjectId = useUIStore.getState().currentSubjectId;
       const filename = filenameInput.trim() || `note-${Date.now()}.md`;
       const res = await apiFetch('/api/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: textInput, filename }),
+        body: JSON.stringify(
+          subjectId ? { text: textInput, filename, subjectId } : { text: textInput, filename },
+        ),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

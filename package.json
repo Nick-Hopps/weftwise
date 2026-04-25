@@ -4,13 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:all": "concurrently --names next,worker --prefix-colors blue,green \"next dev\" \"node --env-file=.env --import tsx src/server/worker-entry.ts\"",
+    "dev:all": "concurrently --names next,worker --prefix-colors blue,green \"next dev\" \"node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx src/server/worker-entry.ts\"",
     "build": "next build",
     "start": "next start",
-    "start:all": "concurrently --names next,worker --prefix-colors blue,green \"next start\" \"node --env-file=.env --import tsx src/server/worker-entry.ts\"",
+    "start:all": "concurrently --names next,worker --prefix-colors blue,green \"next start\" \"node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx src/server/worker-entry.ts\"",
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:migrate-subjects": "tsx scripts/migrate-introduce-subject.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
