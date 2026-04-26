@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { renderLanguageDirective, type PromptContext } from './prompt-context';
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -62,16 +63,10 @@ If the answer synthesises information in a way that would be valuable as a stand
 
 // ── User prompt builder ───────────────────────────────────────────────────────
 
-export interface SubjectContext {
-  slug: string;
-  name: string;
-  description?: string;
-}
-
 export function buildQueryUserPrompt(
   question: string,
   relevantPages: { slug: string; title: string; content: string; isCurrent?: boolean }[],
-  subject?: SubjectContext,
+  ctx: PromptContext,
 ): string {
   const currentPage = relevantPages.find((p) => p.isCurrent);
   const pagesSection =
@@ -84,21 +79,23 @@ export function buildQueryUserPrompt(
           })
           .join('\n\n---\n\n');
 
-  const subjectSection = subject
+  const subjectSection = ctx.subject
     ? `## Active subject (workspace)
-- **Name**: ${subject.name}
-- **Slug**: \`${subject.slug}\`
-${subject.description?.trim() ? `- **Description**: ${subject.description.trim()}\n` : ''}
+- **Name**: ${ctx.subject.name}
+- **Slug**: \`${ctx.subject.slug}\`
+${ctx.subject.description?.trim() ? `- **Description**: ${ctx.subject.description.trim()}\n` : ''}
 All pages below are scoped to this subject. Do not invent information from other subjects.
 
 `
     : '';
 
+  const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
+
   const currentPageHint = currentPage
     ? `\nThe user is currently viewing the page \`${currentPage.slug}\` ("${currentPage.title}"). If the question uses vague references like "this", "this page", "here", or asks for a summary/explanation without naming a topic, assume they are asking about that page.\n`
     : '';
 
-  return `${subjectSection}## Relevant wiki pages
+  return `${languageDirective}${subjectSection}## Relevant wiki pages
 
 ${pagesSection}
 

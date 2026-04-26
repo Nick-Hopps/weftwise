@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { renderLanguageDirective, type PromptContext } from './prompt-context';
 
 // ── Phase A: Page Plan (no body content) ─────────────────────────────────────
 
@@ -217,12 +218,15 @@ All planned pages belong to this subject. Existing pages listed below are scoped
 export function buildPlanUserPrompt(
   sourceText: string,
   existingPages: { slug: string; title: string; summary: string }[],
-  subject?: SubjectContext,
+  ctx: PromptContext,
 ): string {
   const existingPagesSection = buildBudgetedPagesSection(sourceText, existingPages);
-  const subjectSection = subject ? `${renderSubjectHeader(subject)}\n\n` : '';
+  const subjectSection = ctx.subject
+    ? `${renderSubjectHeader(ctx.subject as SubjectContext)}\n\n`
+    : '';
+  const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
 
-  return `${subjectSection}## Existing wiki pages
+  return `${languageDirective}${subjectSection}## Existing wiki pages
 ${existingPagesSection}
 
 ## Source document text
@@ -244,15 +248,18 @@ export function buildPageBodyUserPrompt(
   page: { slug: string; title: string; summary: string; outline: string; action: string },
   sourceText: string,
   allPageTitles: string[],
-  subject?: SubjectContext,
+  ctx: PromptContext,
 ): string {
   const otherPages = allPageTitles
     .filter((t) => t !== page.title)
     .map((t) => `- [[${t}]]`)
     .join('\n');
-  const subjectSection = subject ? `${renderSubjectHeader(subject)}\n\n` : '';
+  const subjectSection = ctx.subject
+    ? `${renderSubjectHeader(ctx.subject as SubjectContext)}\n\n`
+    : '';
+  const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
 
-  return `${subjectSection}## Page to write
+  return `${languageDirective}${subjectSection}## Page to write
 - **Title**: ${page.title}
 - **Slug**: ${page.slug}
 - **Action**: ${page.action}
@@ -273,25 +280,19 @@ Write the markdown body for the page described above. Follow the outline closely
 
 export function buildIndexUserPrompt(
   pages: { slug: string; title: string; summary: string }[],
-  subject?: SubjectContext,
+  ctx: PromptContext,
 ): string {
   const pageList = pages
     .map((p) => `- **${p.title}** (\`${p.slug}\`): ${p.summary}`)
     .join('\n');
-  const subjectSection = subject ? `${renderSubjectHeader(subject)}\n\n` : '';
+  const subjectSection = ctx.subject
+    ? `${renderSubjectHeader(ctx.subject as SubjectContext)}\n\n`
+    : '';
+  const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
 
-  return `${subjectSection}## All wiki pages in this subject
+  return `${languageDirective}${subjectSection}## All wiki pages in this subject
 
 ${pageList}
 
 Generate the index page body listing all pages above alphabetically with their summaries, using [[wikilink]] syntax. Do NOT include YAML frontmatter.`;
-}
-
-// Legacy alias
-export function buildIngestUserPrompt(
-  sourceText: string,
-  existingPages: { slug: string; title: string; summary: string }[],
-  subject?: SubjectContext,
-): string {
-  return buildPlanUserPrompt(sourceText, existingPages, subject);
 }

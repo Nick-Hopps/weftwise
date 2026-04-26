@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { renderLanguageDirective, type PromptContext } from './prompt-context';
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -73,18 +74,14 @@ Carefully review the provided wiki pages and identify quality issues. Focus on t
 
 // ── User prompt builder ───────────────────────────────────────────────────────
 
-export interface SubjectContext {
-  slug: string;
-  name: string;
-  description?: string;
-}
-
 export function buildLintUserPrompt(
   pages: { slug: string; title: string; content: string }[],
-  subject?: SubjectContext,
+  ctx: PromptContext,
 ): string {
+  const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
+
   if (pages.length === 0) {
-    return 'No wiki pages provided. Return an empty findings array.';
+    return `${languageDirective}No wiki pages provided. Return an empty findings array.`;
   }
 
   const pagesSection = pages
@@ -94,17 +91,17 @@ export function buildLintUserPrompt(
     )
     .join('\n\n---\n\n');
 
-  const subjectSection = subject
+  const subjectSection = ctx.subject
     ? `## Active subject (workspace)
-- **Name**: ${subject.name}
-- **Slug**: \`${subject.slug}\`
-${subject.description?.trim() ? `- **Description**: ${subject.description.trim()}\n` : ''}
+- **Name**: ${ctx.subject.name}
+- **Slug**: \`${ctx.subject.slug}\`
+${ctx.subject.description?.trim() ? `- **Description**: ${ctx.subject.description.trim()}\n` : ''}
 All pages below belong to this subject. Compare claims only within this set.
 
 `
     : '';
 
-  return `${subjectSection}Please audit the following wiki pages for contradictions, missing cross-references, and coverage gaps.
+  return `${languageDirective}${subjectSection}Please audit the following wiki pages for contradictions, missing cross-references, and coverage gaps.
 
 ## Wiki pages under review
 
