@@ -61,6 +61,7 @@
 
 - `global-job-tracker.tsx` —— 全局任务状态指示器（读队列中所有任务）
 - `progress-toast.tsx` —— SSE 进度条 toast
+- `settings-dialog.tsx` 现包含 "Wiki language" 行：通过 `useQuery(['app-settings'])` 读 `GET /api/settings`，本地 `useState` 暂存 input，`useMutation` 发 `PUT /api/settings`。**不**写 Zustand —— 服务端 `app_settings` 表是唯一真实源。
 
 ### `providers.tsx`
 
@@ -131,6 +132,7 @@ src/components/
 |------|------|
 | 2026-04-22 | 初始化；对应最近一次 `refactor(ui): 统一设计系统与上下文面板` 后的结构 |
 | 2026-04-25 | Subject：SubjectSwitcher (⌘O) / wiki-page-elsewhere / 各客户端组件接入 subjectId / wiki-link 缓存 key 加 subject |
+| 2026-04-26 | wikiLanguage：`settings-dialog.tsx` 新增 "Wiki language" 行（React Query GET/PUT `/api/settings`，不写 Zustand）|
 
 ---
 

@@ -95,6 +95,16 @@ resolveTask(task, overrides?) → ResolvedTaskRoute
 - `llm-config.json` 入 `.gitignore`（含 API key 引用时避免泄漏）。
 - 必须提供 `defaults.profile` + `defaults.model`，否则 `resolveTask` 抛 `LLMConfigError`。
 
+## `PromptContext` & wikiLanguage 注入
+
+`prompts/prompt-context.ts` 导出：
+- `interface PromptContext { language: string; subject?: SubjectContextLite }`
+- `renderLanguageDirective(language)` — 渲染 `=== OUTPUT LANGUAGE ===` 块
+
+5 个 user prompt builder（plan / pageBody / index / query / lint）签名末参数都是 `ctx: PromptContext`，并在返回字符串顶部插入 `renderLanguageDirective(ctx.language)`。指令明确禁止翻译 slug、`[[wikilink]]` 目标、frontmatter 键、code block —— 否则会破坏 wiki 图。
+
+服务层从 `db/repos/settings-repo::getWikiLanguage()` 读取语言（**不在** `llm-config.json` 里 —— 它是个用户运行时设置，不是 LLM 路由配置）。
+
 ## 扩展指南
 
 - **新增 provider**：
@@ -134,6 +144,7 @@ src/server/llm/
 ├── provider-registry.ts       # generateStructuredOutput / streamTextResponse
 ├── task-router.ts             # defaults ← task ← overrides 合并
 └── prompts/
+    ├── prompt-context.ts      # PromptContext interface + renderLanguageDirective
     ├── ingest-prompt.ts       # 多阶段 plan / page-body / index
     ├── query-prompt.ts        # 用户问答 + 引用
     └── lint-prompt.ts         # 全库扫查
@@ -144,6 +155,7 @@ src/server/llm/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化 |
+| 2026-04-26 | wikiLanguage：新增 `PromptContext` + `renderLanguageDirective`；5 个 user prompt builder 接入 `ctx: PromptContext`；文件清单补 `prompts/prompt-context.ts` |
 
 ---
 

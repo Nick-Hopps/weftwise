@@ -53,6 +53,23 @@
 
 - `upsertSource(subjectId, payload) / findByHash(subjectId, hash) / linkPageToSource(subjectId, pageSlug, sourceId)`
 
+### `settings-repo.ts`（全局键值设置）
+
+通用 key/value 表，承载所有"全 app 单实例"的全局设置（首个使用方：`wikiLanguage`，存语言名字符串如 "English" / "Chinese"）。
+
+| 列 | 类型 | 备注 |
+|----|------|------|
+| `key` | TEXT PK | 设置名（如 `wikiLanguage`）|
+| `value` | TEXT | 字符串值（zod 校验由调用方 `WikiLanguageSchema` 负责）|
+| `updated_at` | TEXT | ISO-8601 时间戳 |
+
+读写统一走 `repos/settings-repo.ts`：
+
+- `getWikiLanguage()` — 缺失时返回 `DEFAULT_WIKI_LANGUAGE`（`English`）
+- `setWikiLanguage(value)` — 经 `WikiLanguageSchema.parse()` 校验（trim + min 1 + max 64）后 upsert
+
+服务层（`ingest` / `query` / `lint`）每次调用时**实时**读取，不在启动时缓存，方便 UI 修改即时生效。
+
 ## 关键依赖与配置
 
 - **依赖**：`better-sqlite3@11`、`drizzle-orm@0.38`、`drizzle-kit@0.29`（生成迁移用）。
@@ -121,6 +138,7 @@ src/server/db/
 |------|------|
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：复合 PK / target_subject_id / subjects-repo / FTS5 带 subject filter / 启动自迁移 |
+| 2026-04-26 | wikiLanguage：新增 `app_settings` 表 + `settings-repo.ts`（`getWikiLanguage` / `setWikiLanguage`）|
 
 ---
 
