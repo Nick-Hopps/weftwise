@@ -1,0 +1,15 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schemas/server.json",
+  "version": 1,
+  "servers": {
+    "fetch": {
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "context7": {
+      "transport": "streamable-http",
+      "url": "https://mcp.context7.com/mcp"
+    }
+  }
+}
