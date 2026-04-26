@@ -37,6 +37,8 @@ This document is the *design contract* for Phase 1. The implementation plan is p
 | D10 | Defaults | maxSteps=25 / maxTokens=500K / parallelSubAgents=3 / MCP=lazy / model=task-router+frontmatter override | Sensible budgets; all configurable from settings UI |
 | D11 | Worker concurrency | **Stay serial** (single in-flight job) | vault-mutex, rate-limit, debugging simplicity |
 | D12 | Settings storage | **`app_settings` table** (existing pattern, same as `wikiLanguage`) | Server is single source of truth; live-reload on every read |
+| D13 | Reviewer rejects commit | **Fail job** — no retry-from-planner | Reviewer's prompt instructs "≥2 unimproved rounds → commit anyway"; this branch is rare and surfacing the failure to the user is more useful than burning more tokens |
+| D14 | Skill `<<include: …>>` syntax | **Deferred to Phase 2** | Phase 1 keeps skill body opaque; reserve the syntax token but no parser |
 
 ---
 
@@ -519,10 +521,7 @@ Per-skill model resolution depends on `agentTaskRouterMode`:
 
 ## 13. Open Questions
 
-| # | Question | Recommended | Status |
-|---|---|---|---|
-| OQ-1 | Reviewer rejects commit — fail job, or retry-from-planner (max 1×)? | Fail job; surface findings to user. Reviewer's prompt instructs "if ≥2 review rounds without improvement, commit anyway" so this should be rare. | Confirm before implementation |
-| OQ-2 | Should skill body support `<<include: …>>` to share prompt fragments? | Defer to Phase 2 (reserve syntax, no implementation now) | Deferred |
+_None — all questions raised during brainstorming were resolved (see decisions D13 / D14)._
 
 ---
 
