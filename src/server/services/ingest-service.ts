@@ -30,6 +30,8 @@ import {
   buildPageBodyUserPrompt,
   buildIndexUserPrompt,
 } from '../llm/prompts/ingest-prompt';
+import { getWikiLanguage } from '../db/repos/settings-repo';
+import type { PromptContext } from '../llm/prompts/prompt-context';
 import { buildWikiPath } from '../wiki/page-identity';
 import type { ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
 
@@ -135,6 +137,11 @@ async function runIngestJob(
     description: subject.description,
   };
 
+  const promptCtx: PromptContext = {
+    language: getWikiLanguage(),
+    subject: subjectCtx,
+  };
+
   // ── Phase A: Generate page plan ────────────────────────────────────────────
 
   emit('ingest:llm', 'Phase A: Generating page plan via LLM...', { phase: 'plan' });
@@ -142,7 +149,7 @@ async function runIngestJob(
     'ingest',
     IngestPlanSchema,
     PLAN_SYSTEM_PROMPT,
-    buildPlanUserPrompt(truncatedText, existingPages, subjectCtx),
+    buildPlanUserPrompt(truncatedText, existingPages, promptCtx),
     { maxTokens: 8192 },
   );
 
@@ -175,7 +182,7 @@ async function runIngestJob(
       'ingest',
       PageBodySchema,
       PAGE_BODY_SYSTEM_PROMPT,
-      buildPageBodyUserPrompt(page, truncatedText, allPageTitles, subjectCtx),
+      buildPageBodyUserPrompt(page, truncatedText, allPageTitles, promptCtx),
       { maxTokens: 8192 },
     );
 
@@ -196,7 +203,7 @@ async function runIngestJob(
     'ingest',
     IndexBodySchema,
     INDEX_BODY_SYSTEM_PROMPT,
-    buildIndexUserPrompt(allPagesForIndex, subjectCtx),
+    buildIndexUserPrompt(allPagesForIndex, promptCtx),
     { maxTokens: 4096 },
   );
 

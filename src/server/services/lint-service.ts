@@ -26,6 +26,8 @@ import {
   LINT_SYSTEM_PROMPT,
   buildLintUserPrompt,
 } from '../llm/prompts/lint-prompt';
+import { getWikiLanguage } from '../db/repos/settings-repo';
+import type { PromptContext } from '../llm/prompts/prompt-context';
 import type { LintFinding, Job, Subject } from '@/lib/contracts';
 
 const ORPHAN_EXCLUDE_SLUGS = new Set(['index', 'log']);
@@ -230,8 +232,13 @@ async function runSemanticChecksForSubject(subject: Subject): Promise<LintFindin
     description: subject.description,
   };
 
+  const promptCtx: PromptContext = {
+    language: getWikiLanguage(),
+    subject: subjectCtx,
+  };
+
   for (const batch of batches) {
-    const userPrompt = buildLintUserPrompt(batch, subjectCtx);
+    const userPrompt = buildLintUserPrompt(batch, promptCtx);
     const result = await generateStructuredOutput(
       'lint',
       LintResultSchema,
