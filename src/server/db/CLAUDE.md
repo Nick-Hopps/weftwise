@@ -70,6 +70,18 @@
 
 服务层（`ingest` / `query` / `lint`）每次调用时**实时**读取，不在启动时缓存，方便 UI 修改即时生效。
 
+**Phase 1 新增的 5 个 agent 配置 key**（由 `app_settings` 表承载，`runPipeline` 每次调用时实时读取）：
+
+| Key | 类型 | 默认值 | 说明 |
+|-----|------|--------|------|
+| `agentMaxSteps` | number | `25` | 单 job 跨所有 skill step 的最大 tool-call 轮次 |
+| `agentMaxTokensPerJob` | number | `500000` | 单 job token 总预算（in + out 合计）|
+| `agentMaxParallelSubAgents` | number | `3` | fanout writer step 的最大并发数 |
+| `agentMcpLifecycle` | string | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
+| `agentTaskRouterMode` | string | `'frontmatter-override'` | skill LLM 选择策略 |
+
+对应 getter/setter 统一在 `settings-repo.ts` 封装，UI 通过 `PUT /api/settings` 写入，**不**镜像到 Zustand。
+
 ## 关键依赖与配置
 
 - **依赖**：`better-sqlite3@11`、`drizzle-orm@0.38`、`drizzle-kit@0.29`（生成迁移用）。
@@ -126,10 +138,11 @@ src/server/db/
 ├── client.ts          # 单例连接 + ensureTables + FTS + legacy 自迁移
 ├── schema.ts          # Drizzle schema（subjects / pages 复合 PK / target_subject_id）
 └── repos/
-    ├── subjects-repo.ts  # 🆕 主题 CRUD + countPages + deleteIfEmpty
+    ├── subjects-repo.ts  # 主题 CRUD + countPages + deleteIfEmpty
     ├── pages-repo.ts     # 全部强制 subjectId
     ├── jobs-repo.ts      # 写入/查询带 subject_id
-    └── sources-repo.ts   # subject-scoped
+    ├── sources-repo.ts   # subject-scoped
+    └── settings-repo.ts  # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
 ```
 
 ## 变更记录 (Changelog)
@@ -139,6 +152,7 @@ src/server/db/
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：复合 PK / target_subject_id / subjects-repo / FTS5 带 subject filter / 启动自迁移 |
 | 2026-04-26 | wikiLanguage：新增 `app_settings` 表 + `settings-repo.ts`（`getWikiLanguage` / `setWikiLanguage`）|
+| 2026-04-27 | settings-repo 新增 5 个 agent 配置 key（maxSteps / maxTokensPerJob / maxParallelSubAgents / mcpLifecycle / taskRouterMode）|
 
 ---
 

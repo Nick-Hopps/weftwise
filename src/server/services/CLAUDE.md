@@ -21,19 +21,13 @@ worker-entry.ts
 
 > **强校验** `params.subjectId`（缺失直接 fail job）。所有页面的 `existingPages` / `titleMap` 都仅取自该 subject。
 
-多阶段 LLM 工作流：
+调用 `runPipeline(jobId, subject, parsedSources, promptCtx)`，内部以 3 个 skill 顺序执行：
 
-1. 读 `sources/*` 原始文件 → `parseSourceAsync`（md/html/pdf 分发）。
-2. **Plan 阶段**：`generateStructuredOutput('ingest', IngestPlanSchema, PLAN_SYSTEM_PROMPT, ...)` 产生页面清单；prompt header 注入当前 SubjectContext + "默认不跨主题链接"指引。
-3. **Page Body 阶段**：对每个 plan 条目生成 markdown 正文（`PageBodySchema`），写入 `vault/wiki/<subject>/<slug>.md`。
-4. **Index 阶段**：更新/创建该 subject 的 `index.md`（每 subject 独立一份，`tags: [meta]`）。
-5. 构造 `ChangesetEntry[]`：frontmatter + body 组装为完整文件。
-6. `createChangeset(jobId, subject, entries)` → `validateChangeset` → `applyChangeset`（内部走 Saga）。
-7. 维护该 subject 的 `log.md`（追加日志条目，保留已有 frontmatter）。
+1. **`ingest-planner`**：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。工具：`vault.read` / `vault.search`。
+2. **`ingest-writer`**（fanout × N pages）：对每个 plan 条目生成完整 markdown 正文与 frontmatter。工具：`vault.read` / `vault.search`。
+3. **`ingest-reviewer`**：审校汇总 writer 产出，调用 `commit_changeset` 写入 vault（Saga 事务）。**只有此 step 可以写入**。
 
-关键常量：`SOURCE_TEXT_LIMIT = 30_000`（传给 LLM 的最大字符数）。
-
-返回值类型 `IngestResult`：`{ pagesCreated, pagesUpdated, linksAdded, commitSha }`。
+旧的多阶段 LLM 直调（`generateStructuredOutput` plan → pageBody → index）与 `buildLogContent` helper 均已移除，详见 `src/server/agents/CLAUDE.md`。
 
 ### `query-service.ts` — 任务类型 `'save-to-wiki'` + 同步函数
 
@@ -73,10 +67,10 @@ worker-entry.ts
 
 ## 测试与质量
 
-- 当前零测试。优先级：
+- 当前零测试（services 层）。优先级：
   - `query-service.answerQuery` 在"库为空 / 命中 0 条 / 命中多条"的不同分支；
-  - `ingest-service.buildLogContent` round-trip；
-  - Saga 失败时 emit 的顺序与最终 job.status 一致。
+  - Saga 失败时 emit 的顺序与最终 job.status 一致；
+  - ingest pipeline 测试见 `src/server/agents/runtime/__tests__/`。
 
 ## 常见问题 (FAQ)
 
@@ -87,7 +81,7 @@ worker-entry.ts
 - **如何调试 ingest 失败？**
   1. 查 `jobs` 表 `status='failed'` 的记录；
   2. 查对应 `job_events` 表里的 `data_json`（含 `finishReason`、`usage`、`cause`）；
-  3. 查 worker 控制台日志（`[LLM][Task: ingest][Model: ...] failed after ...`）。
+  3. 查 worker 控制台日志；ingest pipeline 详细 step 事件在 SSE `agent:step-*` 事件流中。
 
 ## 相关文件清单
 
@@ -104,6 +98,7 @@ src/server/services/
 |------|------|
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：三类 service 强校验 subjectId / prompt 注入 SubjectContext / lint 默认 subject-scoped |
+| 2026-04-27 | ingest-service 切换为 multi-agent runtime；旧多阶段 LLM 直调与 buildLogContent helper 移除 |
 
 ---
 
