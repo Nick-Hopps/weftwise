@@ -36,6 +36,7 @@ export function apiFetch(
 const SUBJECT_AGNOSTIC_EXACT = new Set([
   '/api/session',
   '/api/reset',
+  '/api/settings',
 ]);
 
 const SUBJECT_AGNOSTIC_PREFIXES = [
