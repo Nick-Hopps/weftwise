@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Moon, Sun, X, RotateCcw } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-fetch';
@@ -332,17 +332,23 @@ function NumberSettingRow(props: {
   onSave: (v: number) => void;
   pending: boolean;
 }) {
+  const inputId = useId();
   const [draft, setDraft] = useState<string>(String(props.value));
   useEffect(() => {
     setDraft(String(props.value));
   }, [props.value]);
   const parsed = Number(draft);
-  const valid = Number.isFinite(parsed) && parsed >= props.min && parsed <= props.max;
+  const valid =
+    Number.isFinite(parsed) &&
+    Number.isInteger(parsed) &&
+    parsed >= props.min &&
+    parsed <= props.max;
   const canSave = valid && !props.pending && parsed !== props.value;
   return (
     <div className="flex items-center gap-2">
-      <label className="flex-1 text-sm text-foreground">{props.label}</label>
+      <label htmlFor={inputId} className="flex-1 text-sm text-foreground">{props.label}</label>
       <input
+        id={inputId}
         type="number"
         value={draft}
         min={props.min}
@@ -377,10 +383,12 @@ function SelectSettingRow<T extends string>(props: {
   onChange: (v: T) => void;
   pending: boolean;
 }) {
+  const selectId = useId();
   return (
     <div className="flex items-center gap-2">
-      <label className="flex-1 text-sm text-foreground">{props.label}</label>
+      <label htmlFor={selectId} className="flex-1 text-sm text-foreground">{props.label}</label>
       <select
+        id={selectId}
         value={props.value}
         disabled={props.pending}
         onChange={(e) => props.onChange(e.target.value as T)}
