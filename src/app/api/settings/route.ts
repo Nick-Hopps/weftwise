@@ -4,34 +4,55 @@ import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import {
   getWikiLanguage,
   setWikiLanguage,
+  getAgentMaxSteps,
+  setAgentMaxSteps,
+  getAgentMaxTokensPerJob,
+  setAgentMaxTokensPerJob,
+  getAgentMaxParallelSubAgents,
+  setAgentMaxParallelSubAgents,
+  getAgentMcpLifecycle,
+  setAgentMcpLifecycle,
+  getAgentTaskRouterMode,
+  setAgentTaskRouterMode,
 } from '@/server/db/repos/settings-repo';
-import { WikiLanguageSchema, type AppSettings } from '@/lib/contracts';
+import {
+  WikiLanguageSchema,
+  AgentMaxStepsSchema,
+  AgentMaxTokensPerJobSchema,
+  AgentMaxParallelSubAgentsSchema,
+  AgentMcpLifecycleSchema,
+  AgentTaskRouterModeSchema,
+  type AppSettings,
+} from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
-/**
- * GET /api/settings
- * Returns the current global app settings.
- */
+function readSettings(): AppSettings {
+  return {
+    wikiLanguage: getWikiLanguage(),
+    agentMaxSteps: getAgentMaxSteps(),
+    agentMaxTokensPerJob: getAgentMaxTokensPerJob(),
+    agentMaxParallelSubAgents: getAgentMaxParallelSubAgents(),
+    agentMcpLifecycle: getAgentMcpLifecycle(),
+    agentTaskRouterMode: getAgentTaskRouterMode(),
+  };
+}
+
 export async function GET(request: NextRequest) {
   const authError = requireAuth(request);
   if (authError) return authError;
-
-  const body: AppSettings = { wikiLanguage: getWikiLanguage() };
-  return NextResponse.json(body);
+  return NextResponse.json(readSettings());
 }
 
 const PutBodySchema = z.object({
   wikiLanguage: WikiLanguageSchema.optional(),
+  agentMaxSteps: AgentMaxStepsSchema.optional(),
+  agentMaxTokensPerJob: AgentMaxTokensPerJobSchema.optional(),
+  agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema.optional(),
+  agentMcpLifecycle: AgentMcpLifecycleSchema.optional(),
+  agentTaskRouterMode: AgentTaskRouterModeSchema.optional(),
 });
 
-/**
- * PUT /api/settings
- * Body: { wikiLanguage?: string }
- *
- * Returns the post-update settings. Omitting all fields is a no-op that
- * just echoes the current state.
- */
 export async function PUT(request: NextRequest) {
   const authError = requireAuth(request);
   if (authError) return authError;
@@ -53,10 +74,13 @@ export async function PUT(request: NextRequest) {
     );
   }
 
-  if (parsed.data.wikiLanguage !== undefined) {
-    setWikiLanguage(parsed.data.wikiLanguage);
-  }
+  const d = parsed.data;
+  if (d.wikiLanguage !== undefined) setWikiLanguage(d.wikiLanguage);
+  if (d.agentMaxSteps !== undefined) setAgentMaxSteps(d.agentMaxSteps);
+  if (d.agentMaxTokensPerJob !== undefined) setAgentMaxTokensPerJob(d.agentMaxTokensPerJob);
+  if (d.agentMaxParallelSubAgents !== undefined) setAgentMaxParallelSubAgents(d.agentMaxParallelSubAgents);
+  if (d.agentMcpLifecycle !== undefined) setAgentMcpLifecycle(d.agentMcpLifecycle);
+  if (d.agentTaskRouterMode !== undefined) setAgentTaskRouterMode(d.agentTaskRouterMode);
 
-  const result: AppSettings = { wikiLanguage: getWikiLanguage() };
-  return NextResponse.json(result);
+  return NextResponse.json(readSettings());
 }
