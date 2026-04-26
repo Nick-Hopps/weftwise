@@ -16,10 +16,56 @@ import { rebuildSearchIndex } from './wiki/indexer';
 import { rollbackChangeset } from './wiki/wiki-transaction';
 import type { Changeset } from '@/lib/contracts';
 
+import { join } from 'node:path';
+import { vaultPath } from './config/env';
+import { buildSkillRegistry } from './agents/skills/registry';
+import { createToolRegistry } from './agents/tools/registry';
+import type { ToolDef } from './agents/types';
+import { vaultReadTool } from './agents/tools/builtin/vault-read';
+import { vaultSearchTool } from './agents/tools/builtin/vault-search';
+import { commitChangesetTool } from './agents/tools/builtin/commit-changeset';
+import { dispatchSkillTool } from './agents/tools/builtin/dispatch-skill';
+import { createMcpPool } from './agents/tools/mcp/client-pool';
+import { loadMcpConfig } from './agents/tools/mcp/config';
+import { getAgentMcpLifecycle } from './db/repos/settings-repo';
+import { setRuntimeRegistries } from './worker-runtime';
+
 // Import service modules to trigger handler registration side effects
 import './services/ingest-service';
 import './services/lint-service';
 import './services/query-service'; // registers 'save-to-wiki' handler
+
+async function bootRuntime(): Promise<{ shutdown: () => Promise<void> }> {
+  const skillRegistry = await buildSkillRegistry({
+    vaultDir: vaultPath(),
+    examplesDir: join(process.cwd(), 'examples', 'skills'),
+  });
+  const degraded = skillRegistry.degraded();
+  if (degraded.length) {
+    console.warn('[runtime] degraded skills:', degraded);
+  } else {
+    console.log(`[runtime] loaded ${skillRegistry.list().length} skill(s)`);
+  }
+
+  const toolRegistry = createToolRegistry();
+  toolRegistry.register(vaultReadTool as ToolDef);
+  toolRegistry.register(vaultSearchTool as ToolDef);
+  toolRegistry.register(commitChangesetTool as ToolDef);
+  toolRegistry.register(dispatchSkillTool as ToolDef);
+
+  const mcpConfig = loadMcpConfig(join(process.cwd(), 'mcp-config.json'));
+  const pool = createMcpPool({
+    config: mcpConfig,
+    lifecycle: getAgentMcpLifecycle(),
+    toolRegistry,
+  });
+  pool.registerToolPlaceholders(toolRegistry);
+  await pool.startEager();
+
+  setRuntimeRegistries({ skillRegistry, toolRegistry });
+
+  return { shutdown: () => pool.shutdown() };
+}
 
 async function main() {
   console.log('Initializing worker...');
@@ -92,15 +138,24 @@ async function main() {
   await ensureVaultRepo();
   console.log('Vault repository ready');
 
+  // Boot agent runtime (skills + tools + MCP pool)
+  const runtime = await bootRuntime();
+
   // Start the worker polling loop (respect env config)
   const pollMs = parseInt(process.env.WORKER_POLL_INTERVAL_MS || '2000', 10);
   const stop = startWorker(pollMs);
   console.log(`Worker started, polling every ${pollMs}ms`);
 
   // M1 fix: Graceful shutdown — stop worker AND close DB connection
-  function shutdown(signal: string) {
+  async function shutdown(signal: string) {
     console.log(`Received ${signal}, stopping worker...`);
     stop();
+    try {
+      await runtime.shutdown();
+      console.log('Agent runtime shut down');
+    } catch (err) {
+      console.error('Failed to shut down agent runtime:', err);
+    }
     try {
       getRawDb().close();
       console.log('Database connection closed');
@@ -108,8 +163,8 @@ async function main() {
     process.exit(0);
   }
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
 }
 
 main().catch((err) => {
