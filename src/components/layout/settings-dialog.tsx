@@ -74,6 +74,24 @@ export function SettingsDialog() {
     },
   });
 
+  const savePartial = useMutation({
+    mutationFn: async (patch: Partial<AppSettings>) => {
+      const res = await apiFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`PUT /api/settings → ${res.status}${text ? `: ${text}` : ''}`);
+      }
+      return (await res.json()) as AppSettings;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(['app-settings'], data);
+    },
+  });
+
   const savedLanguage = settingsQuery.data?.wikiLanguage;
 
   // Build the option list: presets, plus the saved value if it's a custom one.
@@ -209,6 +227,72 @@ export function SettingsDialog() {
 
           <Separator />
 
+          <div className="space-y-4">
+            <div className="text-sm font-semibold text-foreground">Agents</div>
+
+            <NumberSettingRow
+              label="Max steps per agent"
+              value={settingsQuery.data?.agentMaxSteps ?? 25}
+              min={1}
+              max={200}
+              onSave={(v) => savePartial.mutate({ agentMaxSteps: v })}
+              pending={savePartial.isPending}
+            />
+            <NumberSettingRow
+              label="Total token budget per task"
+              value={settingsQuery.data?.agentMaxTokensPerJob ?? 500_000}
+              min={10_000}
+              max={5_000_000}
+              onSave={(v) => savePartial.mutate({ agentMaxTokensPerJob: v })}
+              pending={savePartial.isPending}
+            />
+            <NumberSettingRow
+              label="Parallel sub-agents"
+              value={settingsQuery.data?.agentMaxParallelSubAgents ?? 3}
+              min={1}
+              max={10}
+              onSave={(v) => savePartial.mutate({ agentMaxParallelSubAgents: v })}
+              pending={savePartial.isPending}
+            />
+            <SelectSettingRow
+              label="MCP connection mode"
+              value={settingsQuery.data?.agentMcpLifecycle ?? 'lazy'}
+              options={[
+                { value: 'eager', label: 'eager (connect at boot)' },
+                { value: 'lazy', label: 'lazy (connect on first use)' },
+                { value: 'per-job', label: 'per-job (connect per job)' },
+              ]}
+              onChange={(v) =>
+                savePartial.mutate({
+                  agentMcpLifecycle: v as 'eager' | 'lazy' | 'per-job',
+                })
+              }
+              pending={savePartial.isPending}
+            />
+            <SelectSettingRow
+              label="LLM selection mode"
+              value={settingsQuery.data?.agentTaskRouterMode ?? 'frontmatter-override'}
+              options={[
+                { value: 'task-router-only', label: 'task-router only' },
+                { value: 'frontmatter-override', label: 'frontmatter override' },
+              ]}
+              onChange={(v) =>
+                savePartial.mutate({
+                  agentTaskRouterMode: v as 'task-router-only' | 'frontmatter-override',
+                })
+              }
+              pending={savePartial.isPending}
+            />
+
+            {savePartial.isError && (
+              <p role="alert" className="text-xs text-danger">
+                Failed to save: {(savePartial.error as Error).message}
+              </p>
+            )}
+          </div>
+
+          <Separator />
+
           <div className="flex items-center justify-between text-xs text-foreground-tertiary">
             <span>Agentic Wiki</span>
             <span className="tabular-nums">v{APP_VERSION}</span>
@@ -236,6 +320,84 @@ function SettingRow({ label, description, children, className }: SettingRowProps
         )}
       </div>
       <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+function NumberSettingRow(props: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onSave: (v: number) => void;
+  pending: boolean;
+}) {
+  const [draft, setDraft] = useState<string>(String(props.value));
+  useEffect(() => {
+    setDraft(String(props.value));
+  }, [props.value]);
+  const parsed = Number(draft);
+  const valid = Number.isFinite(parsed) && parsed >= props.min && parsed <= props.max;
+  const canSave = valid && !props.pending && parsed !== props.value;
+  return (
+    <div className="flex items-center gap-2">
+      <label className="flex-1 text-sm text-foreground">{props.label}</label>
+      <input
+        type="number"
+        value={draft}
+        min={props.min}
+        max={props.max}
+        onChange={(e) => setDraft(e.target.value)}
+        className={cn(
+          'h-7 rounded-md border border-input-border bg-input-bg px-2 text-xs text-foreground',
+          'transition-colors duration-fast ease-standard',
+          'hover:border-border-strong',
+          'focus:outline-none focus:border-accent focus:ring-2 focus:ring-focus-ring/30',
+          'disabled:opacity-50 disabled:cursor-not-allowed',
+          'w-24 text-right',
+        )}
+        disabled={props.pending}
+      />
+      <Button
+        intent="outline"
+        size="sm"
+        disabled={!canSave}
+        onClick={() => props.onSave(parsed)}
+      >
+        {props.pending ? 'Saving…' : 'Save'}
+      </Button>
+    </div>
+  );
+}
+
+function SelectSettingRow<T extends string>(props: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  pending: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <label className="flex-1 text-sm text-foreground">{props.label}</label>
+      <select
+        value={props.value}
+        disabled={props.pending}
+        onChange={(e) => props.onChange(e.target.value as T)}
+        className={cn(
+          'h-7 rounded-md border border-input-border bg-input-bg px-2 text-xs text-foreground',
+          'transition-colors duration-fast ease-standard',
+          'hover:border-border-strong',
+          'focus:outline-none focus:border-accent focus:ring-2 focus:ring-focus-ring/30',
+          'disabled:opacity-50 disabled:cursor-not-allowed',
+        )}
+      >
+        {props.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
