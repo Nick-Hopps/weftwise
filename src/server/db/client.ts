@@ -33,6 +33,14 @@ function tableColumns(table: string): string[] {
   return rows.map((r) => r.name);
 }
 
+function primaryKeyColumns(table: string): string[] {
+  const sqlite = rawSqlite!;
+  const rows = sqlite
+    .prepare(`SELECT name, pk FROM pragma_table_info(?) WHERE pk > 0 ORDER BY pk`)
+    .all(table) as Array<{ name: string; pk: number }>;
+  return rows.map((r) => r.name);
+}
+
 function tableExists(table: string): boolean {
   const sqlite = rawSqlite!;
   const row = sqlite
@@ -93,7 +101,15 @@ function migratePages(generalId: string): void {
   }
 
   const cols = tableColumns('pages');
-  if (cols.includes('subject_id')) return;
+  const hasSubjectId = cols.includes('subject_id');
+  const pkCols = primaryKeyColumns('pages');
+  const pkIsComposite =
+    pkCols.length === 2 && pkCols[0] === 'subject_id' && pkCols[1] === 'slug';
+
+  if (hasSubjectId && pkIsComposite) {
+    sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS pages_path_unique ON pages(path);`);
+    return;
+  }
 
   sqlite.exec(`
     DROP TABLE IF EXISTS pages_new;
@@ -110,12 +126,21 @@ function migratePages(generalId: string): void {
       PRIMARY KEY (subject_id, slug)
     );
   `);
-  sqlite
-    .prepare(
-      `INSERT INTO pages_new (subject_id, slug, title, path, summary, content_hash, tags, created_at, updated_at)
-       SELECT ?, slug, title, path, summary, content_hash, tags, created_at, updated_at FROM pages`
-    )
-    .run(generalId);
+  if (hasSubjectId) {
+    sqlite
+      .prepare(
+        `INSERT INTO pages_new (subject_id, slug, title, path, summary, content_hash, tags, created_at, updated_at)
+         SELECT COALESCE(subject_id, ?), slug, title, path, summary, content_hash, tags, created_at, updated_at FROM pages`
+      )
+      .run(generalId);
+  } else {
+    sqlite
+      .prepare(
+        `INSERT INTO pages_new (subject_id, slug, title, path, summary, content_hash, tags, created_at, updated_at)
+         SELECT ?, slug, title, path, summary, content_hash, tags, created_at, updated_at FROM pages`
+      )
+      .run(generalId);
+  }
   sqlite.exec(`
     DROP TABLE pages;
     ALTER TABLE pages_new RENAME TO pages;
