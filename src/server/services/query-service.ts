@@ -18,6 +18,8 @@ import {
   QUERY_SYSTEM_PROMPT,
   buildQueryUserPrompt,
 } from '../llm/prompts/query-prompt';
+import { getWikiLanguage } from '../db/repos/settings-repo';
+import type { PromptContext } from '../llm/prompts/prompt-context';
 import {
   createChangeset,
   validateChangeset,
@@ -103,10 +105,14 @@ export function streamQueryAnswer(
   subject: Subject,
   abortSignal?: AbortSignal,
 ) {
+  const promptCtx: PromptContext = {
+    language: getWikiLanguage(),
+    subject: subjectCtxFrom(subject),
+  };
   return streamTextResponse(
     'query',
     systemPrompt,
-    buildQueryUserPrompt(question, context, subjectCtxFrom(subject)),
+    buildQueryUserPrompt(question, context, promptCtx),
     abortSignal,
   );
 }
@@ -117,11 +123,15 @@ export async function generateQueryCitations(
   context: QueryContextPage[],
   subject: Subject,
 ): Promise<{ pageSlug: string; excerpt: string }[]> {
+  const promptCtx: PromptContext = {
+    language: getWikiLanguage(),
+    subject: subjectCtxFrom(subject),
+  };
   const response = await generateStructuredOutput(
     'query',
     QueryCitationsSchema,
     QUERY_SYSTEM_PROMPT,
-    `${buildQueryUserPrompt(question, context, subjectCtxFrom(subject))}
+    `${buildQueryUserPrompt(question, context, promptCtx)}
 
 ## Draft answer to cite
 
