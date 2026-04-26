@@ -1,6 +1,6 @@
 import { generateObject, generateText, tool, type ToolSet, type CoreMessage } from 'ai';
 import { randomUUID } from 'node:crypto';
-import type { AgentContext, SkillTemplate, ToolDef } from '../types';
+import type { AgentContext, SkillTemplate } from '../types';
 import { resolveTask } from '../../llm/task-router';
 import { resolveModel } from '../../llm/provider-registry';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';

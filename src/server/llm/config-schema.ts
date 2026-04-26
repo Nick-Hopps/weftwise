@@ -5,7 +5,11 @@ import { z } from 'zod';
 // Enums
 // ---------------------------------------------------------------------------
 
-export const LLMTaskSchema = z.enum(['ingest', 'query', 'lint']);
+const BUILTIN_LLM_TASKS = ['ingest', 'query', 'lint'] as const;
+export const LLMTaskSchema = z.string().refine(
+  (s) => (BUILTIN_LLM_TASKS as readonly string[]).includes(s) || /^skill:[a-z0-9][a-z0-9-]*$/.test(s),
+  { message: "Task must be 'ingest', 'query', 'lint', or 'skill:<id>'" },
+);
 
 export const LLMProviderKindSchema = z.enum([
   'anthropic',
@@ -132,13 +136,7 @@ export const LLMConfigFileSchema = z
     $schema: z.string().optional(),
     version: z.literal(1),
     defaults: LLMDefaultRouteConfigSchema,
-    tasks: z
-      .object({
-        ingest: LLMRouteConfigSchema.optional(),
-        query: LLMRouteConfigSchema.optional(),
-        lint: LLMRouteConfigSchema.optional(),
-      })
-      .default({}),
+    tasks: z.record(LLMTaskSchema, LLMRouteConfigSchema).default({}),
     providers: z.record(z.string().min(1), LLMProviderProfileSchema),
   })
   .superRefine((config, ctx) => {
@@ -157,9 +155,9 @@ export const LLMConfigFileSchema = z
     };
 
     checkProfileRef(config.defaults.profile, ['defaults', 'profile']);
-    checkProfileRef(config.tasks.ingest?.profile, ['tasks', 'ingest', 'profile']);
-    checkProfileRef(config.tasks.query?.profile, ['tasks', 'query', 'profile']);
-    checkProfileRef(config.tasks.lint?.profile, ['tasks', 'lint', 'profile']);
+    for (const [taskKey, taskConfig] of Object.entries(config.tasks ?? {})) {
+      checkProfileRef(taskConfig?.profile, ['tasks', taskKey, 'profile']);
+    }
   });
 
 // ---------------------------------------------------------------------------

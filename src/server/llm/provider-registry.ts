@@ -1,8 +1,13 @@
 import { generateObject, streamText } from 'ai';
+import type { LanguageModel } from 'ai';
 import type { ZodType } from 'zod';
-import type { LLMRouteOverride, LLMTask } from './config-schema';
+import type { LLMRouteOverride, LLMTask, ResolvedTaskRoute } from './config-schema';
 import { getLanguageModel } from './provider-factory';
 import { resolveTask } from './task-router';
+
+export function resolveModel(route: ResolvedTaskRoute): LanguageModel {
+  return getLanguageModel(route);
+}
 
 /**
  * Generate a structured JSON object validated against a Zod schema.
