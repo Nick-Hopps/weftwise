@@ -66,21 +66,28 @@ function resolveLinkTargetSubject(
 /**
  * Update the SQLite index for a set of slugs within a single subject.
  *
- * For each slug:
- * - If the file exists: upsert page row, update FTS, replace outgoing links.
- * - If the file is missing: remove the page row, FTS entry, and outgoing links.
+ * Two passes so wikilinks between pages in the SAME batch resolve correctly:
+ * 1. Upsert every page row + FTS entry (or delete missing files), so the
+ *    title→slug map seen in pass 2 is complete for the touched batch.
+ * 2. Re-extract wikilinks against the up-to-date title map and replace each
+ *    page's outgoing links.
+ *
+ * Without the two passes, a fresh batch of pages whose bodies cite each other
+ * by title (common with non-ASCII / Chinese titles) loses every cross-link to
+ * `normalizeSlug` fallback, which strips most non-ASCII content.
  */
 export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
   if (slugs.length === 0) return;
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) return;
 
-  const resolver = buildTitleResolver(subjectId);
+  const presentSlugs: string[] = [];
 
+  // Pass 1 — upsert pages / FTS, or delete missing files. No wikilink resolution
+  // yet: the resolver built in pass 2 must see every freshly-upserted title.
   for (const slug of slugs) {
     const doc = readPageInSubject(subject.slug, slug, {
       currentSubjectSlug: subject.slug,
-      titleResolver: resolver,
     });
 
     if (doc === null) {
@@ -93,6 +100,17 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
 
     pagesRepo.upsertPage(page);
     pagesRepo.updateFtsEntry(subjectId, slug, page.title, page.summary, doc.body);
+    presentSlugs.push(slug);
+  }
+
+  // Pass 2 — resolve wikilinks with a title map that now includes the batch.
+  const resolver = buildTitleResolver(subjectId);
+  for (const slug of presentSlugs) {
+    const doc = readPageInSubject(subject.slug, slug, {
+      currentSubjectSlug: subject.slug,
+      titleResolver: resolver,
+    });
+    if (!doc) continue;
 
     const outgoing = doc.links
       .map((link) => {
