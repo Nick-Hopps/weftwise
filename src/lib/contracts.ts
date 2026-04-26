@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export type SubjectId = string;
 
 export interface Subject {
@@ -99,3 +101,23 @@ export interface Changeset {
   postHead: string | null;
   status: 'pending' | 'applied' | 'rolled-back';
 }
+
+export const DEFAULT_WIKI_LANGUAGE = 'English';
+
+export const WikiLanguageSchema = z
+  .string()
+  .trim()
+  .min(1, 'Wiki language must be a non-empty language name (e.g. "English", "Chinese", "日本語")')
+  .max(64, 'Wiki language must be 64 characters or fewer')
+  .regex(
+    /^[^\n\r`*#\[\]<>]+$/,
+    'Wiki language must not contain newlines or markdown control characters',
+  );
+
+export interface AppSettings {
+  wikiLanguage: string;
+}
+
+export const AppSettingsSchema = z.object({
+  wikiLanguage: WikiLanguageSchema,
+});

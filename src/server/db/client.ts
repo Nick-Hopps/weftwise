@@ -375,6 +375,18 @@ function migrateOperations(): void {
   }
 }
 
+function migrateAppSettings(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('app_settings')) return;
+  sqlite.exec(`
+    CREATE TABLE app_settings (
+      key TEXT PRIMARY KEY NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
   const ftsExists = tableExists('pages_fts');
@@ -412,6 +424,7 @@ function ensureTables() {
     migrateJobs();
     migrateJobEvents();
     migrateOperations();
+    migrateAppSettings();
     ensurePagesFts();
   } finally {
     rawSqlite.pragma('foreign_keys = ON');

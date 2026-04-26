@@ -15,6 +15,14 @@ export const subjects = sqliteTable('subjects', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const appSettings = sqliteTable('app_settings', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export type AppSettingsRow = typeof appSettings.$inferSelect;
+
 export const pages = sqliteTable(
   'pages',
   {
