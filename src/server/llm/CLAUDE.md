@@ -112,11 +112,18 @@ resolveTask(task, overrides?) → ResolvedTaskRoute
   2. 增加对应的 `XxxProfileSchema` 并入 discriminated union；
   3. 在 `provider-factory.ts::getLanguageModel` 添加 `case 'xxx'` 分支。
 - **新增任务类型**：
-  1. 扩展 `LLMTaskSchema` 枚举；
+  1. 扩展 `LLMTaskSchema`（现为 `z.union` 支持 `skill:<id>` 格式的开放字符串）；
   2. 新建 `prompts/<task>-prompt.ts`；
   3. 在 `llm-config.json::tasks` 给出默认配置；
   4. Service 层调 `generateStructuredOutput('<task>', ...)`。
+- **为 skill 指定专属模型**：在 `llm-config.json::tasks` 添加 `"skill:<id>": { "model": "...", "temperature": 0.1 }`。`resolveTask` 识别 `skill:` 前缀，`config.tasks` 已改为 `z.record`（开放 key），无需修改 schema。
 - **临时换模型**：调用点传 `overrides: { profile, model, temperature }`，优先级最高。
+
+**Phase 1 新增**：
+
+- `LLMTaskSchema` 接受 `skill:<id>` 形式的 key（如 `skill:ingest-planner`），不限于 `ingest|query|lint` 三个枚举值。
+- `LLMConfigFile.tasks` 由枚举 key 改为 `z.record`（开放字典），`llm-config.json` 可直接写任意 `"skill:xxx"` 节。
+- `provider-registry.ts` 新增导出 `resolveModel(route: ResolvedTaskRoute): LanguageModel`，供 `agent-loop.ts` 直接获取模型实例（不经过 `generateStructuredOutput` 包装）。
 
 ## 测试与质量
 
@@ -156,6 +163,7 @@ src/server/llm/
 |------|------|
 | 2026-04-22 | 初始化 |
 | 2026-04-26 | wikiLanguage：新增 `PromptContext` + `renderLanguageDirective`；5 个 user prompt builder 接入 `ctx: PromptContext`；文件清单补 `prompts/prompt-context.ts` |
+| 2026-04-27 | LLMTaskSchema 接受 `skill:<id>` key；`config.tasks` 改为 `z.record`（开放字典）；`provider-registry` 导出 `resolveModel` 供 agent-loop 使用 |
 
 ---
 
