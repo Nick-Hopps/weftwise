@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./llm-config.schema.json",
   "title": "Agentic Wiki LLM Config",
-  "description": "Configuration for multi-model LLM routing. Each task (ingest, query, lint) can use a different provider and model. Supports the full set of Vercel AI SDK CallSettings parameters.",
+  "description": "Configuration for multi-model LLM routing. Each task can use a different provider and model. Route entries support the JSON-serializable subset of Vercel AI SDK CallSettings plus providerOptions and app-level timeoutMs.",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "defaults", "providers"],
@@ -20,8 +20,13 @@
     },
     "tasks": {
       "type": "object",
-      "description": "Per-task route overrides. Unspecified fields inherit from defaults.",
-      "additionalProperties": false,
+      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Keys may be built-in tasks (ingest/query/lint) or skill:<id> task routes.",
+      "propertyNames": {
+        "pattern": "^(ingest|query|lint|skill:[a-z0-9][a-z0-9-]*)$"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/taskRoute"
+      },
       "properties": {
         "ingest": { "$ref": "#/$defs/taskRoute" },
         "query": { "$ref": "#/$defs/taskRoute" },
@@ -38,9 +43,31 @@
     }
   },
   "$defs": {
+    "jsonValue": {
+      "description": "Any JSON-serializable value.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Additional HTTP headers sent with each LLM request. Only applicable for HTTP-based providers."
+    },
     "taskRoute": {
       "type": "object",
-      "description": "Route override for a specific task. All fields are optional and inherit from defaults.",
+      "description": "Route override for a specific task. All fields are optional and inherit from defaults. This intentionally contains route-level JSON settings only; runtime-only AI SDK parameters such as prompts, schemas, tools, callbacks, and AbortSignal belong in code.",
       "additionalProperties": false,
       "properties": {
         "profile": {
@@ -51,73 +78,67 @@
         "model": {
           "type": "string",
           "minLength": 1,
-          "description": "Model ID to use (e.g., 'claude-sonnet-4-6', 'gpt-4o')."
+          "description": "Model ID to use (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4o')."
         },
         "maxTokens": {
           "type": "integer",
           "minimum": 1,
-          "description": "Maximum number of output tokens to generate."
+          "description": "AI SDK CallSettings.maxTokens: maximum number of output tokens to generate."
         },
         "temperature": {
           "type": "number",
           "minimum": 0,
           "maximum": 2,
-          "description": "Sampling temperature (0 = almost deterministic, 2 = very random). Recommended: set either temperature or topP, not both."
+          "description": "AI SDK CallSettings.temperature: sampling temperature. Recommended: set either temperature or topP, not both. Provider/model ranges may differ."
         },
         "topP": {
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "description": "Nucleus sampling: only tokens comprising the top P probability mass are considered (e.g. 0.1 = top 10%). Recommended: set either temperature or topP, not both."
+          "description": "AI SDK CallSettings.topP: nucleus sampling; only tokens comprising the top P probability mass are considered. Recommended: set either temperature or topP, not both."
         },
         "topK": {
           "type": "integer",
           "minimum": 1,
-          "description": "Only sample from the top K most likely tokens. Removes long-tail low-probability responses."
+          "description": "AI SDK CallSettings.topK: only sample from the top K most likely tokens. Provider support varies."
         },
         "presencePenalty": {
           "type": "number",
           "minimum": -1,
           "maximum": 1,
-          "description": "Penalise tokens that already appear in the prompt. Positive values reduce repetition, negative values increase it."
+          "description": "AI SDK CallSettings.presencePenalty: affects likelihood of repeating information already in the prompt. Provider support/ranges vary."
         },
         "frequencyPenalty": {
           "type": "number",
           "minimum": -1,
           "maximum": 1,
-          "description": "Penalise tokens proportional to how often they have appeared so far. Positive values reduce word/phrase repetition."
+          "description": "AI SDK CallSettings.frequencyPenalty: affects likelihood of repeatedly using the same words or phrases. Provider support/ranges vary."
         },
         "stopSequences": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Generation stops when the model outputs one of these strings."
+          "description": "AI SDK CallSettings.stopSequences: generation stops when the model outputs one of these strings. Used by streamText; generateObject omits stopSequences in AI SDK v4."
         },
         "seed": {
           "type": "integer",
-          "description": "Integer seed for deterministic sampling (provider support varies)."
+          "description": "AI SDK CallSettings.seed: integer seed for deterministic sampling. Provider support varies."
         },
         "maxRetries": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum number of retries on transient API failures. 0 disables retries. Default: 2."
+          "description": "AI SDK CallSettings.maxRetries: maximum number of retries on transient API failures. 0 disables retries. AI SDK default: 2."
         },
         "headers": {
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "Additional HTTP headers sent with each LLM request (e.g. custom routing headers)."
+          "$ref": "#/$defs/headers"
         },
         "providerOptions": {
-          "type": "object",
-          "description": "Provider-specific options passed through to the AI SDK. Outer key = provider name (e.g. 'anthropic', 'openai'), inner object = provider-specific settings.",
-          "additionalProperties": {
-            "type": "object",
-            "additionalProperties": true
-          }
+          "$ref": "#/$defs/providerOptions",
+          "description": "AI SDK providerOptions: provider-specific JSON options passed through to the provider. Outer key = provider name (e.g. 'anthropic', 'openai', 'google')."
         },
         "timeoutMs": {
           "type": "integer",
           "minimum": 1,
-          "description": "Timeout in milliseconds before aborting the request. Default: 480000 (8 minutes)."
+          "description": "App-level timeout in milliseconds before aborting the request. Not an AI SDK CallSettings field. Default in this project: 480000 (8 minutes)."
         }
       }
     },
@@ -128,65 +149,161 @@
       ],
       "description": "Default route must specify at least profile and model."
     },
-    "anthropicProvider": {
+    "providerOptions": {
+      "type": "object",
+      "description": "AI SDK providerOptions. Known provider keys are documented for editor assistance; unknown provider keys remain allowed for OpenAI-compatible endpoints and future AI SDK provider options.",
+      "properties": {
+        "anthropic": { "$ref": "#/$defs/anthropicProviderOptions" },
+        "openai": { "$ref": "#/$defs/openaiProviderOptions" },
+        "google": { "$ref": "#/$defs/googleProviderOptions" },
+        "deepseek": { "$ref": "#/$defs/genericProviderOptions" },
+        "mistral": { "$ref": "#/$defs/genericProviderOptions" },
+        "xai": { "$ref": "#/$defs/genericProviderOptions" },
+        "ollama": { "$ref": "#/$defs/genericProviderOptions" },
+        "openai-compatible": { "$ref": "#/$defs/genericProviderOptions" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/genericProviderOptions" }
+    },
+    "genericProviderOptions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "anthropicProviderOptions": {
+      "type": "object",
+      "description": "@ai-sdk/anthropic providerOptions.",
+      "properties": {
+        "thinking": {
+          "type": "object",
+          "description": "Anthropic extended thinking configuration.",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": ["enabled", "disabled"]
+            },
+            "budgetTokens": {
+              "type": "number",
+              "minimum": 1
+            }
+          }
+        }
+      },
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "openaiProviderOptions": {
+      "type": "object",
+      "description": "@ai-sdk/openai Responses API providerOptions. Chat-model construction settings such as logitBias/structuredOutputs/reasoningEffort are not route-level settings in the current provider factory.",
+      "properties": {
+        "metadata": { "$ref": "#/$defs/jsonValue" },
+        "parallelToolCalls": { "type": ["boolean", "null"] },
+        "previousResponseId": { "type": ["string", "null"] },
+        "store": { "type": ["boolean", "null"] },
+        "user": { "type": ["string", "null"] },
+        "reasoningEffort": { "type": ["string", "null"] },
+        "strictSchemas": { "type": ["boolean", "null"] },
+        "instructions": { "type": ["string", "null"] },
+        "reasoningSummary": { "type": ["string", "null"] }
+      },
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "googleProviderOptions": {
+      "type": "object",
+      "description": "@ai-sdk/google providerOptions.",
+      "properties": {
+        "responseModalities": {
+          "type": ["array", "null"],
+          "items": { "enum": ["TEXT", "IMAGE"] }
+        },
+        "thinkingConfig": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "thinkingBudget": { "type": ["number", "null"] },
+            "includeThoughts": { "type": ["boolean", "null"] }
+          }
+        }
+      },
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "baseProviderProfile": {
       "type": "object",
       "additionalProperties": false,
       "required": ["provider"],
       "properties": {
-        "provider": { "const": "anthropic" },
-        "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "format": "uri" }
+        "provider": {
+          "enum": ["anthropic", "openai", "google", "deepseek", "mistral", "xai"]
+        },
+        "apiKeyEnv": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Environment variable name that contains the API key. Runtime requires this for hosted providers."
+        },
+        "baseURL": {
+          "type": "string",
+          "format": "uri",
+          "description": "Optional custom API base URL."
+        }
       }
+    },
+    "anthropicProvider": {
+      "allOf": [
+        { "$ref": "#/$defs/baseProviderProfile" },
+        {
+          "properties": {
+            "provider": { "const": "anthropic" }
+          }
+        }
+      ]
     },
     "openaiProvider": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["provider"],
-      "properties": {
-        "provider": { "const": "openai" },
-        "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "format": "uri" }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/baseProviderProfile" },
+        {
+          "properties": {
+            "provider": { "const": "openai" }
+          }
+        }
+      ]
     },
     "googleProvider": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["provider"],
-      "properties": {
-        "provider": { "const": "google" },
-        "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "format": "uri" }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/baseProviderProfile" },
+        {
+          "properties": {
+            "provider": { "const": "google" }
+          }
+        }
+      ]
     },
     "deepseekProvider": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["provider"],
-      "properties": {
-        "provider": { "const": "deepseek" },
-        "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "format": "uri" }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/baseProviderProfile" },
+        {
+          "properties": {
+            "provider": { "const": "deepseek" }
+          }
+        }
+      ]
     },
     "mistralProvider": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["provider"],
-      "properties": {
-        "provider": { "const": "mistral" },
-        "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "format": "uri" }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/baseProviderProfile" },
+        {
+          "properties": {
+            "provider": { "const": "mistral" }
+          }
+        }
+      ]
     },
     "xaiProvider": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["provider"],
-      "properties": {
-        "provider": { "const": "xai" },
-        "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "format": "uri" }
-      }
+      "allOf": [
+        { "$ref": "#/$defs/baseProviderProfile" },
+        {
+          "properties": {
+            "provider": { "const": "xai" }
+          }
+        }
+      ]
     },
     "ollamaProvider": {
       "type": "object",
@@ -195,7 +312,10 @@
       "properties": {
         "provider": { "const": "ollama" },
         "apiKeyEnv": { "type": "string", "minLength": 1 },
-        "baseURL": { "type": "string", "description": "Ollama server URL (default: http://localhost:11434)" }
+        "baseURL": {
+          "type": "string",
+          "description": "Ollama server URL. Runtime default: http://localhost:11434"
+        }
       }
     },
     "openaiCompatibleProvider": {
@@ -212,9 +332,8 @@
         "apiKeyEnv": { "type": "string", "minLength": 1 },
         "baseURL": { "type": "string", "format": "uri" },
         "headers": {
-          "type": "object",
-          "additionalProperties": { "type": "string" },
-          "description": "Custom HTTP headers to send with requests."
+          "$ref": "#/$defs/headers",
+          "description": "Custom HTTP headers to send with requests for this provider profile."
         }
       }
     },
