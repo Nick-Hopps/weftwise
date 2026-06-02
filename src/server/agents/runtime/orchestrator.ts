@@ -46,7 +46,7 @@ export async function runPipeline(opts: {
           overlay: baseOverlay.snapshot(),
           parentRunId: opts.ctx.rootRunId,
         };
-        return runAgentLoop({ skill, ctx: childCtx, input: item });
+        return runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item) });
       });
       // Merge writer outputs (each is an object; assume each yields a top-level `entry` field).
       const seenSlugs = new Set<string>();
@@ -80,6 +80,22 @@ function readPath(obj: unknown, path: string): unknown {
     }
     return undefined;
   }, obj);
+}
+
+function buildFanoutInput(carry: unknown, item: unknown): unknown {
+  if (!isPlainObject(carry) || !isPlainObject(item)) return item;
+
+  return {
+    ...item,
+    sources: carry.sources,
+    subjectSlug: carry.subjectSlug,
+    existingPages: carry.existingPages,
+    plan: carry.plan,
+  };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 async function runWithSemaphore<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
