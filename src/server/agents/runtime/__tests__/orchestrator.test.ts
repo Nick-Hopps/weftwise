@@ -63,8 +63,45 @@ describe('orchestrator.runPipeline', () => {
       initialInput: {},
     });
     expect(mockRun).toHaveBeenCalledTimes(3);
+    expect(mockRun.mock.calls[1][0].input).toMatchObject({
+      slug: 'a',
+      subjectSlug: undefined,
+      sources: undefined,
+      plan: { pages: [{ slug: 'a' }, { slug: 'b' }] },
+    });
     const r = result as { writerOutputs?: unknown[] };
     expect(r.writerOutputs).toHaveLength(2);
+  });
+
+  it('passes source and subject context into fanout writers', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: {
+        sources: [{ filename: 'source.md', fullText: 'source body' }],
+        subjectSlug: 'general',
+        existingPages: [],
+        plan: { pages: [{ slug: 'a', title: 'A' }] },
+      }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner' },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx: ctxStub(),
+      initialInput: {},
+    });
+
+    expect(mockRun.mock.calls[1][0].input).toMatchObject({
+      slug: 'a',
+      title: 'A',
+      subjectSlug: 'general',
+      sources: [{ filename: 'source.md', fullText: 'source body' }],
+      existingPages: [],
+      plan: { pages: [{ slug: 'a', title: 'A' }] },
+    });
   });
 
   it('throws WriterConflictError on duplicate writer paths', async () => {

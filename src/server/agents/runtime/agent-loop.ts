@@ -1,5 +1,6 @@
 import { generateObject, generateText, tool, type ToolSet, type CoreMessage } from 'ai';
 import { randomUUID } from 'node:crypto';
+import type { ZodSchema } from 'zod';
 import type { AgentContext, SkillTemplate } from '../types';
 import { resolveTask } from '../../llm/task-router';
 import { resolveModel } from '../../llm/provider-registry';
@@ -95,16 +96,33 @@ export async function runAgentLoop(opts: {
   let outputTokens = 0;
 
   if (skill.outputSchema) {
-    const result = await generateObject({
-      model,
-      schema: skill.outputSchema,
-      messages,
-      maxTokens: skill.model?.maxTokens ?? route.maxTokens,
-      temperature: skill.model?.temperature ?? route.temperature,
-    });
-    output = result.object;
-    inputTokens = result.usage?.promptTokens ?? 0;
-    outputTokens = result.usage?.completionTokens ?? 0;
+    try {
+      const result = await generateObject({
+        model,
+        schema: skill.outputSchema,
+        messages,
+        maxTokens: skill.model?.maxTokens ?? route.maxTokens,
+        temperature: skill.model?.temperature ?? route.temperature,
+      });
+      output = result.object;
+      inputTokens = result.usage?.promptTokens ?? 0;
+      outputTokens = result.usage?.completionTokens ?? 0;
+    } catch (err) {
+      const recovered = recoverStructuredOutput(err, skill.outputSchema);
+      if (!recovered) throw err;
+
+      output = recovered.object;
+      inputTokens = recovered.inputTokens;
+      outputTokens = recovered.outputTokens;
+      ctx.emit('agent:step', `${skill.name} recovered structured output`, {
+        runId,
+        parentRunId: ctx.parentRunId,
+        skillId: skill.id,
+        stepIndex: ctx.budget.stepCount,
+        kind: 'structured-output-recovery',
+        reason: recovered.reason,
+      });
+    }
   } else {
     const result = await generateText({
       model,
@@ -152,4 +170,159 @@ function previewOutput(out: unknown): string {
     const s = typeof out === 'string' ? out : JSON.stringify(out);
     return s.length > 240 ? s.slice(0, 240) + '…' : s;
   } catch { return '<unserializable>'; }
+}
+
+function recoverStructuredOutput(err: unknown, schema: ZodSchema): {
+  object: unknown;
+  inputTokens: number;
+  outputTokens: number;
+  reason: string;
+} | null {
+  const responseText = readStringProperty(err, 'responseText');
+  if (!responseText) return null;
+
+  const parsed = parseJsonValue(responseText);
+  if (parsed === undefined) return null;
+
+  const direct = schema.safeParse(parsed);
+  if (direct.success) {
+    return {
+      object: direct.data,
+      inputTokens: readUsageToken(err, 'promptTokens'),
+      outputTokens: readUsageToken(err, 'completionTokens'),
+      reason: 'responseText already matched schema',
+    };
+  }
+
+  const repaired = repairJsonStringContainers(parsed, schema);
+  if (repaired === undefined) return null;
+
+  return {
+    object: repaired,
+    inputTokens: readUsageToken(err, 'promptTokens'),
+    outputTokens: readUsageToken(err, 'completionTokens'),
+    reason: 'parsed JSON-string object fields from responseText',
+  };
+}
+
+function repairJsonStringContainers(value: unknown, schema: ZodSchema): unknown | undefined {
+  let current = cloneJson(value);
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const result = schema.safeParse(current);
+    if (result.success) return result.data;
+
+    let changed = false;
+    for (const issue of result.error.issues) {
+      const expected = 'expected' in issue ? issue.expected : undefined;
+      const received = 'received' in issue ? issue.received : undefined;
+      if ((expected !== 'object' && expected !== 'array') || received !== 'string') continue;
+
+      const text = getAtPath(current, issue.path);
+      if (typeof text !== 'string') continue;
+
+      const parsed = parseJsonValue(text);
+      if (!matchesExpectedContainer(parsed, expected)) continue;
+
+      current = setAtPath(current, issue.path, parsed);
+      changed = true;
+    }
+
+    if (!changed) return undefined;
+  }
+
+  const final = schema.safeParse(current);
+  return final.success ? final.data : undefined;
+}
+
+function parseJsonValue(text: string): unknown | undefined {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const extracted = extractFirstJsonValue(text);
+    if (!extracted) return undefined;
+    try { return JSON.parse(extracted); } catch { return undefined; }
+  }
+}
+
+function extractFirstJsonValue(text: string): string | null {
+  const start = text.search(/[\[{]/);
+  if (start < 0) return null;
+
+  const opener = text[start];
+  const closer = opener === '{' ? '}' : ']';
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+    } else if (char === opener) {
+      depth += 1;
+    } else if (char === closer) {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+
+  return null;
+}
+
+function matchesExpectedContainer(value: unknown, expected: unknown): boolean {
+  if (expected === 'array') return Array.isArray(value);
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function getAtPath(value: unknown, path: Array<string | number>): unknown {
+  return path.reduce<unknown>((acc, key) => {
+    if (acc === null || typeof acc !== 'object') return undefined;
+    return (acc as Record<string | number, unknown>)[key];
+  }, value);
+}
+
+function setAtPath(value: unknown, path: Array<string | number>, next: unknown): unknown {
+  if (path.length === 0) return next;
+
+  const root = cloneJson(value);
+  let cursor = root as Record<string | number, unknown>;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const key = path[i];
+    const child = cursor[key];
+    if (child === null || typeof child !== 'object') return value;
+    cursor = child as Record<string | number, unknown>;
+  }
+  cursor[path[path.length - 1]] = next;
+  return root;
+}
+
+function cloneJson(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function readStringProperty(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const direct = (value as Record<string, unknown>)[key];
+  if (typeof direct === 'string') return direct;
+  return undefined;
+}
+
+function readUsageToken(value: unknown, key: 'promptTokens' | 'completionTokens'): number {
+  if (!value || typeof value !== 'object') return 0;
+  const usage = (value as Record<string, unknown>).usage;
+  if (!usage || typeof usage !== 'object') return 0;
+  const token = (usage as Record<string, unknown>)[key];
+  return typeof token === 'number' ? token : 0;
 }
