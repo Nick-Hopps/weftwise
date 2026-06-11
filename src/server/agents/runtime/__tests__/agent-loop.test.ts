@@ -55,6 +55,7 @@ function ctxStub(): AgentContext {
     cancelled: () => false,
     committed: { value: false },
     pending: { entries: [] },
+    chunkStore: new Map(),
     budgetSnapshot: { maxSteps: 25, maxTokensPerJob: 500_000, maxParallelSubAgents: 2 },
   } as AgentContext;
 }

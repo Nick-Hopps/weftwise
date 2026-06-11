@@ -89,6 +89,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     cancelled: () => false,
     committed: { value: false },
     pending: { entries: [] },
+    chunkStore: new Map(), // TODO(Task 8): 接线真实 chunkStore
     budgetSnapshot,
   };
 
