@@ -43,8 +43,13 @@ export async function runAgentLoop(opts: {
   // Resolve tools.
   const toolDefs = ctx.toolRegistry.resolve(skill.tools);
   const toolSet: ToolSet = {};
+  const usedToolNames = new Set<string>();
   for (const t of toolDefs) {
-    toolSet[t.name] = tool({
+    // Internal tool names are dot-namespaced (`vault.read`, `mcp.<server>.<tool>`),
+    // but provider APIs require ^[a-zA-Z0-9_-]{1,64}$ — translate at the boundary.
+    const providerName = toProviderToolName(t.name, usedToolNames);
+    usedToolNames.add(providerName);
+    toolSet[providerName] = tool({
       description: t.description,
       parameters: t.inputSchema,
       execute: async (args: unknown) => {
@@ -165,6 +170,28 @@ export async function runAgentLoop(opts: {
   };
 }
 
+/**
+ * Map an internal tool name to a provider-safe function name.
+ *
+ * Provider APIs (OpenAI / DeepSeek / xAI / Mistral / …) require tool names to
+ * match `^[a-zA-Z0-9_-]{1,64}$`. Our internal names use dots for namespacing
+ * (`vault.read`, `dispatch.skill`, `mcp.<server>.<tool>`), so any non-conforming
+ * character becomes `_`, the result is capped at 64 chars, and collisions are
+ * disambiguated with a numeric suffix.
+ */
+function toProviderToolName(name: string, used: Set<string>): string {
+  let base = name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+  if (base.length === 0) base = 'tool';
+
+  if (!used.has(base)) return base;
+
+  for (let i = 2; ; i += 1) {
+    const suffix = `_${i}`;
+    const candidate = base.slice(0, 64 - suffix.length) + suffix;
+    if (!used.has(candidate)) return candidate;
+  }
+}
+
 function previewOutput(out: unknown): string {
   try {
     const s = typeof out === 'string' ? out : JSON.stringify(out);
@@ -178,10 +205,11 @@ function recoverStructuredOutput(err: unknown, schema: ZodSchema): {
   outputTokens: number;
   reason: string;
 } | null {
-  const responseText = readStringProperty(err, 'responseText');
-  if (!responseText) return null;
+  // AI SDK 4 `NoObjectGeneratedError` carries the raw model output on `err.text`.
+  const rawText = readStringProperty(err, 'text');
+  if (!rawText) return null;
 
-  const parsed = parseJsonValue(responseText);
+  const parsed = parseJsonValue(rawText);
   if (parsed === undefined) return null;
 
   const direct = schema.safeParse(parsed);
@@ -190,7 +218,7 @@ function recoverStructuredOutput(err: unknown, schema: ZodSchema): {
       object: direct.data,
       inputTokens: readUsageToken(err, 'promptTokens'),
       outputTokens: readUsageToken(err, 'completionTokens'),
-      reason: 'responseText already matched schema',
+      reason: 'recovered JSON from err.text matched schema',
     };
   }
 
@@ -201,7 +229,7 @@ function recoverStructuredOutput(err: unknown, schema: ZodSchema): {
     object: repaired,
     inputTokens: readUsageToken(err, 'promptTokens'),
     outputTokens: readUsageToken(err, 'completionTokens'),
-    reason: 'parsed JSON-string object fields from responseText',
+    reason: 'parsed JSON-string object fields from err.text',
   };
 }
 

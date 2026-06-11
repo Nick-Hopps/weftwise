@@ -58,6 +58,29 @@ function ctxStub(): AgentContext {
   } as AgentContext;
 }
 
+function toolDefStub(name: string): import('../../types').ToolDef {
+  return {
+    name,
+    source: 'builtin',
+    description: name,
+    inputSchema: z.object({}),
+    outputSchema: z.unknown(),
+    sideEffect: 'none',
+    handler: vi.fn(async () => ({})),
+  } as unknown as import('../../types').ToolDef;
+}
+
+// A reviewer-like skill: no outputSchema → agent-loop uses generateText with tools.
+const reviewerSkill = (): SkillTemplate => ({
+  id: 'ingest-reviewer',
+  name: 'Ingest Reviewer',
+  description: 'Reviews and commits',
+  version: 1,
+  tools: ['vault.read', 'vault.search', 'commit_changeset'],
+  canDispatch: [],
+  systemPrompt: 'Review the drafts.',
+});
+
 const writerSkill = (): SkillTemplate => ({
   id: 'ingest-writer',
   name: 'Ingest Writer',
@@ -76,12 +99,14 @@ const writerSkill = (): SkillTemplate => ({
 });
 
 describe('runAgentLoop structured output recovery', () => {
+  // AI SDK 4 `NoObjectGeneratedError` exposes the raw model text on `err.text`
+  // (NOT `responseText`). Tests must mock the real property name.
   it('recovers when a generated object field is returned as a JSON string', async () => {
     mocks.generateObject.mockReset();
     mocks.generateObject.mockRejectedValueOnce(Object.assign(
       new Error('No object generated: response did not match schema.'),
       {
-        responseText: JSON.stringify({
+        text: JSON.stringify({
           entry: JSON.stringify({
             action: 'create',
             path: 'wiki/general/javascript-fundamentals.md',
@@ -112,5 +137,71 @@ describe('runAgentLoop structured output recovery', () => {
       'Ingest Writer recovered structured output',
       expect.objectContaining({ kind: 'structured-output-recovery' }),
     );
+  });
+
+  // The reported symptom: model wraps valid JSON in a ```json fence, so the AI SDK
+  // raises "could not parse the response." The recovery must extract the embedded JSON.
+  it('recovers when the model wraps JSON in a markdown code fence', async () => {
+    mocks.generateObject.mockReset();
+    const innerObject = {
+      entry: {
+        action: 'create',
+        path: 'wiki/general/typescript.md',
+        content: '---\ntitle: TypeScript\n---\n',
+      },
+    };
+    mocks.generateObject.mockRejectedValueOnce(Object.assign(
+      new Error('No object generated: could not parse the response.'),
+      {
+        text: 'Here is the entry:\n```json\n' + JSON.stringify(innerObject) + '\n```',
+        usage: { promptTokens: 5, completionTokens: 15 },
+      },
+    ));
+
+    const ctx = ctxStub();
+    const result = await runAgentLoop({
+      skill: writerSkill(),
+      ctx,
+      input: { slug: 'typescript', subjectSlug: 'general' },
+    });
+
+    expect(result.output).toEqual(innerObject);
+    expect(ctx.budget.chargeTokens).toHaveBeenCalledWith(20);
+    expect(ctx.emit).toHaveBeenCalledWith(
+      'agent:step',
+      'Ingest Writer recovered structured output',
+      expect.objectContaining({ kind: 'structured-output-recovery' }),
+    );
+  });
+});
+
+describe('runAgentLoop provider tool-name sanitization', () => {
+  // Provider APIs (OpenAI / DeepSeek / ...) require tool names to match
+  // ^[a-zA-Z0-9_-]{1,64}$. Internal tool names use dots for namespacing
+  // (`vault.read`, `mcp.<server>.<tool>`), which the provider rejects with
+  // "Invalid 'tools[0].function.name': string does not match pattern."
+  it('sanitizes dotted tool names before passing them to generateText', async () => {
+    mocks.generateText.mockReset();
+    mocks.generateText.mockResolvedValueOnce({
+      text: 'done',
+      usage: { promptTokens: 1, completionTokens: 2 },
+    });
+
+    const ctx = ctxStub();
+    (ctx.toolRegistry.resolve as ReturnType<typeof vi.fn>).mockReturnValue([
+      toolDefStub('vault.read'),
+      toolDefStub('vault.search'),
+      toolDefStub('commit_changeset'),
+    ]);
+
+    await runAgentLoop({ skill: reviewerSkill(), ctx, input: {} });
+
+    expect(mocks.generateText).toHaveBeenCalledTimes(1);
+    const arg = mocks.generateText.mock.calls[0][0] as { tools: Record<string, unknown> };
+    const names = Object.keys(arg.tools);
+    expect(names).toEqual(['vault_read', 'vault_search', 'commit_changeset']);
+    for (const n of names) {
+      expect(n).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
+    }
   });
 });
