@@ -2,8 +2,9 @@ import type { AgentContext, SkillTemplate } from '../types';
 import { runAgentLoop, type AgentRunResult } from './agent-loop';
 
 export type PipelineStep =
-  | { kind: 'sequence'; skillId: string }
-  | { kind: 'fanout'; skillId: string; fromOutput: string };
+  | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[] }
+  | { kind: 'fanout'; skillId: string; fromOutput: string }
+  | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string };
 
 export class WriterConflictError extends Error {
   constructor(public readonly slug: string) {
@@ -30,9 +31,48 @@ export async function runPipeline(opts: {
   for (const step of opts.steps) {
     if (step.kind === 'sequence') {
       const skill = opts.resolveSkill(step.skillId);
-      const r = await runAgentLoop({ skill, ctx: opts.ctx, input: carry });
-      carry = r.output;
+      const input = step.omitFromInput && isPlainObject(carry)
+        ? omitKeys(carry, step.omitFromInput)
+        : carry;
+      const r = await runAgentLoop({ skill, ctx: opts.ctx, input });
+      carry = step.carryThrough && isPlainObject(carry) && isPlainObject(r.output)
+        ? { ...pickKeys(carry, step.carryThrough), ...r.output }
+        : r.output;
+    } else if (step.kind === 'map') {
+      const skill = opts.resolveSkill(step.skillId);
+      const items = readPath(carry, step.fromOutput);
+      if (!Array.isArray(items)) {
+        throw new Error(`Map source at "${step.fromOutput}" is not an array (got ${typeof items})`);
+      }
+      const outline = isPlainObject(carry) ? carry.outline : undefined;
+      const limit = opts.ctx.budgetSnapshot.maxParallelSubAgents;
+      const results = await runWithSemaphore(items, limit, async (item) => {
+        if (!isPlainObject(item) || typeof item.key !== 'string') return item;
+        const stored = opts.ctx.chunkStore.get(item.key);
+        if (!stored) {
+          opts.ctx.emit('ingest:warn', `Chunk not found in chunkStore: ${item.key}`, { key: item.key });
+          return item;
+        }
+        // map 纯收集（summarizer 无 overlay 副作用），无需像 fanout 那样做 overlay snapshot 隔离
+        const childCtx: AgentContext = { ...opts.ctx, parentRunId: opts.ctx.rootRunId };
+        const r = await runAgentLoop({
+          skill,
+          ctx: childCtx,
+          input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, outline },
+        });
+        const out = r.output as { summary?: string } | undefined;
+        if (typeof out?.summary !== 'string') {
+          opts.ctx.emit('ingest:warn', `Summarizer returned no summary for chunk: ${item.key}`, { key: item.key, skillId: skill.id });
+          return item;
+        }
+        return { ...item, content: out.summary };
+      });
+      // intoOutput 只写顶层 key（点路径会被当作字面量键创建；当前用法仅顶层）
+      carry = isPlainObject(carry)
+        ? { ...carry, [step.intoOutput]: results }
+        : { [step.intoOutput]: results };
     } else {
+      // fanout 分支：overlay 快照隔离、WriterConflictError 检测、putEntries 合并
       const skill = opts.resolveSkill(step.skillId);
       const items = readPath(carry, step.fromOutput);
       if (!Array.isArray(items)) {
@@ -46,9 +86,9 @@ export async function runPipeline(opts: {
           overlay: baseOverlay.snapshot(),
           parentRunId: opts.ctx.rootRunId,
         };
-        return runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item) });
+        return runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx) });
       });
-      // Merge writer outputs (each is an object; assume each yields a top-level `entry` field).
+      // 冲突检测
       const seenSlugs = new Set<string>();
       const merged: unknown[] = [];
       for (const r of results) {
@@ -62,12 +102,14 @@ export async function runPipeline(opts: {
         }
         merged.push(r.output);
       }
-      // Apply each writer's `entry` to the parent overlay.
+      // 把每个 writer 的 entry 合并到父 overlay
       for (const r of results) {
         const out = r.output as { entry?: { action: 'create' | 'update' | 'delete'; path: string; content: string } } | undefined;
         if (out?.entry) opts.ctx.overlay.putEntries([out.entry]);
       }
-      carry = { ...((carry as object) ?? {}), writerOutputs: merged };
+      carry = isPlainObject(carry)
+        ? { ...carry, writerOutputs: merged }
+        : { writerOutputs: merged };
     }
   }
   return carry;
@@ -82,16 +124,56 @@ function readPath(obj: unknown, path: string): unknown {
   }, obj);
 }
 
-function buildFanoutInput(carry: unknown, item: unknown): unknown {
+function buildFanoutInput(carry: unknown, item: unknown, ctx: AgentContext): unknown {
   if (!isPlainObject(carry) || !isPlainObject(item)) return item;
 
   return {
     ...item,
-    sources: carry.sources,
+    relevantChunks: resolveRelevantChunks(item, ctx),
     subjectSlug: carry.subjectSlug,
     existingPages: carry.existingPages,
     plan: carry.plan,
   };
+}
+
+/** 按 planner 标注的 sourceRefs 从 chunkStore 解析出相关块全文；缺失块跳过并告警。 */
+function resolveRelevantChunks(
+  item: Record<string, unknown>,
+  ctx: AgentContext,
+): Array<{ id: string; heading: string; text: string }> {
+  const refs = item.sourceRefs;
+  if (!Array.isArray(refs)) return [];
+  const out: Array<{ id: string; heading: string; text: string }> = [];
+  for (const ref of refs) {
+    if (!isPlainObject(ref) || typeof ref.sourceId !== 'string' || !Array.isArray(ref.chunkIds)) continue;
+    for (const chunkId of ref.chunkIds) {
+      if (typeof chunkId !== 'string') continue;
+      const stored = ctx.chunkStore.get(`${ref.sourceId}:${chunkId}`);
+      if (!stored) {
+        ctx.emit('ingest:warn', `Planner referenced missing chunk: ${ref.sourceId}:${chunkId}`, {
+          sourceId: ref.sourceId,
+          chunkId,
+        });
+        continue;
+      }
+      out.push({ id: stored.id, heading: stored.heading, text: stored.text });
+    }
+  }
+  return out;
+}
+
+function pickKeys(obj: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k in obj) out[k] = obj[k];
+  }
+  return out;
+}
+
+function omitKeys(obj: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...obj };
+  for (const k of keys) delete out[k];
+  return out;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -101,11 +183,18 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 async function runWithSemaphore<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let i = 0;
+  let failed = false; // 任一实例失败后不再派发新实例（已在飞的自然结束）
   async function worker() {
     while (true) {
+      if (failed) return;
       const idx = i++;
       if (idx >= items.length) return;
-      results[idx] = await fn(items[idx]);
+      try {
+        results[idx] = await fn(items[idx]);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));

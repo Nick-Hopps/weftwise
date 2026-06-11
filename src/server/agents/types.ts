@@ -66,6 +66,23 @@ export interface PendingChangeset {
   entries: ChangesetEntry[];
 }
 
+/** chunkStore 中的块全文（全文唯一存放处，绝不进 carry/prompt）。 */
+export interface StoredChunk {
+  sourceId: string;
+  id: string;
+  heading: string;
+  text: string;
+}
+
+/** carry 中流转的轻量块引用；content 在小路径=全文、大路径=摘要。 */
+export interface ChunkRef {
+  key: string; // `${sourceId}:${id}`
+  sourceId: string;
+  id: string;
+  heading: string;
+  content: string;
+}
+
 export interface AgentContext {
   job: Job;
   subject: Subject;
@@ -79,6 +96,8 @@ export interface AgentContext {
   cancelled: () => boolean;
   committed: { value: boolean };
   pending: PendingChangeset;
+  /** 块全文存放处；key = `${sourceId}:${chunkId}`。 */
+  chunkStore: Map<string, StoredChunk>;
   /** Snapshot from settings-repo, captured at root-run start. */
   budgetSnapshot: AgentBudget;
 }

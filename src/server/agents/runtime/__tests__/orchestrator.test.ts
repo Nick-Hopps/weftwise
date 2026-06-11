@@ -1,6 +1,7 @@
+// src/server/agents/runtime/__tests__/orchestrator.test.ts
 import { describe, expect, it, vi } from 'vitest';
 import { runPipeline, WriterConflictError } from '../orchestrator';
-import type { AgentContext, SkillTemplate } from '../../types';
+import type { AgentContext, SkillTemplate, StoredChunk } from '../../types';
 
 const mockRun = vi.fn();
 vi.mock('../agent-loop', () => ({
@@ -8,7 +9,9 @@ vi.mock('../agent-loop', () => ({
   AgentCancelled: class extends Error {},
 }));
 
-function ctxStub(): AgentContext {
+function ctxStub(chunks: StoredChunk[] = []): AgentContext {
+  const chunkStore = new Map<string, StoredChunk>();
+  for (const c of chunks) chunkStore.set(`${c.sourceId}:${c.id}`, c);
   return {
     job: { id: 'j' } as AgentContext['job'],
     subject: { slug: 'general' } as AgentContext['subject'],
@@ -22,6 +25,7 @@ function ctxStub(): AgentContext {
     cancelled: () => false,
     committed: { value: false },
     pending: { entries: [] },
+    chunkStore,
     budgetSnapshot: { maxSteps: 25, maxTokensPerJob: 500_000, maxParallelSubAgents: 2 },
   } as AgentContext;
 }
@@ -30,8 +34,11 @@ const stubSkill = (id: string): SkillTemplate => ({
   id, name: id, description: '', version: 1, tools: [], canDispatch: [], systemPrompt: '',
 });
 
-describe('orchestrator.runPipeline', () => {
-  it('runs sequence steps in order, carrying output', async () => {
+const chunk = (sourceId: string, id: string, text: string): StoredChunk =>
+  ({ sourceId, id, heading: '', text });
+
+describe('orchestrator.runPipeline: sequence', () => {
+  it('顺序执行并传递输出', async () => {
     mockRun.mockReset();
     mockRun
       .mockResolvedValueOnce({ runId: '1', output: { plan: { pages: [] } }, tokensUsed: 0, stepCount: 1 })
@@ -43,68 +50,180 @@ describe('orchestrator.runPipeline', () => {
       initialInput: { sources: [] },
     });
     expect(result).toEqual({ final: 'ok' });
-    expect(mockRun).toHaveBeenCalledTimes(2);
-    expect(mockRun.mock.calls[1][0].input).toEqual({ plan: { pages: [] } });
   });
 
-  it('fans out per-item with parallel cap', async () => {
+  it('carryThrough 把指定 key 从前一 carry 透传到新 carry', async () => {
     mockRun.mockReset();
     mockRun
-      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a' }, { slug: 'b' }] } }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'w2', output: { entry: { action: 'create', path: 'wiki/general/b.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
-    const result = await runPipeline({
+      .mockResolvedValueOnce({ runId: '1', output: { plan: { pages: [] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: '2', output: { final: 'ok' }, tokensUsed: 0, stepCount: 1 });
+    await runPipeline({
       steps: [
-        { kind: 'sequence', skillId: 'planner' },
-        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'chunkRefs'] },
+        { kind: 'sequence', skillId: 'reviewer' },
       ],
       resolveSkill: stubSkill,
       ctx: ctxStub(),
-      initialInput: {},
+      initialInput: { subjectSlug: 'general', chunkRefs: [{ key: 'k' }], other: 'dropped' },
     });
-    expect(mockRun).toHaveBeenCalledTimes(3);
-    expect(mockRun.mock.calls[1][0].input).toMatchObject({
-      slug: 'a',
-      subjectSlug: undefined,
-      sources: undefined,
-      plan: { pages: [{ slug: 'a' }, { slug: 'b' }] },
+    // reviewer 的输入 = carryThrough keys + planner 输出
+    expect(mockRun.mock.calls[1][0].input).toEqual({
+      subjectSlug: 'general',
+      chunkRefs: [{ key: 'k' }],
+      plan: { pages: [] },
     });
-    const r = result as { writerOutputs?: unknown[] };
-    expect(r.writerOutputs).toHaveLength(2);
   });
 
-  it('passes source and subject context into fanout writers', async () => {
+  it('omitFromInput 从该步输入中剔除指定 key', async () => {
+    mockRun.mockReset();
+    mockRun.mockResolvedValueOnce({ runId: '1', output: { done: true }, tokensUsed: 0, stepCount: 1 });
+    await runPipeline({
+      steps: [{ kind: 'sequence', skillId: 'reviewer', omitFromInput: ['chunkRefs', 'outline'] }],
+      resolveSkill: stubSkill,
+      ctx: ctxStub(),
+      initialInput: { chunkRefs: [{ key: 'k' }], outline: '- x', plan: { pages: [] } },
+    });
+    expect(mockRun.mock.calls[0][0].input).toEqual({ plan: { pages: [] } });
+  });
+});
+
+describe('orchestrator.runPipeline: map', () => {
+  it('逐块注入 chunkStore 全文+outline，把 summary 写回 content', async () => {
+    mockRun.mockReset();
+    mockRun.mockImplementation(async (opts: { input: { id: string } }) => ({
+      runId: `m-${opts.input.id}`,
+      output: { summary: `摘要:${opts.input.id}` },
+      tokensUsed: 0,
+      stepCount: 1,
+    }));
+    const ctx = ctxStub([chunk('s1', 'c0', '全文零'), chunk('s1', 'c1', '全文一')]);
+    const result = await runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {
+        outline: '- [s1:c0] x\n- [s1:c1] y',
+        chunkRefs: [
+          { key: 's1:c0', sourceId: 's1', id: 'c0', heading: '', content: '' },
+          { key: 's1:c1', sourceId: 's1', id: 'c1', heading: '', content: '' },
+        ],
+      },
+    });
+    // summarizer 收到全文与 outline
+    expect(mockRun.mock.calls[0][0].input).toMatchObject({ text: '全文零', outline: expect.stringContaining('s1:c0') });
+    const r = result as { chunkRefs: Array<{ content: string }> };
+    expect(r.chunkRefs.map((c) => c.content)).toEqual(['摘要:c0', '摘要:c1']);
+  });
+
+  it('chunkStore 缺失的块跳过并 emit warn，原 item 保留', async () => {
+    mockRun.mockReset();
+    const ctx = ctxStub([]); // 空 chunkStore
+    const result = await runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { chunkRefs: [{ key: 's1:c9', sourceId: 's1', id: 'c9', heading: '', content: '' }] },
+    });
+    expect(mockRun).not.toHaveBeenCalled();
+    expect(ctx.emit).toHaveBeenCalledWith('ingest:warn', expect.stringContaining('s1:c9'), expect.anything());
+    const r = result as { chunkRefs: Array<{ key: string }> };
+    expect(r.chunkRefs[0].key).toBe('s1:c9');
+  });
+
+  it('summarizer 输出缺 summary 时原 item 保留并 emit warn', async () => {
+    mockRun.mockReset();
+    mockRun.mockResolvedValueOnce({ runId: 'm-c0', output: '纯文本', tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([chunk('s1', 'c0', '全文零')]);
+    const result = await runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { chunkRefs: [{ key: 's1:c0', sourceId: 's1', id: 'c0', heading: '', content: '' }] },
+    });
+    expect(ctx.emit).toHaveBeenCalledWith('ingest:warn', expect.stringContaining('s1:c0'), expect.objectContaining({ skillId: 'summarizer' }));
+    const r = result as { chunkRefs: Array<{ content: string }> };
+    expect(r.chunkRefs[0].content).toBe('');
+  });
+
+  it('单实例失败后 runPipeline reject 且不再派发新实例', async () => {
     mockRun.mockReset();
     mockRun
-      .mockResolvedValueOnce({ runId: 'p', output: {
-        sources: [{ filename: 'source.md', fullText: 'source body' }],
-        subjectSlug: 'general',
-        existingPages: [],
-        plan: { pages: [{ slug: 'a', title: 'A' }] },
-      }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'm-c0', output: { summary: '摘要:c0' }, tokensUsed: 0, stepCount: 1 })
+      .mockRejectedValueOnce(new Error('LLM exploded'))
+      .mockResolvedValueOnce({ runId: 'm-c2', output: { summary: '摘要:c2' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([chunk('s1', 'c0', '全文零'), chunk('s1', 'c1', '全文一'), chunk('s1', 'c2', '全文二')]);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行执行使断言确定：失败在第 2 块，第 3 块不被派发
+    await expect(runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {
+        chunkRefs: [
+          { key: 's1:c0', sourceId: 's1', id: 'c0', heading: '', content: '' },
+          { key: 's1:c1', sourceId: 's1', id: 'c1', heading: '', content: '' },
+          { key: 's1:c2', sourceId: 's1', id: 'c2', heading: '', content: '' },
+        ],
+      },
+    })).rejects.toThrow('LLM exploded');
+    expect(mockRun).toHaveBeenCalledTimes(2);
+  });
+});
 
+describe('orchestrator.runPipeline: fanout', () => {
+  it('按 sourceRefs 从 chunkStore 注入 relevantChunks（不透传 chunkRefs）', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({
+        runId: 'p',
+        output: { plan: { pages: [{ slug: 'a', sourceRefs: [{ sourceId: 's1', chunkIds: ['c0', 'c2'] }] }] } },
+        tokensUsed: 0, stepCount: 1,
+      })
+      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([chunk('s1', 'c0', '块零全文'), chunk('s1', 'c2', '块二全文')]);
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages', 'chunkRefs'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [], chunkRefs: [{ key: 's1:c0' }] },
+    });
+    const writerInput = mockRun.mock.calls[1][0].input as Record<string, unknown>;
+    expect(writerInput.relevantChunks).toEqual([
+      { id: 'c0', heading: '', text: '块零全文' },
+      { id: 'c2', heading: '', text: '块二全文' },
+    ]);
+    expect(writerInput.subjectSlug).toBe('general');
+    expect(writerInput.chunkRefs).toBeUndefined();
+    expect(writerInput.sources).toBeUndefined();
+  });
+
+  it('sourceRefs 引用缺失块时跳过 + emit warn', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({
+        runId: 'p',
+        output: { plan: { pages: [{ slug: 'a', sourceRefs: [{ sourceId: 's1', chunkIds: ['c404'] }] }] } },
+        tokensUsed: 0, stepCount: 1,
+      })
+      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
     await runPipeline({
       steps: [
         { kind: 'sequence', skillId: 'planner' },
         { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
       ],
       resolveSkill: stubSkill,
-      ctx: ctxStub(),
+      ctx,
       initialInput: {},
     });
-
-    expect(mockRun.mock.calls[1][0].input).toMatchObject({
-      slug: 'a',
-      title: 'A',
-      subjectSlug: 'general',
-      sources: [{ filename: 'source.md', fullText: 'source body' }],
-      existingPages: [],
-      plan: { pages: [{ slug: 'a', title: 'A' }] },
-    });
+    expect(ctx.emit).toHaveBeenCalledWith('ingest:warn', expect.stringContaining('c404'), expect.anything());
+    const writerInput = mockRun.mock.calls[1][0].input as Record<string, unknown>;
+    expect(writerInput.relevantChunks).toEqual([]);
   });
 
-  it('throws WriterConflictError on duplicate writer paths', async () => {
+  it('writer 路径冲突仍抛 WriterConflictError', async () => {
     mockRun.mockReset();
     mockRun
       .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a' }, { slug: 'a' }] } }, tokensUsed: 0, stepCount: 1 })
