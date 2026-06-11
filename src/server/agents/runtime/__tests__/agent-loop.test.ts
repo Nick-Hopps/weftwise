@@ -39,13 +39,14 @@ vi.mock('../../../db/repos/settings-repo', () => ({
 }));
 
 import { runAgentLoop } from '../agent-loop';
+import { BudgetExceededError } from '../budget';
 
 function ctxStub(): AgentContext {
   return {
     job: { id: 'j' } as AgentContext['job'],
     subject: { id: 's1', slug: 'general' } as AgentContext['subject'],
     emit: vi.fn(),
-    budget: { chargeStep: vi.fn(), chargeTokens: vi.fn(), assertWithin: vi.fn(), stepCount: 0, tokensUsed: 0 },
+    budget: { chargeTokens: vi.fn(), assertWithin: vi.fn(), tokensUsed: 0 },
     overlay: { snapshot: vi.fn(), readPage: vi.fn(), search: vi.fn(), putEntries: vi.fn() } as unknown as AgentContext['overlay'],
     toolRegistry: { register: vi.fn(), resolve: vi.fn(() => []), get: vi.fn() },
     skillRegistry: { get: vi.fn(), list: vi.fn(() => []), degraded: vi.fn(() => []) },
@@ -203,5 +204,22 @@ describe('runAgentLoop provider tool-name sanitization', () => {
     for (const n of names) {
       expect(n).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     }
+  });
+});
+
+describe('runAgentLoop budget propagation', () => {
+  // token 防线在 run 开始时由 ctx.budget.assertWithin() 执行；
+  // 该异常必须原样冒泡给 orchestrator，不能在 agent-loop 内被吞掉。
+  it('propagates BudgetExceededError thrown by assertWithin', async () => {
+    const ctx = ctxStub();
+    (ctx.budget.assertWithin as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new BudgetExceededError('maxTokensPerJob', 600000, 500000);
+    });
+
+    await expect(runAgentLoop({
+      skill: writerSkill(),
+      ctx,
+      input: { slug: 'any', subjectSlug: 'general' },
+    })).rejects.toMatchObject({ name: 'BudgetExceededError' });
   });
 });

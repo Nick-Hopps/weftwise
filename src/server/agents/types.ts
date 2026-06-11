@@ -85,11 +85,15 @@ export interface AgentContext {
 
 // Forward-declared interfaces; concrete classes live in their own files.
 export interface BudgetTracker {
-  chargeStep(): void;
   chargeTokens(n: number): void;
   assertWithin(): void;
-  readonly stepCount: number;
   readonly tokensUsed: number;
+}
+
+/** 单 agent 实例内的 step 计数器（防单实例失控循环；job 级总量防线是 token）。 */
+export interface RunStepTracker {
+  chargeStep(): void;
+  readonly stepCount: number;
 }
 
 export interface OverlayVault {

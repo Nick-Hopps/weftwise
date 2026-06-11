@@ -13,7 +13,7 @@ function ctxStub(): AgentContext {
     job: { id: 'j' } as AgentContext['job'],
     subject: { slug: 'general' } as AgentContext['subject'],
     emit: vi.fn(),
-    budget: { chargeStep: vi.fn(), chargeTokens: vi.fn(), assertWithin: vi.fn(), stepCount: 0, tokensUsed: 0 },
+    budget: { chargeTokens: vi.fn(), assertWithin: vi.fn(), tokensUsed: 0 },
     overlay: { snapshot: vi.fn(() => ({ snapshot: () => ({}), readPage: vi.fn(), search: vi.fn(), putEntries: vi.fn() })), readPage: vi.fn(), search: vi.fn(), putEntries: vi.fn() } as unknown as AgentContext['overlay'],
     toolRegistry: { register: vi.fn(), resolve: vi.fn(() => []), get: vi.fn() },
     skillRegistry: { get: vi.fn(), list: vi.fn(() => []), degraded: vi.fn(() => []) },
