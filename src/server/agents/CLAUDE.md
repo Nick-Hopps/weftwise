@@ -18,6 +18,9 @@ ingest-service.ts
         ▼ runPipeline(jobId, subject, sources, ctx)
   orchestrator.ts
         │
+        ├── [大文件路径] map: skill 'ingest-chunk-summarizer' × N chunks
+        │     └── 逐块定位性摘要，全文从 ctx.chunkStore 注入，summary 写回 chunkRefs
+        │
         ├── step 1: skill 'ingest-planner'
         │     └── tools: vault.read, vault.search
         │
@@ -63,8 +66,8 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `agent-loop.ts` | 单个 agent 的 tool-call 驱动循环；调用 `llm/provider-registry::resolveModel(route)` 获取模型，循环执行直到 stop 或 budget 超限 |
-| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE |
-| `budget.ts` | `BudgetTracker`：跟踪当前 job 的 steps / tokens 消耗；超限时抛 `BudgetExceededError`（不可重试）|
+| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入） |
+| `budget.ts` | `createBudgetTracker`（job 级 token）+ `createRunStepTracker`（单实例 step）；超限抛 `BudgetExceededError` |
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
 
 ### `skills/`
@@ -107,12 +110,8 @@ export async function loadSkill(id: string): Promise<SkillDef>
 export async function seedSkillFiles(): Promise<void>
 
 // runtime/budget.ts
-export class BudgetTracker {
-  constructor(opts: { maxSteps: number; maxTokens: number })
-  checkStep(): void   // throws BudgetExceededError if over limit
-  addTokens(n: number): void
-  snapshot(): BudgetSnapshot
-}
+export function createBudgetTracker(budget: AgentBudget): BudgetTracker   // job 级 token
+export function createRunStepTracker(maxSteps: number): RunStepTracker    // 单实例 step
 ```
 
 ---
@@ -123,7 +122,7 @@ export class BudgetTracker {
 
 | Key | 默认值 | 说明 |
 |-----|--------|------|
-| `agentMaxSteps` | `25` | 单个 job 跨所有 skill step 的最大 tool-call 轮次 |
+| `agentMaxSteps` | `25` | **单个 agent 实例**内的最大 tool-call 轮次（2026-06 起从 job 级改为实例级；job 级总量防线由 token 预算承担） |
 | `agentMaxTokensPerJob` | `500000` | 单个 job 的 token 总预算（in + out） |
 | `agentMaxParallelSubAgents` | `3` | fanout writer step 的最大并发数 |
 | `agentMcpLifecycle` | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
