@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { IngestResult } from '@/lib/contracts';
 
 vi.mock('../../db/repos/subjects-repo', () => ({
@@ -29,6 +29,7 @@ vi.mock('../../db/repos/settings-repo', () => ({
   getAgentMaxTokensPerJob: () => mockMaxTokens,
   getAgentMaxParallelSubAgents: () => 2,
   getAgentTaskRouterMode: () => 'frontmatter-override',
+  getWikiLanguage: () => 'Chinese',
 }));
 
 const mockRunPipeline = vi.fn(async (): Promise<IngestResult> => ({
@@ -42,9 +43,10 @@ vi.mock('../../agents/runtime/orchestrator', () => ({
   WriterConflictError: class extends Error {},
 }));
 
+let mockSkillVersion = 2;
 vi.mock('../../worker-runtime', () => ({
   getRuntimeRegistries: () => ({
-    skillRegistry: { get: (id: string) => ({ id, name: id, description: '', version: 1, tools: [], canDispatch: [], systemPrompt: '' }), list: () => [], degraded: () => [] },
+    skillRegistry: { get: (id: string) => ({ id, name: id, description: '', version: mockSkillVersion, tools: [], canDispatch: [], systemPrompt: '' }), list: () => [], degraded: () => [] },
     toolRegistry: { register: vi.fn(), resolve: vi.fn(() => []), get: vi.fn() },
   }),
 }));
@@ -68,10 +70,13 @@ function makeJob() {
 }
 
 describe('ingest-service', () => {
+  beforeAll(async () => {
+    await import('../ingest-service');
+  });
+
   it('runs orchestrator pipeline and returns IngestResult', async () => {
     mockCleanText = '这是一段短内容。';
     mockMaxTokens = 100_000;
-    await import('../ingest-service');
     const handler = handlers.get('ingest');
     expect(handler).toBeDefined();
     const job = {
@@ -154,5 +159,30 @@ describe('ingest-service', () => {
     const handler = handlers.get('ingest')!;
     await expect(handler(makeJob(), vi.fn())).rejects.toThrow(/agentMaxTokensPerJob/);
     expect(mockRunPipeline).not.toHaveBeenCalled();
+  });
+
+  it('skill 版本守卫：v1 skill 拒绝启动且不调 runPipeline', async () => {
+    mockSkillVersion = 1;
+    mockCleanText = '短内容。';
+    mockMaxTokens = 100_000;
+    mockRunPipeline.mockClear();
+    const handler = handlers.get('ingest')!;
+    await expect(handler(makeJob(), vi.fn())).rejects.toThrow(/requires v2/);
+    expect(mockRunPipeline).not.toHaveBeenCalled();
+    mockSkillVersion = 2; // 恢复
+  });
+
+  it('initialInput 包含非空 languageDirective', async () => {
+    mockSkillVersion = 2;
+    mockCleanText = '短内容。';
+    mockMaxTokens = 100_000;
+    mockRunPipeline.mockClear();
+    const handler = handlers.get('ingest')!;
+    await handler(makeJob(), vi.fn());
+    const opts = (mockRunPipeline.mock.calls as unknown as Array<[unknown]>)[0][0] as {
+      initialInput: { languageDirective?: string };
+    };
+    expect(typeof opts.initialInput.languageDirective).toBe('string');
+    expect(opts.initialInput.languageDirective!.length).toBeGreaterThan(0);
   });
 });
