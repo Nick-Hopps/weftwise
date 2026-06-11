@@ -36,19 +36,79 @@ export async function runAgentLoop(opts: {
   const startedAt = Date.now();
   const runSteps = createRunStepTracker(ctx.budgetSnapshot.maxSteps);
 
-  // Resolve LLM model: task-router defaults < tasks['skill:<id>'] < frontmatter (if mode allows).
+  const { model, route } = resolveSkillModel(skill);
+  const toolSet = compileToolSet(skill, ctx, runId, runSteps);
+  const messages = buildMessages(skill, input);
+
+  // LLM 调用前的取消闸门
+  if (ctx.cancelled()) throw new AgentCancelled();
+  ctx.budget.assertWithin();
+
+  const { output, inputTokens, outputTokens } = skill.outputSchema
+    ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
+    : await generateTextResult(skill, ctx, model, route, messages, toolSet);
+
+  runSteps.chargeStep(); // final 输出本身计 1 步
+  // 事后登记：token 超限由下一个 run 开始时的 assertWithin 拦截
+  //（结合 ingest 预检 fail-fast，事后防线足够）。
+  ctx.budget.chargeTokens(inputTokens + outputTokens);
+
+  ctx.emit('agent:step', `${skill.name} produced final output`, {
+    runId,
+    parentRunId: ctx.parentRunId,
+    skillId: skill.id,
+    stepIndex: runSteps.stepCount,
+    kind: 'final',
+    tokensIn: inputTokens,
+    tokensOut: outputTokens,
+  });
+
+  ctx.emit('agent:run-completed', `${skill.name} completed`, {
+    runId,
+    tokensUsed: inputTokens + outputTokens,
+    stepCount: runSteps.stepCount,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return {
+    runId,
+    output,
+    tokensUsed: inputTokens + outputTokens,
+    stepCount: runSteps.stepCount,
+  };
+}
+
+type TaskRoute = ReturnType<typeof resolveTask>;
+type ResolvedModel = ReturnType<typeof resolveModel>;
+type RunStepTracker = ReturnType<typeof createRunStepTracker>;
+
+interface GenerationResult {
+  output: unknown;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** 解析 LLM 模型：task-router defaults < tasks['skill:<id>'] < frontmatter（视 mode 而定）。 */
+function resolveSkillModel(skill: SkillTemplate): { model: ResolvedModel; route: TaskRoute } {
   const taskKey = `skill:${skill.id}`;
   const routerMode = getAgentTaskRouterMode();
   const route = resolveTask(taskKey, routerMode === 'frontmatter-override' ? skill.model : undefined);
-  const model = resolveModel(route);
+  return { model: resolveModel(route), route };
+}
 
-  // Resolve tools.
+/** 把 skill 声明的内部工具编译为 provider 可用的 ToolSet（带步数计费与 emit 遥测）。 */
+function compileToolSet(
+  skill: SkillTemplate,
+  ctx: AgentContext,
+  runId: string,
+  runSteps: RunStepTracker,
+): ToolSet {
   const toolDefs = ctx.toolRegistry.resolve(skill.tools);
   const toolSet: ToolSet = {};
   const usedToolNames = new Set<string>();
   for (const t of toolDefs) {
-    // Internal tool names are dot-namespaced (`vault.read`, `mcp.<server>.<tool>`),
-    // but provider APIs require ^[a-zA-Z0-9_-]{1,64}$ — translate at the boundary.
+    // 内部工具名用点号分命名空间（`vault.read`、`mcp.<server>.<tool>`），
+    // 但 provider API 要求 ^[a-zA-Z0-9_-]{1,64}$ —— 在边界处转换。
     const providerName = toProviderToolName(t.name, usedToolNames);
     usedToolNames.add(providerName);
     toolSet[providerName] = tool({
@@ -88,93 +148,85 @@ export async function runAgentLoop(opts: {
       },
     });
   }
+  return toolSet;
+}
 
-  // Build messages.
-  const messages: CoreMessage[] = [
+/** 构造 system + user 消息（非字符串 input 序列化为 JSON）。 */
+function buildMessages(skill: SkillTemplate, input: unknown): CoreMessage[] {
+  return [
     { role: 'system', content: skill.systemPrompt },
     { role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) },
   ];
+}
 
-  // Cancellation gate before LLM call.
-  if (ctx.cancelled()) throw new AgentCancelled();
-  ctx.budget.assertWithin();
-
-  let output: unknown;
-  let inputTokens = 0;
-  let outputTokens = 0;
-
-  if (skill.outputSchema) {
-    try {
-      const result = await generateObject({
-        model,
-        schema: skill.outputSchema,
-        messages,
-        maxTokens: skill.model?.maxTokens ?? route.maxTokens,
-        temperature: skill.model?.temperature ?? route.temperature,
-      });
-      output = result.object;
-      inputTokens = result.usage?.promptTokens ?? 0;
-      outputTokens = result.usage?.completionTokens ?? 0;
-    } catch (err) {
-      const recovered = recoverStructuredOutput(err, skill.outputSchema);
-      if (!recovered) throw err;
-
-      output = recovered.object;
-      inputTokens = recovered.inputTokens;
-      outputTokens = recovered.outputTokens;
-      ctx.emit('agent:step', `${skill.name} recovered structured output`, {
-        runId,
-        parentRunId: ctx.parentRunId,
-        skillId: skill.id,
-        stepIndex: runSteps.stepCount,
-        kind: 'structured-output-recovery',
-        reason: recovered.reason,
-      });
-    }
-  } else {
-    const result = await generateText({
+/** 结构化输出路径：generateObject，失败时尝试从 err.text 恢复。 */
+async function generateStructuredResult(
+  skill: SkillTemplate,
+  ctx: AgentContext,
+  runId: string,
+  runSteps: RunStepTracker,
+  model: ResolvedModel,
+  route: TaskRoute,
+  messages: CoreMessage[],
+): Promise<GenerationResult> {
+  const schema = skill.outputSchema!;
+  try {
+    const result = await generateObject({
       model,
-      tools: toolSet,
+      schema,
       messages,
       maxTokens: skill.model?.maxTokens ?? route.maxTokens,
       temperature: skill.model?.temperature ?? route.temperature,
-      // SDK maxSteps 是第一道防线（静默截断工具轮次）；runSteps 是纵深防御——
-      // generateObject 路径的唯一步数防线，也是全路径的步数遥测来源。
-      // 两者同值是有意的，不要为让 runSteps 先触发而改成 N-1。
-      maxSteps: ctx.budgetSnapshot.maxSteps,
     });
-    output = result.text;
-    inputTokens = result.usage?.promptTokens ?? 0;
-    outputTokens = result.usage?.completionTokens ?? 0;
+    return {
+      output: result.object,
+      inputTokens: result.usage?.promptTokens ?? 0,
+      outputTokens: result.usage?.completionTokens ?? 0,
+    };
+  } catch (err) {
+    const recovered = recoverStructuredOutput(err, schema);
+    if (!recovered) throw err;
+
+    ctx.emit('agent:step', `${skill.name} recovered structured output`, {
+      runId,
+      parentRunId: ctx.parentRunId,
+      skillId: skill.id,
+      stepIndex: runSteps.stepCount,
+      kind: 'structured-output-recovery',
+      reason: recovered.reason,
+    });
+    return {
+      output: recovered.object,
+      inputTokens: recovered.inputTokens,
+      outputTokens: recovered.outputTokens,
+    };
   }
+}
 
-  runSteps.chargeStep(); // final 输出本身计 1 步
-  // 事后登记：token 超限由下一个 run 开始时的 assertWithin 拦截
-  //（结合 ingest 预检 fail-fast，事后防线足够）。
-  ctx.budget.chargeTokens(inputTokens + outputTokens);
-
-  ctx.emit('agent:step', `${skill.name} produced final output`, {
-    runId,
-    parentRunId: ctx.parentRunId,
-    skillId: skill.id,
-    stepIndex: runSteps.stepCount,
-    kind: 'final',
-    tokensIn: inputTokens,
-    tokensOut: outputTokens,
+/** 自由文本路径：generateText + 工具调用循环。 */
+async function generateTextResult(
+  skill: SkillTemplate,
+  ctx: AgentContext,
+  model: ResolvedModel,
+  route: TaskRoute,
+  messages: CoreMessage[],
+  toolSet: ToolSet,
+): Promise<GenerationResult> {
+  const result = await generateText({
+    model,
+    tools: toolSet,
+    messages,
+    maxTokens: skill.model?.maxTokens ?? route.maxTokens,
+    temperature: skill.model?.temperature ?? route.temperature,
+    // SDK maxSteps 是第一道防线（静默截断工具轮次）；runSteps 是纵深防御——
+    // generateObject 路径的唯一步数防线，也是全路径的步数遥测来源。
+    // 两者同值是有意的，不要为让 runSteps 先触发而改成 N-1。
+    maxSteps: ctx.budgetSnapshot.maxSteps,
   });
-
-  ctx.emit('agent:run-completed', `${skill.name} completed`, {
-    runId,
-    tokensUsed: inputTokens + outputTokens,
-    stepCount: runSteps.stepCount,
-    durationMs: Date.now() - startedAt,
-  });
-
   return {
-    runId,
-    output,
-    tokensUsed: inputTokens + outputTokens,
-    stepCount: runSteps.stepCount,
+    output: result.text,
+    inputTokens: result.usage?.promptTokens ?? 0,
+    outputTokens: result.usage?.completionTokens ?? 0,
   };
 }
 
