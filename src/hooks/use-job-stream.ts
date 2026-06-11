@@ -138,7 +138,14 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
         'ingest:applying',
         'ingest:complete',
         'ingest:warn',
+        'ingest:planning',
+        'ingest:committing',
+        // Agent runtime events (orchestrator)
+        'agent:run-started',
+        'agent:run-completed',
+        'agent:step',
         // Lint events
+        'lint:scope',
         'lint:deterministic:start',
         'lint:deterministic:done',
         'lint:semantic:start',

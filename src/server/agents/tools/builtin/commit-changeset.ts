@@ -96,7 +96,7 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
           pageSlugs: [...pagesCreated, ...pagesUpdated],
           linkPageSource: sourcesRepo.linkPageSource,
           updateSourcePageLinks,
-          onWarning: (message) => ctx.emit('ingest:warning', message),
+          onWarning: (message) => ctx.emit('ingest:warn', message),
         };
       }
     }

@@ -29,11 +29,14 @@ import { createMcpPool } from './agents/tools/mcp/client-pool';
 import { loadMcpConfig } from './agents/tools/mcp/config';
 import { getAgentMcpLifecycle } from './db/repos/settings-repo';
 import { setRuntimeRegistries } from './worker-runtime';
+import { createLogger } from './logging';
 
 // Import service modules to trigger handler registration side effects
 import './services/ingest-service';
 import './services/lint-service';
 import './services/query-service'; // registers 'save-to-wiki' handler
+
+const log = createLogger('worker');
 
 async function bootRuntime(): Promise<{ shutdown: () => Promise<void> }> {
   const skillRegistry = await buildSkillRegistry({
@@ -42,9 +45,9 @@ async function bootRuntime(): Promise<{ shutdown: () => Promise<void> }> {
   });
   const degraded = skillRegistry.degraded();
   if (degraded.length) {
-    console.warn('[runtime] degraded skills:', degraded);
+    log.warn('degraded skills:', degraded);
   } else {
-    console.log(`[runtime] loaded ${skillRegistry.list().length} skill(s)`);
+    log.info(`loaded ${skillRegistry.list().length} skill(s)`);
   }
 
   const toolRegistry = createToolRegistry();
@@ -68,7 +71,7 @@ async function bootRuntime(): Promise<{ shutdown: () => Promise<void> }> {
 }
 
 async function main() {
-  console.log('Initializing worker...');
+  log.info('Initializing worker...');
 
   // Eagerly load LLM config to print route table at boot
   const { getLLMConfig } = await import('./llm/config-loader');
@@ -76,22 +79,22 @@ async function main() {
 
   // Ensure database is ready
   getDb();
-  console.log('Database initialized');
+  log.info('Database initialized');
 
   // Self-heal: if pages exist but FTS index is empty, rebuild it
   const sqlite = getRawDb();
   const pageCount = (sqlite.prepare('SELECT COUNT(*) as n FROM pages').get() as { n: number }).n;
   const ftsCount = (sqlite.prepare('SELECT COUNT(*) as n FROM pages_fts').get() as { n: number }).n;
   if (pageCount > 0 && ftsCount === 0) {
-    console.log('FTS index empty with existing pages — rebuilding...');
+    log.info('FTS index empty with existing pages — rebuilding...');
     rebuildSearchIndex();
-    console.log('FTS index rebuilt');
+    log.info('FTS index rebuilt');
   }
 
   // Crash recovery: reclaim jobs with expired leases from previous worker
   const reclaimed = queue.reclaimExpired();
   if (reclaimed > 0) {
-    console.log(`Reclaimed ${reclaimed} expired running job(s)`);
+    log.info(`Reclaimed ${reclaimed} expired running job(s)`);
   }
 
   // Rollback pending (uncommitted) operations from crashed runs.
@@ -114,7 +117,7 @@ async function main() {
     try {
       const subject = op.subject_id ? subjectsRepo.getById(op.subject_id) : null;
       if (!subject) {
-        console.warn(`Skipping operation ${op.id}: subject ${op.subject_id} no longer exists`);
+        log.warn(`Skipping operation ${op.id}: subject ${op.subject_id} no longer exists`);
         continue;
       }
       const changeset: Changeset = {
@@ -128,15 +131,15 @@ async function main() {
         status: 'pending',
       };
       await rollbackChangeset(changeset);
-      console.log(`Rolled back pending operation ${op.id} (subject: ${subject.slug})`);
+      log.info(`Rolled back pending operation ${op.id} (subject: ${subject.slug})`);
     } catch (err) {
-      console.error(`Failed to rollback operation ${op.id}:`, err);
+      log.error(`Failed to rollback operation ${op.id}:`, err);
     }
   }
 
   // Ensure vault git repo exists
   await ensureVaultRepo();
-  console.log('Vault repository ready');
+  log.info('Vault repository ready');
 
   // Boot agent runtime (skills + tools + MCP pool)
   const runtime = await bootRuntime();
@@ -144,21 +147,21 @@ async function main() {
   // Start the worker polling loop (respect env config)
   const pollMs = parseInt(process.env.WORKER_POLL_INTERVAL_MS || '2000', 10);
   const stop = startWorker(pollMs);
-  console.log(`Worker started, polling every ${pollMs}ms`);
+  log.info(`Worker started, polling every ${pollMs}ms`);
 
   // M1 fix: Graceful shutdown — stop worker AND close DB connection
   async function shutdown(signal: string) {
-    console.log(`Received ${signal}, stopping worker...`);
+    log.info(`Received ${signal}, stopping worker...`);
     stop();
     try {
       await runtime.shutdown();
-      console.log('Agent runtime shut down');
+      log.info('Agent runtime shut down');
     } catch (err) {
-      console.error('Failed to shut down agent runtime:', err);
+      log.error('Failed to shut down agent runtime:', err);
     }
     try {
       getRawDb().close();
-      console.log('Database connection closed');
+      log.info('Database connection closed');
     } catch { /* already closed */ }
     process.exit(0);
   }
@@ -168,6 +171,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Worker failed to start:', err);
+  log.error('Worker failed to start:', err);
   process.exit(1);
 });
