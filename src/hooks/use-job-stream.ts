@@ -129,6 +129,7 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
         // Ingest events
         'ingest:start',
         'ingest:parsing',
+        'ingest:chunking',
         'ingest:reading-wiki',
         'ingest:llm',
         'ingest:planned',
