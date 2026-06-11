@@ -5,6 +5,7 @@ import type { AgentContext, SkillTemplate } from '../types';
 import { resolveTask } from '../../llm/task-router';
 import { resolveModel } from '../../llm/provider-registry';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';
+import { createRunStepTracker } from './budget';
 
 export class AgentCancelled extends Error {
   constructor() { super('Agent cancelled'); this.name = 'AgentCancelled'; }
@@ -33,6 +34,7 @@ export async function runAgentLoop(opts: {
   });
 
   const startedAt = Date.now();
+  const runSteps = createRunStepTracker(ctx.budgetSnapshot.maxSteps);
 
   // Resolve LLM model: task-router defaults < tasks['skill:<id>'] < frontmatter (if mode allows).
   const taskKey = `skill:${skill.id}`;
@@ -54,13 +56,14 @@ export async function runAgentLoop(opts: {
       parameters: t.inputSchema,
       execute: async (args: unknown) => {
         const stepStart = Date.now();
+        runSteps.chargeStep();
         try {
           const out = await t.handler(args, ctx);
           ctx.emit('agent:step', `${skill.name} called ${t.name}`, {
             runId,
             parentRunId: ctx.parentRunId,
             skillId: skill.id,
-            stepIndex: ctx.budget.stepCount,
+            stepIndex: runSteps.stepCount,
             kind: 'tool-call',
             tool: t.name,
             input: args,
@@ -73,7 +76,7 @@ export async function runAgentLoop(opts: {
             runId,
             parentRunId: ctx.parentRunId,
             skillId: skill.id,
-            stepIndex: ctx.budget.stepCount,
+            stepIndex: runSteps.stepCount,
             kind: 'tool-call',
             tool: t.name,
             input: args,
@@ -123,7 +126,7 @@ export async function runAgentLoop(opts: {
         runId,
         parentRunId: ctx.parentRunId,
         skillId: skill.id,
-        stepIndex: ctx.budget.stepCount,
+        stepIndex: runSteps.stepCount,
         kind: 'structured-output-recovery',
         reason: recovered.reason,
       });
@@ -135,6 +138,9 @@ export async function runAgentLoop(opts: {
       messages,
       maxTokens: skill.model?.maxTokens ?? route.maxTokens,
       temperature: skill.model?.temperature ?? route.temperature,
+      // SDK maxSteps 是第一道防线（静默截断工具轮次）；runSteps 是纵深防御——
+      // generateObject 路径的唯一步数防线，也是全路径的步数遥测来源。
+      // 两者同值是有意的，不要为让 runSteps 先触发而改成 N-1。
       maxSteps: ctx.budgetSnapshot.maxSteps,
     });
     output = result.text;
@@ -142,14 +148,16 @@ export async function runAgentLoop(opts: {
     outputTokens = result.usage?.completionTokens ?? 0;
   }
 
-  ctx.budget.chargeStep();
+  runSteps.chargeStep(); // final 输出本身计 1 步
+  // 事后登记：token 超限由下一个 run 开始时的 assertWithin 拦截
+  //（结合 ingest 预检 fail-fast，事后防线足够）。
   ctx.budget.chargeTokens(inputTokens + outputTokens);
 
   ctx.emit('agent:step', `${skill.name} produced final output`, {
     runId,
     parentRunId: ctx.parentRunId,
     skillId: skill.id,
-    stepIndex: ctx.budget.stepCount,
+    stepIndex: runSteps.stepCount,
     kind: 'final',
     tokensIn: inputTokens,
     tokensOut: outputTokens,
@@ -158,7 +166,7 @@ export async function runAgentLoop(opts: {
   ctx.emit('agent:run-completed', `${skill.name} completed`, {
     runId,
     tokensUsed: inputTokens + outputTokens,
-    stepCount: ctx.budget.stepCount,
+    stepCount: runSteps.stepCount,
     durationMs: Date.now() - startedAt,
   });
 
@@ -166,7 +174,7 @@ export async function runAgentLoop(opts: {
     runId,
     output,
     tokensUsed: inputTokens + outputTokens,
-    stepCount: ctx.budget.stepCount,
+    stepCount: runSteps.stepCount,
   };
 }
 
