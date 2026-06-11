@@ -5,6 +5,8 @@ import {
   validateChangeset,
   applyChangeset,
 } from '../../../wiki/wiki-transaction';
+import { stampSystemFrontmatter } from '../../../wiki/frontmatter';
+import * as pagesRepo from '../../../db/repos/pages-repo';
 
 const ChangesetEntryInputSchema = z.object({
   action: z.enum(['create', 'update', 'delete']),
@@ -45,7 +47,24 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
       throw new Error('commit_changeset already invoked in this run');
     }
 
-    const changeset = createChangeset(ctx.job.id, ctx.subject, input.entries);
+    // System owns timestamp frontmatter (created/updated). Writers only author
+    // title/summary/tags + body, so stamp the system-owned fields here before
+    // validation; preserve an existing page's created on update.
+    const now = new Date().toISOString();
+    const entries = input.entries.map((entry) => {
+      if (entry.action === 'delete') return entry;
+      const slug = slugFromPath(entry.path);
+      const existing = slug ? pagesRepo.getPageBySlug(ctx.subject.id, slug) : null;
+      return {
+        ...entry,
+        content: stampSystemFrontmatter(entry.content, {
+          now,
+          existingCreated: existing?.createdAt ?? null,
+        }),
+      };
+    });
+
+    const changeset = createChangeset(ctx.job.id, ctx.subject, entries);
 
     const validation = validateChangeset(changeset);
     if (!validation.valid) {
