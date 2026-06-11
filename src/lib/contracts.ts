@@ -11,6 +11,56 @@ export interface Subject {
   updatedAt: string;
 }
 
+/** `GET /api/subjects` 列表项：Subject 摘要 + 页面计数 */
+export interface SubjectListEntry {
+  id: SubjectId;
+  slug: string;
+  name: string;
+  description: string;
+  pageCount: number;
+}
+
+/** Wiki 页面 YAML frontmatter（解析/序列化单一真实源在 server/wiki/frontmatter.ts） */
+export interface WikiFrontmatter {
+  title: string;
+  created: string;
+  updated: string;
+  tags: string[];
+  sources: string[];
+  summary?: string;
+  aliases?: string[];
+}
+
+/** 从 markdown 中提取出的一条 wikilink（提取逻辑单一真实源在 server/wiki/wikilinks.ts） */
+export interface ExtractedLink {
+  /** The full raw token including brackets, e.g. `[[Page Name|Alias]]` */
+  raw: string;
+  /** The page-name portion of the inner content, after stripping subject/alias/section. */
+  rawTitle: string;
+  /** The resolved target slug (page name only, normalized) */
+  target: string;
+  /**
+   * Subject slug the link resolves into. Equals the explicit `subject:` prefix
+   * when present; otherwise falls back to the caller-provided
+   * `currentSubjectSlug`. May be the empty string when no current subject is
+   * supplied — callers should treat that as "use today's subject context".
+   */
+  targetSubjectSlug: string;
+  /** Display alias if present (`[[Target|Alias]]`), otherwise null */
+  alias: string | null;
+  /** Byte offsets of the `[[…]]` token in the original markdown string */
+  position: { start: number; end: number };
+}
+
+export type TitleResolver = (title: string) => string | undefined;
+
+/** frontmatter + body + links 的组合解析结果 */
+export interface WikiDocument {
+  frontmatter: WikiFrontmatter;
+  body: string;
+  links: ExtractedLink[];
+}
+
 export interface WikiPage {
   slug: string;
   title: string;

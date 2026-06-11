@@ -4,19 +4,9 @@
  */
 
 import matter from 'gray-matter';
+import type { WikiFrontmatter } from '@/lib/contracts';
 
-/**
- * Typed frontmatter fields for every wiki page.
- */
-export interface WikiFrontmatter {
-  title: string;
-  created: string;
-  updated: string;
-  tags: string[];
-  sources: string[];
-  summary?: string;
-  aliases?: string[];
-}
+export type { WikiFrontmatter };
 
 /**
  * Extract YAML frontmatter from raw markdown content.

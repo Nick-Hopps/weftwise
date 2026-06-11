@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layers, Plus, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import { normalizeSubjectSlug } from '@/lib/slug';
+import type { SubjectListEntry } from '@/lib/contracts';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -14,17 +15,9 @@ import { IconButton } from '@/components/ui/icon-button';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
 
-interface SubjectCard {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  pageCount: number;
-}
-
 const SUBJECTS_QUERY_KEY = ['subjects'] as const;
 
-async function fetchSubjects(): Promise<SubjectCard[]> {
+async function fetchSubjects(): Promise<SubjectListEntry[]> {
   const res = await apiFetch('/api/subjects');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -36,7 +29,7 @@ interface CreateSubjectPayload {
   description: string;
 }
 
-async function createSubject(payload: CreateSubjectPayload): Promise<SubjectCard> {
+async function createSubject(payload: CreateSubjectPayload): Promise<SubjectListEntry> {
   const res = await apiFetch('/api/subjects', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -55,7 +48,7 @@ interface PatchSubjectPayload {
   description?: string;
 }
 
-async function patchSubject(payload: PatchSubjectPayload): Promise<SubjectCard> {
+async function patchSubject(payload: PatchSubjectPayload): Promise<SubjectListEntry> {
   const { id, ...body } = payload;
   const res = await apiFetch(`/api/subjects/${id}`, {
     method: 'PATCH',
@@ -283,7 +276,7 @@ function SubjectCard({
   onCloseEdit,
   onChanged,
 }: {
-  subject: SubjectCard;
+  subject: SubjectListEntry;
   isActive: boolean;
   isEditing: boolean;
   onEdit: () => void;

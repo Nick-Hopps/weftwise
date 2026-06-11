@@ -12,13 +12,9 @@ import type {
   TitleResolver,
 } from './wikilinks';
 
-export type { WikiFrontmatter, ExtractedLink, TitleResolver };
+import type { WikiDocument } from '@/lib/contracts';
 
-export interface WikiDocument {
-  frontmatter: WikiFrontmatter;
-  body: string;
-  links: ExtractedLink[];
-}
+export type { WikiFrontmatter, ExtractedLink, TitleResolver, WikiDocument };
 
 export type ParseWikiDocumentOptions = ExtractWikiLinksOptions;
 

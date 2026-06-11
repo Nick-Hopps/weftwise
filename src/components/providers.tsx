@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query';
 import { GENERAL_SUBJECT_SLUG, useUIStore } from '@/stores/ui-store';
 import { apiFetch } from '@/lib/api-fetch';
+import type { SubjectListEntry } from '@/lib/contracts';
 import { GlobalJobTracker } from '@/components/shared/global-job-tracker';
 import { CommandPalette } from '@/components/search/command-palette';
 import { ContextPanelSheet } from '@/components/layout/context-panel-sheet';
@@ -65,15 +66,7 @@ function GlobalHotkeys() {
   return null;
 }
 
-interface SubjectsBootResponse {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  pageCount: number;
-}
-
-async function fetchSubjects(): Promise<SubjectsBootResponse[]> {
+async function fetchSubjects(): Promise<SubjectListEntry[]> {
   const res = await apiFetch('/api/subjects');
   if (!res.ok) return [];
   return res.json();
