@@ -156,19 +156,19 @@ export function validateChangeset(
           !titleMap.has(link.target) &&
           !titleMap.has(link.target.toLowerCase())
         ) {
-          warnings.push(`[${entry.path}] Unresolved wikilink: [[${link.raw}]]`);
+          warnings.push(`[${entry.path}] Unresolved wikilink: ${link.raw}`);
         }
         continue;
       }
 
       const targetSubject = resolveSubject(targetSubjectSlug);
       if (!targetSubject) {
-        warnings.push(`[${entry.path}] Unknown subject in wikilink: [[${link.raw}]]`);
+        warnings.push(`[${entry.path}] Unknown subject in wikilink: ${link.raw}`);
         continue;
       }
       const exists = pagesRepo.getPageBySlug(targetSubject.id, link.target);
       if (!exists) {
-        warnings.push(`[${entry.path}] Unresolved cross-subject wikilink: [[${link.raw}]]`);
+        warnings.push(`[${entry.path}] Unresolved cross-subject wikilink: ${link.raw}`);
       }
     }
   }
