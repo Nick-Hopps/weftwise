@@ -6,18 +6,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Command } from 'cmdk';
 import { Check, Layers, Plus, Settings } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
+import type { SubjectListEntry } from '@/lib/contracts';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Kbd } from '@/components/ui/kbd';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/cn';
-
-interface SubjectListEntry {
-  id: string;
-  slug: string;
-  name: string;
-  description: string;
-  pageCount: number;
-}
 
 const INVALIDATE_KEYS = [
   'pages',

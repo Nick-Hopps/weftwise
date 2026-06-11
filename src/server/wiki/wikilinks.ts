@@ -18,28 +18,9 @@
 
 import { normalizeSlug } from './page-identity';
 import { SUBJECT_SLUG_RE } from '@/lib/slug';
+import type { ExtractedLink, TitleResolver } from '@/lib/contracts';
 
-export interface ExtractedLink {
-  /** The full raw token including brackets, e.g. `[[Page Name|Alias]]` */
-  raw: string;
-  /** The page-name portion of the inner content, after stripping subject/alias/section. */
-  rawTitle: string;
-  /** The resolved target slug (page name only, normalized) */
-  target: string;
-  /**
-   * Subject slug the link resolves into. Equals the explicit `subject:` prefix
-   * when present; otherwise falls back to the caller-provided
-   * `currentSubjectSlug`. May be the empty string when no current subject is
-   * supplied — callers should treat that as "use today's subject context".
-   */
-  targetSubjectSlug: string;
-  /** Display alias if present (`[[Target|Alias]]`), otherwise null */
-  alias: string | null;
-  /** Byte offsets of the `[[…]]` token in the original markdown string */
-  position: { start: number; end: number };
-}
-
-export type TitleResolver = (title: string) => string | undefined;
+export type { ExtractedLink, TitleResolver };
 
 export interface ExtractWikiLinksOptions {
   /**
