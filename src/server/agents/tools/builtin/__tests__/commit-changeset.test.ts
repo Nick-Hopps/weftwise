@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '../../../types';
-import { commitChangesetTool } from '../commit-changeset';
 
-vi.mock('../../../../wiki/wiki-transaction', () => ({
+const txMocks = vi.hoisted(() => ({
   createChangeset: vi.fn((_jobId: string, subject: { id: string; slug: string }, entries: unknown[]) => ({
     id: 'cs-1',
     jobId: _jobId,
@@ -13,6 +12,10 @@ vi.mock('../../../../wiki/wiki-transaction', () => ({
     postHead: null,
     status: 'pending',
   })),
+}));
+
+vi.mock('../../../../wiki/wiki-transaction', () => ({
+  createChangeset: txMocks.createChangeset,
   validateChangeset: vi.fn(() => ({ valid: true, errors: [], warnings: [] })),
   applyChangeset: vi.fn(async (changeset: { entries: unknown[] }) => ({
     ...changeset,
@@ -21,6 +24,14 @@ vi.mock('../../../../wiki/wiki-transaction', () => ({
   })),
   rollbackChangeset: vi.fn(async () => undefined),
 }));
+
+// Stamping looks up the existing page to preserve `created` on update.
+vi.mock('../../../../db/repos/pages-repo', () => ({
+  getPageBySlug: vi.fn(() => null),
+}));
+
+import { commitChangesetTool } from '../commit-changeset';
+import { parseFrontmatter } from '../../../../wiki/frontmatter';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -64,6 +75,24 @@ describe('commit-changeset', () => {
       entries: [{ action: 'create', path: 'wiki/general/a.md', content: 'x' }],
       summary: 'a',
     }, ctx)).rejects.toThrow(/already invoked/);
+  });
+
+  it('stamps system-owned created/updated frontmatter before building the changeset', async () => {
+    txMocks.createChangeset.mockClear();
+    const ctx = makeCtx();
+    await commitChangesetTool.handler({
+      entries: [
+        // writer-style content: title/tags only, no created/updated
+        { action: 'create', path: 'wiki/general/c.md', content: '---\ntitle: C\ntags:\n  - t\n---\n\n## Body\n' },
+      ],
+      summary: 'add c',
+    }, ctx);
+
+    const passedEntries = txMocks.createChangeset.mock.calls[0][2] as { content: string }[];
+    const { data } = parseFrontmatter(passedEntries[0].content);
+    expect(data.created).not.toBe('');
+    expect(data.updated).not.toBe('');
+    expect(data.title).toBe('C');
   });
 
   it('emits ingest:committing with commit metadata', async () => {

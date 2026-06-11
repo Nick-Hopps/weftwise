@@ -79,6 +79,37 @@ export function serializeFrontmatter(data: WikiFrontmatter, body: string): strin
   return matter.stringify(body, frontmatterObj);
 }
 
+/**
+ * Stamp system-owned frontmatter fields onto a page's raw content.
+ *
+ * Division of ownership: the LLM authors `title` / `summary` / `tags` and the
+ * body; the system owns the timestamps. `updated` is always set to `now`;
+ * `created` is preserved from the existing page when known, otherwise `now`.
+ * Any LLM-supplied `created` / `updated` is intentionally overwritten so the
+ * model never invents timestamps. `sources` is guaranteed to be an array.
+ *
+ * Pure: `now` and `existingCreated` are passed in so the result is deterministic.
+ */
+export function stampSystemFrontmatter(
+  content: string,
+  opts: { now: string; existingCreated?: string | null },
+): string {
+  const { data, body } = parseFrontmatter(content);
+
+  const existing = opts.existingCreated?.trim();
+  const created = existing ? existing : opts.now;
+
+  const stamped: WikiFrontmatter = {
+    ...data,
+    created,
+    updated: opts.now,
+    tags: Array.isArray(data.tags) ? data.tags : [],
+    sources: Array.isArray(data.sources) ? data.sources : [],
+  };
+
+  return serializeFrontmatter(stamped, body);
+}
+
 const REQUIRED_FIELDS: (keyof WikiFrontmatter)[] = [
   'title',
   'created',
