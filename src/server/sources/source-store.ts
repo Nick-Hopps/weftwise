@@ -179,6 +179,29 @@ export function getRawSourceBuffer(
 }
 
 /**
+ * 把确定性切块结果写入 metadata sidecar（权威源，SQLite 仅缓存）。
+ * Best-effort —— 失败不阻塞 ingest。
+ */
+export function updateSourceChunks(
+  sourceId: string,
+  chunks: Array<{ id: string; heading: string; text: string; tokenCount: number }>
+): void {
+  const meta = getSourceMetadata(sourceId);
+  if (!meta) return;
+  const subjectSlug =
+    typeof meta.subjectSlug === 'string' ? meta.subjectSlug : null;
+  const candidatePath = subjectSlug
+    ? path.join(sourcesMetaDirFor(subjectSlug), `${sourceId}.json`)
+    : vaultPath('.llm-wiki', 'sources', `${sourceId}.json`);
+  try {
+    const updated = { ...meta, chunks };
+    fs.writeFileSync(candidatePath, JSON.stringify(updated, null, 2), 'utf-8');
+  } catch {
+    // best-effort
+  }
+}
+
+/**
  * Update the metadata sidecar with the slugs of pages this source contributed
  * to. Best-effort — failures here do not block the saga.
  */
