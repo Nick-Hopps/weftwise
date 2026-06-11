@@ -17,8 +17,7 @@
  */
 
 import { normalizeSlug } from './page-identity';
-
-const SUBJECT_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+import { SUBJECT_SLUG_RE } from '@/lib/slug';
 
 export interface ExtractedLink {
   /** The full raw token including brackets, e.g. `[[Page Name|Alias]]` */

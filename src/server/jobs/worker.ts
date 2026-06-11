@@ -28,8 +28,17 @@ let isProcessing = false;
  * Returns true if the error is likely transient and retryable
  * (network timeouts, aborted requests, rate limits).
  */
+/** 业务性失败：重试只会重复消耗 token / 重复冲突，永不重试。 */
+const NON_RETRYABLE_ERROR_NAMES = new Set([
+  'BudgetExceededError',
+  'WriterConflictError',
+  'AgentCancelled',
+  'SubjectError',
+]);
+
 function isRetryableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  if (NON_RETRYABLE_ERROR_NAMES.has(error.name)) return false;
   const msg = error.message.toLowerCase();
   return (
     msg.includes('aborted') ||

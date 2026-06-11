@@ -27,7 +27,7 @@ interface WikiLinkNode {
   };
 }
 
-import { normalizeSlug } from '@/lib/slug';
+import { normalizeSlug, SUBJECT_SLUG_RE } from '@/lib/slug';
 
 // ---------------------------------------------------------------------------
 // remarkWikiLinks plugin
@@ -44,7 +44,6 @@ import { normalizeSlug } from '@/lib/slug';
 // slug; otherwise the entire token is treated as a page title.
 
 const WIKILINK_RE = /\[\[([^\[\]]+?)\]\]/g;
-const SUBJECT_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
 type SlugResolver = (title: string) => string | undefined;
 
