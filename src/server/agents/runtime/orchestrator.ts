@@ -47,7 +47,10 @@ export async function runPipeline(opts: {
       const outline = isPlainObject(carry) ? carry.outline : undefined;
       const limit = opts.ctx.budgetSnapshot.maxParallelSubAgents;
       const results = await runWithSemaphore(items, limit, async (item) => {
-        if (!isPlainObject(item) || typeof item.key !== 'string') return item;
+        if (!isPlainObject(item) || typeof item.key !== 'string') {
+          opts.ctx.emit('ingest:warn', 'Map item missing string key — skipping summarizer', { item });
+          return item;
+        }
         const stored = opts.ctx.chunkStore.get(item.key);
         if (!stored) {
           opts.ctx.emit('ingest:warn', `Chunk not found in chunkStore: ${item.key}`, { key: item.key });
@@ -55,10 +58,11 @@ export async function runPipeline(opts: {
         }
         // map 纯收集（summarizer 无 overlay 副作用），无需像 fanout 那样做 overlay snapshot 隔离
         const childCtx: AgentContext = { ...opts.ctx, parentRunId: opts.ctx.rootRunId };
+        const languageDirective = isPlainObject(carry) ? carry.languageDirective : undefined;
         const r = await runAgentLoop({
           skill,
           ctx: childCtx,
-          input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, outline },
+          input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, outline, languageDirective },
         });
         const out = r.output as { summary?: string } | undefined;
         if (typeof out?.summary !== 'string') {
@@ -127,12 +131,20 @@ function readPath(obj: unknown, path: string): unknown {
 function buildFanoutInput(carry: unknown, item: unknown, ctx: AgentContext): unknown {
   if (!isPlainObject(carry) || !isPlainObject(item)) return item;
 
+  const relevantChunks = resolveRelevantChunks(item, ctx);
+  if (relevantChunks.length === 0) {
+    ctx.emit('ingest:warn', `Writer for "${String(item.slug ?? item.path ?? '?')}" received zero relevant chunks`, {
+      slug: item.slug ?? null,
+    });
+  }
+
   return {
     ...item,
-    relevantChunks: resolveRelevantChunks(item, ctx),
+    relevantChunks,
     subjectSlug: carry.subjectSlug,
     existingPages: carry.existingPages,
     plan: carry.plan,
+    languageDirective: carry.languageDirective,
   };
 }
 

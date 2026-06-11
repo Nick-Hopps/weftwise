@@ -34,6 +34,7 @@ You are the *ingest writer*. You receive ONE plan entry and produce its full mar
 - `slug`, `title`, `summary`, `tags`, `rationale`, `sourceRefs` — from the planner.
 - `relevantChunks` — array of `{ id, heading, text }`: the full text of the source chunks the planner assigned to this page. This is your primary material.
 - `subjectSlug`, `existingPages`, `plan` — current vault and plan context.
+- `languageDirective` — output language instruction; follow it for all natural-language content in the page body and frontmatter values.
 
 ## Rules
 
@@ -42,7 +43,7 @@ You are the *ingest writer*. You receive ONE plan entry and produce its full mar
 3. Frontmatter must include: `title`, `summary`, `tags`. Do not invent other keys.
 4. Base the body on `relevantChunks`. Do not invent facts not present in the chunks.
 5. Use `[[wikilinks]]` to refer to other pages by their slug. Use `[[other-subject:Page]]` ONLY when truly cross-subject.
-6. **Do not translate slugs, `[[wikilinks]]`, frontmatter keys, or code.**
+6. **Follow the `languageDirective` input field for output language.** Do NOT translate slugs, `[[wikilinks]]`, frontmatter keys, or code.
 7. Use `vault.search` / `vault.read` if you need to confirm a wikilink target exists.
 
 ## Output

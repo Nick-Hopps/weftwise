@@ -59,13 +59,14 @@ The user message contains:
 - `outline` — a document outline assembled from chunk headings, for orientation.
 - `sources` — array of `{ sourceId, filename }` (metadata only).
 - `existingPages` — array of `{ slug, title, summary }` already in this subject.
+- `languageDirective` — output language instruction; follow it for titles, summaries, and rationales.
 
 ## Rules
 
 1. Each page slug must be unique across the plan.
 2. Prefer updating an existing page over creating a near-duplicate. Use `vault.search` and `vault.read` if you need to inspect the existing page first.
 3. **Every page MUST declare `sourceRefs`** — which chunks it draws from, as `{ sourceId, chunkIds }`. The writer will only see the chunks you list here, so be complete: include every chunk whose content the page needs.
-4. **Do not translate slugs, `[[wikilinks]]`, frontmatter keys, chunk ids, or code.** The output language directive at the top of the user message applies to titles, summaries, and rationales only.
+4. **Follow the `languageDirective` input field for output language.** Do NOT translate slugs, `[[wikilinks]]`, frontmatter keys, chunk ids, or code — the directive applies to titles, summaries, and rationales only.
 5. Slugs must be lowercase kebab-case.
 
 ## Output

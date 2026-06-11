@@ -223,6 +223,77 @@ describe('orchestrator.runPipeline: fanout', () => {
     expect(writerInput.relevantChunks).toEqual([]);
   });
 
+  it('sourceRefs 零匹配时 emit zero-chunks warn', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({
+        runId: 'p',
+        output: { plan: { pages: [{ slug: 'a', sourceRefs: [{ sourceId: 's1', chunkIds: ['c404'] }] }] } },
+        tokensUsed: 0, stepCount: 1,
+      })
+      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner' },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {},
+    });
+    expect(ctx.emit).toHaveBeenCalledWith(
+      'ingest:warn',
+      expect.stringContaining('zero relevant chunks'),
+      expect.objectContaining({ slug: 'a' }),
+    );
+  });
+
+  it('languageDirective 从 initialInput 透传到 writer input', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({
+        runId: 'p',
+        output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }] } },
+        tokensUsed: 0, stepCount: 1,
+      })
+      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages', 'languageDirective'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [], languageDirective: 'LANG_DIRECTIVE' },
+    });
+    const writerInput = mockRun.mock.calls[1][0].input as Record<string, unknown>;
+    expect(writerInput.languageDirective).toBe('LANG_DIRECTIVE');
+  });
+
+  it('languageDirective 透传到 summarizer (map) input', async () => {
+    mockRun.mockReset();
+    mockRun.mockImplementation(async (opts: { input: { id: string } }) => ({
+      runId: `m-${opts.input.id}`,
+      output: { summary: `摘要:${opts.input.id}` },
+      tokensUsed: 0,
+      stepCount: 1,
+    }));
+    const ctx = ctxStub([chunk('s1', 'c0', '全文零')]);
+    await runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {
+        outline: '',
+        languageDirective: 'LANG_DIRECTIVE',
+        chunkRefs: [{ key: 's1:c0', sourceId: 's1', id: 'c0', heading: '', content: '' }],
+      },
+    });
+    expect(mockRun.mock.calls[0][0].input).toMatchObject({ languageDirective: 'LANG_DIRECTIVE' });
+  });
+
   it('writer 路径冲突仍抛 WriterConflictError', async () => {
     mockRun.mockReset();
     mockRun

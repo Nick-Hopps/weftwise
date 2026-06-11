@@ -8,7 +8,9 @@ import {
   getAgentMaxSteps,
   getAgentMaxTokensPerJob,
   getAgentMaxParallelSubAgents,
+  getWikiLanguage,
 } from '../db/repos/settings-repo';
+import { renderLanguageDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
@@ -90,6 +92,21 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   }
 
   const { skillRegistry, toolRegistry } = getRuntimeRegistries();
+
+  // Skill 契约版本守卫：v2 起 planner 产 sourceRefs / writer 收 relevantChunks。
+  // 播种不覆盖已存在文件，存量 vault 的 v1 skill 会静默产出零素材页面，必须拦截。
+  const MIN_SKILL_VERSIONS: Record<string, number> = { 'ingest-planner': 2, 'ingest-writer': 2 };
+  for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
+    const s = skillRegistry.get(skillId);
+    if (!s) throw new Error(`Skill not loaded: ${skillId}`);
+    if (s.version < minVersion) {
+      throw new Error(
+        `Skill "${skillId}" is v${s.version} but this pipeline requires v${minVersion}+. ` +
+        `Your vault has an outdated copy: delete vault/.llm-wiki/skills/${skillId}.md (or merge the new template from examples/skills/) and restart the worker to re-seed.`,
+      );
+    }
+  }
+
   const budget = createBudgetTracker(budgetSnapshot);
   const overlay = createOverlayVault({ subjectSlug: subject.slug });
 
@@ -114,8 +131,10 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     .getAllPages(subjectId)
     .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary }));
 
+  const languageDirective = renderLanguageDirective(getWikiLanguage());
+
   // carry 透传 key：让 planner 输出后 fanout/reviewer 仍能读到上下文（planner outputSchema 只有 plan）
-  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline'];
+  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective'];
   const steps: PipelineStep[] = [
     ...(inline
       ? []
@@ -141,6 +160,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       subjectSlug: subject.slug,
       existingPages,
       outline: prep.outline,
+      languageDirective,
     },
   }) as IngestResult;
 
