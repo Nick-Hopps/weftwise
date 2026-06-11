@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layers, Plus, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
+import { normalizeSubjectSlug } from '@/lib/slug';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -74,15 +75,6 @@ async function deleteSubject(id: string): Promise<void> {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `HTTP ${res.status}`);
   }
-}
-
-function slugify(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
 }
 
 export default function SubjectsPage() {
@@ -209,7 +201,7 @@ function CreateSubjectForm({
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
-    const finalSlug = slug || slugify(name);
+    const finalSlug = slug || normalizeSubjectSlug(name);
     if (!finalSlug || !name.trim()) {
       setError('Both name and slug are required.');
       return;
@@ -236,7 +228,7 @@ function CreateSubjectForm({
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
-                if (!slugTouched) setSlug(slugify(e.target.value));
+                if (!slugTouched) setSlug(normalizeSubjectSlug(e.target.value));
               }}
               placeholder="e.g. Frontend Architecture"
             />
@@ -248,7 +240,7 @@ function CreateSubjectForm({
             <Input
               value={slug}
               onChange={(e) => {
-                setSlug(slugify(e.target.value));
+                setSlug(normalizeSubjectSlug(e.target.value));
                 setSlugTouched(true);
               }}
               placeholder="frontend-architecture"

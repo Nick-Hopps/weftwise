@@ -3,8 +3,7 @@ import { eq, asc, sql } from 'drizzle-orm';
 import { getDb } from '../client';
 import { subjects, pages } from '../schema';
 import type { Subject } from '@/lib/contracts';
-
-const SUBJECT_SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
+import { SUBJECT_SLUG_RE } from '@/lib/slug';
 
 export class SubjectError extends Error {
   constructor(public code: 'invalid-slug' | 'slug-conflict' | 'not-empty' | 'not-found', message: string) {

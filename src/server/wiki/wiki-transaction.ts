@@ -181,6 +181,8 @@ export interface SourceLinkOps {
   pageSlugs: string[];
   linkPageSource: (subjectId: string, pageSlug: string, sourceId: string) => void;
   updateSourcePageLinks: (sourceId: string, pageSlugs: string[]) => void;
+  /** sidecar 更新失败时的告警出口；缺省时静默（不影响 changeset 提交）。 */
+  onWarning?: (message: string) => void;
 }
 
 export async function applyChangeset(
@@ -246,8 +248,13 @@ export async function applyChangeset(
       if (sourceOps) {
         try {
           sourceOps.updateSourcePageLinks(sourceOps.sourceId, sourceOps.pageSlugs);
-        } catch {
-          // best-effort sidecar update
+        } catch (err) {
+          // sidecar 更新不阻断提交，但必须让调用方可见
+          sourceOps.onWarning?.(
+            `Failed to update source page links for source ${sourceOps.sourceId}: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+          );
         }
       }
 

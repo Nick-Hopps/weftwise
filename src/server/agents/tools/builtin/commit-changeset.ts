@@ -5,8 +5,11 @@ import {
   validateChangeset,
   applyChangeset,
 } from '../../../wiki/wiki-transaction';
+import type { SourceLinkOps } from '../../../wiki/wiki-transaction';
 import { stampSystemFrontmatter } from '../../../wiki/frontmatter';
 import * as pagesRepo from '../../../db/repos/pages-repo';
+import * as sourcesRepo from '../../../db/repos/sources-repo';
+import { updateSourcePageLinks } from '../../../sources/source-store';
 
 const ChangesetEntryInputSchema = z.object({
   action: z.enum(['create', 'update', 'delete']),
@@ -73,9 +76,6 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
       );
     }
 
-    const applied = await applyChangeset(changeset);
-    ctx.committed.value = true;
-
     const pagesCreated = input.entries
       .filter((e) => e.action === 'create')
       .map((e) => slugFromPath(e.path))
@@ -85,6 +85,24 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
       .filter((e) => e.action === 'update')
       .map((e) => slugFromPath(e.path))
       .filter((s): s is string => s !== null);
+
+    // ingest 任务需要在提交时写 page_sources 溯源（页面 ↔ 源文件多对多）
+    let sourceOps: SourceLinkOps | undefined;
+    if (ctx.job.type === 'ingest') {
+      const params = JSON.parse(ctx.job.paramsJson || '{}') as { sourceId?: string };
+      if (params.sourceId) {
+        sourceOps = {
+          sourceId: params.sourceId,
+          pageSlugs: [...pagesCreated, ...pagesUpdated],
+          linkPageSource: sourcesRepo.linkPageSource,
+          updateSourcePageLinks,
+          onWarning: (message) => ctx.emit('ingest:warning', message),
+        };
+      }
+    }
+
+    const applied = await applyChangeset(changeset, sourceOps);
+    ctx.committed.value = true;
 
     const commitSha = applied.postHead ?? '';
 
