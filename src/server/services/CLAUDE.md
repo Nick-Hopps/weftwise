@@ -19,7 +19,9 @@ worker-entry.ts
 
 ### `ingest-service.ts` — 任务类型 `'ingest'`
 
-> **强校验** `params.subjectId`（缺失直接 fail job）。所有页面的 `existingPages` / `titleMap` 都仅取自该 subject。
+> **强校验** `params.subjectId`（缺失直接 fail job）。所有页面的 `existingPages` / `titleMap` 都仅取自该 subject（实读 pagesRepo，不再截断）。
+
+预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；reviewer 输入剔除 chunkRefs/outline；常量在 `ingest-prep.ts`。
 
 调用 `runPipeline(jobId, subject, parsedSources, promptCtx)`，内部以 3 个 skill 顺序执行：
 
@@ -87,7 +89,8 @@ worker-entry.ts
 
 ```
 src/server/services/
-├── ingest-service.ts   # 多阶段 LLM 摄入
+├── ingest-service.ts   # 多阶段 LLM 摄入（分片自适应流水线）
+├── ingest-prep.ts      # 预检/预算/常量纯函数
 ├── query-service.ts    # 问答 + save-to-wiki
 └── lint-service.ts     # 全库 lint 扫描
 ```

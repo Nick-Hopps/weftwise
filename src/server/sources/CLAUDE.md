@@ -38,6 +38,21 @@ requiresBuffer(filename): boolean                    // 是否 PDF
 | `.pdf` | `parsers/pdf-parser.ts`（pdf-parse 提取文本 + metadata） |
 | `.txt` / 其它 | 默认分支（首行为 title） |
 
+### `source-cleaner.ts`
+
+```ts
+cleanSourceText(raw: string, kind: CleanerKind): string   // kind: 'markdown' | 'text' | 'pdf'
+cleanerKindFor(filename: string): CleanerKind
+```
+
+### `source-chunker.ts`
+
+```ts
+chunkText(cleanText: string, kind: SourceKind, opts?): SourceChunk[]   // kind: 'markdown' | 'plain'
+countTokens(text: string): number
+sourceKindFor(filename: string): SourceKind
+```
+
 ### `source-store.ts`
 
 ```ts
@@ -50,6 +65,7 @@ saveRawSource(filename, content: string | Buffer): { id: string }
 getRawSourceContent(sourceId): string | null
 getRawSourceBuffer(sourceId): Buffer | null
 updateSourcePageLinks(sourceId, pageSlugs)    // 写 page_sources 多对多
+updateSourceChunks(sourceId, chunks)          // chunk 持久化到 metadata sidecar
 ```
 
 ## 关键依赖与配置
@@ -91,6 +107,8 @@ updateSourcePageLinks(sourceId, pageSlugs)    // 写 page_sources 多对多
 ```
 src/server/sources/
 ├── parser-registry.ts               # 扩展名分发 + ParsedSource 契约
+├── source-cleaner.ts                # 按来源预清洗（PDF 清洗链）
+├── source-chunker.ts                # 结构感知递归切分器（token 计长）
 ├── source-store.ts                  # 持久化 + 去重 + page_sources
 └── parsers/
     ├── markdown-parser.ts

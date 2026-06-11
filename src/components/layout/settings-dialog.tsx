@@ -240,6 +240,7 @@ export function SettingsDialog() {
             />
             <NumberSettingRow
               label="Total token budget per task"
+              description="Default 500k handles sources up to ~200k tokens; raise to 1-1.5M for book-sized files"
               value={settingsQuery.data?.agentMaxTokensPerJob ?? 500_000}
               min={10_000}
               max={5_000_000}
@@ -326,6 +327,7 @@ function SettingRow({ label, description, children, className }: SettingRowProps
 
 function NumberSettingRow(props: {
   label: string;
+  description?: string;
   value: number;
   min: number;
   max: number;
@@ -346,7 +348,12 @@ function NumberSettingRow(props: {
   const canSave = valid && !props.pending && parsed !== props.value;
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor={inputId} className="flex-1 text-sm text-foreground">{props.label}</label>
+      <div className="flex-1 min-w-0">
+        <label htmlFor={inputId} className="text-sm text-foreground">{props.label}</label>
+        {props.description && (
+          <div className="text-xs text-foreground-tertiary mt-0.5">{props.description}</div>
+        )}
+      </div>
       <input
         id={inputId}
         type="number"
