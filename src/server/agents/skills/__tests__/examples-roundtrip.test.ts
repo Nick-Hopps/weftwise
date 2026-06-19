@@ -51,10 +51,13 @@ describe('examples/skills round-trip', () => {
     expect(writer!.version).toBeGreaterThanOrEqual(2);
   });
 
-  it('ingest-chunk-summarizer 可加载且 tools 为空', async () => {
+  it('ingest-chunk-summarizer 可加载、tools 为空、且摘要输出封顶（防 map 输出膨胀）', async () => {
     const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
     const summarizer = skills.find((s) => s.id === 'ingest-chunk-summarizer');
     expect(summarizer).toBeDefined();
     expect(summarizer!.tools).toEqual([]);
+    // map 步逐块产出摘要，不封顶会使 map 输出随块数线性膨胀（实测每条 ~700 token，远超声明的 2-3 句）
+    expect(summarizer!.model?.maxTokens).toBeDefined();
+    expect(summarizer!.model!.maxTokens!).toBeLessThanOrEqual(512);
   });
 });

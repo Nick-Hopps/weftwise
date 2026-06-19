@@ -4,8 +4,19 @@ import type { ChunkRef, StoredChunk } from '../agents/types';
 
 /** inline / map 路径分界（token）；超过则插入 map 摘要步 */
 export const PLAN_INLINE_THRESHOLD = 25_000;
-/** 每块摘要的预估输出 token */
-const SUMMARY_OUT_TOKENS = 80;
+/**
+ * 大路径全文处理倍率：map 步通读全文一遍（输入≈totalTokens），writer 步再按
+ * planner 的 sourceRefs 从 chunkStore 二次读相关全文（最坏≈再读一遍）≈ 2× totalTokens，
+ * 余下 0.3× 给两遍读各自的输出与 slack。旧值 1.2× 只建模 map 输入、漏算 writer 二次读，
+ * 导致书本级文档预检放行后运行期爆 maxTokensPerJob。
+ */
+const MAP_REDUCE_TOKEN_FACTOR = 2.3;
+/**
+ * 每块的固定开销（与全文输入正交，计输出与重复读）：summarizer 系统提示（~250）
+ * + 摘要输出（封顶 256，见 ingest-chunk-summarizer skill 的 model.maxTokens）
+ * + planner 复读该摘要（~256）。摘要输出被算两次（map 写 + planner 读），含余量取 800。
+ */
+const PER_CHUNK_OVERHEAD_TOKENS = 800;
 /** planner / writers / reviewer 的预留 token */
 const PIPELINE_RESERVE_TOKENS = 60_000;
 
@@ -79,7 +90,7 @@ export function isInlinePath(totalTokens: number): boolean {
 /** 粗粒度成本上界（宁可保守），用于流水线启动前的预算预检。 */
 export function estimateIngestCost(totalTokens: number, chunkCount: number, inline: boolean): number {
   if (inline) return totalTokens + PIPELINE_RESERVE_TOKENS;
-  return Math.round(totalTokens * 1.2) + chunkCount * SUMMARY_OUT_TOKENS + PIPELINE_RESERVE_TOKENS;
+  return Math.round(totalTokens * MAP_REDUCE_TOKEN_FACTOR) + chunkCount * PER_CHUNK_OVERHEAD_TOKENS + PIPELINE_RESERVE_TOKENS;
 }
 
 /**

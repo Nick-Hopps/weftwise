@@ -44,7 +44,6 @@ export async function runPipeline(opts: {
       if (!Array.isArray(items)) {
         throw new Error(`Map source at "${step.fromOutput}" is not an array (got ${typeof items})`);
       }
-      const outline = isPlainObject(carry) ? carry.outline : undefined;
       const limit = opts.ctx.budgetSnapshot.maxParallelSubAgents;
       const results = await runWithSemaphore(items, limit, async (item) => {
         if (!isPlainObject(item) || typeof item.key !== 'string') {
@@ -59,10 +58,12 @@ export async function runPipeline(opts: {
         // map 纯收集（summarizer 无 overlay 副作用），无需像 fanout 那样做 overlay snapshot 隔离
         const childCtx: AgentContext = { ...opts.ctx, parentRunId: opts.ctx.rootRunId };
         const languageDirective = isPlainObject(carry) ? carry.languageDirective : undefined;
+        // 只注入本块全文：整份 outline 一行/块，若按块广播即 O(N²) token（书本级会爆预算）。
+        // summarizer 仅就本块定位即可；全局结构由 planner 汇总所有摘要时形成（outline 仍单次给 planner）。
         const r = await runAgentLoop({
           skill,
           ctx: childCtx,
-          input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, outline, languageDirective },
+          input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, languageDirective },
         });
         const out = r.output as { summary?: string } | undefined;
         if (typeof out?.summary !== 'string') {

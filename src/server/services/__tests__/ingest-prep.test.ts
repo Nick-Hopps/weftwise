@@ -84,4 +84,12 @@ describe('isInlinePath / estimateIngestCost', () => {
     expect(large).toBeGreaterThan(100_000 * 1.2);
     expect(estimateIngestCost(100_000, 200, false)).toBeGreaterThan(large);
   });
+
+  it('大路径估算计入 writer 二次读全文：≥ 2× totalTokens', () => {
+    // 回归：旧公式仅按 1.2× 建模 map 输入，漏算 writer 按 sourceRefs 二次读相关全文
+    // （map 通读一遍 + writer 再读一遍 ≈ 2× totalTokens）。书本级文档因此预检放行后运行期爆预算。
+    const totalTokens = 245_685; // Linear Algebra Done Right 实测
+    const chunkCount = 234;
+    expect(estimateIngestCost(totalTokens, chunkCount, false)).toBeGreaterThanOrEqual(2 * totalTokens);
+  });
 });
