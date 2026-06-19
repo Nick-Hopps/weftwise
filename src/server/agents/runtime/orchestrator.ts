@@ -139,13 +139,16 @@ function buildFanoutInput(carry: unknown, item: unknown, ctx: AgentContext): unk
     });
   }
 
+  // 共享字段在前、per-page 字段在后：序列化后各 writer 输入有字节一致的前缀，
+  // 供 DeepSeek 自动前缀缓存（命中要求从第 0 token 起完全一致）复用 plan/existingPages；
+  // item / relevantChunks 为 per-page 内容，排在可变后缀（缓存 miss）。语义不变（字段按名读取）。
   return {
-    ...item,
-    relevantChunks,
     subjectSlug: carry.subjectSlug,
     existingPages: carry.existingPages,
     plan: carry.plan,
     languageDirective: carry.languageDirective,
+    ...item,
+    relevantChunks,
   };
 }
 
