@@ -51,13 +51,13 @@ describe('examples/skills round-trip', () => {
     expect(writer!.version).toBeGreaterThanOrEqual(2);
   });
 
-  it('ingest-chunk-summarizer 可加载、tools 为空、且摘要输出封顶（防 map 输出膨胀）', async () => {
+  it('ingest-chunk-summarizer 可加载、tools 为空、且不设 maxTokens 上限', async () => {
     const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
     const summarizer = skills.find((s) => s.id === 'ingest-chunk-summarizer');
     expect(summarizer).toBeDefined();
     expect(summarizer!.tools).toEqual([]);
-    // map 步逐块产出摘要，不封顶会使 map 输出随块数线性膨胀（实测每条 ~700 token，远超声明的 2-3 句）
-    expect(summarizer!.model?.maxTokens).toBeDefined();
-    expect(summarizer!.model!.maxTokens!).toBeLessThanOrEqual(512);
+    // 不给 structured-output 的 map 步设输出上限：截断会产出残缺 JSON（finishReason:length →
+    // "No object generated"），234 块里任一截断都会让整个 ingest 失败。简洁靠提示词约束，不靠硬截断。
+    expect(summarizer!.model?.maxTokens).toBeUndefined();
   });
 });

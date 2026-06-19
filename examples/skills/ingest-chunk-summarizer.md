@@ -5,9 +5,6 @@ description: Produce a short, self-contained summary for one source chunk.
 version: 2
 tools: []
 canDispatch: []
-model:
-  # map 步逐块调用：封顶摘要输出，避免 map 输出随块数线性膨胀（2-3 句 ≪ 256 token）
-  maxTokens: 256
 outputSchema: |
   {
     "type": "object",
