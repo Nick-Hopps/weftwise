@@ -27,11 +27,13 @@ export async function runAgentLoop(opts: {
 }): Promise<AgentRunResult> {
   const { skill, ctx, input } = opts;
   const runId = randomUUID();
+  const label = inputLabel(input); // 哪页/哪块，贯穿本 run 的所有事件，便于排查
 
-  ctx.emit('agent:run-started', `${skill.name} started`, {
+  ctx.emit('agent:run-started', `${skill.name} started${label ? `: ${label}` : ''}`, {
     runId,
     parentRunId: ctx.parentRunId,
     skillId: skill.id,
+    label,
     subjectId: ctx.subject.id,
   });
 
@@ -46,19 +48,35 @@ export async function runAgentLoop(opts: {
   if (ctx.cancelled()) throw new AgentCancelled();
   ctx.budget.assertWithin();
 
-  const { output, inputTokens, outputTokens, cacheHitTokens } = skill.outputSchema
-    ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
-    : await generateTextResult(skill, ctx, model, route, messages, toolSet);
+  let generation: GenerationResult;
+  try {
+    generation = skill.outputSchema
+      ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
+      : await generateTextResult(skill, ctx, model, route, messages, toolSet);
+  } catch (err) {
+    // 结构化输出失败（解析失败 / 不符合 schema，恢复也补不了）：emit 富诊断（原始输出 + 问题路径），
+    // 让"哪页/哪块、模型吐了什么、哪个字段错"在 job_events 与 UI 直接可见，再原样上抛。
+    ctx.emit('agent:error', `${skill.name} generation failed${label ? ` for ${label}` : ''}`, {
+      runId,
+      parentRunId: ctx.parentRunId,
+      skillId: skill.id,
+      label,
+      ...summarizeGenerationError(err),
+    });
+    throw err;
+  }
+  const { output, inputTokens, outputTokens, cacheHitTokens } = generation;
 
   runSteps.chargeStep(); // final 输出本身计 1 步
   // 事后登记：token 超限由下一个 run 开始时的 assertWithin 拦截
   //（结合 ingest 预检 fail-fast，事后防线足够）。
   ctx.budget.chargeTokens(inputTokens + outputTokens);
 
-  ctx.emit('agent:step', `${skill.name} produced final output`, {
+  ctx.emit('agent:step', `${skill.name} produced final output${label ? `: ${label}` : ''}`, {
     runId,
     parentRunId: ctx.parentRunId,
     skillId: skill.id,
+    label,
     stepIndex: runSteps.stepCount,
     kind: 'final',
     tokensIn: inputTokens,
@@ -66,8 +84,9 @@ export async function runAgentLoop(opts: {
     cacheHitTokens,
   });
 
-  ctx.emit('agent:run-completed', `${skill.name} completed`, {
+  ctx.emit('agent:run-completed', `${skill.name} completed${label ? `: ${label}` : ''}`, {
     runId,
+    label,
     tokensUsed: inputTokens + outputTokens,
     cacheHitTokens,
     stepCount: runSteps.stepCount,
@@ -414,6 +433,58 @@ function readStringProperty(value: unknown, key: string): string | undefined {
   const direct = (value as Record<string, unknown>)[key];
   if (typeof direct === 'string') return direct;
   return undefined;
+}
+
+/** 从 agent 输入提取一个简短 item 标识（写页 slug / 块 id 等），用于日志区分是哪块/哪页。 */
+export function inputLabel(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const o = input as Record<string, unknown>;
+  for (const k of ['slug', 'path', 'id', 'key', 'title']) {
+    const v = o[k];
+    if (typeof v === 'string' && v.length > 0) return v;
+  }
+  return undefined;
+}
+
+export interface GenerationErrorSummary {
+  finishReason?: string;
+  /** 模型原始输出（截断），用于排查"产了什么导致不符合 schema"。 */
+  rawText?: string;
+  /** schema 校验问题（zod issue 路径）或解析错误信息。 */
+  detail?: string;
+}
+
+/** 把 AI SDK 的 NoObjectGeneratedError 等结构化输出错误提炼成可读诊断（供日志/事件）。 */
+export function summarizeGenerationError(err: unknown): GenerationErrorSummary {
+  if (!err || typeof err !== 'object') return {};
+  const e = err as Record<string, unknown>;
+  const out: GenerationErrorSummary = {};
+  if (typeof e.finishReason === 'string') out.finishReason = e.finishReason;
+  if (typeof e.text === 'string') out.rawText = e.text.length > 800 ? e.text.slice(0, 800) + '…' : e.text;
+  const issues = readZodIssues(e);
+  if (issues) out.detail = issues;
+  else {
+    const cause = e.cause as Record<string, unknown> | undefined;
+    if (cause && typeof cause.message === 'string') out.detail = cause.message;
+    else if (typeof e.message === 'string') out.detail = e.message;
+  }
+  return out;
+}
+
+/** 从 TypeValidationError（err.cause）内层 ZodError（.cause.issues 或 .issues）提取问题路径。 */
+function readZodIssues(e: Record<string, unknown>): string | undefined {
+  const c1 = e.cause as Record<string, unknown> | undefined;
+  const c2 = c1?.cause as Record<string, unknown> | undefined;
+  const raw = c2?.issues ?? c1?.issues;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  return raw
+    .slice(0, 5)
+    .map((i) => {
+      const issue = i as Record<string, unknown>;
+      const path = Array.isArray(issue.path) ? issue.path.join('.') : '';
+      return `${path || '(root)'}: ${String(issue.message ?? 'invalid')}`;
+    })
+    .join('; ');
 }
 
 /**

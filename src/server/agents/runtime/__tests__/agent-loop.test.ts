@@ -38,8 +38,41 @@ vi.mock('../../../db/repos/settings-repo', () => ({
   getAgentTaskRouterMode: mocks.getAgentTaskRouterMode,
 }));
 
-import { runAgentLoop, readCacheHitTokens } from '../agent-loop';
+import { runAgentLoop, readCacheHitTokens, inputLabel, summarizeGenerationError } from '../agent-loop';
 import { BudgetExceededError } from '../budget';
+
+describe('inputLabel', () => {
+  it('从输入取页面/块标识（slug > path > id > key > title）', () => {
+    expect(inputLabel({ slug: 'linear-maps', title: 'x' })).toBe('linear-maps');
+    expect(inputLabel({ id: 'c12', heading: '' })).toBe('c12');
+    expect(inputLabel({ title: 'Only Title' })).toBe('Only Title');
+    expect(inputLabel({})).toBeUndefined();
+    expect(inputLabel(null)).toBeUndefined();
+  });
+});
+
+describe('summarizeGenerationError', () => {
+  it('提取 finishReason / 原始文本 / zod 校验问题路径', () => {
+    const zodErr = { issues: [{ path: ['entry', 'action'], message: 'Invalid enum value' }] };
+    const err = Object.assign(new Error('No object generated: response did not match schema.'), {
+      finishReason: 'stop',
+      text: '{"action":"create","path":"wiki/general/x.md"}', // 缺 entry 包裹
+      cause: Object.assign(new Error('Type validation failed'), { cause: zodErr }),
+    });
+    const s = summarizeGenerationError(err);
+    expect(s.finishReason).toBe('stop');
+    expect(s.rawText).toContain('"action":"create"');
+    expect(s.detail).toContain('entry.action');
+    expect(s.detail).toContain('Invalid enum value');
+  });
+  it('截断超长原始文本到 ~800 字符', () => {
+    const s = summarizeGenerationError({ text: 'x'.repeat(2000) });
+    expect(s.rawText!.length).toBeLessThanOrEqual(801);
+  });
+  it('非对象返回空摘要', () => {
+    expect(summarizeGenerationError(null)).toEqual({});
+  });
+});
 
 describe('readCacheHitTokens', () => {
   it('提取 DeepSeek / OpenAI / Anthropic 各自的缓存命中字段', () => {
@@ -219,6 +252,28 @@ describe('runAgentLoop provider tool-name sanitization', () => {
     for (const n of names) {
       expect(n).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     }
+  });
+});
+
+describe('runAgentLoop 失败诊断日志', () => {
+  it('结构化输出失败时 emit agent:error（skillId/label/finishReason/原始文本）并仍上抛', async () => {
+    mocks.generateObject.mockReset();
+    mocks.generateObject.mockRejectedValueOnce(Object.assign(
+      new Error('No object generated: response did not match schema.'),
+      { finishReason: 'stop', text: '{"action":"create"}', usage: { promptTokens: 1, completionTokens: 2 } },
+    ));
+    const ctx = ctxStub();
+    await expect(runAgentLoop({ skill: writerSkill(), ctx, input: { slug: 'linear-maps' } })).rejects.toThrow();
+    expect(ctx.emit).toHaveBeenCalledWith(
+      'agent:error',
+      expect.stringContaining('linear-maps'),
+      expect.objectContaining({
+        skillId: 'ingest-writer',
+        label: 'linear-maps',
+        finishReason: 'stop',
+        rawText: expect.stringContaining('action'),
+      }),
+    );
   });
 });
 
