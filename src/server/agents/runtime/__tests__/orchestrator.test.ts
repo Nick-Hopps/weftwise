@@ -295,6 +295,38 @@ describe('orchestrator.runPipeline: fanout', () => {
     expect(mockRun.mock.calls[0][0].input).toMatchObject({ languageDirective: 'LANG_DIRECTIVE' });
   });
 
+  it('writer fanout 把共享上下文(plan/existingPages)排在 page 专属内容之前，构成可缓存公共前缀', async () => {
+    // DeepSeek 自动前缀缓存仅在「从第 0 token 起完全一致」时命中。
+    // 共享上下文须落在各 writer 序列化输入的公共前缀内，否则 fanout 无法复用缓存。
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({
+        runId: 'p',
+        output: { plan: { pages: [{ slug: 'page-a', sourceRefs: [] }, { slug: 'page-b', sourceRefs: [] }] } },
+        tokensUsed: 0, stepCount: 1,
+      })
+      .mockResolvedValueOnce({ runId: 'wa', output: { entry: { action: 'create', path: 'wiki/general/page-a.md', content: '' } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'wb', output: { entry: { action: 'create', path: 'wiki/general/page-b.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行确保 call 顺序确定
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    const inA = JSON.stringify(mockRun.mock.calls[1][0].input);
+    const inB = JSON.stringify(mockRun.mock.calls[2][0].input);
+    let i = 0;
+    while (i < inA.length && inA[i] === inB[i]) i++;
+    const sharedPrefix = inA.slice(0, i); // 两个 writer 输入的公共前缀（DeepSeek 可缓存部分）
+    expect(sharedPrefix).toContain('existingPages');
+    expect(sharedPrefix).toContain('"plan"');
+  });
+
   it('writer 路径冲突仍抛 WriterConflictError', async () => {
     mockRun.mockReset();
     mockRun
