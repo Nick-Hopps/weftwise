@@ -1,5 +1,6 @@
 import type { AgentContext, SkillTemplate } from '../types';
-import { runAgentLoop, type AgentRunResult } from './agent-loop';
+import { runAgentLoop, AgentCancelled, type AgentRunResult } from './agent-loop';
+import { BudgetExceededError } from './budget';
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[] }
@@ -60,11 +61,25 @@ export async function runPipeline(opts: {
         const languageDirective = isPlainObject(carry) ? carry.languageDirective : undefined;
         // 只注入本块全文：整份 outline 一行/块，若按块广播即 O(N²) token（书本级会爆预算）。
         // summarizer 仅就本块定位即可；全局结构由 planner 汇总所有摘要时形成（outline 仍单次给 planner）。
-        const r = await runAgentLoop({
-          skill,
-          ctx: childCtx,
-          input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, languageDirective },
-        });
+        let r: AgentRunResult;
+        try {
+          r = await runAgentLoop({
+            skill,
+            ctx: childCtx,
+            input: { sourceId: stored.sourceId, id: stored.id, heading: stored.heading, text: stored.text, languageDirective },
+          });
+        } catch (err) {
+          // map 逐块独立：单块摘要失败（如 provider 返回无法解析的输出）降级为空摘要，
+          // 不拖垮整本书的 ingest——writer 取的是 chunkStore 全文，不依赖摘要。
+          // BudgetExceeded / Cancelled 是控制流异常，必须照常上抛中断全程。
+          if (err instanceof BudgetExceededError || err instanceof AgentCancelled) throw err;
+          opts.ctx.emit('ingest:warn', `Summarizer failed for chunk ${item.key}; using empty summary`, {
+            key: item.key,
+            skillId: skill.id,
+            error: (err as Error).message,
+          });
+          return item;
+        }
         const out = r.output as { summary?: string } | undefined;
         if (typeof out?.summary !== 'string') {
           opts.ctx.emit('ingest:warn', `Summarizer returned no summary for chunk: ${item.key}`, { key: item.key, skillId: skill.id });
