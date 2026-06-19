@@ -38,8 +38,22 @@ vi.mock('../../../db/repos/settings-repo', () => ({
   getAgentTaskRouterMode: mocks.getAgentTaskRouterMode,
 }));
 
-import { runAgentLoop } from '../agent-loop';
+import { runAgentLoop, readCacheHitTokens } from '../agent-loop';
 import { BudgetExceededError } from '../budget';
+
+describe('readCacheHitTokens', () => {
+  it('提取 DeepSeek / OpenAI / Anthropic 各自的缓存命中字段', () => {
+    expect(readCacheHitTokens({ deepseek: { promptCacheHitTokens: 1856, promptCacheMissTokens: 5 } })).toBe(1856);
+    expect(readCacheHitTokens({ openai: { cachedPromptTokens: 1024 } })).toBe(1024);
+    expect(readCacheHitTokens({ anthropic: { cacheReadInputTokens: 512 } })).toBe(512);
+  });
+  it('无缓存元数据时返回 0', () => {
+    expect(readCacheHitTokens(undefined)).toBe(0);
+    expect(readCacheHitTokens(null)).toBe(0);
+    expect(readCacheHitTokens({})).toBe(0);
+    expect(readCacheHitTokens({ deepseek: {} })).toBe(0);
+  });
+});
 
 function ctxStub(): AgentContext {
   return {
@@ -205,6 +219,25 @@ describe('runAgentLoop provider tool-name sanitization', () => {
     for (const n of names) {
       expect(n).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     }
+  });
+});
+
+describe('runAgentLoop cache-hit telemetry', () => {
+  it('把 providerMetadata 的缓存命中透出到 agent:step(final) 与返回值', async () => {
+    mocks.generateObject.mockReset();
+    mocks.generateObject.mockResolvedValueOnce({
+      object: { entry: { action: 'create', path: 'wiki/general/x.md', content: '' } },
+      usage: { promptTokens: 1861, completionTokens: 40 },
+      providerMetadata: { deepseek: { promptCacheHitTokens: 1856, promptCacheMissTokens: 5 } },
+    });
+    const ctx = ctxStub();
+    const result = await runAgentLoop({ skill: writerSkill(), ctx, input: { slug: 'x', subjectSlug: 'general' } });
+    expect(result.cacheHitTokens).toBe(1856);
+    expect(ctx.emit).toHaveBeenCalledWith(
+      'agent:step',
+      expect.stringContaining('final output'),
+      expect.objectContaining({ kind: 'final', tokensIn: 1861, cacheHitTokens: 1856 }),
+    );
   });
 });
 

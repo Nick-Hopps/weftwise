@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { FileUp, UploadCloud } from 'lucide-react';
@@ -33,6 +33,22 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { events, status } = useJobStream(jobId);
+
+  // 聚合 agent 各 run 的输入 token 与缓存命中（DeepSeek/OpenAI 自动前缀缓存），让缓存收益在页面可见。
+  // 取 agent:step 的 final 步（每 run 一次，不会重复计）。
+  const cacheStats = useMemo(() => {
+    let cacheHit = 0;
+    let promptIn = 0;
+    for (const e of events) {
+      if (e.type !== 'agent:step') continue;
+      const d = e.data as { kind?: string; tokensIn?: number; cacheHitTokens?: number };
+      if (d.kind !== 'final') continue;
+      if (typeof d.tokensIn === 'number') promptIn += d.tokensIn;
+      if (typeof d.cacheHitTokens === 'number') cacheHit += d.cacheHitTokens;
+    }
+    const pct = promptIn > 0 ? Math.round((cacheHit / promptIn) * 100) : 0;
+    return { cacheHit, promptIn, pct };
+  }, [events]);
 
   const isProcessing = jobId !== null && status === 'streaming';
   const isDone = status === 'completed';
@@ -293,6 +309,17 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
                 {jobId.slice(0, 8)}
               </span>
             </div>
+            {cacheStats.promptIn > 0 && (
+              <div
+                className="flex items-center justify-between px-3 py-1.5 border-b border-border bg-subtle"
+                title="命中前缀缓存的输入 token（DeepSeek/OpenAI 自动缓存，按 ~0.1× 计费）"
+              >
+                <span className="text-[11px] text-foreground-secondary">Prompt cache hits</span>
+                <span className="text-[11px] font-mono text-foreground tabular-nums">
+                  {cacheStats.cacheHit.toLocaleString()} / {cacheStats.promptIn.toLocaleString()} in ({cacheStats.pct}%)
+                </span>
+              </div>
+            )}
             <ul className={cn('px-3 py-2 space-y-1 overflow-y-auto', compact ? 'max-h-20' : 'max-h-40')}>
               {events.length === 0 ? (
                 <li className="text-xs italic text-foreground-tertiary">Waiting for events…</li>
