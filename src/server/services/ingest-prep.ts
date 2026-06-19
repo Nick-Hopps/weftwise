@@ -13,10 +13,10 @@ export const PLAN_INLINE_THRESHOLD = 25_000;
 const MAP_REDUCE_TOKEN_FACTOR = 2.3;
 /**
  * 每块的固定开销（与全文输入正交，计输出与重复读）：summarizer 系统提示（~250）
- * + 摘要输出（封顶 256，见 ingest-chunk-summarizer skill 的 model.maxTokens）
- * + planner 复读该摘要（~256）。摘要输出被算两次（map 写 + planner 读），含余量取 800。
+ * + 摘要输出（实测 ~700/块；不封顶——封顶会截断 structured-output 产生残缺 JSON）
+ * + planner 复读该摘要（~700）。摘要输出被算两次（map 写 + planner 读），含余量取 1500。
  */
-const PER_CHUNK_OVERHEAD_TOKENS = 800;
+const PER_CHUNK_OVERHEAD_TOKENS = 1_500;
 /** planner / writers / reviewer 的预留 token */
 const PIPELINE_RESERVE_TOKENS = 60_000;
 
