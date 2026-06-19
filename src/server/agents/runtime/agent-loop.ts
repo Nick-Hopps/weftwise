@@ -16,6 +16,8 @@ export interface AgentRunResult {
   output: unknown;
   tokensUsed: number;
   stepCount: number;
+  /** 本次 run 命中缓存的输入 token（遥测用；DeepSeek/OpenAI/Anthropic 各自字段，见 readCacheHitTokens） */
+  cacheHitTokens: number;
 }
 
 export async function runAgentLoop(opts: {
@@ -44,7 +46,7 @@ export async function runAgentLoop(opts: {
   if (ctx.cancelled()) throw new AgentCancelled();
   ctx.budget.assertWithin();
 
-  const { output, inputTokens, outputTokens } = skill.outputSchema
+  const { output, inputTokens, outputTokens, cacheHitTokens } = skill.outputSchema
     ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
     : await generateTextResult(skill, ctx, model, route, messages, toolSet);
 
@@ -61,11 +63,13 @@ export async function runAgentLoop(opts: {
     kind: 'final',
     tokensIn: inputTokens,
     tokensOut: outputTokens,
+    cacheHitTokens,
   });
 
   ctx.emit('agent:run-completed', `${skill.name} completed`, {
     runId,
     tokensUsed: inputTokens + outputTokens,
+    cacheHitTokens,
     stepCount: runSteps.stepCount,
     durationMs: Date.now() - startedAt,
   });
@@ -75,6 +79,7 @@ export async function runAgentLoop(opts: {
     output,
     tokensUsed: inputTokens + outputTokens,
     stepCount: runSteps.stepCount,
+    cacheHitTokens,
   };
 }
 
@@ -86,6 +91,7 @@ interface GenerationResult {
   output: unknown;
   inputTokens: number;
   outputTokens: number;
+  cacheHitTokens: number;
 }
 
 /** 解析 LLM 模型：task-router defaults < tasks['skill:<id>'] < frontmatter（视 mode 而定）。 */
@@ -182,6 +188,7 @@ async function generateStructuredResult(
       output: result.object,
       inputTokens: result.usage?.promptTokens ?? 0,
       outputTokens: result.usage?.completionTokens ?? 0,
+      cacheHitTokens: readCacheHitTokens(result.providerMetadata),
     };
   } catch (err) {
     const recovered = recoverStructuredOutput(err, schema);
@@ -199,6 +206,7 @@ async function generateStructuredResult(
       output: recovered.object,
       inputTokens: recovered.inputTokens,
       outputTokens: recovered.outputTokens,
+      cacheHitTokens: 0, // 恢复路径（解析失败）不追踪缓存命中
     };
   }
 }
@@ -227,6 +235,7 @@ async function generateTextResult(
     output: result.text,
     inputTokens: result.usage?.promptTokens ?? 0,
     outputTokens: result.usage?.completionTokens ?? 0,
+    cacheHitTokens: readCacheHitTokens(result.providerMetadata),
   };
 }
 
@@ -405,6 +414,29 @@ function readStringProperty(value: unknown, key: string): string | undefined {
   const direct = (value as Record<string, unknown>)[key];
   if (typeof direct === 'string') return direct;
   return undefined;
+}
+
+/**
+ * 从 provider metadata 提取本次调用「命中缓存的输入 token」数（各供应商命名不同）：
+ * DeepSeek `deepseek.promptCacheHitTokens` / OpenAI `openai.cachedPromptTokens` /
+ * Anthropic `anthropic.cacheReadInputTokens`。无则 0。仅用于遥测，让缓存收益在页面可见。
+ */
+export function readCacheHitTokens(meta: unknown): number {
+  if (!meta || typeof meta !== 'object') return 0;
+  const m = meta as Record<string, unknown>;
+  const candidates: Array<[string, string]> = [
+    ['deepseek', 'promptCacheHitTokens'],
+    ['openai', 'cachedPromptTokens'],
+    ['anthropic', 'cacheReadInputTokens'],
+  ];
+  for (const [provider, field] of candidates) {
+    const p = m[provider];
+    if (p && typeof p === 'object') {
+      const v = (p as Record<string, unknown>)[field];
+      if (typeof v === 'number' && v >= 0) return v;
+    }
+  }
+  return 0;
 }
 
 function readUsageToken(value: unknown, key: 'promptTokens' | 'completionTokens'): number {
