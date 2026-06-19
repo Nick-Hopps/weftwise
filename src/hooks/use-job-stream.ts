@@ -144,6 +144,7 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
         'agent:run-started',
         'agent:run-completed',
         'agent:step',
+        'agent:error',
         // Lint events
         'lint:scope',
         'lint:deterministic:start',

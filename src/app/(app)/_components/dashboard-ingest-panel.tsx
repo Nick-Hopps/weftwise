@@ -324,14 +324,29 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
               {events.length === 0 ? (
                 <li className="text-xs italic text-foreground-tertiary">Waiting for events…</li>
               ) : (
-                events.slice(-20).map((evt, i) => (
-                  <li key={i} className="text-xs text-foreground-secondary flex gap-2">
-                    <span className="text-foreground-tertiary shrink-0">›</span>
-                    <span className="truncate">
-                      {(evt.data?.message as string) || evt.type}
-                    </span>
-                  </li>
-                ))
+                events.slice(-20).map((evt, i) => {
+                  const isError = evt.type === 'agent:error';
+                  const msg = (evt.data?.message as string) || evt.type;
+                  const why = isError
+                    ? ((evt.data?.detail as string) || (evt.data?.finishReason as string) || '')
+                    : '';
+                  return (
+                    <li
+                      key={i}
+                      className={cn('text-xs flex gap-2', isError ? 'text-danger' : 'text-foreground-secondary')}
+                    >
+                      <span className={cn('shrink-0', isError ? 'text-danger' : 'text-foreground-tertiary')}>
+                        {isError ? '✗' : '›'}
+                      </span>
+                      <span
+                        className="truncate"
+                        title={isError ? (evt.data?.rawText as string) || undefined : undefined}
+                      >
+                        {msg}{why ? ` — ${why}` : ''}
+                      </span>
+                    </li>
+                  );
+                })
               )}
             </ul>
             {(isDone || isFailed) && (
