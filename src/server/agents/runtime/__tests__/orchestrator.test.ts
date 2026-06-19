@@ -1,6 +1,7 @@
 // src/server/agents/runtime/__tests__/orchestrator.test.ts
 import { describe, expect, it, vi } from 'vitest';
 import { runPipeline, WriterConflictError } from '../orchestrator';
+import { BudgetExceededError } from '../budget';
 import type { AgentContext, SkillTemplate, StoredChunk } from '../../types';
 
 const mockRun = vi.fn();
@@ -146,15 +147,16 @@ describe('orchestrator.runPipeline: map', () => {
     expect(r.chunkRefs[0].content).toBe('');
   });
 
-  it('单实例失败后 runPipeline reject 且不再派发新实例', async () => {
+  it('某块 summarizer 抛错时降级为空摘要、不中断全程、其余块照常处理', async () => {
+    // map 是逐块独立摘要：单块失败不应拖垮整本书的 ingest（writer 用 chunkStore 全文，不依赖摘要）。
     mockRun.mockReset();
     mockRun
       .mockResolvedValueOnce({ runId: 'm-c0', output: { summary: '摘要:c0' }, tokensUsed: 0, stepCount: 1 })
       .mockRejectedValueOnce(new Error('LLM exploded'))
       .mockResolvedValueOnce({ runId: 'm-c2', output: { summary: '摘要:c2' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([chunk('s1', 'c0', '全文零'), chunk('s1', 'c1', '全文一'), chunk('s1', 'c2', '全文二')]);
-    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行执行使断言确定：失败在第 2 块，第 3 块不被派发
-    await expect(runPipeline({
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行使断言确定
+    const result = await runPipeline({
       steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
       resolveSkill: stubSkill,
       ctx,
@@ -165,8 +167,31 @@ describe('orchestrator.runPipeline: map', () => {
           { key: 's1:c2', sourceId: 's1', id: 'c2', heading: '', content: '' },
         ],
       },
-    })).rejects.toThrow('LLM exploded');
-    expect(mockRun).toHaveBeenCalledTimes(2);
+    });
+    expect(mockRun).toHaveBeenCalledTimes(3); // 失败块不阻止后续派发
+    const r = result as { chunkRefs: Array<{ content: string }> };
+    expect(r.chunkRefs.map((c) => c.content)).toEqual(['摘要:c0', '', '摘要:c2']); // 失败块降级为空
+    expect(ctx.emit).toHaveBeenCalledWith('ingest:warn', expect.stringContaining('s1:c1'), expect.objectContaining({ skillId: 'summarizer' }));
+  });
+
+  it('summarizer 抛 BudgetExceededError 时仍中断全程（控制流异常不被吞）', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'm-c0', output: { summary: '摘要:c0' }, tokensUsed: 0, stepCount: 1 })
+      .mockRejectedValueOnce(new BudgetExceededError('maxTokensPerJob', 600000, 500000));
+    const ctx = ctxStub([chunk('s1', 'c0', '全文零'), chunk('s1', 'c1', '全文一')]);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1;
+    await expect(runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {
+        chunkRefs: [
+          { key: 's1:c0', sourceId: 's1', id: 'c0', heading: '', content: '' },
+          { key: 's1:c1', sourceId: 's1', id: 'c1', heading: '', content: '' },
+        ],
+      },
+    })).rejects.toThrow(BudgetExceededError);
   });
 });
 
