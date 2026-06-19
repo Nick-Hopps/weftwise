@@ -88,7 +88,7 @@ describe('orchestrator.runPipeline: sequence', () => {
 });
 
 describe('orchestrator.runPipeline: map', () => {
-  it('逐块注入 chunkStore 全文+outline，把 summary 写回 content', async () => {
+  it('逐块只注入本块全文（不广播全文 outline，避免 O(N²) token），把 summary 写回 content', async () => {
     mockRun.mockReset();
     mockRun.mockImplementation(async (opts: { input: { id: string } }) => ({
       runId: `m-${opts.input.id}`,
@@ -109,8 +109,9 @@ describe('orchestrator.runPipeline: map', () => {
         ],
       },
     });
-    // summarizer 收到全文与 outline
-    expect(mockRun.mock.calls[0][0].input).toMatchObject({ text: '全文零', outline: expect.stringContaining('s1:c0') });
+    // summarizer 收到本块全文，但绝不携带整份 outline（O(N²) 根因）
+    expect(mockRun.mock.calls[0][0].input).toMatchObject({ text: '全文零' });
+    expect((mockRun.mock.calls[0][0].input as Record<string, unknown>).outline).toBeUndefined();
     const r = result as { chunkRefs: Array<{ content: string }> };
     expect(r.chunkRefs.map((c) => c.content)).toEqual(['摘要:c0', '摘要:c1']);
   });

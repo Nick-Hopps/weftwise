@@ -119,10 +119,10 @@ describe('ingest-service', () => {
   });
 
   it('大文件插入 map 步且 chunkRefs.content 为空（待摘要回填）', async () => {
-    // 50k word（约 60k+ token，远超 25k 阈值走大路径）；预算放宽到 200k 让预检通过，
-    // 避免文本量贴着阈值——chunker 参数微调时用例不会无声变语义
+    // 50k word（约 60k+ token，远超 25k 阈值走大路径）；预算放宽到 1M 让预检通过，
+    // 远高于大路径估算（~2.3× totalTokens），避免 chunker / 估算常数微调时用例无声变语义
     mockCleanText = `${'word '.repeat(50_000)}`;
-    mockMaxTokens = 200_000;
+    mockMaxTokens = 1_000_000;
     mockRunPipeline.mockClear();
     const handler = handlers.get('ingest')!;
     await handler(makeJob(), vi.fn());
@@ -152,7 +152,7 @@ describe('ingest-service', () => {
   });
 
   it('预检超预算：流水线启动前失败且不调 runPipeline', async () => {
-    // 40k word：估算约 126k > 100k 预算，预检 fail-fast
+    // 40k word：大路径估算（~2.3× totalTokens）远超 100k 预算，预检 fail-fast
     mockCleanText = `${'word '.repeat(40_000)}`;
     mockMaxTokens = 100_000;
     mockRunPipeline.mockClear();
