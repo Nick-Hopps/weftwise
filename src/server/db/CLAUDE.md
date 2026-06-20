@@ -75,7 +75,7 @@
 | Key | 类型 | 默认值 | 说明 |
 |-----|------|--------|------|
 | `agentMaxSteps` | number | `25` | 单 job 跨所有 skill step 的最大 tool-call 轮次 |
-| `agentMaxTokensPerJob` | number | `500000` | 单 job token 总预算（in + out 合计）|
+| `agentMaxTokensPerJob` | number | `1200000` | 单 job token 总预算（in + out 合计）；P2 三轮内容阶段后由 500k 提升至 1.2M |
 | `agentMaxParallelSubAgents` | number | `3` | fanout writer step 的最大并发数 |
 | `agentMcpLifecycle` | string | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
 | `agentTaskRouterMode` | string | `'frontmatter-override'` | skill LLM 选择策略 |

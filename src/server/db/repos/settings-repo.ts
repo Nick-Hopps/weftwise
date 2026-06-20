@@ -97,7 +97,7 @@ export function setAgentMaxSteps(value: number): number {
 }
 
 /**
- * Returns the max tokens per job (10k-5M). Falls back to DEFAULT_AGENT_MAX_TOKENS_PER_JOB (500k).
+ * Returns the max tokens per job (10k-5M). Falls back to DEFAULT_AGENT_MAX_TOKENS_PER_JOB (1.2M).
  * Reads DB on every call so changes take effect without worker restart.
  */
 export function getAgentMaxTokensPerJob(): number {

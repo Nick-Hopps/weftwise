@@ -23,11 +23,15 @@ worker-entry.ts
 
 预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；reviewer 输入剔除 chunkRefs/outline；常量在 `ingest-prep.ts`。
 
-调用 `runPipeline(jobId, subject, parsedSources, promptCtx)`，内部以 3 个 skill 顺序执行：
+调用 `runPipeline(jobId, subject, parsedSources, promptCtx)`，内部以 5 个 skill 阶段执行：
 
-1. **`ingest-planner`**：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。工具：`vault.read` / `vault.search`。
-2. **`ingest-writer`**（fanout × N pages）：对每个 plan 条目生成完整 markdown 正文与 frontmatter。工具：`vault.read` / `vault.search`。
-3. **`ingest-reviewer`**：审校汇总 writer 产出，调用 `commit_changeset` 写入 vault（Saga 事务）。**只有此 step 可以写入**。
+1. **`ingest-planner`**（sequence）：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。工具：`vault.read` / `vault.search`。
+2. **`ingest-writer`**（fanout × N pages）：对每个 plan 条目生成忠实层散文（与源文忠实对应的 markdown 正文，不含 callout）与 frontmatter。工具：`vault.read` / `vault.search`。`checkpointAs: 'writer-page'`。
+3. **`ingest-enricher`**（fanout × N pages）：读取 writer 产出（injectPriorPageAs），叠加 `[!type]` callout 增益层（intuition / example / quiz / background / diagram / pitfall 六类）。**结构化输出（`generateObject`），无 tools**。`checkpointAs: 'enricher-page'`。
+4. **`ingest-verifier`**（fanout × N pages）：读取 enricher 产出（injectPriorPageAs），按参数化维度自检（P2 参数化核查；P3 web-search 增强型核查为后续阶段）。**结构化输出（`generateObject`），无 tools**。`checkpointAs: 'verifier-page'`。
+5. **`ingest-reviewer`**（sequence）：审校汇总全部产出，调用 `commit_changeset` 写入 vault（Saga 事务）。**只有此 step 可以写入**。
+
+各内容阶段（2→3→4）通过 orchestrator `ctx.pending` last-write-wins upsert 传递：后阶段按 path 覆盖前阶段暂存页。预算预检使用 `CONTENT_STAGE_FACTOR=3`（三轮内容阶段）估算 token 消耗；`DEFAULT_AGENT_MAX_TOKENS_PER_JOB` 由 500k 提升至 1.2M。
 
 旧的多阶段 LLM 直调（`generateStructuredOutput` plan → pageBody → index）与 `buildLogContent` helper 均已移除，详见 `src/server/agents/CLAUDE.md`。
 
@@ -105,6 +109,7 @@ src/server/services/
 | 2026-04-25 | Subject：三类 service 强校验 subjectId / prompt 注入 SubjectContext / lint 默认 subject-scoped |
 | 2026-04-27 | ingest-service 切换为 multi-agent runtime；旧多阶段 LLM 直调与 buildLogContent helper 移除 |
 | 2026-06-20 | ingest-service 接入断点续传（loadCheckpoint / steps checkpointAs / reduceCostForResume 预检折减 / emit ingest:resuming / 成功 clear）|
+| 2026-06-20 | ingest 流水线扩展为 5 阶段：新增 enricher（callout 增益层）+ verifier（参数化自检，P2），均为结构化输出无 tools；CONTENT_STAGE_FACTOR=3 预算估算 + DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M |
 
 ---
 
