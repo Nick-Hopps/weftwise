@@ -48,3 +48,31 @@ describe('renderMarkdown — KaTeX 公式渲染', () => {
     expect(html).toContain('Page');
   });
 });
+
+describe('renderMarkdown — Callout 渲染', () => {
+  it('[!type] blockquote 渲染为 data-callout 容器并剥离标记', () => {
+    const md = '> [!intuition] 💡 直觉\n> 把 T 想成一次搅动。';
+    const html = toHtml(renderMarkdown(md));
+    expect(html).toContain('data-callout="intuition"');
+    expect(html).toContain('callout-intuition');
+    expect(html).toContain('💡 直觉');
+    expect(html).not.toContain('[!intuition]');
+  });
+
+  it('type 大小写归一化为小写', () => {
+    const html = toHtml(renderMarkdown('> [!Quiz] ❓ 自测\n> 为什么？'));
+    expect(html).toContain('data-callout="quiz"');
+  });
+
+  it('普通 blockquote 不被误判为 callout', () => {
+    const html = toHtml(renderMarkdown('> 这是一句普通引用。'));
+    expect(html).toContain('<blockquote');
+    expect(html).not.toContain('data-callout');
+  });
+
+  it('callout 内的 [[wikilink]] 仍渲染', () => {
+    const html = toHtml(renderMarkdown('> [!background] 🔗 背景\n> 见 [[Vectors]]'));
+    expect(html).toContain('data-callout="background"');
+    expect(html).toContain('Vectors');
+  });
+});
