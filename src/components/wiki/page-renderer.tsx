@@ -40,6 +40,7 @@ const proseClassName = `
   [&>img]:rounded-md [&>img]:my-6 [&>img]:max-w-full [&>img]:border [&>img]:border-border
   [&_strong]:font-semibold [&_strong]:text-prose-heading
   [&_em]:italic
+  [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden
   [&_a]:text-accent [&_a]:transition-colors [&_a]:duration-fast [&_a]:underline [&_a]:decoration-1 [&_a]:underline-offset-4 [&_a]:decoration-accent/40 [&_a]:hover:decoration-accent
 `;
 
@@ -53,7 +54,7 @@ export default function PageRenderer({
   updated = '',
   titleSlugMap,
 }: PageRendererProps) {
-  const rendered = useMemo(() => renderMarkdown(content, titleSlugMap), [content, titleSlugMap]);
+  const rendered = useMemo(() => renderMarkdown(content, titleSlugMap, { math: true }), [content, titleSlugMap]);
 
   return (
     <article className="max-w-content mx-auto px-6 py-10">
