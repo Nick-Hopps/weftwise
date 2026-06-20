@@ -44,11 +44,31 @@ describe('examples/skills round-trip', () => {
     expect(invalid.success).toBe(false);
   });
 
-  it('ingest-writer version >= 2', async () => {
+  it('ingest-writer version >= 3 且 outputSchema 为扁平 entry（无 entry 包装）', async () => {
     const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
     const writer = skills.find((s) => s.id === 'ingest-writer');
     expect(writer).toBeDefined();
-    expect(writer!.version).toBeGreaterThanOrEqual(2);
+    expect(writer!.version).toBeGreaterThanOrEqual(3);
+    expect(writer!.outputSchema).toBeDefined();
+
+    // outputSchema 直接就是 changeset entry：DeepSeek 等会拍平单键 { entry } 包装（吐裸
+    // {action,path,content}），故移除包装让 schema 对齐模型自然输出。
+    const valid = writer!.outputSchema!.safeParse({
+      action: 'create',
+      path: 'wiki/general/a.md',
+      content: '---\ntitle: A\n---\n# A',
+    });
+    expect(valid.success).toBe(true);
+
+    // 旧的 { entry: {...} } 包装形状缺失顶层必填字段，不再被接受
+    const wrapped = writer!.outputSchema!.safeParse({
+      entry: { action: 'create', path: 'wiki/general/a.md', content: 'x' },
+    });
+    expect(wrapped.success).toBe(false);
+
+    // required 缺失（无 content）时解析失败
+    const missing = writer!.outputSchema!.safeParse({ action: 'create', path: 'wiki/general/a.md' });
+    expect(missing.success).toBe(false);
   });
 
   it('ingest-chunk-summarizer 可加载、tools 为空、且不设 maxTokens 上限', async () => {

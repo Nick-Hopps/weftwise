@@ -2,7 +2,7 @@
 id: ingest-writer
 name: Ingest Writer
 description: Write the markdown body for a single planned wiki page.
-version: 2
+version: 3
 tools:
   - vault.read
   - vault.search
@@ -11,17 +11,11 @@ outputSchema: |
   {
     "type": "object",
     "properties": {
-      "entry": {
-        "type": "object",
-        "properties": {
-          "action": { "type": "string", "enum": ["create", "update"] },
-          "path": { "type": "string" },
-          "content": { "type": "string" }
-        },
-        "required": ["action", "path", "content"]
-      }
+      "action": { "type": "string", "enum": ["create", "update"] },
+      "path": { "type": "string" },
+      "content": { "type": "string" }
     },
-    "required": ["entry"]
+    "required": ["action", "path", "content"]
   }
 ---
 
@@ -48,4 +42,8 @@ You are the *ingest writer*. You receive ONE plan entry and produce its full mar
 
 ## Output
 
-Emit JSON matching the declared `outputSchema`. The `content` must be the complete file contents (frontmatter delimiters included).
+Emit a single JSON object matching the declared `outputSchema` — the page's changeset entry, with **no** wrapping key:
+
+- `action` — `"create"` if the page is new, `"update"` if it already exists.
+- `path` — `wiki/<subjectSlug>/<slug>.md`.
+- `content` — the complete file contents (frontmatter delimiters included).
