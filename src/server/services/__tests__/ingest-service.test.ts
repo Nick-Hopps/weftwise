@@ -32,15 +32,49 @@ vi.mock('../../db/repos/settings-repo', () => ({
   getWikiLanguage: () => 'Chinese',
 }));
 
-const mockRunPipeline = vi.fn(async (): Promise<IngestResult> => ({
-  pagesCreated: ['a'],
+// runPipeline 现在返回内容阶段的 carry（含 plan/subjectSlug/sources/languageDirective），
+// 不再自带 commit —— commit 由 service 在 finalize（indexer + commitPending）阶段完成。
+const mockRunPipeline = vi.fn(async () => ({
+  plan: { pages: [{ slug: 'a', title: 'A', summary: 'sum a' }] },
+  subjectSlug: 'general',
+  languageDirective: 'x',
+  sources: [{ sourceId: 'src1', filename: 'doc.txt' }],
+  writerOutputs: [],
+}));
+const mockRunSingle = vi.fn(async () => ({
+  runId: 'r-indexer',
+  output: {
+    indexMd: '---\ntitle: General — Index\ntags: [meta]\n---\n# Index\n- [[a|A]] — sum a',
+    logMd: '---\ntitle: General — Change Log\ntags: [meta]\n---\n# Change Log\n- ingested "doc.txt": 1 page',
+  },
+  tokensUsed: 0,
+  stepCount: 1,
+  cacheHitTokens: 0,
+}));
+vi.mock('../../agents/runtime/orchestrator', () => ({
+  runPipeline: (...args: unknown[]) => mockRunPipeline(...args as []),
+  runSingle: (...args: unknown[]) => mockRunSingle(...args as []),
+  WriterConflictError: class extends Error {},
+}));
+
+const mockCommitPending = vi.fn(async (): Promise<IngestResult> => ({
+  pagesCreated: ['a', 'index', 'log'],
   pagesUpdated: [],
   linksAdded: 0,
   commitSha: 'sha-1',
 }));
-vi.mock('../../agents/runtime/orchestrator', () => ({
-  runPipeline: (...args: unknown[]) => mockRunPipeline(...args as []),
-  WriterConflictError: class extends Error {},
+vi.mock('../../agents/tools/builtin/commit-changeset', () => ({
+  commitPending: (...args: unknown[]) => mockCommitPending(...args as []),
+}));
+
+// overlay.readPage 会触碰 fs/vault —— finalize 读现有 index/log 时用，stub 成"不存在"。
+vi.mock('../../agents/runtime/overlay-vault', () => ({
+  createOverlayVault: () => ({
+    readPage: async () => null,
+    search: async () => [],
+    putEntries: () => {},
+    snapshot: () => ({}),
+  }),
 }));
 
 vi.mock('../../agents/runtime/checkpoint', () => ({
@@ -103,13 +137,31 @@ describe('ingest-service', () => {
       createdAt: '', startedAt: null, completedAt: null,
       leaseExpiresAt: null, heartbeatAt: null, attemptCount: 0,
     };
+    mockRunSingle.mockClear();
+    mockCommitPending.mockClear();
     const emit = vi.fn();
     const result = await handler!(job, emit) as IngestResult;
     expect(result.commitSha).toBe('sha-1');
     expect(mockRunPipeline).toHaveBeenCalled();
     const callArg = (mockRunPipeline.mock.calls[0] as unknown as unknown[])[0] as { steps: unknown[] };
-    // 小文件走 inline：sequence + fanout + fanout + fanout + sequence = 5 步
-    expect(callArg.steps).toHaveLength(5);
+    // 小文件走 inline：planner(sequence) + writer/enricher/verifier(fanout×3) = 4 步（reviewer 已移除）
+    expect(callArg.steps).toHaveLength(4);
+
+    // finalize：service 跑无-tools 的 ingest-indexer，再用 commitPending 收口提交 index/log
+    expect(mockRunSingle).toHaveBeenCalledTimes(1);
+    const indexerArg = (mockRunSingle.mock.calls[0] as unknown as unknown[])[0] as {
+      skill: { id: string };
+      input: { pages: Array<{ slug: string }> };
+    };
+    expect(indexerArg.skill.id).toBe('ingest-indexer');
+    // indexer 收到「现有页 ∪ 本次 plan 页」的并集（索引须覆盖全 subject，不只本次新页）
+    expect(indexerArg.input.pages.map((p) => p.slug).sort()).toEqual(['a', 'existing-a']);
+
+    expect(mockCommitPending).toHaveBeenCalledTimes(1);
+    const supplied = (mockCommitPending.mock.calls[0] as unknown as unknown[])[1] as Array<{ path: string }>;
+    expect(supplied.map((e) => e.path).sort()).toEqual([
+      'wiki/general/index.md', 'wiki/general/log.md',
+    ]);
   });
 
   it('小文件走 inline：无 map 步，chunkRefs.content 已填全文，existingPages 实读', async () => {
@@ -124,7 +176,7 @@ describe('ingest-service', () => {
       initialInput: { chunkRefs: Array<{ content: string }>; existingPages: unknown[]; outline: string };
       ctx: { chunkStore: Map<string, unknown> };
     };
-    expect(opts.steps.map((s) => s.kind)).toEqual(['sequence', 'fanout', 'fanout', 'fanout', 'sequence']);
+    expect(opts.steps.map((s) => s.kind)).toEqual(['sequence', 'fanout', 'fanout', 'fanout']);
     expect(opts.initialInput.chunkRefs[0].content).toContain('短内容');
     expect(opts.initialInput.existingPages).toEqual([
       { slug: 'existing-a', title: 'Existing A', summary: 'sum A' },
@@ -146,23 +198,19 @@ describe('ingest-service', () => {
       initialInput: { chunkRefs: Array<{ content: string }> };
     };
     expect(opts.steps[0]).toMatchObject({ kind: 'map', skillId: 'ingest-chunk-summarizer' });
-    expect(opts.steps.map((s) => s.kind)).toEqual(['map', 'sequence', 'fanout', 'fanout', 'fanout', 'sequence']);
+    expect(opts.steps.map((s) => s.kind)).toEqual(['map', 'sequence', 'fanout', 'fanout', 'fanout']);
     expect(opts.initialInput.chunkRefs[0].content).toBe('');
   });
 
-  it('reviewer 步声明 omitFromInput 剔除 chunkRefs 与 outline', async () => {
+  it('流水线不再含 reviewer 步：末步为 verifier fanout（commit 已移出 agent runtime）', async () => {
     mockCleanText = '短内容。';
     mockMaxTokens = 100_000;
     mockRunPipeline.mockClear();
     const handler = handlers.get('ingest')!;
     await handler(makeJob(), vi.fn());
     const opts = (mockRunPipeline.mock.calls as unknown as Array<[unknown]>)[0][0] as { steps: Array<Record<string, unknown>> };
-    const reviewer = opts.steps[opts.steps.length - 1];
-    expect(reviewer).toMatchObject({
-      kind: 'sequence',
-      skillId: 'ingest-reviewer',
-      omitFromInput: ['chunkRefs', 'outline'],
-    });
+    expect(opts.steps.some((s) => s.skillId === 'ingest-reviewer')).toBe(false);
+    expect(opts.steps[opts.steps.length - 1]).toMatchObject({ kind: 'fanout', skillId: 'ingest-verifier' });
   });
 
   it('预检超预算：流水线启动前失败且不调 runPipeline', async () => {

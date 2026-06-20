@@ -21,15 +21,20 @@ worker-entry.ts
 
 > **强校验** `params.subjectId`（缺失直接 fail job）。所有页面的 `existingPages` / `titleMap` 都仅取自该 subject（实读 pagesRepo，不再截断）。
 
-预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；reviewer 输入剔除 chunkRefs/outline；常量在 `ingest-prep.ts`。
+预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；常量在 `ingest-prep.ts`。
 
-调用 `runPipeline(jobId, subject, parsedSources, promptCtx)`，内部以 5 个 skill 阶段执行：
+调用 `runPipeline(...)` 执行 **4 个内容 skill 阶段**（全部结构化输出、无写盘工具，只往 `ctx.pending` 暂存），随后由 service 层 `finalizeIngest` 收口提交：
 
-1. **`ingest-planner`**（sequence）：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。工具：`vault.read` / `vault.search`。
-2. **`ingest-writer`**（fanout × N pages）：对每个 plan 条目生成忠实层散文（与源文忠实对应的 markdown 正文，不含 callout）与 frontmatter。工具：`vault.read` / `vault.search`。`checkpointAs: 'writer-page'`。
+1. **`ingest-planner`**（sequence）：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。
+2. **`ingest-writer`**（fanout × N pages）：对每个 plan 条目生成忠实层散文（与源文忠实对应的 markdown 正文，不含 callout）与 frontmatter。`checkpointAs: 'writer-page'`。
 3. **`ingest-enricher`**（fanout × N pages）：读取 writer 产出（injectPriorPageAs），叠加 `[!type]` callout 增益层（intuition / example / quiz / background / diagram / pitfall 六类）。**结构化输出（`generateObject`），无 tools**。`checkpointAs: 'enricher-page'`。
 4. **`ingest-verifier`**（fanout × N pages）：读取 enricher 产出（injectPriorPageAs），按参数化维度自检（P2 参数化核查；P3 web-search 增强型核查为后续阶段）。**结构化输出（`generateObject`），无 tools**。`checkpointAs: 'verifier-page'`。
-5. **`ingest-reviewer`**（sequence）：审校汇总全部产出，调用 `commit_changeset` 写入 vault（Saga 事务）。**只有此 step 可以写入**。
+
+**finalize（`finalizeIngest`，service 层，非 agent）**：
+- `runSingle('ingest-indexer')`：**无 tools 结构化输出**，输入全 subject 页清单（existing ∪ plan，排除 index/log meta）+ 现有 index/log 全文，产出 `{ indexMd, logMd }`（不接触页正文）。
+- `commitPending(ctx, [index.md, log.md])`：把 `ctx.pending`（全部内容页）∪ index/log 一次性原子提交（`createChangeset → validate → fs → SQLite → git`）。
+
+> **2026-06-21**：原第五阶段 tool-using `ingest-reviewer` 在 packyapi openai-compatible 转译下工具死循环（反复读 index/log 不消费、永不 commit → 撞 maxSteps），已删除；改为上述 `ingest-indexer`（无 tools）+ service 层 `commitPending`。
 
 各内容阶段（2→3→4）通过 orchestrator `ctx.pending` last-write-wins upsert 传递：后阶段按 path 覆盖前阶段暂存页。预算预检使用 `CONTENT_STAGE_FACTOR=3`（三轮内容阶段）估算 token 消耗；`DEFAULT_AGENT_MAX_TOKENS_PER_JOB` 由 500k 提升至 1.2M。
 
