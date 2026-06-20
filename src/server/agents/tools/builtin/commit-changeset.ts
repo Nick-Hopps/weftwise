@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ChangesetEntry } from '@/lib/contracts';
 import type { ToolDef } from '../../types';
 import {
   createChangeset,
@@ -18,10 +19,21 @@ const ChangesetEntryInputSchema = z.object({
 });
 
 const InputSchema = z.object({
-  entries: z.array(ChangesetEntryInputSchema).min(1),
-  /** Forward-compat field; not passed to applyChangeset (commit message is auto-generated). */
-  summary: z.string().min(1),
+  // Writer pages are pre-staged in ctx.pending by the orchestrator; the reviewer only supplies
+  // index.md / log.md and any corrected pages here. Optional so a clean run can commit staged
+  // pages alone (the handler merges pending ∪ entries, input winning on path conflicts).
+  entries: z.array(ChangesetEntryInputSchema).optional(),
+  /** Forward-compat field; unused (commit message is auto-generated). */
+  summary: z.string().optional(),
 });
+
+/** 合并暂存(pending)与工具入参 entries：按 path 去重，input 覆盖同 path（reviewer 修正版生效）。 */
+function mergeEntriesByPath(staged: ChangesetEntry[], supplied: ChangesetEntry[]): ChangesetEntry[] {
+  const byPath = new Map<string, ChangesetEntry>();
+  for (const e of staged) byPath.set(e.path, e);
+  for (const e of supplied) byPath.set(e.path, e);
+  return [...byPath.values()];
+}
 
 const OutputSchema = z.object({
   commitSha: z.string(),
@@ -41,7 +53,9 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
   name: 'commit_changeset',
   source: 'builtin',
   description:
-    'Persist accumulated wiki page changes to disk + git in a single atomic commit. Can only be called once per job; call this last.',
+    'Persist the wiki changes to disk + git in one atomic commit. Writer pages are already staged; ' +
+    'pass only index.md, log.md, and any pages you corrected — do NOT re-emit unchanged pages. ' +
+    'Can only be called once per job; call this last.',
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'commit',
@@ -50,17 +64,25 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
       throw new Error('commit_changeset already invoked in this run');
     }
 
+    // writer 页面已由 orchestrator 暂存进 ctx.pending；reviewer 只传 index/log + 修正页。
+    // 合并：暂存 ∪ input，按 path 去重、input 覆盖同 path（reviewer 修正版盖过暂存版；对旧版
+    // reviewer 重发全部也兼容——同 path 去重不产生重复）。
+    const mergedEntries = mergeEntriesByPath(ctx.pending.entries, input.entries ?? []);
+    if (mergedEntries.length === 0) {
+      throw new Error('commit_changeset: nothing to commit (no staged or supplied entries)');
+    }
+
     // System owns timestamp frontmatter (created/updated). Writers only author
     // title/summary/tags + body, so stamp the system-owned fields here before
     // validation; preserve an existing page's created on update.
     const now = new Date().toISOString();
-    const entries = input.entries.map((entry) => {
+    const entries = mergedEntries.map((entry) => {
       if (entry.action === 'delete') return entry;
       const slug = slugFromPath(entry.path);
       const existing = slug ? pagesRepo.getPageBySlug(ctx.subject.id, slug) : null;
       return {
         ...entry,
-        content: stampSystemFrontmatter(entry.content, {
+        content: stampSystemFrontmatter(entry.content ?? '', {
           now,
           existingCreated: existing?.createdAt ?? null,
         }),
@@ -76,12 +98,12 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
       );
     }
 
-    const pagesCreated = input.entries
+    const pagesCreated = mergedEntries
       .filter((e) => e.action === 'create')
       .map((e) => slugFromPath(e.path))
       .filter((s): s is string => s !== null);
 
-    const pagesUpdated = input.entries
+    const pagesUpdated = mergedEntries
       .filter((e) => e.action === 'update')
       .map((e) => slugFromPath(e.path))
       .filter((s): s is string => s !== null);
