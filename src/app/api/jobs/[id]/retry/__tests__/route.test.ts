@@ -36,6 +36,7 @@ describe('POST /api/jobs/[id]/retry', () => {
     const res = await call();
     expect(res.status).toBe(404);
     expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockEmit).not.toHaveBeenCalled();
   });
 
   it('422 当 job 非 ingest', async () => {
@@ -43,6 +44,7 @@ describe('POST /api/jobs/[id]/retry', () => {
     const res = await call();
     expect(res.status).toBe(422);
     expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockEmit).not.toHaveBeenCalled();
   });
 
   it('409 当 job 状态非 failed', async () => {
@@ -50,6 +52,7 @@ describe('POST /api/jobs/[id]/retry', () => {
     const res = await call();
     expect(res.status).toBe(409);
     expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockEmit).not.toHaveBeenCalled();
   });
 
   it('202 + requeue + emit job:retrying 当 failed ingest', async () => {
@@ -59,6 +62,6 @@ describe('POST /api/jobs/[id]/retry', () => {
     const res = await call();
     expect(res.status).toBe(202);
     expect(mockRequeue).toHaveBeenCalledWith('j1');
-    expect(mockEmit).toHaveBeenCalledWith('j1', 'job:retrying', expect.any(String), expect.anything());
+    expect(mockEmit).toHaveBeenCalledWith('j1', 'job:retrying', expect.any(String), expect.objectContaining({ manual: true }));
   });
 });
