@@ -5,7 +5,9 @@ import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
 import remarkRehype from 'remark-rehype';
+import remarkMath from 'remark-math';
 import rehypeReact from 'rehype-react';
+import rehypeKatex from 'rehype-katex';
 import * as prod from 'react/jsx-runtime';
 import type { Root as MdastRoot, Text as MdastText, Node as MdastNode, Parent as MdastParent } from 'mdast';
 import type { Plugin } from 'unified';
@@ -202,16 +204,25 @@ const prodRuntime = prod as unknown as {
 export function renderMarkdown(
   content: string,
   titleSlugMap?: Record<string, string>,
+  options?: { math?: boolean },
 ): React.ReactElement {
+  const enableMath = options?.math ?? false;
   const resolver: SlugResolver | undefined = titleSlugMap
     ? (title: string) => titleSlugMap[title] ?? titleSlugMap[title.toLowerCase()]
     : undefined;
 
-  const file = unified()
-    .use(remarkParse)
-    .use(remarkFrontmatter, ['yaml'])
-    .use(createRemarkWikiLinks(resolver))
-    .use(remarkRehype, { allowDangerousHtml: false })
+  // mdast 阶段：remark-math（可选）必须先于 wikilink 扫描，
+  // 这样 $…$ 先被切成 math 节点，wikilink 扫描器（只处理 [[…]] 文本）碰不到公式内部。
+  let remark = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']);
+  if (enableMath) remark = remark.use(remarkMath);
+  remark = remark.use(createRemarkWikiLinks(resolver));
+
+  // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；
+  // throwOnError:false 保证非法 LaTeX 不会让同步 processSync 抛错、整页崩溃。
+  let rehype = remark.use(remarkRehype, { allowDangerousHtml: false });
+  if (enableMath) rehype = rehype.use(rehypeKatex, { throwOnError: false });
+
+  const file = rehype
     .use(rehypeReact, {
       Fragment: prodRuntime.Fragment,
       jsx: prodRuntime.jsx,
