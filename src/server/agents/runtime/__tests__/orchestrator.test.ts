@@ -204,7 +204,7 @@ describe('orchestrator.runPipeline: fanout', () => {
         output: { plan: { pages: [{ slug: 'a', sourceRefs: [{ sourceId: 's1', chunkIds: ['c0', 'c2'] }] }] } },
         tokensUsed: 0, stepCount: 1,
       })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([chunk('s1', 'c0', '块零全文'), chunk('s1', 'c2', '块二全文')]);
     await runPipeline({
       steps: [
@@ -233,7 +233,7 @@ describe('orchestrator.runPipeline: fanout', () => {
         output: { plan: { pages: [{ slug: 'a', sourceRefs: [{ sourceId: 's1', chunkIds: ['c404'] }] }] } },
         tokensUsed: 0, stepCount: 1,
       })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([]);
     await runPipeline({
       steps: [
@@ -257,7 +257,7 @@ describe('orchestrator.runPipeline: fanout', () => {
         output: { plan: { pages: [{ slug: 'a', sourceRefs: [{ sourceId: 's1', chunkIds: ['c404'] }] }] } },
         tokensUsed: 0, stepCount: 1,
       })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([]);
     await runPipeline({
       steps: [
@@ -283,7 +283,7 @@ describe('orchestrator.runPipeline: fanout', () => {
         output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }] } },
         tokensUsed: 0, stepCount: 1,
       })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([]);
     await runPipeline({
       steps: [
@@ -330,8 +330,8 @@ describe('orchestrator.runPipeline: fanout', () => {
         output: { plan: { pages: [{ slug: 'page-a', sourceRefs: [] }, { slug: 'page-b', sourceRefs: [] }] } },
         tokensUsed: 0, stepCount: 1,
       })
-      .mockResolvedValueOnce({ runId: 'wa', output: { entry: { action: 'create', path: 'wiki/general/page-a.md', content: '' } }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'wb', output: { entry: { action: 'create', path: 'wiki/general/page-b.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'wa', output: { action: 'create', path: 'wiki/general/page-a.md', content: '' }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'wb', output: { action: 'create', path: 'wiki/general/page-b.md', content: '' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([]);
     ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行确保 call 顺序确定
     await runPipeline({
@@ -352,12 +352,37 @@ describe('orchestrator.runPipeline: fanout', () => {
     expect(sharedPrefix).toContain('"plan"');
   });
 
+  it('writer 扁平输出（无 entry 包装）合并到父 overlay 且暴露给 reviewer', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '# A' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    const result = await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    });
+    // 父 overlay 收到的就是扁平 ChangesetEntry（无 .entry 包装）
+    expect(ctx.overlay.putEntries).toHaveBeenCalledWith([
+      { action: 'create', path: 'wiki/general/a.md', content: '# A' },
+    ]);
+    // writerOutputs（传给 reviewer）也是扁平形状
+    expect((result as { writerOutputs: unknown[] }).writerOutputs).toEqual([
+      { action: 'create', path: 'wiki/general/a.md', content: '# A' },
+    ]);
+  });
+
   it('writer 路径冲突仍抛 WriterConflictError', async () => {
     mockRun.mockReset();
     mockRun
       .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a' }, { slug: 'a' }] } }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'w1', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'w2', output: { entry: { action: 'create', path: 'wiki/general/a.md', content: '' } }, tokensUsed: 0, stepCount: 1 });
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w2', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
     await expect(runPipeline({
       steps: [
         { kind: 'sequence', skillId: 'planner' },

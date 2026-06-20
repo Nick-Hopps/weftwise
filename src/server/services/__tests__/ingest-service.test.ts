@@ -43,7 +43,7 @@ vi.mock('../../agents/runtime/orchestrator', () => ({
   WriterConflictError: class extends Error {},
 }));
 
-let mockSkillVersion = 2;
+let mockSkillVersion = 3;
 vi.mock('../../worker-runtime', () => ({
   getRuntimeRegistries: () => ({
     skillRegistry: { get: (id: string) => ({ id, name: id, description: '', version: mockSkillVersion, tools: [], canDispatch: [], systemPrompt: '' }), list: () => [], degraded: () => [] },
@@ -169,11 +169,11 @@ describe('ingest-service', () => {
     const handler = handlers.get('ingest')!;
     await expect(handler(makeJob(), vi.fn())).rejects.toThrow(/requires v2/);
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    mockSkillVersion = 2; // 恢复
+    mockSkillVersion = 3; // 恢复
   });
 
   it('initialInput 包含非空 languageDirective', async () => {
-    mockSkillVersion = 2;
+    mockSkillVersion = 3;
     mockCleanText = '短内容。';
     mockMaxTokens = 100_000;
     mockRunPipeline.mockClear();

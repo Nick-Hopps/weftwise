@@ -93,9 +93,11 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   const { skillRegistry, toolRegistry } = getRuntimeRegistries();
 
-  // Skill 契约版本守卫：v2 起 planner 产 sourceRefs / writer 收 relevantChunks。
-  // 播种不覆盖已存在文件，存量 vault 的 v1 skill 会静默产出零素材页面，必须拦截。
-  const MIN_SKILL_VERSIONS: Record<string, number> = { 'ingest-planner': 2, 'ingest-writer': 2 };
+  // Skill 契约版本守卫：planner v2 起产 sourceRefs / writer 收 relevantChunks；
+  // writer v3 起 outputSchema 扁平化（去掉 entry 包装——单键包装会被 DeepSeek 等拍平致
+  // 结构化输出失败），与 orchestrator 扁平消费强绑定。
+  // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
+  const MIN_SKILL_VERSIONS: Record<string, number> = { 'ingest-planner': 2, 'ingest-writer': 3 };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
     const s = skillRegistry.get(skillId);
     if (!s) throw new Error(`Skill not loaded: ${skillId}`);

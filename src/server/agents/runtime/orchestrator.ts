@@ -108,12 +108,12 @@ export async function runPipeline(opts: {
         };
         return runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx) });
       });
-      // 冲突检测
+      // 冲突检测：writer 直接产出单个 changeset entry（ingest-writer v3 起无 `entry` 包装——
+      // 单键包装会被 DeepSeek 等拍平致结构化输出失败，故 schema 扁平化）。
       const seenSlugs = new Set<string>();
       const merged: unknown[] = [];
       for (const r of results) {
-        const out = r.output as { entry?: { path?: string } } | undefined;
-        const path = out?.entry?.path;
+        const path = (r.output as { path?: string } | undefined)?.path;
         if (path) {
           if (seenSlugs.has(path)) {
             throw new WriterConflictError(path);
@@ -124,8 +124,8 @@ export async function runPipeline(opts: {
       }
       // 把每个 writer 的 entry 合并到父 overlay
       for (const r of results) {
-        const out = r.output as { entry?: { action: 'create' | 'update' | 'delete'; path: string; content: string } } | undefined;
-        if (out?.entry) opts.ctx.overlay.putEntries([out.entry]);
+        const entry = r.output as { action: 'create' | 'update' | 'delete'; path: string; content: string } | undefined;
+        if (entry?.path) opts.ctx.overlay.putEntries([entry]);
       }
       carry = isPlainObject(carry)
         ? { ...carry, writerOutputs: merged }
