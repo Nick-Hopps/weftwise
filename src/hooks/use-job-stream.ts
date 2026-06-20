@@ -20,7 +20,7 @@ const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 2000;
 const MAX_EVENTS = 200;
 
-export function useJobStream(jobId: string | null): UseJobStreamResult {
+export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStreamResult {
   const [events, setEvents] = useState<JobStreamEvent[]>([]);
   const [status, setStatus] = useState<JobStreamStatus>('idle');
   const [latestMessage, setLatestMessage] = useState<string>('');
@@ -88,7 +88,8 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
           id: event.lastEventId || undefined,
         };
 
-        if (event.lastEventId) {
+        // 跳过 SSE 合成的终态事件 id（'final'，见 events.ts），否则重试重连游标失效会全量重放旧 job:failed
+        if (event.lastEventId && event.lastEventId !== 'final') {
           lastEventIdRef.current = event.lastEventId;
         }
 
@@ -114,6 +115,9 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
           const errMsg = (parsed.error as string) || 'Job failed';
           setLatestMessage(errMsg);
           source?.close();
+        } else if (eventType === 'job:retrying') {
+          // 自动重试（worker）或手动重试后，流转回处理中
+          updateStatus('streaming');
         }
       };
 
@@ -128,6 +132,7 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
         'job:retrying',
         // Ingest events
         'ingest:start',
+        'ingest:resuming',
         'ingest:parsing',
         'ingest:chunking',
         'ingest:reading-wiki',
@@ -198,7 +203,7 @@ export function useJobStream(jobId: string | null): UseJobStreamResult {
       source?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId]);
+  }, [jobId, reconnectKey]);
 
   return { events, status, latestMessage, reset };
 }
