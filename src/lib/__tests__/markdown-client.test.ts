@@ -76,3 +76,21 @@ describe('renderMarkdown — Callout 渲染', () => {
     expect(html).toContain('Vectors');
   });
 });
+
+describe('renderMarkdown — Mermaid 渲染', () => {
+  it('```mermaid 代码块渲染为 mermaid 容器并保留源码', () => {
+    const md = '```mermaid\ngraph TD; A-->B\n```';
+    const html = toHtml(renderMarkdown(md));
+    expect(html).toContain('mermaid-diagram');
+    expect(html).toContain('data-mermaid-src');
+    expect(html).toContain('graph TD');
+    expect(html).not.toContain('language-mermaid');
+  });
+
+  it('普通代码块不受影响', () => {
+    const md = '```js\nconst a = 1;\n```';
+    const html = toHtml(renderMarkdown(md));
+    expect(html).toContain('<code');
+    expect(html).not.toContain('mermaid-diagram');
+  });
+});
