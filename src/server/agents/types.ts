@@ -1,5 +1,5 @@
 import type { ZodSchema } from 'zod';
-import type { Job, Subject, ChangesetEntry } from '@/lib/contracts';
+import type { Job, Subject, ChangesetEntry, CheckpointProgress } from '@/lib/contracts';
 
 export interface AgentBudget {
   maxSteps: number;
@@ -66,6 +66,19 @@ export interface PendingChangeset {
   entries: ChangesetEntry[];
 }
 
+/** 断点续传句柄：内存索引 + 落盘双写；缺省（undefined）时 orchestrator 行为与现状一致。 */
+export interface IngestCheckpoint {
+  getChunkSummary(key: string): string | undefined;
+  putChunkSummary(key: string, summary: string): void;
+  getPlan(): unknown | undefined;
+  putPlan(output: unknown): void;
+  getWriterPage(slug: string): ChangesetEntry | undefined;   // slug = plan page 身份
+  putWriterPage(slug: string, entry: ChangesetEntry): void;
+  hasAny(): boolean;
+  progress(): CheckpointProgress;
+  clear(): void;
+}
+
 /** chunkStore 中的块全文（全文唯一存放处，绝不进 carry/prompt）。 */
 export interface StoredChunk {
   sourceId: string;
@@ -100,6 +113,8 @@ export interface AgentContext {
   chunkStore: Map<string, StoredChunk>;
   /** Snapshot from settings-repo, captured at root-run start. */
   budgetSnapshot: AgentBudget;
+  /** 断点续传句柄；仅 ingest 注入，缺省时不续传。 */
+  checkpoint?: IngestCheckpoint;
 }
 
 // Forward-declared interfaces; concrete classes live in their own files.
