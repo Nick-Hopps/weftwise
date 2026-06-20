@@ -71,6 +71,15 @@ describe('examples/skills round-trip', () => {
     expect(missing.success).toBe(false);
   });
 
+  it('ingest-reviewer version >= 2（暂存自动提交契约：reviewer 只发 index/log + 纠错，不重发未改动页）', async () => {
+    const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
+    const reviewer = skills.find((s) => s.id === 'ingest-reviewer');
+    expect(reviewer).toBeDefined();
+    expect(reviewer!.version).toBeGreaterThanOrEqual(2);
+    // reviewer 仍可调用 commit_changeset
+    expect(reviewer!.tools).toContain('commit_changeset');
+  });
+
   it('ingest-chunk-summarizer 可加载、tools 为空、且不设 maxTokens 上限', async () => {
     const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
     const summarizer = skills.find((s) => s.id === 'ingest-chunk-summarizer');

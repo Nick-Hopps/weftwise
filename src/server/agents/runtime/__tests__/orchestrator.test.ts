@@ -377,6 +377,29 @@ describe('orchestrator.runPipeline: fanout', () => {
     ]);
   });
 
+  it('writer 扁平 entry 累积进 ctx.pending（供 commit 自动提交，reviewer 无需重发）', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }, { slug: 'b', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '# A' }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w2', output: { action: 'create', path: 'wiki/general/b.md', content: '# B' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行确保累积顺序确定
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    });
+    expect(ctx.pending.entries).toEqual([
+      { action: 'create', path: 'wiki/general/a.md', content: '# A' },
+      { action: 'create', path: 'wiki/general/b.md', content: '# B' },
+    ]);
+  });
+
   it('writer 路径冲突仍抛 WriterConflictError', async () => {
     mockRun.mockReset();
     mockRun

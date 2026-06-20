@@ -26,9 +26,14 @@ ingest-service.ts
         │
         ├── step 2: fanout skill 'ingest-writer' × N pages
         │     └── tools: vault.read, vault.search
+        │       每个 writer entry 暂存进 ctx.pending（+overlay 读隔离）
         │
         └── step 3: skill 'ingest-reviewer'
               └── tools: vault.read, vault.search, commit_changeset (ONLY HERE)
+                  逐页质检 → 只传 index/log + 修正页（不重发未改动页）
+                              │
+                              ▼
+                    commit = ctx.pending ∪ input.entries（按 path 去重, input 覆盖）
                               │
                               ▼
                     wiki-transaction Saga
@@ -36,6 +41,8 @@ ingest-service.ts
 ```
 
 **写入边界**：只有 `ingest-reviewer` skill 可以调用 `commit_changeset` tool。Planner 与 Writer 只做读操作（`vault.read` / `vault.search`）。这是通过 Tool Registry 在各 step 挂载不同工具集来强制的。
+
+**暂存提交**：writer 页面由 orchestrator 暂存进 `ctx.pending`；`commit_changeset` 提交 `pending ∪ input.entries`（按 path 去重、input 覆盖）。reviewer 看全部页面（`writerOutputs` 输入）做质检，但只需吐出 `index.md` / `log.md` 及**修正过的页面**——未改动页自动提交，避免把全部正文塞进一次工具调用（巨量参数易致解析失败/截断）。
 
 ---
 
@@ -85,7 +92,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具 |
 | `builtin/vault-read.ts` | `vault.read` — 通过 `overlay-vault` 读取 wiki 页面内容 |
 | `builtin/vault-search.ts` | `vault.search` — 通过 `pagesRepo.searchPages` 做 FTS5 搜索 |
-| `builtin/commit-changeset.ts` | `commit_changeset` — 仅 reviewer 可用；接收 `ChangesetEntry[]` → 调用 `wiki-transaction` Saga |
+| `builtin/commit-changeset.ts` | `commit_changeset` — 仅 reviewer 可用；提交 `ctx.pending ∪ input.entries`（按 path 去重、input 覆盖）→ 调用 `wiki-transaction` Saga |
 | `builtin/dispatch-skill.ts` | `dispatch_skill` — orchestrator fanout 用；触发子 skill 执行（writer × N）|
 | `mcp/config.ts` | MCP 服务器连接配置（从 `app_settings` 读取）|
 | `mcp/transport.ts` | stdio / SSE transport 封装 |

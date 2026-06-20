@@ -108,4 +108,58 @@ describe('commit-changeset', () => {
       pagesUpdated: [],
     }));
   });
+
+  it('合并 ctx.pending（writer 暂存页）与 input.entries（reviewer 的 index/log），一并提交', async () => {
+    txMocks.createChangeset.mockClear();
+    const ctx = makeCtx({
+      pending: { entries: [
+        { action: 'create', path: 'wiki/general/page-a.md', content: '---\ntitle: A\n---\n' },
+        { action: 'create', path: 'wiki/general/page-b.md', content: '---\ntitle: B\n---\n' },
+      ] },
+    });
+    const result = await commitChangesetTool.handler({
+      entries: [{ action: 'create', path: 'wiki/general/index.md', content: '---\ntitle: Index\n---\n' }],
+      summary: 's',
+    }, ctx);
+    const passed = txMocks.createChangeset.mock.calls[0][2] as { path: string }[];
+    expect(passed.map((e) => e.path).sort()).toEqual([
+      'wiki/general/index.md', 'wiki/general/page-a.md', 'wiki/general/page-b.md',
+    ]);
+    // pagesCreated 取自合并集，含未在 input 里出现的暂存页
+    expect(result.pagesCreated.sort()).toEqual(['index', 'page-a', 'page-b']);
+  });
+
+  it('input.entries 按 path 覆盖 pending 暂存页（reviewer 修正版生效，去重无重复）', async () => {
+    txMocks.createChangeset.mockClear();
+    const ctx = makeCtx({
+      pending: { entries: [
+        { action: 'create', path: 'wiki/general/a.md', content: '---\ntitle: A\n---\n原始正文' },
+      ] },
+    });
+    await commitChangesetTool.handler({
+      entries: [{ action: 'create', path: 'wiki/general/a.md', content: '---\ntitle: A\n---\n修正正文' }],
+      summary: 's',
+    }, ctx);
+    const passed = txMocks.createChangeset.mock.calls[0][2] as { path: string; content: string }[];
+    const a = passed.filter((e) => e.path === 'wiki/general/a.md');
+    expect(a).toHaveLength(1);
+    expect(a[0].content).toContain('修正正文');
+  });
+
+  it('input.entries 省略时仅提交 pending 暂存页', async () => {
+    const ctx = makeCtx({
+      pending: { entries: [
+        { action: 'create', path: 'wiki/general/only.md', content: '---\ntitle: Only\n---\n' },
+      ] },
+    });
+    const result = await commitChangesetTool.handler({ summary: 's' }, ctx);
+    expect(result.pagesCreated).toEqual(['only']);
+    expect(ctx.committed.value).toBe(true);
+  });
+
+  it('pending 与 input 都为空时报错 nothing to commit', async () => {
+    const ctx = makeCtx();
+    await expect(commitChangesetTool.handler({ summary: 's' }, ctx))
+      .rejects.toThrow(/nothing to commit/i);
+  });
 });
