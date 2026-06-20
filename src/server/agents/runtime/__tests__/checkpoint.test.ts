@@ -26,6 +26,7 @@ describe('loadCheckpoint', () => {
     expect(ckpt.getPlan()).toBeUndefined();
     expect(ckpt.getChunkSummary('s1:c0')).toBeUndefined();
     expect(ckpt.getWriterPage('a')).toBeUndefined();
+    expect(ckpt.progress()).toEqual({ plan: false, chunkSummaries: 0, writerPages: 0, totalPages: null });
   });
 
   it('put 后内存即时可读，且重新 loadCheckpoint 能从 DB 读回（落盘）', async () => {
