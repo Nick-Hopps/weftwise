@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as queue from '@/server/jobs/queue';
 import { requireAuth } from '@/server/middleware/auth';
 import type { Job } from '@/lib/contracts';
+import * as checkpointsRepo from '@/server/db/repos/checkpoints-repo';
 
 export const runtime = 'nodejs';
 
@@ -20,5 +21,10 @@ export async function GET(request: NextRequest) {
     ...(subjectId ? { subjectId } : {}),
   });
 
-  return NextResponse.json(jobs);
+  const withProgress = jobs.map((j) => ({
+    ...j,
+    checkpointProgress: checkpointsRepo.getProgress(j.id),
+  }));
+
+  return NextResponse.json(withProgress);
 }
