@@ -2,7 +2,7 @@
 
 > 日期：2026-06-20
 > 状态：设计（待评审 → 进入实现计划）
-> 范围：仅 `ingest` 任务流水线（不动 query / lint）；含配套前端渲染改造
+> 范围：仅 `ingest` 任务流水线（不动 query / lint）；含配套前端渲染改造与定期维护层
 
 ---
 
@@ -36,6 +36,7 @@
 - 生成的页面在保留原文严谨内容（忠实层）之外，叠加**学习导向的增益层**：直觉/动机、例题、自测 Q&A、前置背景、图示、常见误区。
 - 增益内容**正确性可控**：模型自由扩写后经验证；存疑断言触发 web 检索核查；低置信项打标或删除。
 - 忠实层与增益层**物理可分、溯源可辨**：读者一眼能区分"书上的"与"AI 补的"。
+- **定期维护/学习化复习**：页面不在 ingest 后冻结，而是像人类学习一样被周期性回访、深化、整合、复核（§15）。
 - 不破坏既有 Saga 写入边界、subject 隔离、断点续传、预算护栏。
 
 **非目标（本轮不做）**
@@ -43,7 +44,7 @@
 - 不改 query / lint 任务。
 - 不改 wikilink / slug / Saga 事务语义。
 - 不做交互式 explorable explanation（仅静态 markdown + 已支持渲染）。
-- 不强制重生成存量页面（提供手动"重新增益"动作，但不自动回填）。
+- 存量页面不自动批量回填（提供手动"重新增益"动作 §14；自动化由维护层 §15 按成熟度节律渐进进行，非一次性全量重跑）。
 
 ---
 
@@ -56,6 +57,7 @@
 | **页面模型** | 双层 + Obsidian callout | 忠实=普通散文；增益=`[!type]` callout；溯源即 callout |
 | **图表** | 同期接 mermaid | 本轮一并接入 mermaid 渲染 |
 | **验证检索** | 同期接 web 检索 | verifier 配 web-search MCP 工具核查存疑断言 |
+| **维护层** | 混合触发 + 自适应收敛 | 成熟度节律 + 事件唤醒 + 使用加权；用"递减回报"替代回忆测试，自动毕业（§15）|
 
 ---
 
@@ -79,6 +81,7 @@ sequence      ingest-reviewer               → commit_changeset（提交 pendin
 - writer 每页 entry 暂存进 `ctx.pending.entries` + `ctx.overlay`（`orchestrator.ts:156`）；reviewer 不重发未改动页，只发修正页 + index/log。
 - fanout 冲突检测：同一阶段内同 `path` 抛 `WriterConflictError`（`orchestrator.ts:147`）。
 - 断点续传：`PipelineStep.checkpointAs ∈ {'plan','writer-page','chunk-summary'}`；`IngestCheckpoint`（`types.ts:70`）有 `get/putPlan`、`get/putWriterPage`、`get/putChunkSummary`，内存索引 + 落盘双写（checkpoints-repo）。
+- **无任何定时/复发机制**：jobs 仅 3 类（ingest/lint/save-to-wiki），全是 API 按需入队；worker 每 `pollIntervalMs`（默认 2s）轮询消费。维护层（§15）需新增调度组件。
 
 ---
 
@@ -110,7 +113,7 @@ sequence      ingest-reviewer                  不变; 提交 pending ∪ 修正
 
 ### 6.1 planner（不变）
 
-仍产出 `plan.pages[]`（slug/title/summary/tags/rationale/sourceRefs）。P4 可选升级为"学习设计师"（Approach 3 增量，见 §15），本轮不动。
+仍产出 `plan.pages[]`（slug/title/summary/tags/rationale/sourceRefs）。P4 可选升级为"学习设计师"（Approach 3 增量，见 §16），本轮不动。
 
 ### 6.2 writer（基本不变）— 忠实层
 
@@ -271,26 +274,87 @@ sequence      ingest-reviewer                  不变; 提交 pending ∪ 修正
 
 ---
 
-## 十四、回填现有页
+## 十四、回填现有页（手动）
 
 - 提供**手动**"重新增益"动作：对已有页跑 enricher + verifier（writer 阶段可跳过——忠实层已存在，直接以现有 content 为 draft）。
 - 入口：页面操作菜单或 subject 级批量动作；入队一个变体 ingest job（`params.mode = 're-enrich'`，`sourceId` 可空、直接读现有页 content 当 draft）。
-- 不自动触发；存量 12 页由用户按需重生成。
+- 不自动触发；存量 12 页由用户按需重生成。自动化的渐进维护由 §15 承担。
 
 ---
 
-## 十五、实现分期（roadmap，均在本轮范围，仅落地顺序）
+## 十五、维护层（定期增益 / 学习化复习）
+
+> Nick 确认：**混合触发**（成熟度节律 A + 事件唤醒 B + 使用加权 C）+ **自适应收敛**（递减回报 → 毕业）。
+
+### 15.1 动机
+
+ingest 时的 enricher+verifier 只跑一次就冻结，违背"增量构建并**维护**"的愿景。维护层让页面像人类学习一样**周期性被回访、深化、整合、复核**，并随新知识到来而整合。复用 §14 的 `mode='re-enrich'` job 与 §6 的 enricher/verifier agent，**不改 ingest 主链路**；仅新增调度组件（当前系统无任何定时机制，§4）。
+
+### 15.2 核心机制：用"递减回报"替代回忆测试
+
+Anki/SuperMemo：人评测回忆质量 → 定下次复习间隔。这里无回忆测试，改用 **"本遍 enricher 的新增量"** 作信号（= 增量 enricher 的 diff：新 callout 数 / 新链接数 / 改动字节）：
+
+- 加出很多新增益 → 间隔慢涨（页面"还在长身体"）；
+- 几乎无新增（saturation）→ 间隔快涨 / **毕业转休眠**（"已掌握"）；
+- 事件/使用注入新材料 → **唤醒**、提前到期。
+
+自我调节、自动收敛，无需人盯。这是维护层不沦为"token 无底洞"的关键护栏。
+
+### 15.3 三信号 → 一个优先级队列
+
+```
+成熟度节律(A)   每页 spaced 间隔 1d→3d→7d→21d→60d→休眠；按 15.2 增减
+事件唤醒(B)     新页/源 commit → 经 wiki_links 找相关旧页 → 唤醒 + 提前到期（整合新知识）
+使用加权(C)     读者打开/停留某页 → 抬 priority + 唤醒（复习正在学的）
+```
+
+调度器每个维护周期（默认每天一次，挂 worker 轮询循环的低频 sweep tick）选"到期 + 高优先级"的页，在**维护预算**内入队 `re-enrich` job。
+
+### 15.4 数据模型（新增 `page_maturity` 表）
+
+| 列 | 说明 |
+|----|------|
+| `subject_id, slug` | 复合 PK，FK → pages |
+| `passes` | 已增益遍数 |
+| `last_enriched_at` | 上次回访时间 |
+| `interval_days` | 当前 spacing 间隔 |
+| `next_due_at` | 下次到期时间 |
+| `state` | `active` / `dormant` / `graduated` |
+| `priority` | 事件/使用加权后的优先级（随时间衰减） |
+
+### 15.5 关键组件
+
+| 组件 | 落点 |
+|------|------|
+| 间隔/成熟度策略 | 纯函数模块（如 `maintenance-policy.ts`）：输入"本遍新增量 + 当前态" → 输出新 `interval_days`/`state`；易单测 |
+| 维护调度器 | worker 轮询循环加低频 sweep tick（间隔可配，默认每日）；选页 → 入队 `re-enrich`，受维护预算 + 每周期上限约束 |
+| `re-enrich` job | 复用 §14：writer 跳过（以现有页 content 为 draft）→ 增量 enricher → verifier；commit 后更新 `page_maturity` |
+| 事件唤醒钩子 | reviewer commit / `indexTouchedPages` 后，按 `wiki_links` 邻居 bump `next_due_at` / 复活 dormant |
+| 使用埋点 | `POST /api/pages/[slug]/viewed`（dwell）→ 抬 `priority`；**前端 beacon = 维护层最重的一块** |
+| 增量 enricher | re-enrich 模式 prompt：只补缺/深化/整合新链接，**保留已有好 callout**；diff = 产物 + 收敛信号 |
+| 维护设置 | settings：维护开关 / sweep 节律 / 每日维护 token 预算（per-subject 或全局）|
+
+### 15.6 护栏
+
+1. **增量不 churn**：重跑不翻新整页，否则又贵又抖、收敛信号失真。测试需 diff 校验旧 callout 不被无谓重写。
+2. **维护预算独立**：与 ingest 的 `agentMaxTokensPerJob` 分开；维护单设每日上限，扫到上限即停止入队。
+3. **不与 ingest 抢锁**：`re-enrich` 仍走 worker 单任务串行 + `vault-mutex`；维护 sweep 只入队、不直接写。
+
+---
+
+## 十六、实现分期（roadmap，均在本轮范围，仅落地顺序）
 
 | 阶段 | 内容 | 可独立验收 |
 |------|------|-----------|
 | **P1 渲染解耦** | mermaid 渲染 + callout 样式化（前端） | 手写含 callout/mermaid 的页面，渲染正确 |
 | **P2 核心增益** | enricher skill + 页面模型 + orchestrator last-write-wins + checkpoint/预算扩展 | ingest 产出双层页面（verifier 暂用参数化自检） |
 | **P3 接地核查** | web-search MCP 接入 + verifier 升级为检索核查 + `stage_correction` 工具 | 存疑断言被检索核查/修正/打标 |
-| **P4 收尾** | `augmentationLevel` per-subject 设置 + 回填动作 +（可选）学习设计师 planner（Approach 3） | 强度可配；存量页可重新增益 |
+| **P4 收尾** | `augmentationLevel` per-subject 设置 + 手动回填动作 +（可选）学习设计师 planner（Approach 3） | 强度可配；存量页可重新增益 |
+| **P5 维护层** | P5a 成熟度节律(`page_maturity`+策略+调度器+`re-enrich`) → P5b 事件唤醒(wiki_links 邻居) → P5c 使用加权(前端 beacon，最重/可选) | 页面按节律自动回访深化；新知识唤醒相关旧页；saturation 后自动毕业 |
 
 ---
 
-## 十六、测试策略
+## 十七、测试策略
 
 - **skill examples-roundtrip**（沿用 `skills/__tests__/examples-roundtrip.test.ts`）：enricher/verifier 的 frontmatter + outputSchema 合法、id 与文件名一致、版本号。
 - **orchestrator 多阶段 fanout**：last-write-wins（同 path 跨阶段覆盖、同阶段仍报冲突）；checkpoint 续传命中 enricher/verifier 跳过 LLM。
@@ -298,21 +362,24 @@ sequence      ingest-reviewer                  不变; 提交 pending ∪ 修正
 - **verifier 工具循环**：mock `web.search` + `stage_correction`；验证存疑断言触发检索、修正写回 pending。
 - **页面模型契约**：enricher 输出保留忠实层（diff 校验忠实段落不变）、只在 callout 内引入模型断言。
 - **渲染**：`markdown-client` 对 callout/mermaid 的解析单测（含降级路径）。
+- **维护层**：`maintenance-policy` 纯函数（递减回报 → 间隔增减/毕业、唤醒重置）；调度器选页（到期 + 优先级 + 预算上限）；事件唤醒 bump 邻居；增量 enricher 不 churn 的 diff 校验。
 
 ---
 
-## 十七、风险与开放问题
+## 十八、风险与开放问题
 
 1. **增益正确性残差**：参数化自检 + web 检索仍可能漏判细微错误；缓解 = 可见的 callout 溯源让读者自行校准 + lint 的 contradiction 兜底。
 2. **enricher 篡改忠实层**：靠 prompt 强约束 + 测试 diff 校验；若不可靠，后备方案是 enricher 只输出"callout 列表 + 插入锚点"，由 orchestrator 机械拼接（更安全但更死板）——列为 P2 实现时的 fallback。
 3. **成本**：书本级 ingest 2–3× token；靠预检 fail-fast + per-subject `off` 兜底。
-4. **per-subject 设置存储**：`app_settings` 当前是否支持 subject 维度键，需实现计划核定（§12.1）。
-5. **mermaid SSR/CSP**：客户端 hydration 方案需与现有 `page-renderer.tsx`（rehype-pretty-code 异步路径）协调。
-6. **web-search MCP 依赖**：用户须自备 server，否则降级——文档需说明。
+4. **维护层失控成本**：定期重跑若无收敛即 token 无底洞；靠 §15.2 自适应毕业 + §15.6 独立维护预算双重护栏；收敛信号（diff 量）若被 enricher churn 污染会失真——故"增量不 churn"是硬约束。
+5. **per-subject 设置存储**：`app_settings` 当前是否支持 subject 维度键，需实现计划核定（§12.1）。
+6. **mermaid SSR/CSP**：客户端 hydration 方案需与现有 `page-renderer.tsx`（rehype-pretty-code 异步路径）协调。
+7. **web-search MCP 依赖**：用户须自备 server，否则降级——文档需说明。
+8. **使用加权(C)埋点**：需前端 beacon + 行为存储，是维护层最重的一块；故置于 P5c、可选/最后。
 
 ---
 
-## 十八、相关文件清单（预计改动）
+## 十九、相关文件清单（预计改动）
 
 ```
 新增 skill 模板
@@ -320,7 +387,7 @@ sequence      ingest-reviewer                  不变; 提交 pending ∪ 修正
   examples/skills/ingest-verifier.md
 新增内置工具
   src/server/agents/tools/builtin/stage-correction.ts
-后端改动
+后端改动（增益主链路）
   src/server/services/ingest-service.ts        # steps 插入 enricher/verifier; 版本守卫; augmentationLevel
   src/server/services/ingest-prep.ts            # 预算计入新阶段
   src/server/agents/runtime/orchestrator.ts     # pending last-write-wins; fanout input 注入 draftContent
@@ -329,9 +396,18 @@ sequence      ingest-reviewer                  不变; 提交 pending ∪ 修正
   src/server/agents/tools/registry.ts            # 注册 stage_correction
   src/server/db/repos/settings-repo.ts           # getAugmentationLevel/setAugmentationLevel
   src/server/db/repos/checkpoints-repo.ts        # stage 列扩展
+后端改动（维护层 P5）
+  src/server/db/schema.ts                        # page_maturity 表
+  src/server/db/repos/maturity-repo.ts           # page_maturity CRUD + 选页查询（新增）
+  src/server/services/maintenance-policy.ts      # 间隔/成熟度纯函数（新增）
+  src/server/services/maintenance-scheduler.ts   # sweep tick + 选页入队（新增）
+  src/server/services/reenrich-service.ts        # re-enrich job handler（或并入 ingest-service mode 分支）
+  src/server/jobs/worker.ts                      # 轮询循环挂 maintenance sweep
+  src/server/wiki/indexer.ts                     # commit 后按 wiki_links 邻居唤醒
+  src/app/api/pages/[slug]/viewed/route.ts       # 使用埋点（P5c）
 前端改动
   src/lib/markdown-client.ts                     # mermaid + callout 识别
-  src/components/wiki/page-renderer.tsx          # mermaid hydration + callout 样式
+  src/components/wiki/page-renderer.tsx          # mermaid hydration + callout 样式; 阅读 beacon(P5c)
   （新增 mermaid 渲染组件 + callout 组件）
 配置
   llm-config.json                                # skill:ingest-enricher / skill:ingest-verifier
@@ -339,4 +415,4 @@ sequence      ingest-reviewer                  不变; 提交 pending ∪ 修正
 
 ---
 
-_本设计经多轮 brainstorm 确认：hybrid-verify 正确性模型 + Approach 2 双层分离 + callout 页面模型 + 同期接 mermaid 与 web 检索。_
+_本设计经多轮 brainstorm 确认：hybrid-verify 正确性模型 + Approach 2 双层分离 + callout 页面模型 + 同期接 mermaid 与 web 检索 + 混合触发的学习化维护层（自适应收敛）。_
