@@ -130,6 +130,15 @@ export async function runPipeline(opts: {
           parentRunId: opts.ctx.rootRunId,
         };
         const r = await runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx, step) });
+        // 路径强制规范：fanout over plan.pages 时 orchestrator 已知 slug+subjectSlug，
+        // 不信任模型自填的 path——实测 verifier 等会吐裸 slug（如 "quicksort" 而非
+        // "wiki/general/quicksort.md"），导致落到 vault 根、indexer 解析不出 slug 而漏建索引。
+        if (slug && isPlainObject(carry) && typeof carry.subjectSlug === 'string') {
+          const entry = r.output as { path?: string } | undefined;
+          if (entry && typeof entry.path === 'string') {
+            entry.path = `wiki/${carry.subjectSlug}/${slug}.md`;
+          }
+        }
         // 每页完成瞬间即落盘（barrier 之前）——fail-fast 中止时已完成 + 在飞页都保住
         if (step.checkpointAs && slug) {
           const entry = r.output as ChangesetEntry | undefined;

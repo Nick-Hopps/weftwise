@@ -624,4 +624,23 @@ describe('orchestrator.runPipeline: 多内容阶段（增益）', () => {
     expect(forA).toHaveLength(1);
     expect(forA[0].content).toBe('enriched');
   });
+
+  it('强制规范 path：模型吐裸 slug 时 orchestrator 纠正为 wiki/<subject>/<slug>.md', async () => {
+    mockRun.mockReset();
+    mockRun.mockImplementationOnce(async (opts: { input: unknown }) => {
+      const input = opts.input as { slug: string };
+      // 模拟 verifier 吐裸 slug（坏 path）
+      return { runId: 'v', output: { action: 'create', path: input.slug, content: 'x' }, tokensUsed: 0, stepCount: 1 };
+    });
+    const ctx = ctxStub();
+    await runPipeline({
+      steps: [{ kind: 'fanout', skillId: 'verifier', fromOutput: 'plan.pages' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', plan: { pages: [{ slug: 'quicksort', sourceRefs: [] }] } },
+    });
+    const paths = ctx.pending.entries.map((e) => e.path);
+    expect(paths).toContain('wiki/general/quicksort.md');
+    expect(paths).not.toContain('quicksort');
+  });
 });
