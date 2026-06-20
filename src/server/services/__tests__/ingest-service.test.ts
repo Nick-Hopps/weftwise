@@ -43,6 +43,20 @@ vi.mock('../../agents/runtime/orchestrator', () => ({
   WriterConflictError: class extends Error {},
 }));
 
+vi.mock('../../agents/runtime/checkpoint', () => ({
+  loadCheckpoint: () => ({
+    getChunkSummary: () => undefined,
+    putChunkSummary: () => {},
+    getPlan: () => undefined,
+    putPlan: () => {},
+    getWriterPage: () => undefined,
+    putWriterPage: () => {},
+    hasAny: () => false,
+    progress: () => ({ plan: false, chunkSummaries: 0, writerPages: 0, totalPages: null }),
+    clear: () => {},
+  }),
+}));
+
 let mockSkillVersion = 3;
 vi.mock('../../worker-runtime', () => ({
   getRuntimeRegistries: () => ({

@@ -1,6 +1,7 @@
 import { chunkText, sourceKindFor, type SourceChunk } from '../sources/source-chunker';
 import { cleanSourceText, cleanerKindFor } from '../sources/source-cleaner';
 import type { ChunkRef, StoredChunk } from '../agents/types';
+import type { CheckpointProgress } from '@/lib/contracts';
 
 /** inline / map 路径分界（token）；超过则插入 map 摘要步 */
 export const PLAN_INLINE_THRESHOLD = 25_000;
@@ -102,4 +103,16 @@ export function estimateIngestCost(totalTokens: number, chunkCount: number, inli
 function firstLineOf(text: string): string {
   const line = text.trimStart().split('\n', 1)[0] ?? '';
   return line.length > 60 ? `${Array.from(line).slice(0, 60).join('')}…` : line;
+}
+
+/**
+ * 恢复态预算折减：full 估算按已写页比例扣减 fanout 占比。
+ * 仅在 plan 已缓存（totalPages 已知）时折减；保守只折减 writer fanout 这一主成本
+ * （估为整体 60%），map/planner/reserve 不折减——宁可少减不致放行后运行期爆预算。
+ */
+export function reduceCostForResume(fullEstimate: number, progress: CheckpointProgress): number {
+  if (!progress.plan || !progress.totalPages || progress.totalPages <= 0) return fullEstimate;
+  const FANOUT_SHARE = 0.6;
+  const doneFraction = Math.min(1, progress.writerPages / progress.totalPages);
+  return Math.round(fullEstimate * (1 - FANOUT_SHARE * doneFraction));
 }
