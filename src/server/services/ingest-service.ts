@@ -111,7 +111,10 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   // writer v3 起 outputSchema 扁平化（去掉 entry 包装——单键包装会被 DeepSeek 等拍平致
   // 结构化输出失败），与 orchestrator 扁平消费强绑定。
   // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
-  const MIN_SKILL_VERSIONS: Record<string, number> = { 'ingest-planner': 2, 'ingest-writer': 3, 'ingest-reviewer': 2 };
+  const MIN_SKILL_VERSIONS: Record<string, number> = {
+    'ingest-planner': 2, 'ingest-writer': 4, 'ingest-reviewer': 2,
+    'ingest-enricher': 1, 'ingest-verifier': 1,
+  };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
     const s = skillRegistry.get(skillId);
     if (!s) throw new Error(`Skill not loaded: ${skillId}`);
@@ -158,6 +161,8 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       : [{ kind: 'map', skillId: 'ingest-chunk-summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs', checkpointAs: 'chunk-summary' } as const]),
     { kind: 'sequence', skillId: 'ingest-planner', carryThrough: carryKeys, checkpointAs: 'plan' },
     { kind: 'fanout', skillId: 'ingest-writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+    { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
+    { kind: 'fanout', skillId: 'ingest-verifier', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
     { kind: 'sequence', skillId: 'ingest-reviewer', omitFromInput: ['chunkRefs', 'outline'] },
   ];
 

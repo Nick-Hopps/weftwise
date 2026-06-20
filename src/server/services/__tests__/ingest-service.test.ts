@@ -57,7 +57,7 @@ vi.mock('../../agents/runtime/checkpoint', () => ({
   }),
 }));
 
-let mockSkillVersion = 3;
+let mockSkillVersion = 4;
 vi.mock('../../worker-runtime', () => ({
   getRuntimeRegistries: () => ({
     skillRegistry: { get: (id: string) => ({ id, name: id, description: '', version: mockSkillVersion, tools: [], canDispatch: [], systemPrompt: '' }), list: () => [], degraded: () => [] },
@@ -108,8 +108,8 @@ describe('ingest-service', () => {
     expect(result.commitSha).toBe('sha-1');
     expect(mockRunPipeline).toHaveBeenCalled();
     const callArg = (mockRunPipeline.mock.calls[0] as unknown as unknown[])[0] as { steps: unknown[] };
-    // 小文件走 inline：sequence + fanout + sequence = 3 步
-    expect(callArg.steps).toHaveLength(3);
+    // 小文件走 inline：sequence + fanout + fanout + fanout + sequence = 5 步
+    expect(callArg.steps).toHaveLength(5);
   });
 
   it('小文件走 inline：无 map 步，chunkRefs.content 已填全文，existingPages 实读', async () => {
@@ -124,7 +124,7 @@ describe('ingest-service', () => {
       initialInput: { chunkRefs: Array<{ content: string }>; existingPages: unknown[]; outline: string };
       ctx: { chunkStore: Map<string, unknown> };
     };
-    expect(opts.steps.map((s) => s.kind)).toEqual(['sequence', 'fanout', 'sequence']);
+    expect(opts.steps.map((s) => s.kind)).toEqual(['sequence', 'fanout', 'fanout', 'fanout', 'sequence']);
     expect(opts.initialInput.chunkRefs[0].content).toContain('短内容');
     expect(opts.initialInput.existingPages).toEqual([
       { slug: 'existing-a', title: 'Existing A', summary: 'sum A' },
@@ -146,7 +146,7 @@ describe('ingest-service', () => {
       initialInput: { chunkRefs: Array<{ content: string }> };
     };
     expect(opts.steps[0]).toMatchObject({ kind: 'map', skillId: 'ingest-chunk-summarizer' });
-    expect(opts.steps.map((s) => s.kind)).toEqual(['map', 'sequence', 'fanout', 'sequence']);
+    expect(opts.steps.map((s) => s.kind)).toEqual(['map', 'sequence', 'fanout', 'fanout', 'fanout', 'sequence']);
     expect(opts.initialInput.chunkRefs[0].content).toBe('');
   });
 
@@ -183,11 +183,11 @@ describe('ingest-service', () => {
     const handler = handlers.get('ingest')!;
     await expect(handler(makeJob(), vi.fn())).rejects.toThrow(/requires v2/);
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    mockSkillVersion = 3; // 恢复
+    mockSkillVersion = 4; // 恢复
   });
 
   it('initialInput 包含非空 languageDirective', async () => {
-    mockSkillVersion = 3;
+    mockSkillVersion = 4;
     mockCleanText = '短内容。';
     mockMaxTokens = 100_000;
     mockRunPipeline.mockClear();

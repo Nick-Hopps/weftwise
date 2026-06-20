@@ -96,6 +96,15 @@ describe('isInlinePath / estimateIngestCost', () => {
   });
 });
 
+describe('estimateIngestCost — 计入 enricher/verifier 两阶段', () => {
+  it('inline 成本含三内容阶段倍率（CONTENT_STAGE_FACTOR）', () => {
+    const tokens = 100_000;
+    const cost = estimateIngestCost(tokens, 5, true);
+    // 旧公式 = 100000 + 60000 = 160000；新公式应 >= 3× 内容（writer+enricher+verifier）
+    expect(cost).toBeGreaterThanOrEqual(tokens * 3);
+  });
+});
+
 describe('reduceCostForResume', () => {
   const prog = (p: Partial<CheckpointProgress>): CheckpointProgress => ({
     plan: false, chunkSummaries: 0, writerPages: 0, totalPages: null, ...p,
