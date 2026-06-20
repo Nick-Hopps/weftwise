@@ -4,7 +4,7 @@
 
 ## 模块职责
 
-为长任务提供**多 agent 流水线执行环境**。核心动机：ingest 任务的三阶段工作流（规划 → 生成 → 审校）在单次 LLM 调用中难以保证质量与可控性，需要独立 agent 角色分工、互相交接上下文、并受统一预算与写入边界约束。
+为长任务提供**多 agent 流水线执行环境**。核心动机：ingest 任务的五阶段工作流（规划 → 生成 → 增益 → 核查 → 审校）在单次 LLM 调用中难以保证质量与可控性，需要独立 agent 角色分工、互相交接上下文、并受统一预算与写入边界约束。
 
 当前启用范围：**仅 `ingest` 任务**。其余任务（`query` / `lint`）仍走 `services/` 内的直接 LLM 调用。
 
@@ -21,14 +21,30 @@ ingest-service.ts
         ├── [大文件路径] map: skill 'ingest-chunk-summarizer' × N chunks
         │     └── 逐块定位性摘要，全文从 ctx.chunkStore 注入，summary 写回 chunkRefs
         │
-        ├── step 1: skill 'ingest-planner'
+        ├── step 1: skill 'ingest-planner'  (sequence)
         │     └── tools: vault.read, vault.search
         │
-        ├── step 2: fanout skill 'ingest-writer' × N pages
+        ├── step 2: fanout skill 'ingest-writer' × N pages  (fanout)
         │     └── tools: vault.read, vault.search
         │       每个 writer entry 暂存进 ctx.pending（+overlay 读隔离）
+        │       忠实层散文：只产出与原文忠实对应的 markdown 正文，不含 callout
+        │       checkpointAs: 'writer-page'
         │
-        └── step 3: skill 'ingest-reviewer'
+        ├── step 3: fanout skill 'ingest-enricher' × N pages  (fanout)
+        │     └── 结构化输出（generateObject，无 tools）
+        │       读取 step 2 的页面内容（injectPriorPageAs），叠加 [!type] callout 增益层
+        │       callout 类型：intuition / example / quiz / background / diagram / pitfall
+        │       ctx.pending 按 path upsert（last-write-wins，覆盖 writer 产出）
+        │       checkpointAs: 'enricher-page'
+        │
+        ├── step 4: fanout skill 'ingest-verifier' × N pages  (fanout)
+        │     └── 结构化输出（generateObject，无 tools）——参数化自检（P2）
+        │       读取 step 3 的页面内容（injectPriorPageAs），按参数化维度核查
+        │       ctx.pending 按 path upsert（last-write-wins，覆盖 enricher 产出）
+        │       checkpointAs: 'verifier-page'
+        │       ⚠️ 注意：web-search 增强型核查为 P3，当前 P2 仅结构化参数化自检
+        │
+        └── step 5: skill 'ingest-reviewer'  (sequence)
               └── tools: vault.read, vault.search, commit_changeset (ONLY HERE)
                   逐页质检 → 只传 index/log + 修正页（不重发未改动页）
                               │
@@ -40,9 +56,11 @@ ingest-service.ts
                     (validate → fs → SQLite → git)
 ```
 
-**写入边界**：只有 `ingest-reviewer` skill 可以调用 `commit_changeset` tool。Planner 与 Writer 只做读操作（`vault.read` / `vault.search`）。这是通过 Tool Registry 在各 step 挂载不同工具集来强制的。
+**写入边界**：只有 `ingest-reviewer` skill 可以调用 `commit_changeset` tool。Planner、Writer、Enricher、Verifier 只在 `ctx.pending` 中暂存（Enricher / Verifier 为纯结构化输出，无任何 tools）。这是通过 Tool Registry 在各 step 挂载不同工具集来强制的。
 
-**暂存提交**：writer 页面由 orchestrator 暂存进 `ctx.pending`；`commit_changeset` 提交 `pending ∪ input.entries`（按 path 去重、input 覆盖）。reviewer 看全部页面（`writerOutputs` 输入）做质检，但只需吐出 `index.md` / `log.md` 及**修正过的页面**——未改动页自动提交，避免把全部正文塞进一次工具调用（巨量参数易致解析失败/截断）。
+**暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commit_changeset` 提交 `pending ∪ input.entries`（按 path 去重、input 覆盖）。reviewer 看全部页面做质检，只需吐出 `index.md` / `log.md` 及**修正过的页面**——未改动页自动提交，避免把全部正文塞进一次工具调用（巨量参数易致解析失败/截断）。
+
+**跨阶段注入**：fanout step 可携带 `injectPriorPageAs`，orchestrator 将上一阶段对应 path 的 `content` 注入到当前阶段的输入，实现 writer → enricher → verifier 逐层内容传递。
 
 ---
 
@@ -73,7 +91,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `agent-loop.ts` | 单个 agent 的 tool-call 驱动循环；调用 `llm/provider-registry::resolveModel(route)` 获取模型，循环执行直到 stop 或 budget 超限 |
-| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入）；step 支持 `checkpointAs`（'plan'/'writer-page'/'chunk-summary'），命中检查点跳过 LLM，writer 每页完成即落盘 |
+| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入）；step 支持 `checkpointAs`（'plan'/'writer-page'/'enricher-page'/'verifier-page'/'chunk-summary'），命中检查点跳过 LLM，每页完成即落盘；fanout step 可携带 `injectPriorPageAs`，自动将上一阶段对应 path 的 content 注入当前阶段输入；`ctx.pending` 按 path upsert（last-write-wins，后阶段覆盖前阶段）|
 | `budget.ts` | `createBudgetTracker`（job 级 token）+ `createRunStepTracker`（单实例 step）；超限抛 `BudgetExceededError` |
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
 | `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变 |
@@ -131,7 +149,7 @@ export function createRunStepTracker(maxSteps: number): RunStepTracker    // 单
 | Key | 默认值 | 说明 |
 |-----|--------|------|
 | `agentMaxSteps` | `25` | **单个 agent 实例**内的最大 tool-call 轮次（2026-06 起从 job 级改为实例级；job 级总量防线由 token 预算承担） |
-| `agentMaxTokensPerJob` | `500000` | 单个 job 的 token 总预算（in + out） |
+| `agentMaxTokensPerJob` | `1200000` | 单个 job 的 token 总预算（in + out）；P2 三轮内容阶段后默认预算由 500k 提升至 1.2M |
 | `agentMaxParallelSubAgents` | `3` | fanout writer step 的最大并发数 |
 | `agentMcpLifecycle` | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
 | `agentTaskRouterMode` | `'frontmatter-override'` | skill LLM 选择策略（`frontmatter-override` = skill YAML 中的 `llm_override` 优先；`config-only` = 仅用 `llm-config.json`）|
@@ -249,6 +267,7 @@ src/server/agents/
 |------|------|
 | 2026-04-27 | 初始化（Phase 1）：orchestrator + skill loader + tool registry + MCP client pool；ingest 切换为 planner→writer×N→reviewer 流水线 |
 | 2026-06-20 | 断点续传：新增 `checkpoint.ts`（IngestCheckpoint 句柄）；`AgentContext.checkpoint?` 可选字段；`PipelineStep.checkpointAs` 逐页续传（命中检查点跳过 LLM，writer 完成即落盘）|
+| 2026-06-20 | P2 双层增益：新增 enricher（`[!type]` callout 增益层）+ verifier（参数化自检，结构化输出无 tools）fanout 步骤；orchestrator pending last-write-wins upsert + 跨阶段 injectPriorPageAs 注入；checkpoint 扩展 enricher-page/verifier-page 类型；DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M（CONTENT_STAGE_FACTOR=3）|
 
 ---
 
