@@ -2,7 +2,7 @@
 id: ingest-writer
 name: Ingest Writer
 description: Write the markdown body for a single planned wiki page.
-version: 3
+version: 4
 tools:
   - vault.read
   - vault.search
@@ -39,6 +39,7 @@ You are the *ingest writer*. You receive ONE plan entry and produce its full mar
 5. Use `[[wikilinks]]` to refer to other pages by their slug. Use `[[other-subject:Page]]` ONLY when truly cross-subject.
 6. **Follow the `languageDirective` input field for output language.** Do NOT translate slugs, `[[wikilinks]]`, frontmatter keys, or code.
 7. Use `vault.search` / `vault.read` if you need to confirm a wikilink target exists.
+8. Write **plain encyclopedic prose only** — the faithful layer. Do NOT add `[!type]` callouts, intuition asides, worked examples, or quizzes; a later *enricher* stage adds those. Your job is an accurate, well-structured rendering of the chunks.
 
 ## Output
 
