@@ -88,7 +88,7 @@ worker 重试（`worker.ts:112-122`）：仅瞬时错误（timeout/429/...）自
 
 ### A. 检查点存储
 
-**新表**（`db/schema.ts`，drizzle 迁移经 `db:generate` + `db:migrate`）：
+**新表**（`db/schema.ts` 声明供类型推断；实际建表走 `client.ts::ensureTables` 的原生 `CREATE TABLE IF NOT EXISTS`，与本项目既有约定一致，**不**用 drizzle 迁移文件）：
 
 ```
 ingest_checkpoints
@@ -161,9 +161,10 @@ orchestrator 在每个 LLM 调用点"先查后跑"：
 1. 解析 + `prepareIngest`（**始终重跑**，零 token，重建稳定 key 的 chunkStore）；
 2. 构建 `CheckpointHandle`（载入 `getCheckpoints(job.id)`）挂到 `ctx.checkpoint`；
 3. 若 `ckpt.hasAny()`：emit `ingest:resuming`，带 `progress()` 摘要（如 `plan 已缓存 / 80 块摘要 / 40 页已写`）；
-4. **恢复期把已缓存的 writer 页预热进 `ctx.overlay` + `ctx.pending.entries`**——保证即使本次没有任何新 writer 运行（全部命中缓存），reviewer 仍能看到全部页面并提交；
-5. `runPipeline(...)` 自然跳过已完成项；
-6. **成功返回前** `deleteCheckpoints(job.id)`（reviewer commit 成功 = handler return 成功）。
+4. `runPipeline(...)` 自然跳过已完成项；
+5. **成功返回前** `deleteCheckpoints(job.id)`（reviewer commit 成功 = handler return 成功）。
+
+> **无需预热 pending/overlay**：fanout 对每个 plan page——无论命中缓存还是新跑——都把结果作为 fn 输出返回，barrier 之后的 `overlay.putEntries` + `pending.entries.push` 对全部结果统一执行（既有逻辑不动）。因此恢复成功路径上 `pending` 必然填满全部页（缓存 + 新写），reviewer 能看到全书。即使全部页命中缓存，fanout 仍会遍历并填充。
 
 > 注：reviewer 步**永远重跑**——它的修正页 / index / log 不进检查点（reviewer 相对一本书是廉价的一次调用）。reviewer 失败时检查点保留（仅 handler 成功 return 才删），下次重试 reviewer 从缓存的 writer 页重读再提交。
 
@@ -232,7 +233,7 @@ worker 的瞬时错误自动 `requeue(job.id)`（`worker.ts:122`）复用同一 
 用户点「重试」：
 
 1. `POST /api/jobs/{id}/retry` → `requeue` → worker `claim` 同一 job；
-2. handler：解析 + `prepareIngest`（重建 chunkStore，零 token）；载入检查点；emit `ingest:resuming`（plan✓ / 80 摘要 / 40 页）；预热 40 页进 overlay+pending；
+2. handler：解析 + `prepareIngest`（重建 chunkStore，零 token）；载入检查点；emit `ingest:resuming`（plan✓ / 80 摘要 / 40 页）；
 3. map：80 块全部命中 → **0 次 LLM**；
 4. planner：命中 plan → **0 次 LLM**；
 5. fanout：40 页命中跳过，**仅跑剩余 60 页**（含上次失败的第 41 页）；每页完成即落盘；
@@ -252,7 +253,7 @@ worker 的瞬时错误自动 `requeue(job.id)`（`worker.ts:122`）复用同一 
   - planner：命中 plan 跳过且 `carry` 重建结构正确；
   - fanout：命中页跳过；**部分失败保留已完成页**（mock 第 K 个 writer 抛错，断言前 K-1 页 + 在飞页已落盘）；
   - `checkpoint===undefined` 时行为与现状一致（回归保护）。
-- **handler**：恢复载入检查点 + 预热 pending/overlay；成功删除检查点；reviewer commit 失败时检查点保留。
+- **handler**：恢复载入检查点；成功删除检查点；reviewer commit 失败时检查点保留。
 - **retry API**：非 failed / 非 ingest 拒绝；failed ingest 正确 requeue。
 - **预检折减**：恢复态估算扣减已缓存产物。
 
@@ -277,8 +278,9 @@ worker 的瞬时错误自动 `requeue(job.id)`（`worker.ts:122`）复用同一 
 src/server/db/repos/checkpoints-repo.ts        # 检查点 CRUD + getProgress
 src/server/agents/runtime/checkpoint.ts        # CheckpointHandle（内存索引 + 落盘双写）
 src/app/api/jobs/[id]/retry/route.ts           # POST 手动重试
-（迁移）drizzle/xxxx_ingest_checkpoints.sql      # db:generate 产物
 ```
+
+> 建表不产生迁移文件：`schema.ts` 加表声明 + `client.ts::ensureTables` 加 `migrateIngestCheckpoints()`（`CREATE TABLE IF NOT EXISTS`），worker/Next.js 首次 `getDb()` 时自动建表。
 
 **修改**
 
@@ -286,8 +288,8 @@ src/app/api/jobs/[id]/retry/route.ts           # POST 手动重试
 src/server/db/schema.ts                        # ingest_checkpoints 表
 src/server/agents/types.ts                     # AgentContext.checkpoint? + CheckpointHandle 接口
 src/server/agents/runtime/orchestrator.ts      # map/planner/fanout 三分支 + runWithSemaphore fn 即时落盘
-src/server/services/ingest-service.ts          # 构建 ckpt / 预热 pending+overlay / resuming 事件 / 成功清理 / 预检折减
-src/server/services/ingest-prep.ts             # estimateIngestCost 增加恢复折减入参（或新 helper）
+src/server/services/ingest-service.ts          # 构建 ckpt / resuming 事件 / 成功清理 / 预检折减
+src/server/services/ingest-prep.ts             # 新增 reduceCostForResume() 纯函数（恢复态预检折减）
 src/server/jobs/events.ts 无改动；use-job-stream.ts  # job:retrying → streaming
 src/app/api/jobs/route.ts、[id]/route.ts        # 响应附 checkpointProgress
 src/app/(app)/_components/dashboard-ingest-panel.tsx  # 重试按钮 + 挂载时恢复失败 ingest
