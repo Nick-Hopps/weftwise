@@ -113,7 +113,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
   const MIN_SKILL_VERSIONS: Record<string, number> = {
     'ingest-planner': 2, 'ingest-writer': 4, 'ingest-reviewer': 2,
-    'ingest-enricher': 1, 'ingest-verifier': 1,
+    'ingest-enricher': 1, 'ingest-verifier': 2,
   };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
     const s = skillRegistry.get(skillId);
