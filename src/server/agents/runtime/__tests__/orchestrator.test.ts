@@ -571,3 +571,57 @@ describe('orchestrator.runPipeline: 断点续传 (checkpointAs)', () => {
     expect(ctx.pending.entries).toEqual([{ action: 'create', path: 'wiki/general/a.md', content: '# A' }]);
   });
 });
+
+describe('orchestrator.runPipeline: 多内容阶段（增益）', () => {
+  it('enricher 阶段把上一阶段该页 content 按 path 注入为 draftContent', async () => {
+    mockRun.mockReset();
+    const captured: Record<string, unknown>[] = [];
+    mockRun
+      .mockImplementationOnce(async (opts: { input: unknown }) => {
+        const input = opts.input as { slug: string };
+        return { runId: 'w', output: { action: 'create', path: `wiki/general/${input.slug}.md`, content: `draft:${input.slug}` }, tokensUsed: 0, stepCount: 1 };
+      })
+      .mockImplementationOnce(async (opts: { input: unknown }) => {
+        const input = opts.input as { slug: string; path?: string };
+        captured.push(input as Record<string, unknown>);
+        return { runId: 'e', output: { action: 'create', path: input.path ?? `wiki/general/${input.slug}.md`, content: `enriched:${input.slug}` }, tokensUsed: 0, stepCount: 1 };
+      });
+    const ctx = ctxStub();
+    await runPipeline({
+      steps: [
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+        { kind: 'fanout', skillId: 'enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', plan: { pages: [{ slug: 'a', sourceRefs: [] }] } },
+    });
+    expect(captured[0].draftContent).toBe('draft:a');
+  });
+
+  it('后阶段同 path 覆盖前阶段暂存（last-write-wins），pending 不重复', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockImplementationOnce(async (opts: { input: unknown }) => {
+        const input = opts.input as { slug: string };
+        return { runId: 'w', output: { action: 'create', path: `wiki/general/${input.slug}.md`, content: 'draft' }, tokensUsed: 0, stepCount: 1 };
+      })
+      .mockImplementationOnce(async (opts: { input: unknown }) => {
+        const input = opts.input as { slug: string };
+        return { runId: 'e', output: { action: 'create', path: `wiki/general/${input.slug}.md`, content: 'enriched' }, tokensUsed: 0, stepCount: 1 };
+      });
+    const ctx = ctxStub();
+    await runPipeline({
+      steps: [
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+        { kind: 'fanout', skillId: 'enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', plan: { pages: [{ slug: 'a', sourceRefs: [] }] } },
+    });
+    const forA = ctx.pending.entries.filter((e) => e.path === 'wiki/general/a.md');
+    expect(forA).toHaveLength(1);
+    expect(forA[0].content).toBe('enriched');
+  });
+});

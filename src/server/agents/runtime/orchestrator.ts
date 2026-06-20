@@ -5,7 +5,7 @@ import type { ChangesetEntry } from '@/lib/contracts';
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
-  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' }
+  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string }
   | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string; checkpointAs?: 'chunk-summary' };
 
 export class WriterConflictError extends Error {
@@ -117,11 +117,11 @@ export async function runPipeline(opts: {
       const limit = opts.ctx.budgetSnapshot.maxParallelSubAgents;
       const results = await runWithSemaphore(items, limit, async (item) => {
         const slug = isPlainObject(item) && typeof item.slug === 'string' ? item.slug : undefined;
-        // 断点续传：命中已写页则跳过 writer LLM（fanout 是书本级最贵步骤）
-        if (step.checkpointAs === 'writer-page' && slug) {
-          const cached = opts.ctx.checkpoint?.getWriterPage(slug);
+        // 断点续传：命中已写页则跳过 LLM（fanout 是书本级最贵步骤）
+        if (step.checkpointAs && slug) {
+          const cached = readStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug);
           if (cached) {
-            return { runId: 'cached-writer', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
+            return { runId: 'cached-page', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
           }
         }
         const childCtx: AgentContext = {
@@ -129,11 +129,11 @@ export async function runPipeline(opts: {
           overlay: baseOverlay.snapshot(),
           parentRunId: opts.ctx.rootRunId,
         };
-        const r = await runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx) });
+        const r = await runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx, step) });
         // 每页完成瞬间即落盘（barrier 之前）——fail-fast 中止时已完成 + 在飞页都保住
-        if (step.checkpointAs === 'writer-page' && slug) {
+        if (step.checkpointAs && slug) {
           const entry = r.output as ChangesetEntry | undefined;
-          if (entry?.path) opts.ctx.checkpoint?.putWriterPage(slug, entry);
+          if (entry?.path) writeStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug, entry);
         }
         return r;
       });
@@ -157,7 +157,7 @@ export async function runPipeline(opts: {
         const entry = r.output as { action: 'create' | 'update' | 'delete'; path: string; content: string } | undefined;
         if (entry?.path) {
           opts.ctx.overlay.putEntries([entry]);
-          opts.ctx.pending.entries.push(entry);
+          upsertPending(opts.ctx.pending, entry);
         }
       }
       carry = isPlainObject(carry)
@@ -166,6 +166,28 @@ export async function runPipeline(opts: {
     }
   }
   return carry;
+}
+
+/** 暂存区按 path 覆盖（last-write-wins）：后阶段同 path 页替换前阶段，避免重复 entry。 */
+function upsertPending(pending: { entries: ChangesetEntry[] }, entry: ChangesetEntry): void {
+  const i = pending.entries.findIndex((e) => e.path === entry.path);
+  if (i >= 0) pending.entries[i] = entry;
+  else pending.entries.push(entry);
+}
+
+function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: string, slug: string): ChangesetEntry | undefined {
+  if (!ck) return undefined;
+  if (kind === 'writer-page') return ck.getWriterPage(slug);
+  if (kind === 'enricher-page') return ck.getEnricherPage(slug);
+  if (kind === 'verifier-page') return ck.getVerifierPage(slug);
+  return undefined;
+}
+
+function writeStageCheckpoint(ck: AgentContext['checkpoint'], kind: string, slug: string, entry: ChangesetEntry): void {
+  if (!ck) return;
+  if (kind === 'writer-page') ck.putWriterPage(slug, entry);
+  else if (kind === 'enricher-page') ck.putEnricherPage(slug, entry);
+  else if (kind === 'verifier-page') ck.putVerifierPage(slug, entry);
 }
 
 function readPath(obj: unknown, path: string): unknown {
@@ -177,7 +199,12 @@ function readPath(obj: unknown, path: string): unknown {
   }, obj);
 }
 
-function buildFanoutInput(carry: unknown, item: unknown, ctx: AgentContext): unknown {
+function buildFanoutInput(
+  carry: unknown,
+  item: unknown,
+  ctx: AgentContext,
+  step: { injectPriorPageAs?: string },
+): unknown {
   if (!isPlainObject(carry) || !isPlainObject(item)) return item;
 
   const relevantChunks = resolveRelevantChunks(item, ctx);
@@ -190,7 +217,7 @@ function buildFanoutInput(carry: unknown, item: unknown, ctx: AgentContext): unk
   // 共享字段在前、per-page 字段在后：序列化后各 writer 输入有字节一致的前缀，
   // 供 DeepSeek 自动前缀缓存（命中要求从第 0 token 起完全一致）复用 plan/existingPages；
   // item / relevantChunks 为 per-page 内容，排在可变后缀（缓存 miss）。语义不变（字段按名读取）。
-  return {
+  const base: Record<string, unknown> = {
     subjectSlug: carry.subjectSlug,
     existingPages: carry.existingPages,
     plan: carry.plan,
@@ -198,6 +225,20 @@ function buildFanoutInput(carry: unknown, item: unknown, ctx: AgentContext): unk
     ...item,
     relevantChunks,
   };
+
+  // 增益/核查阶段：把上一阶段该页产物的 content 按 path 注入指定 key。
+  if (step.injectPriorPageAs && typeof item.slug === 'string') {
+    const path = `wiki/${String(carry.subjectSlug)}/${item.slug}.md`;
+    const prior = Array.isArray(carry.writerOutputs)
+      ? (carry.writerOutputs as Array<{ path?: string; content?: string }>).find((e) => e?.path === path)
+      : undefined;
+    if (prior?.content !== undefined) {
+      base[step.injectPriorPageAs] = prior.content;
+    } else {
+      ctx.emit('ingest:warn', `Enrich/verify for "${item.slug}" found no prior-stage page at ${path}`, { slug: item.slug });
+    }
+  }
+  return base;
 }
 
 /** 按 planner 标注的 sourceRefs 从 chunkStore 解析出相关块全文；缺失块跳过并告警。 */
