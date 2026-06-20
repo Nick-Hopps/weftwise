@@ -24,6 +24,7 @@ vi.mock('ai', () => ({
   generateObject: mocks.generateObject,
   generateText: mocks.generateText,
   tool: mocks.tool,
+  InvalidToolArgumentsError: class { static isInstance() { return false; } },
 }));
 
 vi.mock('../../../llm/task-router', () => ({
@@ -38,8 +39,28 @@ vi.mock('../../../db/repos/settings-repo', () => ({
   getAgentTaskRouterMode: mocks.getAgentTaskRouterMode,
 }));
 
-import { runAgentLoop, readCacheHitTokens, inputLabel, summarizeGenerationError } from '../agent-loop';
+import { runAgentLoop, readCacheHitTokens, inputLabel, summarizeGenerationError, repairToolCallArgs } from '../agent-loop';
 import { BudgetExceededError } from '../budget';
+
+describe('repairToolCallArgs', () => {
+  it('剥离合法 JSON 后的尾随字符（DeepSeek 典型多吐一个 }）', () => {
+    // 真实复现：reviewer 的 commit_changeset 参数在完整 JSON 后多了一个 }
+    expect(repairToolCallArgs('{"entries":[{"action":"create","path":"a.md","content":"x"}],"summary":"s"}}'))
+      .toBe('{"entries":[{"action":"create","path":"a.md","content":"x"}],"summary":"s"}');
+  });
+  it('剥离 JSON 前的前导垃圾', () => {
+    expect(repairToolCallArgs('oops {"a":1}')).toBe('{"a":1}');
+  });
+  it('已是干净 JSON 时返回 null（避免无意义重试 / schema 级错误不误修）', () => {
+    expect(repairToolCallArgs('{"a":1}')).toBeNull();
+  });
+  it('完全不含 JSON 时返回 null', () => {
+    expect(repairToolCallArgs('garbage')).toBeNull();
+  });
+  it('提取出的第一个配平块本身非合法 JSON 时返回 null', () => {
+    expect(repairToolCallArgs('{not json}')).toBeNull();
+  });
+});
 
 describe('inputLabel', () => {
   it('从输入取页面/块标识（slug > path > id > key > title）', () => {
