@@ -14,11 +14,13 @@ import { renderLanguageDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
+import { loadCheckpoint } from '../agents/runtime/checkpoint';
 import {
   prepareIngest,
   fillInlineContent,
   isInlinePath,
   estimateIngestCost,
+  reduceCostForResume,
 } from './ingest-prep';
 import { getRuntimeRegistries } from '../worker-runtime';
 import { randomUUID } from 'node:crypto';
@@ -76,9 +78,23 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     maxParallelSubAgents: getAgentMaxParallelSubAgents(),
   };
 
-  // 预算预检（spec E.2）：任何 LLM 调用前 fail-fast
+  // 断点续传：载入该 job 已有检查点（重试 = requeue 同一 job.id）
+  const checkpoint = loadCheckpoint(job.id);
+  if (checkpoint.hasAny()) {
+    const p = checkpoint.progress();
+    emit(
+      'ingest:resuming',
+      `Resuming ingest: plan ${p.plan ? 'cached' : 'pending'}, ${p.chunkSummaries} summaries, ${p.writerPages}${p.totalPages ? `/${p.totalPages}` : ''} pages done`,
+      { progress: p },
+    );
+  }
+
+  // 预算预检（spec E.2）：任何 LLM 调用前 fail-fast；恢复态按已完成产物折减估算
   const inline = isInlinePath(prep.totalTokens);
-  const estimatedCost = estimateIngestCost(prep.totalTokens, prep.chunkCount, inline);
+  const fullEstimate = estimateIngestCost(prep.totalTokens, prep.chunkCount, inline);
+  const estimatedCost = checkpoint.hasAny()
+    ? reduceCostForResume(fullEstimate, checkpoint.progress())
+    : fullEstimate;
   emit('ingest:chunking', `Chunked into ${prep.chunkCount} chunks (~${prep.totalTokens} tokens)`, {
     chunkCount: prep.chunkCount,
     totalTokens: prep.totalTokens,
@@ -127,6 +143,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     pending: { entries: [] },
     chunkStore: prep.chunkStore,
     budgetSnapshot,
+    checkpoint,
   };
 
   const existingPages = pagesRepo
@@ -140,9 +157,9 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   const steps: PipelineStep[] = [
     ...(inline
       ? []
-      : [{ kind: 'map', skillId: 'ingest-chunk-summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs' } as const]),
-    { kind: 'sequence', skillId: 'ingest-planner', carryThrough: carryKeys },
-    { kind: 'fanout', skillId: 'ingest-writer', fromOutput: 'plan.pages' },
+      : [{ kind: 'map', skillId: 'ingest-chunk-summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs', checkpointAs: 'chunk-summary' } as const]),
+    { kind: 'sequence', skillId: 'ingest-planner', carryThrough: carryKeys, checkpointAs: 'plan' },
+    { kind: 'fanout', skillId: 'ingest-writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
     { kind: 'sequence', skillId: 'ingest-reviewer', omitFromInput: ['chunkRefs', 'outline'] },
   ];
 
@@ -165,6 +182,9 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       languageDirective,
     },
   }) as IngestResult;
+
+  // 成功（reviewer 已 commit）→ 清除检查点；失败时不清，留给下次重试
+  checkpoint.clear();
 
   return result as unknown as Record<string, unknown>;
 });

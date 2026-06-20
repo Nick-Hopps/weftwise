@@ -4,8 +4,10 @@ import {
   fillInlineContent,
   isInlinePath,
   estimateIngestCost,
+  reduceCostForResume,
   PLAN_INLINE_THRESHOLD,
 } from '../ingest-prep';
+import type { CheckpointProgress } from '@/lib/contracts';
 
 describe('prepareIngest', () => {
   it('清洗→切块→构建 chunkStore/chunkRefs/outline/totalTokens', () => {
@@ -91,5 +93,28 @@ describe('isInlinePath / estimateIngestCost', () => {
     const totalTokens = 245_685; // Linear Algebra Done Right 实测
     const chunkCount = 234;
     expect(estimateIngestCost(totalTokens, chunkCount, false)).toBeGreaterThanOrEqual(2 * totalTokens);
+  });
+});
+
+describe('reduceCostForResume', () => {
+  const prog = (p: Partial<CheckpointProgress>): CheckpointProgress => ({
+    plan: false, chunkSummaries: 0, writerPages: 0, totalPages: null, ...p,
+  });
+
+  it('plan 未缓存（totalPages 未知）时不折减', () => {
+    expect(reduceCostForResume(100_000, prog({ plan: false, writerPages: 5 }))).toBe(100_000);
+  });
+
+  it('totalPages 为 0 时不折减（防除零）', () => {
+    expect(reduceCostForResume(100_000, prog({ plan: true, totalPages: 0, writerPages: 0 }))).toBe(100_000);
+  });
+
+  it('按已写页比例折减 fanout 占比（60%）', () => {
+    // 100 页写完 50 页：减 100000 * 0.6 * 0.5 = 30000
+    expect(reduceCostForResume(100_000, prog({ plan: true, totalPages: 100, writerPages: 50 }))).toBe(70_000);
+  });
+
+  it('已写页超过 totalPages 时按 100% 封顶（最多减 fanout 全占比）', () => {
+    expect(reduceCostForResume(100_000, prog({ plan: true, totalPages: 10, writerPages: 99 }))).toBe(40_000);
   });
 });
