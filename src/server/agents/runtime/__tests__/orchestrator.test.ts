@@ -2,7 +2,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { runPipeline, WriterConflictError } from '../orchestrator';
 import { BudgetExceededError } from '../budget';
-import type { AgentContext, SkillTemplate, StoredChunk } from '../../types';
+import type { AgentContext, SkillTemplate, StoredChunk, IngestCheckpoint } from '../../types';
+import type { ChangesetEntry } from '@/lib/contracts';
 
 const mockRun = vi.fn();
 vi.mock('../agent-loop', () => ({
@@ -10,7 +11,7 @@ vi.mock('../agent-loop', () => ({
   AgentCancelled: class extends Error {},
 }));
 
-function ctxStub(chunks: StoredChunk[] = []): AgentContext {
+function ctxStub(chunks: StoredChunk[] = [], checkpoint?: IngestCheckpoint): AgentContext {
   const chunkStore = new Map<string, StoredChunk>();
   for (const c of chunks) chunkStore.set(`${c.sourceId}:${c.id}`, c);
   return {
@@ -28,12 +29,38 @@ function ctxStub(chunks: StoredChunk[] = []): AgentContext {
     pending: { entries: [] },
     chunkStore,
     budgetSnapshot: { maxSteps: 25, maxTokensPerJob: 500_000, maxParallelSubAgents: 2 },
+    checkpoint,
   } as AgentContext;
 }
 
 const stubSkill = (id: string): SkillTemplate => ({
   id, name: id, description: '', version: 1, tools: [], canDispatch: [], systemPrompt: '',
 });
+
+function fakeCheckpoint(seed?: {
+  summaries?: Record<string, string>;
+  plan?: unknown;
+  pages?: Record<string, ChangesetEntry>;
+}): IngestCheckpoint & { _spies: { putSummary: ReturnType<typeof vi.fn>; putPlan: ReturnType<typeof vi.fn>; putPage: ReturnType<typeof vi.fn> } } {
+  const summaries = new Map(Object.entries(seed?.summaries ?? {}));
+  const pages = new Map(Object.entries(seed?.pages ?? {}));
+  let plan = seed?.plan;
+  const putSummary = vi.fn((k: string, s: string) => { summaries.set(k, s); });
+  const putPlan = vi.fn((o: unknown) => { plan = o; });
+  const putPage = vi.fn((slug: string, e: ChangesetEntry) => { pages.set(slug, e); });
+  return {
+    getChunkSummary: (k) => summaries.get(k),
+    putChunkSummary: putSummary,
+    getPlan: () => plan,
+    putPlan,
+    getWriterPage: (slug) => pages.get(slug),
+    putWriterPage: putPage,
+    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0,
+    progress: () => ({ plan: plan !== undefined, chunkSummaries: summaries.size, writerPages: pages.size, totalPages: null }),
+    clear: vi.fn(),
+    _spies: { putSummary, putPlan, putPage },
+  };
+}
 
 const chunk = (sourceId: string, id: string, text: string): StoredChunk =>
   ({ sourceId, id, heading: '', text });
@@ -415,5 +442,126 @@ describe('orchestrator.runPipeline: fanout', () => {
       ctx: ctxStub(),
       initialInput: {},
     })).rejects.toThrow(WriterConflictError);
+  });
+});
+
+describe('orchestrator.runPipeline: 断点续传 (checkpointAs)', () => {
+  it('map: 命中缓存摘要跳过 summarizer，未命中跑后落盘', async () => {
+    mockRun.mockReset();
+    mockRun.mockImplementation(async (opts: { input: { id: string } }) => ({
+      runId: `m-${opts.input.id}`, output: { summary: `新摘要:${opts.input.id}` }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0,
+    }));
+    const ckpt = fakeCheckpoint({ summaries: { 's1:c0': '缓存摘要c0' } });
+    const ctx = ctxStub([chunk('s1', 'c0', '全文零'), chunk('s1', 'c1', '全文一')], ckpt);
+    const result = await runPipeline({
+      steps: [{ kind: 'map', skillId: 'summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs', checkpointAs: 'chunk-summary' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {
+        chunkRefs: [
+          { key: 's1:c0', sourceId: 's1', id: 'c0', heading: '', content: '' },
+          { key: 's1:c1', sourceId: 's1', id: 'c1', heading: '', content: '' },
+        ],
+      },
+    });
+    expect(mockRun).toHaveBeenCalledTimes(1); // 只跑 c1
+    expect(mockRun.mock.calls[0][0].input.id).toBe('c1');
+    const r = result as { chunkRefs: Array<{ content: string }> };
+    expect(r.chunkRefs.map((c) => c.content)).toEqual(['缓存摘要c0', '新摘要:c1']);
+    expect(ckpt._spies.putSummary).toHaveBeenCalledWith('s1:c1', '新摘要:c1');
+    expect(ckpt._spies.putSummary).not.toHaveBeenCalledWith('s1:c0', expect.anything());
+  });
+
+  it('planner: 命中缓存 plan 跳过 LLM，carry 结构与正常跑一致', async () => {
+    mockRun.mockReset();
+    mockRun.mockResolvedValueOnce({ runId: 'w', output: { action: 'create', path: 'wiki/general/a.md', content: '' }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 });
+    const cachedPlan = { plan: { pages: [{ slug: 'a', sourceRefs: [] }] } };
+    const ckpt = fakeCheckpoint({ plan: cachedPlan });
+    const ctx = ctxStub([], ckpt);
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'], checkpointAs: 'plan' },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    });
+    // planner 未调 LLM：唯一的 mockRun 调用是 writer
+    expect(mockRun).toHaveBeenCalledTimes(1);
+    const writerInput = mockRun.mock.calls[0][0].input as Record<string, unknown>;
+    expect(writerInput.slug).toBe('a');
+    expect(ckpt._spies.putPlan).not.toHaveBeenCalled();
+  });
+
+  it('fanout: 命中已写页跳过 writer，未命中跑后即时落盘；pending 含全部页', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }, { slug: 'b', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 })
+      .mockResolvedValueOnce({ runId: 'wb', output: { action: 'create', path: 'wiki/general/b.md', content: '# B' }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 });
+    const cachedA: ChangesetEntry = { action: 'create', path: 'wiki/general/a.md', content: '# A(cached)' };
+    const ckpt = fakeCheckpoint({ pages: { a: cachedA } });
+    const ctx = ctxStub([], ckpt);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1;
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    });
+    // planner 跑 1 次 + 只有 b 跑 writer（a 命中缓存）
+    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(ckpt._spies.putPage).toHaveBeenCalledWith('b', { action: 'create', path: 'wiki/general/b.md', content: '# B' });
+    expect(ckpt._spies.putPage).not.toHaveBeenCalledWith('a', expect.anything());
+    // pending 含缓存 a + 新写 b（reviewer 据此提交全书）
+    expect(ctx.pending.entries).toEqual([
+      cachedA,
+      { action: 'create', path: 'wiki/general/b.md', content: '# B' },
+    ]);
+  });
+
+  it('fanout: 某页失败时已完成页已落盘（fail-fast 不丢已完成工作）', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }, { slug: 'b', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 })
+      .mockResolvedValueOnce({ runId: 'wa', output: { action: 'create', path: 'wiki/general/a.md', content: '# A' }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 })
+      .mockRejectedValueOnce(new Error('writer b 爆炸'));
+    const ckpt = fakeCheckpoint();
+    const ctx = ctxStub([], ckpt);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行：a 先完成并落盘，再轮到 b 抛错
+    await expect(runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    })).rejects.toThrow('writer b 爆炸');
+    // a 在抛错前已落盘 → 重试可跳过
+    expect(ckpt._spies.putPage).toHaveBeenCalledWith('a', { action: 'create', path: 'wiki/general/a.md', content: '# A' });
+    expect(ckpt._spies.putPage).not.toHaveBeenCalledWith('b', expect.anything());
+  });
+
+  it('回归：无 checkpoint（ctx.checkpoint=undefined）时 map/planner/fanout 行为不变', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 })
+      .mockResolvedValueOnce({ runId: 'w', output: { action: 'create', path: 'wiki/general/a.md', content: '# A' }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 });
+    const ctx = ctxStub(); // 无 checkpoint
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'], checkpointAs: 'plan' },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    });
+    expect(mockRun).toHaveBeenCalledTimes(2); // planner + writer 照常都跑
+    expect(ctx.pending.entries).toEqual([{ action: 'create', path: 'wiki/general/a.md', content: '# A' }]);
   });
 });
