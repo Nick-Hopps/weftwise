@@ -108,6 +108,7 @@
 | `jobs` | `id` | `subject_id` 可空（全局型 lint / reset）；ingest/save-to-wiki 必填 |
 | `job_events` | `id` | 顺序由 `created_at` 决定；SSE 用 `Last-Event-Id` 续播 |
 | `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back` |
+| `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 
 ## 扩展指南
 
@@ -141,8 +142,9 @@ src/server/db/
     ├── subjects-repo.ts  # 主题 CRUD + countPages + deleteIfEmpty
     ├── pages-repo.ts     # 全部强制 subjectId
     ├── jobs-repo.ts      # 写入/查询带 subject_id
-    ├── sources-repo.ts   # subject-scoped
-    └── settings-repo.ts  # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
+    ├── sources-repo.ts       # subject-scoped
+    ├── settings-repo.ts      # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
+    └── checkpoints-repo.ts   # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
 ```
 
 ## 变更记录 (Changelog)
@@ -153,6 +155,7 @@ src/server/db/
 | 2026-04-25 | Subject：复合 PK / target_subject_id / subjects-repo / FTS5 带 subject filter / 启动自迁移 |
 | 2026-04-26 | wikiLanguage：新增 `app_settings` 表 + `settings-repo.ts`（`getWikiLanguage` / `setWikiLanguage`）|
 | 2026-04-27 | settings-repo 新增 5 个 agent 配置 key（maxSteps / maxTokensPerJob / maxParallelSubAgents / mcpLifecycle / taskRouterMode）|
+| 2026-06-20 | ingest_checkpoints 表 + checkpoints-repo（断点续传：getCheckpoints / putCheckpoint / deleteCheckpoints / getProgress）|
 
 ---
 

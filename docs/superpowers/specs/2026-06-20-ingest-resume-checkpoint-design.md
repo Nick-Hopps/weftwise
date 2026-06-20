@@ -1,7 +1,7 @@
 # Ingest 断点续传 + 重试设计
 
 > 日期：2026-06-20
-> 状态：已确认，待写实现计划
+> 状态：已实现并合入 feat/ingest-resume-checkpoint（25 文件/224 用例绿）
 > 范围：仅 `ingest` 任务流水线（不动 query / lint）
 
 ---
@@ -267,6 +267,7 @@ worker 的瞬时错误自动 `requeue(job.id)`（`worker.ts:122`）复用同一 
 - query / lint 的断点续传（仅 ingest）。
 - reviewer 产出（修正页 / index / log）的检查点（reviewer 永远重跑）。
 - 跨 job 共享检查点 / 内容级去重。
+- **已知限制——检查点 GC 未实现**：被用户永久放弃的失败 job（从不点重试）的检查点行不会自动清理。`writer-page` 行存整页 markdown 全文，长期运行 SQLite 会单调增长。缓解措施：`/api/reset`（全量或 per-subject）已同步清理 `ingest_checkpoints`，可手动触发。推荐后续项：worker 启动时按保留窗口 GC 超期失败 job 的检查点（保留期为产品决策，v1 暂未明确，故未实现）。
 
 ---
 

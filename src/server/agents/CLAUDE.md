@@ -73,9 +73,10 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `agent-loop.ts` | 单个 agent 的 tool-call 驱动循环；调用 `llm/provider-registry::resolveModel(route)` 获取模型，循环执行直到 stop 或 budget 超限 |
-| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入） |
+| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入）；step 支持 `checkpointAs`（'plan'/'writer-page'/'chunk-summary'），命中检查点跳过 LLM，writer 每页完成即落盘 |
 | `budget.ts` | `createBudgetTracker`（job 级 token）+ `createRunStepTracker`（单实例 step）；超限抛 `BudgetExceededError` |
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
+| `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变 |
 
 ### `skills/`
 
@@ -215,9 +216,10 @@ src/server/agents/
 ├── types.ts                        # 内部类型定义
 ├── runtime/
 │   ├── agent-loop.ts               # 单 agent tool-call 循环
-│   ├── orchestrator.ts             # 多 step 流水线驱动
+│   ├── orchestrator.ts             # 多 step 流水线驱动（含 checkpointAs 逐页续传）
 │   ├── budget.ts                   # BudgetTracker
 │   ├── overlay-vault.ts            # 读写隔离层
+│   ├── checkpoint.ts               # IngestCheckpoint 句柄（内存索引 + 落盘双写）
 │   └── __tests__/
 ├── skills/
 │   ├── schema.ts                   # SkillSchema (zod)
@@ -246,6 +248,7 @@ src/server/agents/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-27 | 初始化（Phase 1）：orchestrator + skill loader + tool registry + MCP client pool；ingest 切换为 planner→writer×N→reviewer 流水线 |
+| 2026-06-20 | 断点续传：新增 `checkpoint.ts`（IngestCheckpoint 句柄）；`AgentContext.checkpoint?` 可选字段；`PipelineStep.checkpointAs` 逐页续传（命中检查点跳过 LLM，writer 完成即落盘）|
 
 ---
 
