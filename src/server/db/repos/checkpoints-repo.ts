@@ -55,6 +55,7 @@ export function getProgress(jobId: string): CheckpointProgress | null {
 
   let totalPages: number | null = null;
   if (plan) {
+    // plan 每个 job 仅一份，落盘时 key 固定为空串（见 checkpoint.ts putPlan）
     const row = sqlite
       .prepare(`SELECT data_json FROM ingest_checkpoints WHERE job_id = ? AND kind = 'plan' AND key = ''`)
       .get(jobId) as { data_json: string } | undefined;
