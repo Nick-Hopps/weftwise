@@ -4,7 +4,9 @@
 
 ## 模块职责
 
-为长任务提供**多 agent 流水线执行环境**。核心动机：ingest 任务的五阶段工作流（规划 → 生成 → 增益 → 核查 → 审校）在单次 LLM 调用中难以保证质量与可控性，需要独立 agent 角色分工、互相交接上下文、并受统一预算与写入边界约束。
+为长任务提供**多 agent 流水线执行环境**。核心动机：ingest 任务的四阶段内容工作流（规划 → 生成 → 增益 → 核查）在单次 LLM 调用中难以保证质量与可控性，需要独立 agent 角色分工、互相交接上下文、并受统一预算约束。
+
+> **2026-06-21 重构**：原第五阶段 tool-using `ingest-reviewer`（`generateText` + `commit_changeset` 工具循环）在 packyapi 的 openai-compatible 转译下工具死循环（反复读 index/log 却不消费、永不 commit → 撞 maxSteps），已删除。索引/日志生成下沉为**无 tools 的 `ingest-indexer` 结构化输出**，**commit 上移回 service 层**（`ingest-service.ts::finalizeIngest` → `commitPending`）。详见根 `CLAUDE.md` Changelog 2026-06-21。
 
 当前启用范围：**仅 `ingest` 任务**。其余任务（`query` / `lint`）仍走 `services/` 内的直接 LLM 调用。
 
@@ -44,21 +46,25 @@ ingest-service.ts
         │       checkpointAs: 'verifier-page'
         │       ⚠️ 注意：web-search 增强型核查为 P3，当前 P2 仅结构化参数化自检
         │
-        └── step 5: skill 'ingest-reviewer'  (sequence)
-              └── tools: vault.read, vault.search, commit_changeset (ONLY HERE)
-                  逐页质检 → 只传 index/log + 修正页（不重发未改动页）
-                              │
-                              ▼
-                    commit = ctx.pending ∪ input.entries（按 path 去重, input 覆盖）
+        ▼  runPipeline 返回（不在 agent 内提交）
+  ────────────────────────────────────────────────────
+  ingest-service.ts :: finalizeIngest（service 层收口）
+        │
+        ├── runSingle skill 'ingest-indexer'  (无 tools, generateObject)
+        │     └── 输入: 全 subject 页清单(existing ∪ plan, 排除 meta) + 现有 index/log 全文
+        │         输出: { indexMd, logMd }（不进页正文、不可能进工具循环）
+        │
+        └── commitPending(ctx, [index.md, log.md])
+                    commit = ctx.pending ∪ [index, log]（按 path 去重）
                               │
                               ▼
                     wiki-transaction Saga
                     (validate → fs → SQLite → git)
 ```
 
-**写入边界**：只有 `ingest-reviewer` skill 可以调用 `commit_changeset` tool。Planner、Writer、Enricher、Verifier 只在 `ctx.pending` 中暂存（Enricher / Verifier 为纯结构化输出，无任何 tools）。这是通过 Tool Registry 在各 step 挂载不同工具集来强制的。
+**写入边界**：流水线内的 agent（Planner / Writer / Enricher / Verifier）**全部为结构化输出，无任何写盘工具**——它们只把页面暂存进 `ctx.pending`。真正的 commit 由 **service 层**（`finalizeIngest` → `commitPending`）在流水线结束后执行，符合"写操作经 services → wiki-transaction"的 Saga 契约。`commit_changeset` tool 仍注册但已无 skill 引用（薄包装 `commitPending`，保留作工具面/测试用）。
 
-**暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commit_changeset` 提交 `pending ∪ input.entries`（按 path 去重、input 覆盖）。reviewer 看全部页面做质检，只需吐出 `index.md` / `log.md` 及**修正过的页面**——未改动页自动提交，避免把全部正文塞进一次工具调用（巨量参数易致解析失败/截断）。
+**暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。indexer 只产出 `index.md` / `log.md`（meta 页），所有内容页随 `pending` 自动提交——索引/日志 LLM 调用不接触页正文，从根本上杜绝巨量工具参数与工具循环。
 
 **跨阶段注入**：fanout step 可携带 `injectPriorPageAs`，orchestrator 将上一阶段对应 path 的 `content` 注入到当前阶段的输入，实现 writer → enricher → verifier 逐层内容传递。
 
@@ -206,15 +212,15 @@ src/server/agents/tools/builtin/__tests__/
 
 - `BudgetTracker`：step 超限抛 `BudgetExceededError`；token 累加准确。
 - `OverlayVault`：读取命中内存 diff；commit 时 diff 正确合并到真实 vault。
-- `commit_changeset` tool：传入合法 entries 时调用 Saga；传入非法 entries 时返回 tool error（不抛出）。
-- Orchestrator step 顺序：planner 输出传入 writer context；reviewer 拿到 writer 聚合输出。
+- `commitPending`（及其薄包装 `commit_changeset` tool）：合并 `pending ∪ supplied` 调用 Saga；重复提交 / 空集报错。
+- Orchestrator step 顺序：planner 输出传入 writer context；writer 扁平 entry 累积进 `ctx.pending`。
 
 ---
 
 ## 常见问题 (FAQ)
 
-- **为什么 writer 不能直接 commit？**
-  写入边界由 tool registry 强制：writer step 的 registry 中根本不包含 `commit_changeset`。LLM 即使尝试调用该工具，也会收到"tool not found"响应而非执行写入。这防止部分写入（reviewer 可以拒绝或修改 writer 产出后再统一 commit）。
+- **谁负责 commit？为什么不在 agent 内？**
+  流水线内所有 agent 都是结构化输出（无写盘工具），只往 `ctx.pending` 暂存。commit 由 service 层 `finalizeIngest` 在流水线结束后统一执行（`commitPending`）。这样写操作回归 services → wiki-transaction 的 Saga 契约，也避免了原 reviewer 用工具循环 commit 在 openai-compatible 供应商上的死循环/巨量参数问题。
 
 - **budget 超限后 job 会怎样？**
   `BudgetExceededError` 被 orchestrator 捕获，触发 `rollbackChangeset`（如已有部分写入）并以 `status='failed'` 结束 job，`error_json` 中记录 budget snapshot。该错误标记为不可重试（避免无限消耗 token）。
@@ -268,6 +274,7 @@ src/server/agents/
 | 2026-04-27 | 初始化（Phase 1）：orchestrator + skill loader + tool registry + MCP client pool；ingest 切换为 planner→writer×N→reviewer 流水线 |
 | 2026-06-20 | 断点续传：新增 `checkpoint.ts`（IngestCheckpoint 句柄）；`AgentContext.checkpoint?` 可选字段；`PipelineStep.checkpointAs` 逐页续传（命中检查点跳过 LLM，writer 完成即落盘）|
 | 2026-06-20 | P2 双层增益：新增 enricher（`[!type]` callout 增益层）+ verifier（参数化自检，结构化输出无 tools）fanout 步骤；orchestrator pending last-write-wins upsert + 跨阶段 injectPriorPageAs 注入；checkpoint 扩展 enricher-page/verifier-page 类型；DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M（CONTENT_STAGE_FACTOR=3）|
+| 2026-06-21 | 删除 tool-using `ingest-reviewer`（packyapi openai-compatible 上工具死循环）：新增无 tools 的 `ingest-indexer`（结构化输出 `{indexMd, logMd}`）；commit 抽出 `commitPending` 并上移到 `ingest-service::finalizeIngest`（service 层收口，符合 Saga 契约）；流水线由 5 阶段收敛为 4 内容阶段 + service finalize；`commit_changeset` tool 降级为 `commitPending` 薄包装（已无 skill 引用）|
 
 ---
 

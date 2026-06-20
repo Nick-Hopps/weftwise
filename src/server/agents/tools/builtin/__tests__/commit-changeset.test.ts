@@ -30,7 +30,7 @@ vi.mock('../../../../db/repos/pages-repo', () => ({
   getPageBySlug: vi.fn(() => null),
 }));
 
-import { commitChangesetTool } from '../commit-changeset';
+import { commitChangesetTool, commitPending } from '../commit-changeset';
 import { parseFrontmatter } from '../../../../wiki/frontmatter';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
@@ -161,5 +161,36 @@ describe('commit-changeset', () => {
     const ctx = makeCtx();
     await expect(commitChangesetTool.handler({ summary: 's' }, ctx))
       .rejects.toThrow(/nothing to commit/i);
+  });
+});
+
+// commitPending：service 层（finalize/indexer 后）直接调用的提交入口，
+// 与 tool 共享同一套合并/stamp/Saga 逻辑。tool 现为它的薄包装。
+describe('commitPending', () => {
+  it('合并 pending（暂存内容页）与 supplied（index/log），提交并返回 IngestResult', async () => {
+    txMocks.createChangeset.mockClear();
+    const ctx = makeCtx({
+      pending: { entries: [
+        { action: 'create', path: 'wiki/general/page-a.md', content: '---\ntitle: A\n---\n' },
+      ] },
+    });
+    const result = await commitPending(ctx, [
+      { action: 'create', path: 'wiki/general/index.md', content: '---\ntitle: Index\n---\n' },
+      { action: 'create', path: 'wiki/general/log.md', content: '---\ntitle: Log\n---\n' },
+    ]);
+    const passed = txMocks.createChangeset.mock.calls[0][2] as { path: string }[];
+    expect(passed.map((e) => e.path).sort()).toEqual([
+      'wiki/general/index.md', 'wiki/general/log.md', 'wiki/general/page-a.md',
+    ]);
+    expect(result.commitSha).toBe('sha-1');
+    expect(result.pagesCreated.sort()).toEqual(['index', 'log', 'page-a']);
+    expect(ctx.committed.value).toBe(true);
+  });
+
+  it('已提交过则抛错（与 tool 共享 committed 守卫）', async () => {
+    const ctx = makeCtx({ committed: { value: true } });
+    await expect(commitPending(ctx, [
+      { action: 'create', path: 'wiki/general/index.md', content: 'x' },
+    ])).rejects.toThrow(/already invoked/);
   });
 });

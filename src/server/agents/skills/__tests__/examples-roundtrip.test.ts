@@ -71,13 +71,28 @@ describe('examples/skills round-trip', () => {
     expect(missing.success).toBe(false);
   });
 
-  it('ingest-reviewer version >= 2（暂存自动提交契约：reviewer 只发 index/log + 纠错，不重发未改动页）', async () => {
+  it('ingest-reviewer 已移除（commit 上移到 service 层，不再有 tool-using 审校阶段）', async () => {
     const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
-    const reviewer = skills.find((s) => s.id === 'ingest-reviewer');
-    expect(reviewer).toBeDefined();
-    expect(reviewer!.version).toBeGreaterThanOrEqual(2);
-    // reviewer 仍可调用 commit_changeset
-    expect(reviewer!.tools).toContain('commit_changeset');
+    expect(skills.find((s) => s.id === 'ingest-reviewer')).toBeUndefined();
+  });
+
+  it('ingest-indexer 可加载、无 tools、outputSchema 为 { indexMd, logMd }', async () => {
+    const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
+    const indexer = skills.find((s) => s.id === 'ingest-indexer');
+    expect(indexer).toBeDefined();
+    // 无 tools：结构化输出走 generateObject，根本不可能进工具循环（这正是替换 reviewer 的目的）
+    expect(indexer!.tools).toEqual([]);
+    expect(indexer!.outputSchema).toBeDefined();
+
+    const valid = indexer!.outputSchema!.safeParse({
+      indexMd: '---\ntitle: General — Index\n---\n# Index',
+      logMd: '---\ntitle: General — Change Log\n---\n# Log\n- 2026: ingested',
+    });
+    expect(valid.success).toBe(true);
+
+    // 两个字段都必填：缺 logMd 应解析失败
+    const missing = indexer!.outputSchema!.safeParse({ indexMd: '# Index' });
+    expect(missing.success).toBe(false);
   });
 
   it('ingest-chunk-summarizer 可加载、tools 为空、且不设 maxTokens 上限', async () => {
