@@ -20,6 +20,12 @@ const MAP_REDUCE_TOKEN_FACTOR = 2.3;
 const PER_CHUNK_OVERHEAD_TOKENS = 1_500;
 /** planner / writers / reviewer 的预留 token */
 const PIPELINE_RESERVE_TOKENS = 60_000;
+/**
+ * 内容阶段倍率：双层增益后每页要经 writer（产忠实草稿）→ enricher（读草稿+产增益页）
+ * → verifier（读增益页+产核查页）三次"读全文+产全文"。每页正文被读写约 3 遍，
+ * 故 inline 路径按 3× 内容计；大路径在 MAP_REDUCE_TOKEN_FACTOR 之上再叠加内容阶段。
+ */
+const CONTENT_STAGE_FACTOR = 3;
 
 export interface PreparedSourceInput {
   sourceId: string;
@@ -90,8 +96,12 @@ export function isInlinePath(totalTokens: number): boolean {
 
 /** 粗粒度成本上界（宁可保守），用于流水线启动前的预算预检。 */
 export function estimateIngestCost(totalTokens: number, chunkCount: number, inline: boolean): number {
-  if (inline) return totalTokens + PIPELINE_RESERVE_TOKENS;
-  return Math.round(totalTokens * MAP_REDUCE_TOKEN_FACTOR) + chunkCount * PER_CHUNK_OVERHEAD_TOKENS + PIPELINE_RESERVE_TOKENS;
+  if (inline) return totalTokens * CONTENT_STAGE_FACTOR + PIPELINE_RESERVE_TOKENS;
+  return (
+    Math.round(totalTokens * (MAP_REDUCE_TOKEN_FACTOR + CONTENT_STAGE_FACTOR)) +
+    chunkCount * PER_CHUNK_OVERHEAD_TOKENS +
+    PIPELINE_RESERVE_TOKENS
+  );
 }
 
 /**
