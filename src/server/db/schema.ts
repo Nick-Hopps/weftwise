@@ -134,3 +134,17 @@ export const operations = sqliteTable('operations', {
   changesetJson: text('changeset_json').notNull(),
   status: text('status').notNull().default('pending'),
 });
+
+export const ingestCheckpoints = sqliteTable(
+  'ingest_checkpoints',
+  {
+    jobId: text('job_id').notNull(),
+    kind: text('kind').notNull(),
+    key: text('key').notNull(),
+    dataJson: text('data_json').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.jobId, t.kind, t.key] }),
+  })
+);
