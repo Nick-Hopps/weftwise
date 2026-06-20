@@ -91,6 +91,7 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Retry failed (${res.status})`);
       }
+      setCheckpointProgress(null);
       setReconnectKey((k) => k + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
