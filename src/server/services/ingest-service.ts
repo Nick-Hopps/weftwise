@@ -80,21 +80,19 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   // 断点续传：载入该 job 已有检查点（重试 = requeue 同一 job.id）
   const checkpoint = loadCheckpoint(job.id);
-  if (checkpoint.hasAny()) {
-    const p = checkpoint.progress();
+  const resumeProgress = checkpoint.hasAny() ? checkpoint.progress() : null;
+  if (resumeProgress) {
     emit(
       'ingest:resuming',
-      `Resuming ingest: plan ${p.plan ? 'cached' : 'pending'}, ${p.chunkSummaries} summaries, ${p.writerPages}${p.totalPages ? `/${p.totalPages}` : ''} pages done`,
-      { progress: p },
+      `Resuming ingest: plan ${resumeProgress.plan ? 'cached' : 'pending'}, ${resumeProgress.chunkSummaries} summaries, ${resumeProgress.writerPages}${resumeProgress.totalPages ? `/${resumeProgress.totalPages}` : ''} pages done`,
+      { progress: resumeProgress },
     );
   }
 
   // 预算预检（spec E.2）：任何 LLM 调用前 fail-fast；恢复态按已完成产物折减估算
   const inline = isInlinePath(prep.totalTokens);
   const fullEstimate = estimateIngestCost(prep.totalTokens, prep.chunkCount, inline);
-  const estimatedCost = checkpoint.hasAny()
-    ? reduceCostForResume(fullEstimate, checkpoint.progress())
-    : fullEstimate;
+  const estimatedCost = resumeProgress ? reduceCostForResume(fullEstimate, resumeProgress) : fullEstimate;
   emit('ingest:chunking', `Chunked into ${prep.chunkCount} chunks (~${prep.totalTokens} tokens)`, {
     chunkCount: prep.chunkCount,
     totalTokens: prep.totalTokens,
