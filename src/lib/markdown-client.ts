@@ -180,6 +180,55 @@ function splitTextForWikiLinks(text: string, resolver?: SlugResolver): MdastNode
 }
 
 // ---------------------------------------------------------------------------
+// remarkCallouts plugin
+// ---------------------------------------------------------------------------
+// 把首段首行匹配 `[!type]` 的 blockquote 重标为 <div data-callout=type>，
+// 并剥离 `[!type]` 标记（保留紧随其后的 emoji/标题文字作为容器首行）。
+// 仅改 hast 提示（hName/hProperties），不改 mdast 结构，故 wikilink/math 子节点照常处理。
+
+const CALLOUT_RE = /^\[!([\w-]+)\]\s*/;
+
+function createRemarkCallouts(): Plugin<[], MdastRoot> {
+  return function () {
+    return function transformer(tree: MdastRoot) {
+      visitCallouts(tree);
+    };
+  };
+}
+
+function visitCallouts(node: MdastNode): void {
+  if (!isParent(node)) return;
+  for (const child of node.children) {
+    if (child.type === 'blockquote') {
+      tagCalloutBlockquote(child as MdastParent);
+    }
+    visitCallouts(child);
+  }
+}
+
+function tagCalloutBlockquote(bq: MdastParent): void {
+  const firstPara = bq.children[0];
+  if (!firstPara || firstPara.type !== 'paragraph' || !isParent(firstPara)) return;
+  const firstText = firstPara.children[0];
+  if (!firstText || firstText.type !== 'text') return;
+  const value = (firstText as MdastText).value;
+  const m = CALLOUT_RE.exec(value);
+  if (!m) return;
+
+  const type = m[1].toLowerCase();
+  (firstText as MdastText).value = value.slice(m[0].length);
+  const node = bq as MdastNode & { data?: Record<string, unknown> };
+  node.data = {
+    ...node.data,
+    hName: 'div',
+    hProperties: {
+      className: ['callout', `callout-${type}`],
+      'data-callout': type,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Production JSX runtime options for rehype-react
 // ---------------------------------------------------------------------------
 
@@ -215,7 +264,7 @@ export function renderMarkdown(
   // 这样 $…$ 先被切成 math 节点，wikilink 扫描器（只处理 [[…]] 文本）碰不到公式内部。
   let remark = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']);
   if (enableMath) remark = remark.use(remarkMath);
-  remark = remark.use(createRemarkWikiLinks(resolver));
+  remark = remark.use(createRemarkCallouts()).use(createRemarkWikiLinks(resolver));
 
   // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；
   // throwOnError:false 保证非法 LaTeX 不会让同步 processSync 抛错、整页崩溃。

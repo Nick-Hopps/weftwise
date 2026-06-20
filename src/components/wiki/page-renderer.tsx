@@ -30,6 +30,10 @@ const proseClassName = `
   [&>ul]:mb-4 [&>ul]:pl-6 [&>ul]:list-disc [&>ul]:space-y-1.5
   [&>ol]:mb-4 [&>ol]:pl-6 [&>ol]:list-decimal [&>ol]:space-y-1.5
   [&>blockquote]:border-l-2 [&>blockquote]:border-prose-quote [&>blockquote]:pl-4 [&>blockquote]:py-0.5 [&>blockquote]:my-4 [&>blockquote]:text-prose-muted
+  [&_.callout]:my-4 [&_.callout]:rounded-md [&_.callout]:border-l-4 [&_.callout]:pl-4 [&_.callout]:pr-3 [&_.callout]:py-2.5 [&_.callout]:bg-subtle
+  [&_.callout>p]:mb-2 [&_.callout>p:last-child]:mb-0 [&_.callout>ul]:mb-2 [&_.callout>ul]:pl-5 [&_.callout>ul]:list-disc
+  [&_.callout-intuition]:border-amber-400 [&_.callout-example]:border-sky-400 [&_.callout-quiz]:border-violet-400
+  [&_.callout-background]:border-slate-400 [&_.callout-diagram]:border-teal-400 [&_.callout-pitfall]:border-rose-400
   [&>pre]:bg-prose-code-bg [&>pre]:text-prose-code [&>pre]:rounded-md [&>pre]:p-4 [&>pre]:overflow-x-auto [&>pre]:my-4 [&>pre]:text-sm [&>pre]:font-mono
   [&_code]:bg-prose-code-bg [&_code]:text-prose-code [&_code]:rounded-sm [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.875em] [&_code]:font-mono
   [&>pre_code]:bg-transparent [&>pre_code]:p-0
