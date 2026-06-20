@@ -1,4 +1,4 @@
-import { generateObject, generateText, tool, type ToolSet, type CoreMessage } from 'ai';
+import { generateObject, generateText, tool, InvalidToolArgumentsError, type ToolSet, type CoreMessage } from 'ai';
 import { randomUUID } from 'node:crypto';
 import type { ZodSchema } from 'zod';
 import type { AgentContext, SkillTemplate } from '../types';
@@ -52,7 +52,7 @@ export async function runAgentLoop(opts: {
   try {
     generation = skill.outputSchema
       ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
-      : await generateTextResult(skill, ctx, model, route, messages, toolSet);
+      : await generateTextResult(skill, ctx, runId, model, route, messages, toolSet);
   } catch (err) {
     // 结构化输出失败（解析失败 / 不符合 schema，恢复也补不了）：emit 富诊断（原始输出 + 问题路径），
     // 让"哪页/哪块、模型吐了什么、哪个字段错"在 job_events 与 UI 直接可见，再原样上抛。
@@ -234,6 +234,7 @@ async function generateStructuredResult(
 async function generateTextResult(
   skill: SkillTemplate,
   ctx: AgentContext,
+  runId: string,
   model: ResolvedModel,
   route: TaskRoute,
   messages: CoreMessage[],
@@ -249,6 +250,22 @@ async function generateTextResult(
     // generateObject 路径的唯一步数防线，也是全路径的步数遥测来源。
     // 两者同值是有意的，不要为让 runSteps 先触发而改成 N-1。
     maxSteps: ctx.budgetSnapshot.maxSteps,
+    // 工具调用参数修复：部分供应商（如 DeepSeek）会在合法 JSON 参数后多吐尾随字符
+    //（典型多一个 `}`），AI SDK 严格 JSON.parse 拒绝 → InvalidToolArgumentsError。
+    // 提取第一个配平 JSON 值剥离尾随垃圾后重试；仅修参数解析错误，schema 不匹配不误修。
+    experimental_repairToolCall: async ({ toolCall, error }) => {
+      if (!InvalidToolArgumentsError.isInstance(error)) return null;
+      const repaired = repairToolCallArgs(toolCall.args);
+      if (!repaired) return null;
+      ctx.emit('agent:step', `${skill.name} repaired tool-call args for ${toolCall.toolName}`, {
+        runId,
+        parentRunId: ctx.parentRunId,
+        skillId: skill.id,
+        kind: 'tool-call-repair',
+        tool: toolCall.toolName,
+      });
+      return { ...toolCall, args: repaired };
+    },
   });
   return {
     output: result.text,
@@ -395,6 +412,22 @@ function extractFirstJsonValue(text: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * 修复工具调用参数：部分供应商在合法 JSON 参数前后多吐字符（典型：DeepSeek 在结尾多一个
+ * `}`）。提取第一个配平的 JSON 值（剥离前导/尾随垃圾）并确认其可解析；得不到与原文不同的
+ * 合法 JSON 时返回 null（已是干净 JSON 的 schema 级错误不会被误修，也避免无意义重试）。
+ */
+export function repairToolCallArgs(rawArgs: string): string | null {
+  const extracted = extractFirstJsonValue(rawArgs);
+  if (!extracted || extracted === rawArgs) return null;
+  try {
+    JSON.parse(extracted);
+  } catch {
+    return null;
+  }
+  return extracted;
 }
 
 function matchesExpectedContainer(value: unknown, expected: unknown): boolean {
