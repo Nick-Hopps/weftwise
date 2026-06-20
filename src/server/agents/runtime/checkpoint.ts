@@ -13,7 +13,8 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
 
   for (const row of checkpointsRepo.getCheckpoints(jobId)) {
     if (row.kind === 'chunk-summary') {
-      summaries.set(row.key, (row.data as { summary: string }).summary);
+      const summary = (row.data as { summary?: string }).summary;
+      if (typeof summary === 'string') summaries.set(row.key, summary);
     } else if (row.kind === 'plan') {
       plan = row.data;
     } else if (row.kind === 'writer-page') {
@@ -38,18 +39,19 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
   return {
     getChunkSummary: (key) => summaries.get(key),
     putChunkSummary: (key, summary) => {
-      summaries.set(key, summary);
+      // DB 优先：落盘成功后再写内存，避免 DB 抛错时留下半提交态。
       checkpointsRepo.putCheckpoint(jobId, 'chunk-summary', key, { summary });
+      summaries.set(key, summary);
     },
     getPlan: () => plan,
     putPlan: (output) => {
-      plan = output;
       checkpointsRepo.putCheckpoint(jobId, 'plan', '', output);
+      plan = output;
     },
     getWriterPage: (slug) => pages.get(slug),
     putWriterPage: (slug, entry) => {
-      pages.set(slug, entry);
       checkpointsRepo.putCheckpoint(jobId, 'writer-page', slug, entry);
+      pages.set(slug, entry);
     },
     hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0,
     progress,
