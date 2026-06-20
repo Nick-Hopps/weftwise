@@ -341,6 +341,22 @@ function migrateAppSettings(): void {
   `);
 }
 
+// 新表：ingest 断点续传检查点（job 运行态，成功即删；同 job_events 不设硬 FK）
+function migrateIngestCheckpoints(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('ingest_checkpoints')) return;
+  sqlite.exec(`
+    CREATE TABLE ingest_checkpoints (
+      job_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      key TEXT NOT NULL,
+      data_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (job_id, kind, key)
+    );
+  `);
+}
+
 // 特例：FTS5 虚拟表不支持 _new + INSERT FROM 重建（索引可由 pages 重建），缺列时直接 DROP 重建
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
@@ -380,6 +396,7 @@ function ensureTables() {
     migrateJobEvents();
     migrateOperations();
     migrateAppSettings();
+    migrateIngestCheckpoints();
     ensurePagesFts();
   } finally {
     rawSqlite.pragma('foreign_keys = ON');

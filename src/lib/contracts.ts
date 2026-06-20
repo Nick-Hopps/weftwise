@@ -105,6 +105,14 @@ export interface JobEvent {
   createdAt: string;
 }
 
+/** ingest 断点续传进度快照（API 响应 + 续传事件共用）。totalPages 仅在 plan 已缓存时可知。 */
+export interface CheckpointProgress {
+  plan: boolean;
+  chunkSummaries: number;
+  writerPages: number;
+  totalPages: number | null;
+}
+
 export interface Source {
   id: string;
   filename: string;
