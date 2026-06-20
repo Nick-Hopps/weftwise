@@ -12,6 +12,7 @@ import { Input, Textarea } from '@/components/ui/input';
 import { Panel, PanelHeader, PanelTitle, SectionLabel } from '@/components/ui/panel';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
+import type { CheckpointProgress, Job } from '@/lib/contracts';
 
 type Mode = 'file' | 'text';
 
@@ -24,6 +25,9 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<Mode>('file');
   const [jobId, setJobId] = useState<string | null>(null);
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [checkpointProgress, setCheckpointProgress] = useState<CheckpointProgress | null>(null);
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +36,7 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
   const [createdPages, setCreatedPages] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { events, status } = useJobStream(jobId);
+  const { events, status } = useJobStream(jobId, reconnectKey);
 
   // 聚合 agent 各 run 的输入 token 与缓存命中（DeepSeek/OpenAI 自动前缀缓存），让缓存收益在页面可见。
   // 取 agent:step 的 final 步（每 run 一次，不会重复计）。
@@ -72,8 +76,74 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
     setCreatedPages([]);
     setTextInput('');
     setFilenameInput('');
+    setCheckpointProgress(null);
     if (fileRef.current) fileRef.current.value = '';
   };
+
+  // 手动重试：requeue 同一 job 后，对同一 jobId 强制重连 SSE（bump reconnectKey）
+  const handleRetry = useCallback(async () => {
+    if (!jobId) return;
+    setRetrying(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Retry failed (${res.status})`);
+      }
+      setReconnectKey((k) => k + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRetrying(false);
+    }
+  }, [jobId]);
+
+  // 失败后拉取该 job 的断点进度（用于按钮上的 "x/y 页" 标签）
+  useEffect(() => {
+    if (status !== 'failed' || !jobId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/jobs/${jobId}`);
+        if (!res.ok) return;
+        const job = (await res.json()) as { checkpointProgress?: CheckpointProgress | null };
+        if (!cancelled) setCheckpointProgress(job.checkpointProgress ?? null);
+      } catch {
+        /* 静默：进度标签只是锦上添花 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, jobId]);
+
+  // 挂载时恢复当前 subject 最近一次「有断点可续」的失败 ingest（关标签页再回来仍能重试）
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const subjectId = useUIStore.getState().currentSubjectId;
+      if (!subjectId) return;
+      try {
+        const res = await apiFetch(`/api/jobs?status=failed&type=ingest&subjectId=${encodeURIComponent(subjectId)}`);
+        if (!res.ok) return;
+        const jobs = (await res.json()) as Array<Job & { checkpointProgress: CheckpointProgress | null }>;
+        const resumable = jobs.filter((j) => j.checkpointProgress);
+        if (resumable.length === 0) return;
+        const latest = resumable[resumable.length - 1]; // listJobs 按 createdAt 升序
+        if (cancelled) return;
+        setCheckpointProgress(latest.checkpointProgress);
+        setJobId(latest.id);
+      } catch {
+        /* 静默 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 仅挂载时尝试一次恢复
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const uploadFile = useCallback(async (file: File) => {
     setError(null);
@@ -367,9 +437,18 @@ export function DashboardIngestPanel({ compact = false }: DashboardIngestPanelPr
                     </div>
                   </div>
                 )}
-                <Button intent="ghost" size="sm" onClick={reset}>
-                  Ingest another source
-                </Button>
+                <div className="flex items-center gap-2">
+                  {isFailed && (
+                    <Button intent="primary" size="sm" onClick={handleRetry} loading={retrying} disabled={retrying}>
+                      {checkpointProgress
+                        ? `重试（从断点继续${checkpointProgress.totalPages ? `：${checkpointProgress.writerPages}/${checkpointProgress.totalPages} 页` : ''}）`
+                        : '重试'}
+                    </Button>
+                  )}
+                  <Button intent="ghost" size="sm" onClick={reset}>
+                    Ingest another source
+                  </Button>
+                </div>
               </div>
             )}
           </div>
