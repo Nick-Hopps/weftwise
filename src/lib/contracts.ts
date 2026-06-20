@@ -173,7 +173,7 @@ export const WikiLanguageSchema = z
   );
 
 export const DEFAULT_AGENT_MAX_STEPS = 25;
-export const DEFAULT_AGENT_MAX_TOKENS_PER_JOB = 500_000;
+export const DEFAULT_AGENT_MAX_TOKENS_PER_JOB = 1_200_000;
 export const DEFAULT_AGENT_MAX_PARALLEL_SUB_AGENTS = 3;
 export const DEFAULT_AGENT_MCP_LIFECYCLE = 'lazy' as const;
 export const DEFAULT_AGENT_TASK_ROUTER_MODE = 'frontmatter-override' as const;

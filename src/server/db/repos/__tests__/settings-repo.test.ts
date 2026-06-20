@@ -22,7 +22,7 @@ describe('settings-repo agent keys', () => {
   it('returns defaults when no row exists', async () => {
     const repo = await import('../settings-repo');
     expect(repo.getAgentMaxSteps()).toBe(25);
-    expect(repo.getAgentMaxTokensPerJob()).toBe(500_000);
+    expect(repo.getAgentMaxTokensPerJob()).toBe(1_200_000);
     expect(repo.getAgentMaxParallelSubAgents()).toBe(3);
     expect(repo.getAgentMcpLifecycle()).toBe('lazy');
     expect(repo.getAgentTaskRouterMode()).toBe('frontmatter-override');

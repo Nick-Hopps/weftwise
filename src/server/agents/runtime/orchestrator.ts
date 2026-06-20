@@ -175,7 +175,7 @@ function upsertPending(pending: { entries: ChangesetEntry[] }, entry: ChangesetE
   else pending.entries.push(entry);
 }
 
-function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: string, slug: string): ChangesetEntry | undefined {
+function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page', slug: string): ChangesetEntry | undefined {
   if (!ck) return undefined;
   if (kind === 'writer-page') return ck.getWriterPage(slug);
   if (kind === 'enricher-page') return ck.getEnricherPage(slug);
@@ -183,7 +183,7 @@ function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: string, slug:
   return undefined;
 }
 
-function writeStageCheckpoint(ck: AgentContext['checkpoint'], kind: string, slug: string, entry: ChangesetEntry): void {
+function writeStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page', slug: string, entry: ChangesetEntry): void {
   if (!ck) return;
   if (kind === 'writer-page') ck.putWriterPage(slug, entry);
   else if (kind === 'enricher-page') ck.putEnricherPage(slug, entry);
