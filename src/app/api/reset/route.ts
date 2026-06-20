@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
     sqlite.prepare(`DELETE FROM page_aliases WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM pages WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM sources WHERE subject_id = ?`).run(subject.id);
+    sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id IN (SELECT id FROM jobs WHERE subject_id = ?)`).run(subject.id);
   });
   wipe();
 
@@ -101,6 +102,7 @@ async function resetAllSubjects(now: string): Promise<NextResponse> {
     sqlite.exec('DELETE FROM job_events');
     sqlite.exec('DELETE FROM operations');
     sqlite.exec('DELETE FROM jobs');
+    sqlite.exec('DELETE FROM ingest_checkpoints');
     sqlite.exec(`DELETE FROM subjects WHERE slug != 'general'`);
   });
   wipe();

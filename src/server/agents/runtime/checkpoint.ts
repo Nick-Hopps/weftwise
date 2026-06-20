@@ -45,6 +45,7 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
     },
     getPlan: () => plan,
     putPlan: (output) => {
+      // plan 每个 job 仅一份，key 固定空串（getProgress 按 key='' 反查）
       checkpointsRepo.putCheckpoint(jobId, 'plan', '', output);
       plan = output;
     },
