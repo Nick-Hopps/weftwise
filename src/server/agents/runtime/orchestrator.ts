@@ -1,11 +1,12 @@
 import type { AgentContext, SkillTemplate } from '../types';
 import { runAgentLoop, AgentCancelled, type AgentRunResult } from './agent-loop';
 import { BudgetExceededError } from './budget';
+import type { ChangesetEntry } from '@/lib/contracts';
 
 export type PipelineStep =
-  | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[] }
-  | { kind: 'fanout'; skillId: string; fromOutput: string }
-  | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string };
+  | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
+  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' }
+  | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string; checkpointAs?: 'chunk-summary' };
 
 export class WriterConflictError extends Error {
   constructor(public readonly slug: string) {
@@ -35,7 +36,15 @@ export async function runPipeline(opts: {
       const input = step.omitFromInput && isPlainObject(carry)
         ? omitKeys(carry, step.omitFromInput)
         : carry;
-      const r = await runAgentLoop({ skill, ctx: opts.ctx, input });
+      // 断点续传：planner 已缓存则跳过 LLM，用缓存 plan 当作步骤输出
+      const cachedPlan = step.checkpointAs === 'plan' ? opts.ctx.checkpoint?.getPlan() : undefined;
+      let r: AgentRunResult;
+      if (cachedPlan !== undefined && cachedPlan !== null) {
+        r = { runId: 'cached-plan', output: cachedPlan, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 };
+      } else {
+        r = await runAgentLoop({ skill, ctx: opts.ctx, input });
+        if (step.checkpointAs === 'plan') opts.ctx.checkpoint?.putPlan(r.output);
+      }
       carry = step.carryThrough && isPlainObject(carry) && isPlainObject(r.output)
         ? { ...pickKeys(carry, step.carryThrough), ...r.output }
         : r.output;
@@ -55,6 +64,11 @@ export async function runPipeline(opts: {
         if (!stored) {
           opts.ctx.emit('ingest:warn', `Chunk not found in chunkStore: ${item.key}`, { key: item.key });
           return item;
+        }
+        // 断点续传：命中已缓存摘要则跳过 summarizer（书本级 map 步是 N 次 LLM 调用）
+        if (step.checkpointAs === 'chunk-summary') {
+          const cached = opts.ctx.checkpoint?.getChunkSummary(item.key);
+          if (typeof cached === 'string') return { ...item, content: cached };
         }
         // map 纯收集（summarizer 无 overlay 副作用），无需像 fanout 那样做 overlay snapshot 隔离
         const childCtx: AgentContext = { ...opts.ctx, parentRunId: opts.ctx.rootRunId };
@@ -85,6 +99,7 @@ export async function runPipeline(opts: {
           opts.ctx.emit('ingest:warn', `Summarizer returned no summary for chunk: ${item.key}`, { key: item.key, skillId: skill.id });
           return item;
         }
+        if (step.checkpointAs === 'chunk-summary') opts.ctx.checkpoint?.putChunkSummary(item.key, out.summary);
         return { ...item, content: out.summary };
       });
       // intoOutput 只写顶层 key（点路径会被当作字面量键创建；当前用法仅顶层）
@@ -101,12 +116,26 @@ export async function runPipeline(opts: {
       const baseOverlay = opts.ctx.overlay.snapshot();
       const limit = opts.ctx.budgetSnapshot.maxParallelSubAgents;
       const results = await runWithSemaphore(items, limit, async (item) => {
+        const slug = isPlainObject(item) && typeof item.slug === 'string' ? item.slug : undefined;
+        // 断点续传：命中已写页则跳过 writer LLM（fanout 是书本级最贵步骤）
+        if (step.checkpointAs === 'writer-page' && slug) {
+          const cached = opts.ctx.checkpoint?.getWriterPage(slug);
+          if (cached) {
+            return { runId: 'cached-writer', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
+          }
+        }
         const childCtx: AgentContext = {
           ...opts.ctx,
           overlay: baseOverlay.snapshot(),
           parentRunId: opts.ctx.rootRunId,
         };
-        return runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx) });
+        const r = await runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx) });
+        // 每页完成瞬间即落盘（barrier 之前）——fail-fast 中止时已完成 + 在飞页都保住
+        if (step.checkpointAs === 'writer-page' && slug) {
+          const entry = r.output as ChangesetEntry | undefined;
+          if (entry?.path) opts.ctx.checkpoint?.putWriterPage(slug, entry);
+        }
+        return r;
       });
       // 冲突检测：writer 直接产出单个 changeset entry（ingest-writer v3 起无 `entry` 包装——
       // 单键包装会被 DeepSeek 等拍平致结构化输出失败，故 schema 扁平化）。
