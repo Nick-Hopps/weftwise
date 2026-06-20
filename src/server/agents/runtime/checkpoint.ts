@@ -9,6 +9,8 @@ import type { IngestCheckpoint } from '../types';
 export function loadCheckpoint(jobId: string): IngestCheckpoint {
   const summaries = new Map<string, string>();
   const pages = new Map<string, ChangesetEntry>();
+  const enricherPages = new Map<string, ChangesetEntry>();
+  const verifierPages = new Map<string, ChangesetEntry>();
   let plan: unknown | undefined;
 
   for (const row of checkpointsRepo.getCheckpoints(jobId)) {
@@ -19,6 +21,10 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
       plan = row.data;
     } else if (row.kind === 'writer-page') {
       pages.set(row.key, row.data as ChangesetEntry);
+    } else if (row.kind === 'enricher-page') {
+      enricherPages.set(row.key, row.data as ChangesetEntry);
+    } else if (row.kind === 'verifier-page') {
+      verifierPages.set(row.key, row.data as ChangesetEntry);
     }
   }
 
@@ -54,11 +60,23 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
       checkpointsRepo.putCheckpoint(jobId, 'writer-page', slug, entry);
       pages.set(slug, entry);
     },
-    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0,
+    getEnricherPage: (slug) => enricherPages.get(slug),
+    putEnricherPage: (slug, entry) => {
+      checkpointsRepo.putCheckpoint(jobId, 'enricher-page', slug, entry);
+      enricherPages.set(slug, entry);
+    },
+    getVerifierPage: (slug) => verifierPages.get(slug),
+    putVerifierPage: (slug, entry) => {
+      checkpointsRepo.putCheckpoint(jobId, 'verifier-page', slug, entry);
+      verifierPages.set(slug, entry);
+    },
+    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0,
     progress,
     clear: () => {
       summaries.clear();
       pages.clear();
+      enricherPages.clear();
+      verifierPages.clear();
       plan = undefined;
       checkpointsRepo.deleteCheckpoints(jobId);
     },

@@ -74,6 +74,10 @@ export interface IngestCheckpoint {
   putPlan(output: unknown): void;
   getWriterPage(slug: string): ChangesetEntry | undefined;   // slug = plan page 身份
   putWriterPage(slug: string, entry: ChangesetEntry): void;
+  getEnricherPage(slug: string): ChangesetEntry | undefined;
+  putEnricherPage(slug: string, entry: ChangesetEntry): void;
+  getVerifierPage(slug: string): ChangesetEntry | undefined;
+  putVerifierPage(slug: string, entry: ChangesetEntry): void;
   hasAny(): boolean;
   progress(): CheckpointProgress;
   clear(): void;

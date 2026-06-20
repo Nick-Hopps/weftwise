@@ -44,6 +44,8 @@ function fakeCheckpoint(seed?: {
 }): IngestCheckpoint & { _spies: { putSummary: ReturnType<typeof vi.fn>; putPlan: ReturnType<typeof vi.fn>; putPage: ReturnType<typeof vi.fn> } } {
   const summaries = new Map(Object.entries(seed?.summaries ?? {}));
   const pages = new Map(Object.entries(seed?.pages ?? {}));
+  const enricherPages = new Map<string, ChangesetEntry>();
+  const verifierPages = new Map<string, ChangesetEntry>();
   let plan = seed?.plan;
   const putSummary = vi.fn((k: string, s: string) => { summaries.set(k, s); });
   const putPlan = vi.fn((o: unknown) => { plan = o; });
@@ -55,7 +57,11 @@ function fakeCheckpoint(seed?: {
     putPlan,
     getWriterPage: (slug) => pages.get(slug),
     putWriterPage: putPage,
-    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0,
+    getEnricherPage: (slug) => enricherPages.get(slug),
+    putEnricherPage: (slug, entry) => { enricherPages.set(slug, entry); },
+    getVerifierPage: (slug) => verifierPages.get(slug),
+    putVerifierPage: (slug, entry) => { verifierPages.set(slug, entry); },
+    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0,
     progress: () => ({ plan: plan !== undefined, chunkSummaries: summaries.size, writerPages: pages.size, totalPages: null }),
     clear: vi.fn(),
     _spies: { putSummary, putPlan, putPage },

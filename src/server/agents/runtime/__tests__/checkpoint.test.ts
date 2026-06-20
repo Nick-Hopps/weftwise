@@ -64,3 +64,21 @@ describe('loadCheckpoint', () => {
     expect(loadCheckpoint('j1').hasAny()).toBe(false);
   });
 });
+
+describe('IngestCheckpoint — enricher/verifier page', () => {
+  it('enricher/verifier page 双写并按 slug 读回', async () => {
+    const { loadCheckpoint } = await import('../checkpoint');
+    const jobId = `ckpt-stage-${Math.random().toString(36).slice(2)}`;
+    const ck = loadCheckpoint(jobId);
+    const e = { action: 'create' as const, path: 'wiki/general/a.md', content: 'enriched' };
+    const v = { action: 'create' as const, path: 'wiki/general/a.md', content: 'verified' };
+    ck.putEnricherPage('a', e);
+    ck.putVerifierPage('a', v);
+
+    const reloaded = loadCheckpoint(jobId);
+    expect(reloaded.getEnricherPage('a')).toEqual(e);
+    expect(reloaded.getVerifierPage('a')).toEqual(v);
+    expect(reloaded.getWriterPage('a')).toBeUndefined();
+    reloaded.clear();
+  });
+});
