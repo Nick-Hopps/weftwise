@@ -10,8 +10,10 @@ import rehypeReact from 'rehype-react';
 import rehypeKatex from 'rehype-katex';
 import * as prod from 'react/jsx-runtime';
 import type { Root as MdastRoot, Text as MdastText, Node as MdastNode, Parent as MdastParent } from 'mdast';
+import type { Code as MdastCode } from 'mdast';
 import type { Plugin } from 'unified';
 import WikiLinkComponent from '@/components/wiki/wiki-link';
+import MermaidDiagram from '@/components/wiki/mermaid-diagram';
 
 // ---------------------------------------------------------------------------
 // Types for custom wikiLink AST node
@@ -229,6 +231,36 @@ function tagCalloutBlockquote(bq: MdastParent): void {
 }
 
 // ---------------------------------------------------------------------------
+// remarkMermaid plugin
+// ---------------------------------------------------------------------------
+// 把 lang==='mermaid' 的 code 节点重标为自定义元素 <mermaiddiagram code="...">，
+// 由 rehype-react 映射到 MermaidDiagram 组件（client 端 useEffect 渲染 SVG）。
+
+function createRemarkMermaid(): Plugin<[], MdastRoot> {
+  return function () {
+    return function transformer(tree: MdastRoot) {
+      visitMermaid(tree);
+    };
+  };
+}
+
+function visitMermaid(node: MdastNode): void {
+  if (!isParent(node)) return;
+  for (const child of node.children) {
+    if (child.type === 'code' && (child as MdastCode).lang === 'mermaid') {
+      const codeNode = child as MdastNode & { data?: Record<string, unknown> };
+      codeNode.data = {
+        ...codeNode.data,
+        hName: 'mermaiddiagram',
+        hProperties: { code: (child as MdastCode).value },
+        hChildren: [],
+      };
+    }
+    visitMermaid(child);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Production JSX runtime options for rehype-react
 // ---------------------------------------------------------------------------
 
@@ -264,7 +296,7 @@ export function renderMarkdown(
   // 这样 $…$ 先被切成 math 节点，wikilink 扫描器（只处理 [[…]] 文本）碰不到公式内部。
   let remark = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']);
   if (enableMath) remark = remark.use(remarkMath);
-  remark = remark.use(createRemarkCallouts()).use(createRemarkWikiLinks(resolver));
+  remark = remark.use(createRemarkCallouts()).use(createRemarkMermaid()).use(createRemarkWikiLinks(resolver));
 
   // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；
   // throwOnError:false 保证非法 LaTeX 不会让同步 processSync 抛错、整页崩溃。
@@ -300,6 +332,9 @@ export function renderMarkdown(
           }
           // Regular external / internal link
           return createElement('a', props);
+        },
+        mermaiddiagram: function MermaidRenderer(props: { code?: string }) {
+          return createElement(MermaidDiagram, { code: props.code ?? '' });
         },
       },
     })
