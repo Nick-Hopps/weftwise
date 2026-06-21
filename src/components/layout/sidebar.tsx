@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
+  Activity,
   ChevronDown,
   FileText,
   Pin,
@@ -20,6 +21,8 @@ import { SectionLabel } from '@/components/ui/panel';
 import { Separator } from '@/components/ui/separator';
 import { useUIStore } from '@/stores/ui-store';
 import { cn } from '@/lib/cn';
+import { Tag } from '@/components/ui/tag';
+import { useLintSummary } from '@/hooks/use-lint-summary';
 
 interface PageItem {
   slug: string;
@@ -69,6 +72,10 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   const openSettingsDialog = useUIStore((s) => s.openSettingsDialog);
   const apiFetch = useApiFetch();
   const { id: subjectId } = useCurrentSubject();
+
+  const { data: lintSummary } = useLintSummary(false);
+  const criticalCount = lintSummary?.bySeverity.critical ?? 0;
+  const isHealthActive = pathname === '/health';
 
   const { data: allPages = [], isLoading } = useQuery({
     queryKey: ['pages', subjectId],
@@ -235,18 +242,40 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 border-t border-border px-2 py-2 flex items-center justify-between">
-        <span className="text-xs text-foreground-tertiary px-1">
-          {totalAll} {totalAll === 1 ? 'page' : 'pages'}
-        </span>
-        <IconButton
-          size="sm"
-          aria-label="Open settings"
-          title="Settings"
-          onClick={openSettingsDialog}
+      <div className="shrink-0 border-t border-border px-2 py-2 space-y-1">
+        <Link
+          href="/health"
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center justify-between gap-2 h-8 px-2 rounded-md text-sm transition-colors focus-ring',
+            isHealthActive
+              ? 'bg-subtle text-foreground font-medium'
+              : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
+          )}
         >
-          <Settings2 />
-        </IconButton>
+          <span className="flex items-center gap-2">
+            <Activity className="h-3.5 w-3.5 text-foreground-tertiary" />
+            Health
+          </span>
+          {criticalCount > 0 && (
+            <Tag tone="danger" size="sm">
+              {criticalCount}
+            </Tag>
+          )}
+        </Link>
+        <div className="flex items-center justify-between px-1">
+          <span className="text-xs text-foreground-tertiary">
+            {totalAll} {totalAll === 1 ? 'page' : 'pages'}
+          </span>
+          <IconButton
+            size="sm"
+            aria-label="Open settings"
+            title="Settings"
+            onClick={openSettingsDialog}
+          >
+            <Settings2 />
+          </IconButton>
+        </div>
       </div>
     </div>
   );
