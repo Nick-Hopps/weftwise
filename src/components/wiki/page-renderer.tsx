@@ -15,6 +15,7 @@ interface PageRendererProps {
   created?: string;
   updated?: string;
   titleSlugMap?: Record<string, string>;
+  editHref?: string;
 }
 
 // Typography scale tuned for reading flow. Uses semantic `prose-*` color
@@ -57,6 +58,7 @@ export default function PageRenderer({
   created = '',
   updated = '',
   titleSlugMap,
+  editHref,
 }: PageRendererProps) {
   const rendered = useMemo(() => renderMarkdown(content, titleSlugMap, { math: true }), [content, titleSlugMap]);
 
@@ -69,6 +71,7 @@ export default function PageRenderer({
           sources={sources}
           created={created}
           updated={updated}
+          editHref={editHref}
         />
       )}
       <div className={proseClassName}>{rendered}</div>

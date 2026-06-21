@@ -1,5 +1,7 @@
 'use client';
 
+import Link from 'next/link';
+import { Pencil } from 'lucide-react';
 import { Tag } from '@/components/ui/tag';
 
 interface FrontmatterDisplayProps {
@@ -8,6 +10,7 @@ interface FrontmatterDisplayProps {
   sources: string[];
   created: string;
   updated: string;
+  editHref?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -35,14 +38,26 @@ export default function FrontmatterDisplay({
   sources,
   created,
   updated,
+  editHref,
 }: FrontmatterDisplayProps) {
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
   return (
     <div className="pb-6 mb-8 border-b border-border">
-      <h1 className="text-2xl font-semibold tracking-tight text-prose-heading mb-5 leading-tight">
-        {title}
-      </h1>
+      <div className="flex items-start justify-between gap-3 mb-5">
+        <h1 className="text-2xl font-semibold tracking-tight text-prose-heading leading-tight">
+          {title}
+        </h1>
+        {editHref && (
+          <Link
+            href={editHref}
+            className="shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </Link>
+        )}
+      </div>
 
       {hasProps && (
         <dl className="grid grid-cols-[88px_1fr] gap-y-1.5 text-sm items-start">
