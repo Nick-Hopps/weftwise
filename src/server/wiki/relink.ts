@@ -3,6 +3,34 @@
  * 纯函数、无副作用。详见 docs/superpowers/specs/2026-06-21-page-retitle-relink-design.md。
  */
 import { extractWikiLinks } from './wikilinks';
+import { SUBJECT_SLUG_RE } from '@/lib/slug';
+
+/**
+ * 把单个 [[…]] token 里的 target 文本替换为 newTitle，保留 subject 前缀、#锚点、|别名。
+ * 按 wikilink 语法（先 | 切别名 → 再 : 切 subject 前缀 → 再 # 切锚点）定位 target 段，
+ * 避免「按子串替换首个出现处」在 target 文本恰好也出现在前缀里时（如 [[general:general]]）
+ * 误改前缀。
+ */
+function replaceTargetInToken(raw: string, newTitle: string): string {
+  const inner = raw.slice(2, raw.length - 2); // 去掉 [[ ]]
+
+  const pipeIdx = inner.indexOf('|');
+  const beforeAlias = pipeIdx === -1 ? inner : inner.slice(0, pipeIdx);
+  const aliasPart = pipeIdx === -1 ? '' : inner.slice(pipeIdx); // 含 '|'
+
+  let prefixPart = '';
+  let rest = beforeAlias;
+  const colonIdx = beforeAlias.indexOf(':');
+  if (colonIdx > 0 && SUBJECT_SLUG_RE.test(beforeAlias.slice(0, colonIdx).trim())) {
+    prefixPart = beforeAlias.slice(0, colonIdx + 1); // 含 ':'
+    rest = beforeAlias.slice(colonIdx + 1);
+  }
+
+  const hashIdx = rest.indexOf('#');
+  const sectionPart = hashIdx === -1 ? '' : rest.slice(hashIdx); // 含 '#'
+
+  return `[[${prefixPart}${newTitle}${sectionPart}${aliasPart}]]`;
+}
 
 /**
  * 重写整文件 raw markdown 里指向旧标题的同-subject wikilink。
@@ -33,8 +61,7 @@ export function rewriteBacklinkText(
 
   let result = raw;
   for (const link of matches) {
-    // 替换首个 target 文本出现处；前缀/锚点/别名都在其后，天然保留。
-    const newToken = link.raw.replace(link.rawTitle, () => newTitle);
+    const newToken = replaceTargetInToken(link.raw, newTitle);
     result =
       result.slice(0, link.position.start) +
       newToken +

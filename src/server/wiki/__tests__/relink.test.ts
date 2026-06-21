@@ -72,4 +72,9 @@ describe('rewriteBacklinkText', () => {
     const out = rewriteBacklinkText('[[Old Title]]', '   ', 'New Title', SUBJECT);
     expect(out).toBe('[[Old Title]]');
   });
+
+  it('回归：target 文本等于 subject 前缀时只改 target 不动前缀', () => {
+    const out = rewriteBacklinkText('[[general:general]]', 'general', 'New', SUBJECT);
+    expect(out).toBe('[[general:New]]');
+  });
 });
