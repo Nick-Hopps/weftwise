@@ -88,8 +88,7 @@ export function MergeDialog({
 
   return (
     <div
-      className="fixed inset-0 flex items-center justify-center bg-black/40 p-4"
-      style={{ zIndex: 50 }}
+      className="fixed inset-0 z-command flex items-center justify-center bg-black/40 p-4"
       onClick={running ? undefined : onClose}
     >
       <div
