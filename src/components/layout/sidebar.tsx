@@ -8,6 +8,7 @@ import {
   Activity,
   ChevronDown,
   FileText,
+  Hash,
   Pin,
   Plus,
   Search,
@@ -262,6 +263,19 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
               {criticalCount}
             </Tag>
           )}
+        </Link>
+        <Link
+          href="/tags"
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center gap-2 h-8 px-2 rounded-md text-sm transition-colors focus-ring',
+            pathname.startsWith('/tags')
+              ? 'bg-subtle text-foreground font-medium'
+              : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
+          )}
+        >
+          <Hash className="h-3.5 w-3.5 text-foreground-tertiary" />
+          Tags
         </Link>
         <div className="flex items-center justify-between px-1">
           <span className="text-xs text-foreground-tertiary">
