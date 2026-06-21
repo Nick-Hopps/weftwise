@@ -37,7 +37,7 @@ export function TagPagesView({ tag }: { tag: string }) {
         </Link>
       </header>
 
-      {isLoading ? (
+      {!subjectId || isLoading ? (
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-9 rounded-md bg-subtle animate-pulse" />
