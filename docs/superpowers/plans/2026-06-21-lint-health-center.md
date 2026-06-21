@@ -13,6 +13,7 @@
 - 测试环境 **node-only，无 RTL/DOM**（`vitest.config.ts`）；只测纯函数与路由 handler（mock 依赖），React 组件不写单测。
 - 客户端 HTTP **只用 `@/lib/api-fetch`**：GET 用 `useApiFetch()`（自动注入 `?subjectId`），POST/PUT 在 body 显式带 `subjectId`，禁止手写 `fetch('/api/...')`。
 - 路由 handler 顶部必须 `export const runtime = 'nodejs'`；只读 GET 用 `requireAuth`（无需 CSRF）。
+- **门禁** = `npx tsc --noEmit` + `npx vitest run`；`npm run lint` / `next build` 的 lint 步在 BASE 即坏（预存历史问题），**不作门禁**。
 - subject 解析统一走 `resolveSubjectFromRequest(request)`；所有共享领域类型放 `src/lib/contracts.ts`。
 - 深链风格固定 `/wiki/<slug>?s=<subjectSlug>`。
 - commit message 用中文、一句话总结；禁止任何 AI 署名 trailer / 脚注。
@@ -1050,10 +1051,11 @@ git commit -m "feat: 侧边栏 Health 入口 + critical 计数徽标"
 | 2026-06-21 | Lint 体检中心 | 新增 `(app)/health` 只读体检页（触发 lint + 按严重度/类型分组展示 findings + 深链跳转）+ `GET /api/lint/latest`（`selectLatestFindings` 收口最近快照）+ 侧边栏 Health 入口/critical 徽标；纯函数 `lint-findings`/`selectLatestFindings` 单测；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-21-lint-health-center* |
 ```
 
-- [ ] **Step 3: 全量测试 + lint**
+- [ ] **Step 3: 全量门禁（tsc + vitest）**
 
-Run: `npx vitest run && npm run lint`
-Expected: 全部 vitest 用例 PASS（含新增的 lint-latest / route / lint-findings 三组）；ESLint 无新增报错。
+Run: `npx tsc --noEmit && npx vitest run`
+Expected: tsc 无新增错误（忽略仓库根目录预存的 `_materialize*.ts`/`_cleanup.ts`）；全部 vitest 用例 PASS（含新增的 lint-latest / route / lint-findings 三组）。
+（注：`npm run lint` 在 BASE 即坏，按项目约定不作门禁。）
 
 - [ ] **Step 4: 提交**
 
