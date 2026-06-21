@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import type { EnrichedLintFinding, LintFinding } from '@/lib/contracts';
 import { Tag } from '@/components/ui/tag';
-import { findingHref } from './lint-findings';
+import { findingHref, SEVERITY_TONE } from './lint-findings';
 
 const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
   'broken-link': Unlink,
@@ -33,12 +33,6 @@ const TYPE_LABEL: Record<LintFinding['type'], string> = {
   contradiction: 'Contradiction',
   'missing-crossref': 'Missing cross-ref',
   'coverage-gap': 'Coverage gap',
-};
-
-const SEVERITY_TONE: Record<LintFinding['severity'], 'danger' | 'warning' | 'neutral'> = {
-  critical: 'danger',
-  warning: 'warning',
-  info: 'neutral',
 };
 
 export function FindingRow({
