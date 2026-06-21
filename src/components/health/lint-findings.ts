@@ -1,5 +1,11 @@
 import type { EnrichedLintFinding, LintFinding } from '@/lib/contracts';
 
+export const SEVERITY_TONE: Record<LintFinding['severity'], 'danger' | 'warning' | 'neutral'> = {
+  critical: 'danger',
+  warning: 'warning',
+  info: 'neutral',
+};
+
 const SEVERITY_ORDER: Record<LintFinding['severity'], number> = {
   critical: 0,
   warning: 1,

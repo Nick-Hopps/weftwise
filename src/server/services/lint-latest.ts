@@ -10,8 +10,8 @@ export function selectLatestFindings(jobs: Job[]): LintLatestResult {
     return { jobId: null, ranAt: null, bySeverity: { critical: 0, warning: 0, info: 0 }, findings: [] };
   }
 
-  // createdAt 为 ISO-8601，字符串比较即时间序
-  const latest = completed.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b));
+  // 按完成时间选最近一次（completedAt 为 ISO-8601，字符串比较即时间序；与返回的 ranAt 自洽）
+  const latest = completed.reduce((a, b) => ((a.completedAt ?? '') >= (b.completedAt ?? '') ? a : b));
 
   let findings: EnrichedLintFinding[] = [];
   try {

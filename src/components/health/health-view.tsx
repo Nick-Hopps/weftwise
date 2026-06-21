@@ -9,17 +9,11 @@ import { useJobStream } from '@/hooks/use-job-stream';
 import { useLintSummary } from '@/hooks/use-lint-summary';
 import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
-import { groupBySeverity } from './lint-findings';
+import { groupBySeverity, SEVERITY_TONE } from './lint-findings';
 import { FindingRow } from './finding-row';
 import type { LintFinding } from '@/lib/contracts';
 
 type Scope = 'subject' | 'all';
-
-const SEVERITY_TONE: Record<LintFinding['severity'], 'danger' | 'warning' | 'neutral'> = {
-  critical: 'danger',
-  warning: 'warning',
-  info: 'neutral',
-};
 
 export function HealthView() {
   const apiFetch = useApiFetch();

@@ -40,7 +40,7 @@ describe('selectLatestFindings', () => {
     });
   });
 
-  it('多个 completed job 取 createdAt 最新的一条', () => {
+  it('多个 completed job 取 completedAt 最新的一条', () => {
     const older = job({ id: 'old', createdAt: '2026-01-01T00:00:00.000Z' });
     const newer = job({
       id: 'new',
@@ -55,9 +55,9 @@ describe('selectLatestFindings', () => {
     expect(res.bySeverity).toEqual({ critical: 1, warning: 0, info: 1 });
   });
 
-  it('忽略乱序输入，仍按时间取最新', () => {
-    const a = job({ id: 'a', createdAt: '2026-03-01T00:00:00.000Z' });
-    const b = job({ id: 'b', createdAt: '2026-01-01T00:00:00.000Z' });
+  it('忽略乱序输入，按 completedAt 取最新', () => {
+    const a = job({ id: 'a', completedAt: '2026-03-01T00:05:00.000Z' });
+    const b = job({ id: 'b', completedAt: '2026-01-01T00:05:00.000Z' });
     expect(selectLatestFindings([a, b]).jobId).toBe('a');
   });
 
