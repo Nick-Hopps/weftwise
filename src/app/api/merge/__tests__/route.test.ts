@@ -62,4 +62,16 @@ describe('POST /api/merge', () => {
     expect(res.status).toBe(400);
     expect(mockEnqueue).not.toHaveBeenCalled();
   });
+
+  it('body 缺字段 → 400，不入队', async () => {
+    const res = await call({ targetSlug: 'a', subjectId: 's1' });
+    expect(res.status).toBe(400);
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+
+  it('target 不存在 → 404', async () => {
+    const res = await call({ targetSlug: 'missing', sourceSlug: 'b', subjectId: 's1' });
+    expect(res.status).toBe(404);
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
 });
