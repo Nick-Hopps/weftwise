@@ -69,6 +69,7 @@ export function HealthView() {
 
   function switchScope(next: Scope) {
     setScope(next);
+    setJobId(null);
     setSemanticErrored(false);
   }
 
@@ -142,7 +143,7 @@ export function HealthView() {
 
       {semanticErrored && (
         <div className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
-          语义检查未完成，仅展示确定性结果。
+          Semantic checks did not complete — only deterministic findings are shown.
         </div>
       )}
 
@@ -170,7 +171,7 @@ export function HealthView() {
             {(['critical', 'warning', 'info'] as const).map((sev) => (
               <span key={sev} className="inline-flex items-center gap-1.5 text-sm text-foreground-secondary">
                 <Tag tone={SEVERITY_TONE[sev]} size="sm">
-                  {data!.bySeverity[sev]}
+                  {data?.bySeverity[sev] ?? 0}
                 </Tag>
                 {sev}
               </span>
