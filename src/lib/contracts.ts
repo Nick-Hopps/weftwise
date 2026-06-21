@@ -83,7 +83,7 @@ export interface WikiLink {
 
 export interface Job {
   id: string;
-  type: 'ingest' | 'lint' | 'save-to-wiki';
+  type: 'ingest' | 'lint' | 'save-to-wiki' | 'merge';
   status: 'pending' | 'running' | 'completed' | 'failed';
   paramsJson: string;
   resultJson: string | null;
