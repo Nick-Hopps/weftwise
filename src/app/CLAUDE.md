@@ -18,6 +18,7 @@
 | `(app)/page.tsx` | Dashboard 首页（按 `currentSubject` 过滤，空态 / 有内容两种布局） |
 | `(app)/wiki/[...slug]/page.tsx` | 动态 wiki 页面（SSR）：`?s=<slug>` 优先于 cookie；找不到页时通过 `findPageInOtherSubjects` 渲染"是否在其他 subject"提示 |
 | `(app)/subjects/page.tsx` | 🆕 Subject 管理页：卡片网格 + 创建 / 重命名 / 删除（当前激活 + 非空 subject 都禁用删除并 hover 提示原因；slug 通过 `?new=1` 自动展开创建表单） |
+| `(app)/health/page.tsx` | 🆕 知识库体检中心：触发 lint（当前 subject / 全量）+ 按严重度分组展示 findings + 跳转到对应页（只读，自动修复见后续特性）|
 | `globals.css` | Tailwind + 自定义 CSS 变量（设计 token） |
 
 ## 对外接口 —— `src/app/api/*`
@@ -29,6 +30,7 @@
 | `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/`，入队 `ingest` 任务；返回 `{ jobId, sourceId }` |
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
+| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
 | `/api/jobs` | GET | 列出任务（支持 `status` / `type` / `subjectId` filter） |
 | `/api/jobs/[id]` | GET | 取单个任务详情 |
 | `/api/jobs/[id]/events` | GET (SSE) | Server-Sent Events 流，供前端实时追踪任务进度；支持 `Last-Event-Id` 续播 |
@@ -79,6 +81,7 @@ src/app/
     ├── ingest/route.ts
     ├── query/route.ts
     ├── lint/route.ts
+    ├── lint/latest/route.ts
     ├── jobs/route.ts
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
