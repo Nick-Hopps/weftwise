@@ -34,11 +34,11 @@ describe('aggregateTags', () => {
 
   it('排除 meta 标签本身', () => {
     const pages = [page('a', ['math', META_TAG]), page('b', ['math'])];
-    expect(aggregateTags(pages)).toEqual([{ tag: 'math', count: 2 }]);
+    expect(aggregateTags(pages)).toEqual([{ tag: 'math', count: 1 }]);
   });
 
-  it('排除带 meta 标签的系统页（其所有标签都不计入）', () => {
-    const pages = [page('index', [META_TAG, 'overview']), page('b', ['overview'])];
+  it('排除带 meta 标签的系统页（按 tags 判定，与 slug 无关）', () => {
+    const pages = [page('log', [META_TAG, 'overview']), page('b', ['overview'])];
     expect(aggregateTags(pages)).toEqual([{ tag: 'overview', count: 1 }]);
   });
 
@@ -55,6 +55,11 @@ describe('pagesWithTag', () => {
 
   it('排除带 meta 的系统页', () => {
     const pages = [page('index', [META_TAG, 'math']), page('a', ['math'])];
+    expect(pagesWithTag(pages, 'math').map((p) => p.slug)).toEqual(['a']);
+  });
+
+  it('排除带 meta 的系统页（slug 非 index 亦然）', () => {
+    const pages = [page('log', [META_TAG, 'math']), page('a', ['math'])];
     expect(pagesWithTag(pages, 'math').map((p) => p.slug)).toEqual(['a']);
   });
 
