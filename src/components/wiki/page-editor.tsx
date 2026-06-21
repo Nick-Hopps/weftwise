@@ -66,6 +66,7 @@ export function PageEditor({ slug }: { slug: string }) {
     return (
       <div className="max-w-content mx-auto px-6 py-8 w-full">
         <div className="h-8 w-40 rounded bg-subtle animate-pulse" />
+        <div className="mt-4 h-[520px] rounded bg-subtle animate-pulse" />
       </div>
     );
   }
@@ -107,7 +108,7 @@ export function PageEditor({ slug }: { slug: string }) {
         </div>
       )}
 
-      <MdEditor value={current} onChange={(next) => setValue(next)} />
+      <MdEditor value={current} onChange={setValue} />
     </div>
   );
 }
