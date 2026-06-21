@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Pencil } from 'lucide-react';
 import { Tag } from '@/components/ui/tag';
 import { TagLink } from '@/components/wiki/tag-link';
+import { MergeButton } from '@/components/wiki/merge-button';
 
 interface FrontmatterDisplayProps {
   title: string;
@@ -13,6 +14,7 @@ interface FrontmatterDisplayProps {
   updated: string;
   editHref?: string;
   subjectSlug?: string;
+  slug?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -42,6 +44,7 @@ export default function FrontmatterDisplay({
   updated,
   editHref,
   subjectSlug,
+  slug,
 }: FrontmatterDisplayProps) {
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
@@ -51,16 +54,19 @@ export default function FrontmatterDisplay({
         <h1 className="text-2xl font-semibold tracking-tight text-prose-heading leading-tight">
           {title}
         </h1>
-        {editHref && (
-          <Link
-            href={editHref}
-            title="Edit this page"
-            className="shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit
-          </Link>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {slug && <MergeButton slug={slug} title={title} />}
+          {editHref && (
+            <Link
+              href={editHref}
+              title="Edit this page"
+              className="shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </Link>
+          )}
+        </div>
       </div>
 
       {hasProps && (
