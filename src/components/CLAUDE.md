@@ -48,6 +48,8 @@
 - `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
 - `merge-button.tsx` —— 🆕 阅读页标题行「Merge」入口（与 Edit 并列），点开 `merge-dialog`
 - `merge-dialog.tsx` —— 🆕 合并弹窗：搜选本 subject 另一页 B（排除自身 + meta）→ `POST /api/merge` → `useJobStream` 追踪 `merge:*` → 完成失效 8 个 query key + `router.refresh` + 关闭；运行中防误关
+- `split-button.tsx` —— 🆕 标题行「Split」入口（Scissors 图标），点开 `split-dialog`
+- `split-dialog.tsx` —— 🆕 拆分弹窗：可选 hint textarea → `POST /api/split` → `useJobStream` 追踪 `split:*` → 完成 `GET /api/jobs/<id>` 读 `resultJson.primarySlug` → 失效缓存 + `router.push` 跳主页（取不到兜底 `/`）+ 关闭；运行中防误关
 
 ### `chat/`
 
