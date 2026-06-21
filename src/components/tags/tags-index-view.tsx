@@ -37,7 +37,7 @@ export function TagsIndexView() {
         </p>
       </header>
 
-      {isLoading ? (
+      {!subjectId || isLoading ? (
         <div className="flex flex-wrap gap-2">
           {[1, 2, 3, 4, 5].map((i) => (
             <div key={i} className="h-7 w-20 rounded-sm bg-subtle animate-pulse" />
