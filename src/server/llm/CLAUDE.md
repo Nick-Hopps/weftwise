@@ -165,6 +165,7 @@ src/server/llm/
 | 2026-04-26 | wikiLanguage：新增 `PromptContext` + `renderLanguageDirective`；5 个 user prompt builder 接入 `ctx: PromptContext`；文件清单补 `prompts/prompt-context.ts` |
 | 2026-04-27 | LLMTaskSchema 接受 `skill:<id>` key；`config.tasks` 改为 `z.record`（开放字典）；`provider-registry` 导出 `resolveModel` 供 agent-loop 使用 |
 | 2026-06-22 | 新增内置 task `merge`（`BUILTIN_LLM_TASKS` 加 'merge'）+ `prompts/merge-prompt.ts`（`MERGE_SYSTEM_PROMPT` / `buildMergeUserPrompt` / `MergeResultSchema`），供合并两页融合正文（④b）|
+| 2026-06-22 | 新增内置 task `split` + `prompts/split-prompt.ts`（`SPLIT_SYSTEM_PROMPT` / `buildSplitUserPrompt` / `SplitResultSchema`，`pages.min(2)`、恰一 `isPrimary`），供拆分一页（④c）|
 
 ---
 
