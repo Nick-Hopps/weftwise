@@ -74,4 +74,12 @@ describe('selectLatestFindings', () => {
     expect(res.findings).toEqual([]);
     expect(res.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
   });
+
+  it('resultJson 为 null 时 findings 为空但保留 jobId', () => {
+    const nullResult = job({ id: 'nullres', resultJson: null });
+    const res = selectLatestFindings([nullResult]);
+    expect(res.jobId).toBe('nullres');
+    expect(res.findings).toEqual([]);
+    expect(res.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
+  });
 });
