@@ -110,7 +110,7 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
               </dd>
               <dt className="text-foreground-secondary">Words</dt>
               <dd className="font-mono text-xs text-foreground tabular-nums">{wordCount}</dd>
-              {fm?.tags && fm.tags.length > 0 && (
+              {fm?.tags && fm.tags.filter((t) => t !== 'meta').length > 0 && (
                 <>
                   <dt className="text-foreground-secondary pt-0.5">Tags</dt>
                   <dd className="flex flex-wrap gap-1">

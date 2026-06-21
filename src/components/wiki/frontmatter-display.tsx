@@ -65,7 +65,7 @@ export default function FrontmatterDisplay({
 
       {hasProps && (
         <dl className="grid grid-cols-[88px_1fr] gap-y-1.5 text-sm items-start">
-          {tags.length > 0 && (
+          {tags.filter((t) => t !== 'meta').length > 0 && (
             <>
               <dt className="text-foreground-secondary pt-0.5">Tags</dt>
               <dd className="flex flex-wrap gap-1">
