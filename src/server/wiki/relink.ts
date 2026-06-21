@@ -4,6 +4,7 @@
  */
 import { extractWikiLinks } from './wikilinks';
 import { SUBJECT_SLUG_RE } from '@/lib/slug';
+import type { TitleResolver } from '@/lib/contracts';
 
 /**
  * 把单个 [[…]] token 里的 target 文本替换为 newTitle，保留 subject 前缀、#锚点、|别名。
@@ -62,6 +63,40 @@ export function rewriteBacklinkText(
   let result = raw;
   for (const link of matches) {
     const newToken = replaceTargetInToken(link.raw, newTitle);
+    result =
+      result.slice(0, link.position.start) +
+      newToken +
+      result.slice(link.position.end);
+  }
+  return result;
+}
+
+/**
+ * 把整文件 raw 里所有「解析到 fromSlug（本 subject）」的 wikilink 改指向 toTitle。
+ * 与 rewriteBacklinkText 的区别：匹配判据是「解析后的 target slug == fromSlug」
+ * （用 titleResolver，覆盖 title-form 与 slug-form 两种写法）。用于 merge：源页被删后，
+ * 所有指向它的引用（含 [[源-slug]]）都要改指存活页。跨主题链接与代码块内链接不动。
+ * 复用 replaceTargetInToken 保前缀/#锚点/|别名；按 position 从右往左替换。无匹配返回原串。
+ */
+export function repointLinksToPage(
+  raw: string,
+  fromSlug: string,
+  toTitle: string,
+  subjectSlug: string,
+  titleResolver: TitleResolver,
+): string {
+  const links = extractWikiLinks(raw, { currentSubjectSlug: subjectSlug, titleResolver });
+  const matches = links
+    .filter(
+      (l) =>
+        l.target === fromSlug &&
+        (!l.targetSubjectSlug || l.targetSubjectSlug === subjectSlug),
+    )
+    .sort((a, b) => b.position.start - a.position.start);
+
+  let result = raw;
+  for (const link of matches) {
+    const newToken = replaceTargetInToken(link.raw, toTitle);
     result =
       result.slice(0, link.position.start) +
       newToken +
