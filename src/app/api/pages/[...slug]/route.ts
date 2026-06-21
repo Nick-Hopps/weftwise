@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import { readPageInSubject } from '@/server/wiki/wiki-store';
+import { serializeWikiDocument } from '@/server/wiki/markdown';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import {
@@ -64,6 +65,7 @@ export async function GET(
   return NextResponse.json({
     ...page,
     content: doc?.body ?? '',
+    raw: doc ? serializeWikiDocument(doc) : '',
     frontmatter: doc?.frontmatter ?? null,
     links: doc?.links ?? [],
     backlinks: backlinks.map((b) => ({
