@@ -59,6 +59,10 @@ worker-entry.ts
 
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
+### `merge-service.ts` — 任务类型 `'merge'`
+
+把 source 页合并进 target 页（A 存活）。`params { targetSlug, sourceSlug, subjectId }`。流程：读 A/B 两页 → 单次 `generateStructuredOutput('merge', MergeResultSchema, …)` 产 `{ mergedBody, mergedSummary }` → 确定性拼装 A 新 frontmatter（保 A title/created、`tags`/`sources` 并集、summary 用 LLM、updated=now via `stampSystemFrontmatter`）→ `repointLinksToPage` 把合并体自身 + 本 subject 内所有指向 B 的 backlink 源页（排除 A/B 自身）重链到 A → 单 `createChangeset` `[update A, delete B, ...update 引用页]` → validate → apply（删 B 时 wiki_links/page_sources 级联自动清）。发 `merge:start` / `merge:complete`。跨 subject 指向 B 的引用不重链（单事务约束）。
+
 ## 关键依赖与配置
 
 - 上游：`jobs/worker` (registerHandler)、`jobs/queue` (requeue 等)、`jobs/events` (emit)
@@ -103,7 +107,8 @@ src/server/services/
 ├── ingest-service.ts   # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts      # 预检/预算/常量纯函数
 ├── query-service.ts    # 问答 + save-to-wiki
-└── lint-service.ts     # 全库 lint 扫描
+├── lint-service.ts     # 全库 lint 扫描
+└── merge-service.ts    # 合并两页（LLM 融合 + 删源页 + 同事务重链）
 ```
 
 ## 变更记录 (Changelog)
@@ -115,6 +120,7 @@ src/server/services/
 | 2026-04-27 | ingest-service 切换为 multi-agent runtime；旧多阶段 LLM 直调与 buildLogContent helper 移除 |
 | 2026-06-20 | ingest-service 接入断点续传（loadCheckpoint / steps checkpointAs / reduceCostForResume 预检折减 / emit ingest:resuming / 成功 clear）|
 | 2026-06-20 | ingest 流水线扩展为 5 阶段：新增 enricher（callout 增益层）+ verifier（参数化自检，P2），均为结构化输出无 tools；CONTENT_STAGE_FACTOR=3 预算估算 + DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M |
+| 2026-06-22 | 新增 `merge-service`（任务类型 `merge`）：LLM 融合两页 + 删源页 + 同事务重链（④b）|
 
 ---
 

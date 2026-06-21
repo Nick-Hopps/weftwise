@@ -34,6 +34,7 @@
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
+| `/api/merge` | POST | 校验 `{ targetSlug, sourceSlug }`（A≠B、非 meta、A/B 均存在，否则 400/404）后入队 `merge` 任务（把 source 合并进 target、删 source、重链）；返回 202 + `{ jobId }` |
 | `/api/jobs` | GET | 列出任务（支持 `status` / `type` / `subjectId` filter） |
 | `/api/jobs/[id]` | GET | 取单个任务详情 |
 | `/api/jobs/[id]/events` | GET (SSE) | Server-Sent Events 流，供前端实时追踪任务进度；支持 `Last-Event-Id` 续播 |
