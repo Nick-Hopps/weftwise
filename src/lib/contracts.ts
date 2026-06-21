@@ -143,6 +143,18 @@ export interface LintFinding {
   suggestedFix: string | null;
 }
 
+export interface EnrichedLintFinding extends LintFinding {
+  subjectId: SubjectId;
+  subjectSlug: string;
+}
+
+export interface LintLatestResult {
+  jobId: string | null;
+  ranAt: string | null;
+  bySeverity: { critical: number; warning: number; info: number };
+  findings: EnrichedLintFinding[];
+}
+
 export interface ChangesetEntry {
   action: 'create' | 'update' | 'delete';
   path: string;
