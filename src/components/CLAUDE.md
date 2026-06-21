@@ -40,6 +40,7 @@
 - `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
+- `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
 - `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行支持可选 `editHref` 渲染 Edit 按钮
 - `page-skeleton.tsx` —— loading skeleton
 - `page-editor.tsx` —— 🆕 在线编辑容器：拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；错误内联、dirty 守卫
@@ -58,6 +59,11 @@
 ### `graph/`
 
 - `mini-graph-view.tsx` —— 基于 cytoscape 的迷你图（仪表盘 + 上下文 Tab 共用）；外层 `<div key={currentSubjectId}>` 强制 cytoscape 重挂载，避免切换 subject 时闪烁
+
+### `tags/`
+
+- `tags-index-view.tsx` —— 🆕 标签索引（aggregateTags(/api/pages) → tag+count）
+- `tag-pages-view.tsx` —— 🆕 单标签页列表（pagesWithTag）
 
 ### `shared/`
 
