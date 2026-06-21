@@ -128,7 +128,7 @@ export async function PUT(
   if (refresh && newTitle && newTitle !== oldTitle) {
     const backlinks = pagesRepo
       .getBacklinks(subject.id, slug)
-      .filter((b) => b.subjectId === subject.id);
+      .filter((b) => b.subjectId === subject.id && b.slug !== slug);
     for (const bl of backlinks) {
       const doc = readPageInSubject(subject.slug, bl.slug);
       if (!doc) continue;
