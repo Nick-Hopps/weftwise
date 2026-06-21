@@ -78,3 +78,56 @@ describe('rewriteBacklinkText', () => {
     expect(out).toBe('[[general:New]]');
   });
 });
+
+import type { TitleResolver } from '@/lib/contracts';
+import { repointLinksToPage } from '../relink';
+
+describe('repointLinksToPage', () => {
+  // 把 'B Title'（及小写）解析到 slug 'b'；其余按 normalizeSlug 兜底。
+  const resolver: TitleResolver = (t) => (t.trim().toLowerCase() === 'b title' ? 'b' : undefined);
+
+  it('title-form [[B Title]] → [[A Title]]', () => {
+    expect(repointLinksToPage('see [[B Title]] x', 'b', 'A Title', 'general', resolver))
+      .toBe('see [[A Title]] x');
+  });
+
+  it('slug-form [[b]] → [[A Title]]', () => {
+    expect(repointLinksToPage('[[b]]', 'b', 'A Title', 'general', resolver))
+      .toBe('[[A Title]]');
+  });
+
+  it('保留别名 [[B Title|看]] → [[A Title|看]]', () => {
+    expect(repointLinksToPage('[[B Title|看]]', 'b', 'A Title', 'general', resolver))
+      .toBe('[[A Title|看]]');
+  });
+
+  it('保留锚点 [[B Title#x]] → [[A Title#x]]', () => {
+    expect(repointLinksToPage('[[B Title#x]]', 'b', 'A Title', 'general', resolver))
+      .toBe('[[A Title#x]]');
+  });
+
+  it('不指向 B 的链接不动（[[Other]] / [[a]]）', () => {
+    expect(repointLinksToPage('[[Other]] and [[a]]', 'b', 'A Title', 'general', resolver))
+      .toBe('[[Other]] and [[a]]');
+  });
+
+  it('跨主题 [[other:B Title]] 不动', () => {
+    expect(repointLinksToPage('[[other:B Title]]', 'b', 'A Title', 'general', resolver))
+      .toBe('[[other:B Title]]');
+  });
+
+  it('同段多处混合、右起替换不串位', () => {
+    expect(repointLinksToPage('A [[B Title]] B [[a]] C [[b|x]] D', 'b', 'A Title', 'general', resolver))
+      .toBe('A [[A Title]] B [[a]] C [[A Title|x]] D');
+  });
+
+  it('code fence 内不动', () => {
+    expect(repointLinksToPage('```\n[[b]]\n```\n[[b]]', 'b', 'A Title', 'general', resolver))
+      .toBe('```\n[[b]]\n```\n[[A Title]]');
+  });
+
+  it('无匹配返回原串', () => {
+    expect(repointLinksToPage('nothing [[zzz]]', 'b', 'A Title', 'general', resolver))
+      .toBe('nothing [[zzz]]');
+  });
+});
