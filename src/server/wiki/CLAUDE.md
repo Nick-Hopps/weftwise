@@ -48,6 +48,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
 | `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / slugFromTitle / GENERAL_SUBJECT_SLUG` | path ↔ (subject, slug) 互转；保留 `slugFromWikiPath` shim 过渡（已无活跃调用方） |
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
+| `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` | 改标题时把整文件 raw 里以旧标题书写的同-subject `[[…]]` 文本刷成新标题（纯函数；复用 extractWikiLinks 匹配，按 wikilink 语法重建 token 保前缀/锚点/别名）|
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
 | `vault-mutex.ts` | `acquireVaultLock / releaseVaultLock` | 单进程 in-memory mutex（因为 worker 单实例运行） |
 
@@ -115,6 +116,7 @@ src/server/wiki/
 ├── wikilinks.ts          # ★ 单一真实源
 ├── page-identity.ts      # slug ↔ path
 ├── indexer.ts            # 写入 pages + FTS
+├── relink.ts             # 改标题→重写 backlink 文本（纯函数）
 └── rebuild.ts            # vault → DB 全量重建
 ```
 
@@ -124,6 +126,7 @@ src/server/wiki/
 |------|------|
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：Saga 全链路注入 subjectId / `[[subject:page]]` 语法 / 跨主题校验 / commit message `[subject:<slug>]` 前缀 |
+| 2026-06-22 | 新增 `relink.ts::rewriteBacklinkText`（改标题→重写同-subject backlink 文本）；接入 `PUT /api/pages` 同事务联动（④a）|
 
 ---
 

@@ -45,6 +45,7 @@
 - `page-skeleton.tsx` —— loading skeleton
 - `page-editor.tsx` —— 🆕 在线编辑容器：拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；错误内联、dirty 守卫
 - `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装，data-color-mode 跟随 darkMode
+- `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
 
 ### `chat/`
 
@@ -127,7 +128,7 @@ src/components/
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*}
-├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton}
+├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice}
 ├── chat/         {chat-interface, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── graph/        {mini-graph-view}
