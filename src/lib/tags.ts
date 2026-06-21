@@ -2,10 +2,8 @@ import type { WikiPage } from '@/lib/contracts';
 
 export const META_TAG = 'meta';
 
-const SYSTEM_PAGE_SLUGS = new Set(['index']);
-
-function isSystemPageWithMeta(page: WikiPage): boolean {
-  return SYSTEM_PAGE_SLUGS.has(page.slug) && (page.tags ?? []).includes(META_TAG);
+function isMetaPage(page: WikiPage): boolean {
+  return (page.tags ?? []).includes(META_TAG);
 }
 
 /**
@@ -15,7 +13,7 @@ function isSystemPageWithMeta(page: WikiPage): boolean {
 export function aggregateTags(pages: WikiPage[]): { tag: string; count: number }[] {
   const counts = new Map<string, number>();
   for (const page of pages) {
-    if (isSystemPageWithMeta(page)) continue;
+    if (isMetaPage(page)) continue;
     for (const tag of page.tags ?? []) {
       if (tag === META_TAG) continue;
       counts.set(tag, (counts.get(tag) ?? 0) + 1);
@@ -28,5 +26,5 @@ export function aggregateTags(pages: WikiPage[]): { tag: string; count: number }
 
 /** 返回带指定 tag 的内容页（排除带 meta 的系统页）；区分大小写按原样匹配。 */
 export function pagesWithTag(pages: WikiPage[], tag: string): WikiPage[] {
-  return pages.filter((page) => !isSystemPageWithMeta(page) && (page.tags ?? []).includes(tag));
+  return pages.filter((page) => !isMetaPage(page) && (page.tags ?? []).includes(tag));
 }
