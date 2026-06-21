@@ -11,11 +11,15 @@ import {
   validateChangeset,
 } from '@/server/wiki/wiki-transaction';
 import { buildWikiPath } from '@/server/wiki/page-identity';
+import { parseFrontmatter } from '@/server/wiki/frontmatter';
+import { rewriteBacklinkText } from '@/server/wiki/relink';
+import type { ChangesetEntry } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
 const UpdatePageSchema = z.object({
   content: z.string().min(1),
+  refreshReferences: z.boolean().optional(),
 });
 
 const PROTECTED_SYSTEM_PAGES = new Set(['index', 'log']);
@@ -107,13 +111,41 @@ export async function PUT(
     );
   }
 
-  const changeset = createChangeset(crypto.randomUUID(), subject, [
+  const oldTitle = existing.title;
+  const newTitle = parseFrontmatter(parsed.data.content).data.title;
+
+  const entries: ChangesetEntry[] = [
     {
       action: 'update',
       path: buildWikiPath(subject.slug, slug),
       content: parsed.data.content,
     },
-  ]);
+  ];
+
+  // 标题变了且开启联动时，把本 subject 内以旧标题书写的引用一并重写进同一事务。
+  let referencesUpdated = 0;
+  const refresh = parsed.data.refreshReferences ?? true;
+  if (refresh && newTitle && newTitle !== oldTitle) {
+    const backlinks = pagesRepo
+      .getBacklinks(subject.id, slug)
+      .filter((b) => b.subjectId === subject.id);
+    for (const bl of backlinks) {
+      const doc = readPageInSubject(subject.slug, bl.slug);
+      if (!doc) continue;
+      const sourceRaw = serializeWikiDocument(doc);
+      const rewritten = rewriteBacklinkText(sourceRaw, oldTitle, newTitle, subject.slug);
+      if (rewritten !== sourceRaw) {
+        entries.push({
+          action: 'update',
+          path: buildWikiPath(subject.slug, bl.slug),
+          content: rewritten,
+        });
+        referencesUpdated += 1;
+      }
+    }
+  }
+
+  const changeset = createChangeset(crypto.randomUUID(), subject, entries);
 
   const validation = validateChangeset(changeset);
   if (!validation.valid) {
@@ -124,7 +156,7 @@ export async function PUT(
   }
 
   await applyChangeset(changeset);
-  return NextResponse.json({ ok: true, slug, subjectId: subject.id });
+  return NextResponse.json({ ok: true, slug, subjectId: subject.id, referencesUpdated });
 }
 
 export async function DELETE(
