@@ -52,7 +52,7 @@ const proseClassName = `
 
 export default function PageRenderer({
   content,
-  slug: _slug,
+  slug,
   title,
   tags = [],
   sources = [],
@@ -75,6 +75,7 @@ export default function PageRenderer({
           updated={updated}
           editHref={editHref}
           subjectSlug={subjectSlug}
+          slug={slug}
         />
       )}
       <div className={proseClassName}>{rendered}</div>

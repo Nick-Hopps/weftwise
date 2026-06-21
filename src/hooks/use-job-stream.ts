@@ -161,6 +161,9 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         // Save-to-wiki events
         'save:start',
         'save:complete',
+        // Merge events
+        'merge:start',
+        'merge:complete',
       ];
 
       const listeners: Array<{ type: string; handler: (e: Event) => void }> = [];
