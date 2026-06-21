@@ -9,6 +9,7 @@ import { GENERAL_SUBJECT_SLUG } from '@/server/wiki/page-identity';
 import { readPageInSubject } from '@/server/wiki/wiki-store';
 import { serializeWikiDocument } from '@/server/wiki/markdown';
 import PageRenderer from '@/components/wiki/page-renderer';
+import { RetitleNotice } from '@/components/wiki/retitle-notice';
 import { SectionLabel } from '@/components/ui/panel';
 import type { Subject } from '@/lib/contracts';
 
@@ -87,6 +88,7 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
 
   return (
     <div className="flex flex-col min-h-full">
+      <RetitleNotice />
       <PageRenderer
         content={doc.body}
         rawContent={serializeWikiDocument(doc)}

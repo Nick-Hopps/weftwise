@@ -37,7 +37,7 @@ export function PageEditor({ slug }: { slug: string }) {
   const dirty = value !== null && value !== initialRaw;
 
   const save = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (): Promise<number> => {
       const res = await apiFetch(`/api/pages/${slug}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -48,9 +48,15 @@ export function PageEditor({ slug }: { slug: string }) {
         const detail = body.details ? `\n${JSON.stringify(body.details, null, 2)}` : '';
         throw new Error((body.error ?? `HTTP ${res.status}`) + detail);
       }
+      const body = (await res.json().catch(() => ({}))) as { referencesUpdated?: number };
+      return body.referencesUpdated ?? 0;
     },
-    onSuccess: async () => {
+    onSuccess: async (referencesUpdated: number) => {
       await Promise.all(INVALIDATE_KEYS.map((k) => queryClient.invalidateQueries({ queryKey: [k] })));
+      if (referencesUpdated > 0) {
+        // 跳转前用 sessionStorage 把提示带到阅读页（push 后本组件即卸载）。
+        sessionStorage.setItem('wiki:retitle-notice', `已同步更新 ${referencesUpdated} 处引用到新标题`);
+      }
       router.push(readHref);
       router.refresh();
     },
