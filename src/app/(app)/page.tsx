@@ -10,7 +10,7 @@ import { eq } from 'drizzle-orm';
 import { DashboardHero } from './_components/dashboard-hero';
 import { DashboardIngestPanel } from './_components/dashboard-ingest-panel';
 import { SectionLabel } from '@/components/ui/panel';
-import { Tag } from '@/components/ui/tag';
+import { TagLink } from '@/components/wiki/tag-link';
 import type { Subject } from '@/lib/contracts';
 
 const SUBJECT_COOKIE = 'wiki_subject';
@@ -135,12 +135,10 @@ export default async function DashboardPage() {
                       </span>
                     )}
                   </span>
-                  {page.tags && page.tags.length > 0 && (
+                  {page.tags && page.tags.filter((t) => t !== 'meta').length > 0 && (
                     <span className="hidden lg:flex gap-1 shrink-0">
-                      {page.tags.slice(0, 2).map((t) => (
-                        <Tag key={t} tone="neutral">
-                          {t}
-                        </Tag>
+                      {page.tags.filter((t) => t !== 'meta').slice(0, 2).map((t) => (
+                        <TagLink key={t} tag={t} subjectSlug={subject.slug} />
                       ))}
                     </span>
                   )}

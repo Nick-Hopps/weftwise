@@ -98,6 +98,7 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
         updated={doc.frontmatter.updated ?? page.updatedAt}
         titleSlugMap={titleSlugMap}
         editHref={`/wiki/${slug}/edit?s=${encodeURIComponent(subject.slug)}`}
+        subjectSlug={subject.slug}
       />
 
       {backlinks.length > 0 && (

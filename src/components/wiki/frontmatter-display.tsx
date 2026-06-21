@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Pencil } from 'lucide-react';
 import { Tag } from '@/components/ui/tag';
+import { TagLink } from '@/components/wiki/tag-link';
 
 interface FrontmatterDisplayProps {
   title: string;
@@ -11,6 +12,7 @@ interface FrontmatterDisplayProps {
   created: string;
   updated: string;
   editHref?: string;
+  subjectSlug?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -39,6 +41,7 @@ export default function FrontmatterDisplay({
   created,
   updated,
   editHref,
+  subjectSlug,
 }: FrontmatterDisplayProps) {
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
@@ -66,11 +69,13 @@ export default function FrontmatterDisplay({
             <>
               <dt className="text-foreground-secondary pt-0.5">Tags</dt>
               <dd className="flex flex-wrap gap-1">
-                {tags.map((t) => (
-                  <Tag key={t} tone="neutral" size="base">
-                    {t}
-                  </Tag>
-                ))}
+                {tags.filter((t) => t !== 'meta').map((t) =>
+                  subjectSlug ? (
+                    <TagLink key={t} tag={t} subjectSlug={subjectSlug} size="base" />
+                  ) : (
+                    <Tag key={t} tone="neutral" size="base">{t}</Tag>
+                  ),
+                )}
               </dd>
             </>
           )}

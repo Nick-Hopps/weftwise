@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { SectionLabel } from '@/components/ui/panel';
-import { Tag } from '@/components/ui/tag';
+import { TagLink } from '@/components/wiki/tag-link';
 
 const MiniGraphView = dynamic(
   () => import('@/components/graph/mini-graph-view').then((m) => ({ default: m.MiniGraphView })),
@@ -53,7 +53,7 @@ interface ContextTabProps {
 
 export function ContextPanelContextTab({ slug }: ContextTabProps) {
   const apiFetch = useApiFetch();
-  const { id: subjectId } = useCurrentSubject();
+  const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
   const { data: pageDetail, isLoading } = useQuery({
     queryKey: ['page-detail', subjectId, slug],
     queryFn: async () => {
@@ -114,10 +114,8 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
                 <>
                   <dt className="text-foreground-secondary pt-0.5">Tags</dt>
                   <dd className="flex flex-wrap gap-1">
-                    {fm.tags.map((t) => (
-                      <Tag key={t} tone="neutral">
-                        {t}
-                      </Tag>
+                    {fm.tags.filter((t) => t !== 'meta').map((t) => (
+                      <TagLink key={t} tag={t} subjectSlug={subjectSlug} />
                     ))}
                   </dd>
                 </>
