@@ -164,6 +164,9 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         // Merge events
         'merge:start',
         'merge:complete',
+        // Split events
+        'split:start',
+        'split:complete',
       ];
 
       const listeners: Array<{ type: string; handler: (e: Event) => void }> = [];

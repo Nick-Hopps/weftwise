@@ -5,6 +5,7 @@ import { Pencil } from 'lucide-react';
 import { Tag } from '@/components/ui/tag';
 import { TagLink } from '@/components/wiki/tag-link';
 import { MergeButton } from '@/components/wiki/merge-button';
+import { SplitButton } from '@/components/wiki/split-button';
 
 interface FrontmatterDisplayProps {
   title: string;
@@ -56,6 +57,7 @@ export default function FrontmatterDisplay({
         </h1>
         <div className="flex items-center gap-2 shrink-0">
           {slug && <MergeButton slug={slug} title={title} />}
+          {slug && <SplitButton slug={slug} title={title} />}
           {editHref && (
             <Link
               href={editHref}
