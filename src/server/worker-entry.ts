@@ -35,6 +35,7 @@ import { createLogger } from './logging';
 import './services/ingest-service';
 import './services/lint-service';
 import './services/query-service'; // registers 'save-to-wiki' handler
+import './services/merge-service';
 
 const log = createLogger('worker');
 
