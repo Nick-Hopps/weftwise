@@ -4,25 +4,21 @@ import { serializeWikiDocument } from '@/server/wiki/markdown';
 import type { WikiDocument } from '@/lib/contracts';
 
 const mockGetPage = vi.fn();
-const mockBacklinks = vi.fn(() => []);
+const mockBacklinks = vi.fn();
 const mockReadPage = vi.fn();
 const mockResolve = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null, requireCsrf: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
-  // @ts-ignore
-  resolveSubjectFromRequest: (...a: any[]) => mockResolve(...a),
+  resolveSubjectFromRequest: (request: unknown, options?: unknown) => mockResolve(request, options),
 }));
 vi.mock('@/server/db/repos/pages-repo', () => ({
-  // @ts-ignore
-  getPageBySlug: (...a: any[]) => mockGetPage(...a),
-  // @ts-ignore
-  getBacklinks: (...a: any[]) => mockBacklinks(...a),
-  findPageBySlugAcrossSubjects: () => [],
+  getPageBySlug: (subjectId: unknown, slug: unknown) => mockGetPage(subjectId, slug),
+  getBacklinks: (subjectId: unknown, slug: unknown) => mockBacklinks(subjectId, slug),
+  findPageBySlugAcrossSubjects: (slug: unknown) => [],
 }));
 vi.mock('@/server/wiki/wiki-store', () => ({
-  // @ts-ignore
-  readPageInSubject: (...a: any[]) => mockReadPage(...a),
+  readPageInSubject: (subjectSlug: unknown, slug: unknown) => mockReadPage(subjectSlug, slug),
 }));
 
 import { GET } from '../route';
@@ -46,7 +42,8 @@ const DOC: WikiDocument = {
 
 beforeEach(() => {
   mockGetPage.mockReset();
-  mockBacklinks.mockReset().mockReturnValue([]);
+  mockBacklinks.mockReset();
+  mockBacklinks.mockReturnValue([]);
   mockReadPage.mockReset();
   mockResolve.mockReset();
   mockResolve.mockReturnValue({ subject: { id: 's1', slug: 'general' }, error: null });
@@ -67,5 +64,14 @@ describe('GET /api/pages/[...slug]', () => {
     mockGetPage.mockReturnValue(null);
     const res = await call(['missing']);
     expect(res.status).toBe(404);
+  });
+
+  it('页面存在但 doc 为 null 时 raw 为空串', async () => {
+    mockGetPage.mockReturnValue({ slug: 'x', title: 'X', tags: [], createdAt: '2026-01-01', updatedAt: '2026-01-01' });
+    mockReadPage.mockReturnValue(null);
+    const res = await call(['x']);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.raw).toBe('');
   });
 });
