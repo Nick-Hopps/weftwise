@@ -97,7 +97,7 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
         created={doc.frontmatter.created ?? page.createdAt}
         updated={doc.frontmatter.updated ?? page.updatedAt}
         titleSlugMap={titleSlugMap}
-        editHref={`/wiki/${slug}/edit?s=${encodeURIComponent(subject.slug)}`}
+        editHref={`/wiki/edit/${slug}?s=${encodeURIComponent(subject.slug)}`}
         subjectSlug={subject.slug}
       />
 
