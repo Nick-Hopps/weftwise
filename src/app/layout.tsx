@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
@@ -18,6 +18,14 @@ const jetbrainsMono = JetBrains_Mono({
   display: 'swap',
 });
 
+// Display face — used for the brand wordmark only (kept off body/prose).
+const spaceGrotesk = Space_Grotesk({
+  subsets: ['latin'],
+  variable: '--font-space-grotesk',
+  display: 'swap',
+  weight: ['500', '600', '700'],
+});
+
 export const metadata: Metadata = {
   title: 'LLM Wiki',
   description: 'LLM-powered personal knowledge management wiki',
@@ -32,7 +40,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${jetbrainsMono.variable}`}
+      className={`${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}
       data-color-mode="light"
     >
       <head>
