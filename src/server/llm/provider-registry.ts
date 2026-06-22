@@ -1,8 +1,9 @@
-import { generateObject, streamText } from 'ai';
+import { embedMany, generateObject, streamText } from 'ai';
 import type { LanguageModel } from 'ai';
 import type { ZodType } from 'zod';
 import type { LLMRouteOverride, LLMTask, ResolvedTaskRoute } from './config-schema';
-import { getLanguageModel } from './provider-factory';
+import { getLLMConfig } from './config-loader';
+import { getEmbeddingModel, getLanguageModel } from './provider-factory';
 import { resolveTask } from './task-router';
 
 export function resolveModel(route: ResolvedTaskRoute): LanguageModel {
@@ -124,4 +125,28 @@ export function streamTextResponse(
     providerOptions: route.providerOptions,
     abortSignal: mergedSignal,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Embedding helpers
+// ---------------------------------------------------------------------------
+
+/** embedding 任务已配置 model 时返回 true；未配置时返回 false（勿在无 embedding 配置时调用）。 */
+export function isEmbeddingConfigured(): boolean {
+  return !!getLLMConfig().tasks?.embedding?.model;
+}
+
+/** 返回 embedding 任务解析后的 modelId（tasks.embedding.model 或 defaults.model 兜底）。 */
+export function embeddingModelId(): string {
+  return resolveTask('embedding').model;
+}
+
+/** 批量生成文本 embedding，返回 number[][] 向量数组。 */
+export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  const route = resolveTask('embedding');
+  const { embeddings } = await embedMany({
+    model: getEmbeddingModel(route),
+    values: texts,
+  });
+  return embeddings;
 }

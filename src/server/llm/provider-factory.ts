@@ -5,7 +5,7 @@ import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { createXai } from '@ai-sdk/xai';
-import type { LanguageModel } from 'ai';
+import type { EmbeddingModel, LanguageModel } from 'ai';
 import type { LLMProviderProfile, ResolvedTaskRoute } from './config-schema';
 import { LLMConfigError, LLMProviderError } from './errors';
 
@@ -33,6 +33,44 @@ export function resetProviderFactoryCache(): void {
 export function getLanguageModel(route: ResolvedTaskRoute): LanguageModel {
   const factory = getOrCreateFactory(route.profileName, route.provider);
   return factory(route.model);
+}
+
+/**
+ * 取 embedding 模型。仅 OpenAI 家族（openai / openai-compatible / ollama）支持；
+ * 其余 provider 抛错（embedding 应配到这些 profile）。
+ */
+export function getEmbeddingModel(route: ResolvedTaskRoute): EmbeddingModel<string> {
+  const profile = route.provider;
+  switch (profile.provider) {
+    case 'openai': {
+      const p = createOpenAI({
+        apiKey: requireApiKey(route.profileName, profile.apiKeyEnv),
+        baseURL: profile.baseURL,
+      });
+      return p.textEmbeddingModel(route.model);
+    }
+    case 'ollama': {
+      const p = createOpenAICompatible({
+        name: 'ollama',
+        apiKey: optionalApiKey(profile.apiKeyEnv) ?? 'ollama',
+        baseURL: ensureV1(profile.baseURL),
+      });
+      return p.textEmbeddingModel(route.model);
+    }
+    case 'openai-compatible': {
+      const p = createOpenAICompatible({
+        name: profile.name,
+        apiKey: optionalApiKey(profile.apiKeyEnv),
+        baseURL: profile.baseURL,
+        headers: profile.headers,
+      });
+      return p.textEmbeddingModel(route.model);
+    }
+    default:
+      throw new LLMProviderError(
+        `Provider "${profile.provider}" does not support embeddings; configure tasks.embedding to an openai / openai-compatible / ollama profile`,
+      );
+  }
 }
 
 // ---------------------------------------------------------------------------
