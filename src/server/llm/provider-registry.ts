@@ -5,6 +5,7 @@ import type { LLMRouteOverride, LLMTask, ResolvedTaskRoute } from './config-sche
 import { getLLMConfig } from './config-loader';
 import { getEmbeddingModel, getLanguageModel } from './provider-factory';
 import { resolveTask } from './task-router';
+import { LLMConfigError } from './errors';
 
 export function resolveModel(route: ResolvedTaskRoute): LanguageModel {
   return getLanguageModel(route);
@@ -138,11 +139,17 @@ export function isEmbeddingConfigured(): boolean {
 
 /** 返回 embedding 任务解析后的 modelId（tasks.embedding.model 或 defaults.model 兜底）。 */
 export function embeddingModelId(): string {
+  if (!isEmbeddingConfigured()) {
+    throw new LLMConfigError('Embedding model not configured (set tasks.embedding.model in llm-config.json)');
+  }
   return resolveTask('embedding').model;
 }
 
 /** 批量生成文本 embedding，返回 number[][] 向量数组。 */
 export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+  if (!isEmbeddingConfigured()) {
+    throw new LLMConfigError('Embedding model not configured (set tasks.embedding.model in llm-config.json)');
+  }
   const route = resolveTask('embedding');
   const { embeddings } = await embedMany({
     model: getEmbeddingModel(route),
