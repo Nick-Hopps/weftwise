@@ -122,6 +122,25 @@ export interface Source {
   subjectId: SubjectId;
 }
 
+export type PageSourceFormat = 'pdf' | 'markdown' | 'html' | 'text';
+
+/**
+ * A source document a page was written from, prepared for the split reading
+ * view. Content is delivered in one of `pages` (pdf sheets) / `text` / `html`
+ * depending on `format`, and may be capped (`truncated`) for large files.
+ */
+export interface PageSourceDoc {
+  id: string;
+  name: string;
+  format: PageSourceFormat;
+  added: string;
+  meta?: string;
+  truncated?: boolean;
+  pages?: string[];
+  text?: string;
+  html?: string;
+}
+
 export interface IngestResult {
   pagesCreated: string[];
   pagesUpdated: string[];
