@@ -42,12 +42,21 @@ describe('conversations-repo', () => {
 
   it('listConversations 按 updated_at DESC（touch 后置顶）', async () => {
     const repo = await setup();
-    const a = repo.createConversation('s1', 'A');
-    const b = repo.createConversation('s1', 'B');
-    // b 较新 → 先返回；touch a 后 a 置顶
-    expect(repo.listConversations('s1').map((c) => c.id)).toEqual([b.id, a.id]);
-    repo.touchConversation(a.id);
-    expect(repo.listConversations('s1')[0].id).toBe(a.id);
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:01Z'));
+      const a = repo.createConversation('s1', 'A');
+      vi.setSystemTime(new Date('2026-01-01T00:00:02Z'));
+      const b = repo.createConversation('s1', 'B');
+      // b 较新 → 先返回
+      expect(repo.listConversations('s1').map((c) => c.id)).toEqual([b.id, a.id]);
+      // touch a 到更晚时间 → a 置顶
+      vi.setSystemTime(new Date('2026-01-01T00:00:03Z'));
+      repo.touchConversation(a.id);
+      expect(repo.listConversations('s1')[0].id).toBe(a.id);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('appendMessage + listMessages（ASC，citations 反序列化）', async () => {
