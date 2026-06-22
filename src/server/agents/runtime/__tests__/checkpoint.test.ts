@@ -65,6 +65,30 @@ describe('loadCheckpoint', () => {
   });
 });
 
+describe('IngestCheckpoint — cited sources (⑨ 续传补源)', () => {
+  it('putCitedSources 落盘 + 重新 loadCheckpoint 读回；clear 后清空', async () => {
+    const { loadCheckpoint } = await import('../checkpoint');
+    const jobId = `ckpt-cited-${Math.random().toString(36).slice(2)}`;
+    const ck = loadCheckpoint(jobId);
+    expect(ck.getCitedSources()).toEqual([]);
+
+    const list = [
+      { url: 'https://a.com/x', title: 'A', citedBy: ['p1', 'p2'], fallbackContent: 'snip-a' },
+      { url: 'https://b.com/y', title: 'B', citedBy: ['p3'], fallbackContent: 'snip-b' },
+    ];
+    ck.putCitedSources(list);
+    expect(ck.getCitedSources()).toEqual(list);
+
+    const reloaded = loadCheckpoint(jobId);
+    expect(reloaded.getCitedSources()).toEqual(list);
+    expect(reloaded.hasAny()).toBe(true);
+
+    reloaded.clear();
+    expect(reloaded.getCitedSources()).toEqual([]);
+    expect(loadCheckpoint(jobId).getCitedSources()).toEqual([]);
+  });
+});
+
 describe('IngestCheckpoint — enricher/verifier page', () => {
   it('enricher/verifier page 双写并按 slug 读回', async () => {
     const { loadCheckpoint } = await import('../checkpoint');

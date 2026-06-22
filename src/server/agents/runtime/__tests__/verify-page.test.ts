@@ -84,6 +84,38 @@ describe('runPageVerification', () => {
     });
   });
 
+  it('has evidence → persists ctx.citedSources to checkpoint (⑨ 续传补源)', async () => {
+    isWebSearchConfigured.mockReturnValue(true);
+    runAgentLoop
+      .mockResolvedValueOnce({ runId: 'r1', output: { doubtfulClaims: [{ excerpt: 'e', query: 'quicksort year', reason: 'date' }] }, tokensUsed: 1, stepCount: 1, cacheHitTokens: 0 })
+      .mockResolvedValueOnce({ runId: 'r2', output: { action: 'update', path: 'wiki/general/quicksort.md', content: PAGE_MD, citedSources: [{ url: 'https://en.wikipedia.org/wiki/Quicksort', title: 'Quicksort - Wikipedia' }] }, tokensUsed: 2, stepCount: 1, cacheHitTokens: 0 });
+    webSearch.mockResolvedValue([{ title: 'Quicksort - Wikipedia', url: 'https://en.wikipedia.org/wiki/Quicksort', snippet: 'Tony Hoare 1959' }]);
+    const putCitedSources = vi.fn();
+    const ctx = {
+      emit: vi.fn(),
+      citedSources: new Map<string, CitedSource>(),
+      checkpoint: { putCitedSources, getCitedSources: () => [] },
+    } as unknown as AgentContext;
+    await runPageVerification({ resolveSkill, ctx, input: baseInput() });
+    expect(putCitedSources).toHaveBeenCalledTimes(1);
+    const persisted = putCitedSources.mock.calls[0][0] as CitedSource[];
+    expect(persisted).toEqual([...ctx.citedSources!.values()]);
+    expect(persisted[0]).toMatchObject({ url: 'https://en.wikipedia.org/wiki/Quicksort', citedBy: ['quicksort'] });
+  });
+
+  it('triage empty → does NOT persist citedSources (no checkpoint write)', async () => {
+    isWebSearchConfigured.mockReturnValue(true);
+    runAgentLoop.mockResolvedValueOnce({ runId: 'r', output: { doubtfulClaims: [] }, tokensUsed: 1, stepCount: 1, cacheHitTokens: 0 });
+    const putCitedSources = vi.fn();
+    const ctx = {
+      emit: vi.fn(),
+      citedSources: new Map<string, CitedSource>(),
+      checkpoint: { putCitedSources, getCitedSources: () => [] },
+    } as unknown as AgentContext;
+    await runPageVerification({ resolveSkill, ctx, input: baseInput() });
+    expect(putCitedSources).not.toHaveBeenCalled();
+  });
+
   it('has doubtful but zero evidence → self-check', async () => {
     isWebSearchConfigured.mockReturnValue(true);
     runAgentLoop
