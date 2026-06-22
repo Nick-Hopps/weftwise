@@ -17,6 +17,8 @@ interface PageRendererProps {
   titleSlugMap?: Record<string, string>;
   editHref?: string;
   subjectSlug?: string;
+  /** Tighten the prose measure for the split (sources) reading view. */
+  narrow?: boolean;
 }
 
 // Typography scale tuned for reading flow. Uses semantic `prose-*` color
@@ -61,11 +63,12 @@ export default function PageRenderer({
   titleSlugMap,
   editHref,
   subjectSlug,
+  narrow = false,
 }: PageRendererProps) {
   const rendered = useMemo(() => renderMarkdown(content, titleSlugMap, { math: true }), [content, titleSlugMap]);
 
   return (
-    <article className="max-w-content mx-auto px-6 py-10">
+    <article className={`wp-rise mx-auto px-6 py-10 ${narrow ? 'max-w-[62ch]' : 'max-w-content'}`}>
       {title && (
         <FrontmatterDisplay
           title={title}

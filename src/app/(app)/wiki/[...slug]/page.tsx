@@ -1,16 +1,15 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
-import { Link2 } from 'lucide-react';
 import type { Metadata } from 'next';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
+import * as sourcesRepo from '@/server/db/repos/sources-repo';
 import { GENERAL_SUBJECT_SLUG } from '@/server/wiki/page-identity';
 import { readPageInSubject } from '@/server/wiki/wiki-store';
 import { serializeWikiDocument } from '@/server/wiki/markdown';
-import PageRenderer from '@/components/wiki/page-renderer';
+import WikiReadingView from '@/components/wiki/wiki-reading-view';
 import { RetitleNotice } from '@/components/wiki/retitle-notice';
-import { SectionLabel } from '@/components/ui/panel';
 import type { Subject } from '@/lib/contracts';
 
 const SUBJECT_COOKIE = 'wiki_subject';
@@ -85,11 +84,21 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
   }
 
   const backlinks = pagesRepo.getBacklinks(subject.id, slug);
+  const backlinkItems = backlinks.map((bl) => ({
+    key: `${bl.subjectId}:${bl.slug}`,
+    href:
+      bl.subjectId === subject.id
+        ? `/wiki/${bl.slug}`
+        : `/wiki/${bl.slug}?s=${encodeURIComponent(subjectsRepo.getById(bl.subjectId)?.slug ?? '')}`,
+    title: bl.title,
+  }));
+
+  const sourceCount = sourcesRepo.getSourcesForPage(subject.id, slug).length;
 
   return (
-    <div className="flex flex-col min-h-full">
+    <>
       <RetitleNotice />
-      <PageRenderer
+      <WikiReadingView
         content={doc.body}
         rawContent={serializeWikiDocument(doc)}
         slug={slug}
@@ -101,37 +110,10 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
         titleSlugMap={titleSlugMap}
         editHref={`/wiki/edit/${slug}?s=${encodeURIComponent(subject.slug)}`}
         subjectSlug={subject.slug}
+        backlinks={backlinkItems}
+        sourceCount={sourceCount}
       />
-
-      {backlinks.length > 0 && (
-        <div className="max-w-content mx-auto px-6 pb-12 w-full">
-          <div className="border-t border-border pt-6">
-            <SectionLabel className="mb-3 flex items-center gap-1.5">
-              <Link2 className="h-3 w-3" />
-              Linked from
-            </SectionLabel>
-            <ul className="flex flex-wrap gap-2">
-              {backlinks.map((bl) => (
-                <li key={`${bl.subjectId}:${bl.slug}`}>
-                  <Link
-                    href={
-                      bl.subjectId === subject.id
-                        ? `/wiki/${bl.slug}`
-                        : `/wiki/${bl.slug}?s=${encodeURIComponent(
-                            subjectsRepo.getById(bl.subjectId)?.slug ?? '',
-                          )}`
-                    }
-                    className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-sm font-medium text-accent-strong bg-accent-subtle border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-colors focus-ring"
-                  >
-                    {bl.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

@@ -360,3 +360,91 @@
 .ingest-bar-indeterminate {
   animation: ingest-indeterminate 1.4s var(--ease-standard) infinite;
 }
+
+/* =============================================================================
+ * Callout labels — render the callout kind as a small uppercase eyebrow above
+ * its body, colored per kind. Pairs with the `.callout-<kind>` left borders set
+ * in page-renderer. `data-callout` carries the kind word.
+ * ============================================================================= */
+.callout[data-callout]::before {
+  content: attr(data-callout);
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: rgb(var(--color-fg-secondary));
+}
+.callout-intuition::before { color: #b45309; }
+.callout-example::before   { color: #0369a1; }
+.callout-quiz::before      { color: rgb(var(--color-accent-strong-fg)); }
+.callout-background::before { color: #475569; }
+.callout-diagram::before   { color: #0f766e; }
+.callout-pitfall::before   { color: #be123c; }
+
+/* =============================================================================
+ * Reading-view block reveal — a gentle fade + rise applied to the article.
+ * ============================================================================= */
+@keyframes wp-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.wp-rise {
+  animation: wp-rise 0.42s var(--ease-standard) both;
+}
+
+/* =============================================================================
+ * Ingested-source rendered HTML (split reading view, "Sources" pane).
+ * ============================================================================= */
+.src-html {
+  font-size: 15px;
+  line-height: 24px;
+  color: rgb(var(--color-prose-body));
+}
+.src-html h1 {
+  margin: 0 0 16px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: var(--tracking-tight);
+  color: rgb(var(--color-prose-heading));
+}
+.src-html h2 {
+  margin: 24px 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: rgb(var(--color-prose-heading));
+}
+.src-html p {
+  margin: 0 0 16px;
+}
+.src-html ul,
+.src-html ol {
+  margin: 0 0 16px;
+  padding-left: 22px;
+}
+.src-html li {
+  margin: 0 0 5px;
+}
+.src-html blockquote {
+  margin: 0 0 16px;
+  padding: 8px 16px;
+  border-left: 3px solid rgb(var(--color-accent-primary));
+  background: rgb(var(--color-accent-subtle));
+  border-radius: 0 6px 6px 0;
+}
+.src-html strong {
+  font-weight: 600;
+  color: rgb(var(--color-prose-heading));
+}
+.src-html a {
+  color: rgb(var(--color-accent-primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
