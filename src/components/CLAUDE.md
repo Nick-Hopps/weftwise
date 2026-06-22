@@ -74,7 +74,7 @@
 
 - `operation-list.tsx` —— 🆕 操作时间线列表（rowid DESC，含类型/受影响页/时间，可点展开 diff）
 - `operation-diff.tsx` —— 🆕 单次操作 unified diff 渲染（preHead → postHead）
-- `revert-button.tsx` —— 🆕 回滚按钮（前向 Saga 还原，SSE 追踪，完成后刷新列表）
+- `revert-button.tsx` —— 🆕 回滚按钮 + 确认弹窗（前向 Saga 还原，**同步 POST 无 SSE/job**；确认文案告知覆盖式语义；成功后 invalidate `['history']`/`['pages']` + `router.refresh()`）
 
 ### `shared/`
 

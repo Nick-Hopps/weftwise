@@ -38,8 +38,8 @@ LintFinding    { type, severity, pageSlug, description, suggestedFix }
 ChangesetEntry { action: 'create'|'update'|'delete', path, content }
 Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
                  status: 'pending'|'applied'|'rolled-back' }
-HistoryEntry   { operationId, type: string, affectedPages: HistoryAffectedPage[], timestamp, status }
-HistoryAffectedPage { slug, title, action: 'create'|'update'|'delete' }
+HistoryEntry   { id, sha, date, type: string, message, affectedPages: HistoryAffectedPage[], status: 'applied'|'reverted' }
+HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
 ```
 
 > **扩展规则**：

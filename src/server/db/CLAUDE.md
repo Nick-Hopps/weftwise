@@ -57,7 +57,7 @@
 
 版本历史/回滚核心（⑥）：管理 Saga 操作记录与可恢复性。
 
-- `listForSubject(subjectId, { limit, offset }): OperationRow[]` —— 按 `rowid DESC` 倒序，包含 `{ rowid, subject_id, preHead, postHead, changeset_json, status, created_at, job_type, job_id }`（LEFT JOIN jobs 取 type；仅返回 `status IN (applied, reverted)`）
+- `listForSubject(subjectId): OperationRow[]` —— 按 `rowid DESC` 倒序（id 恒为新 UUID → 纯 INSERT → rowid=时序），过滤 `post_head IS NOT NULL AND status IN (applied, reverted)`；返回 `OperationRow { id, jobId, subjectId, preHead, postHead, changesetJson, status, jobType }`（LEFT JOIN jobs 取 `jobType`，同步编辑/删除无 jobs 行 → null）
 - `getById(id): OperationRow | null` —— 取单条记录
 - `markReverted(id): void` —— 设 `status='reverted'`（表示用户手动回滚过该操作；与 `rolled-back` 区分）
 
