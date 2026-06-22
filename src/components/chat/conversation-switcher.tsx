@@ -10,7 +10,7 @@ import { cn } from '@/lib/cn';
 import type { Conversation } from '@/lib/contracts';
 
 export function ConversationSwitcher() {
-  const apiFetch = useApiFetch();
+  const apiFetchClient = useApiFetch();
   const queryClient = useQueryClient();
   const { id: subjectId } = useCurrentSubject();
   const currentId = useUIStore((s) => s.currentConversationId);
@@ -20,7 +20,7 @@ export function ConversationSwitcher() {
   const { data: conversations = [] } = useQuery({
     queryKey: ['conversations', subjectId],
     queryFn: async () => {
-      const res = await apiFetch('/api/conversations');
+      const res = await apiFetchClient('/api/conversations');
       if (!res.ok) return [] as Conversation[];
       return (await res.json()) as Conversation[];
     },
@@ -32,25 +32,25 @@ export function ConversationSwitcher() {
 
   const rename = useMutation({
     mutationFn: async ({ id, title }: { id: string; title: string }) => {
-      await apiFetch(`/api/conversations/${id}`, {
+      await apiFetchClient(`/api/conversations/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, subjectId }),
       });
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['conversations', subjectId] }),
   });
 
   const remove = useMutation({
     mutationFn: async (id: string) => {
-      await apiFetch(`/api/conversations/${id}`, {
+      await apiFetchClient(`/api/conversations/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subjectId }),
       });
     },
     onSuccess: (_d, id) => {
-      queryClient.invalidateQueries({ queryKey: ['conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['conversations', subjectId] });
       if (id === currentId) setCurrent(null);
     },
   });
