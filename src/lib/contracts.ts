@@ -187,6 +187,23 @@ export interface HistoryEntry {
   status: 'applied' | 'reverted';
 }
 
+export interface Conversation {
+  id: string;
+  subjectId: SubjectId;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationMessage {
+  id: string;
+  conversationId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  citations: { pageSlug: string; excerpt: string }[] | null;
+  createdAt: string;
+}
+
 export const DEFAULT_WIKI_LANGUAGE = 'English';
 
 export const WikiLanguageSchema = z

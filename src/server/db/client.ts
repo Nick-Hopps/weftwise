@@ -357,6 +357,35 @@ function migrateIngestCheckpoints(): void {
   `);
 }
 
+function migrateConversations(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('conversations')) return;
+  sqlite.exec(`
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+function migrateMessages(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('messages')) return;
+  sqlite.exec(`
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      citations_json TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
 // 特例：FTS5 虚拟表不支持 _new + INSERT FROM 重建（索引可由 pages 重建），缺列时直接 DROP 重建
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
@@ -397,6 +426,8 @@ function ensureTables() {
     migrateOperations();
     migrateAppSettings();
     migrateIngestCheckpoints();
+    migrateConversations();
+    migrateMessages();
     ensurePagesFts();
   } finally {
     rawSqlite.pragma('foreign_keys = ON');
