@@ -101,8 +101,10 @@ export async function runPageVerification(opts: {
   if (cited.length > 0) {
     content = appendSourcesToFrontmatter(content, cited.map((c) => c.url));
     recordCitedSources(ctx, page.slug ?? '', cited, evidence);
-    // ⑨ 续传补源：record 后同步持久化整张累积列表（无 await，与 record 原子）。
-    // 续传命中 verifier-page 检查点跳过本函数时，finalize 仍能从 checkpoint rehydrate 出本页的源。
+    // ⑨ 续传补源：record 后同步持久化整张累积列表。JS 单线程——record 与此处快照之间无
+    // await，同一 microtask 内并发 fanout 页不会穿插改 Map；citedSources 单调增长，每个有源页
+    // 都 persist，故末次写必为完整集，不丢源。续传命中 verifier-page 检查点跳过本函数时，
+    // finalize 仍能从 checkpoint rehydrate 出本页的源。
     if (ctx.citedSources) ctx.checkpoint?.putCitedSources([...ctx.citedSources.values()]);
   }
 
