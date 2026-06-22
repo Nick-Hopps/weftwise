@@ -8,9 +8,9 @@ import { getDb } from '@/server/db/client';
 import { sources } from '@/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { DashboardHero } from './_components/dashboard-hero';
-import { DashboardIngestPanel } from './_components/dashboard-ingest-panel';
+import { DashboardIngestHero } from './_components/dashboard-ingest-hero';
 import { SectionLabel } from '@/components/ui/panel';
-import { TagLink } from '@/components/wiki/tag-link';
+import { Tag } from '@/components/ui/tag';
 import type { Subject } from '@/lib/contracts';
 
 const SUBJECT_COOKIE = 'wiki_subject';
@@ -79,25 +79,16 @@ export default async function DashboardPage() {
 
   if (isEmpty) {
     return (
-      <div className="max-w-2xl mx-auto px-6 py-10 sm:py-16 space-y-8">
+      <div className="max-w-[760px] mx-auto px-6 py-10 sm:py-16 space-y-6">
         <DashboardHero pageCount={0} />
-        <section className="space-y-3">
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">
-              Start with your first source in <span className="font-mono text-accent-strong">{subject.slug}</span>
-            </h2>
-            <p className="text-sm text-foreground-secondary">
-              Upload a document or paste text — the agent will create the pages for you.
-            </p>
-          </div>
-          <DashboardIngestPanel />
-        </section>
+        <DashboardIngestHero />
       </div>
     );
   }
 
   return (
     <div className="max-w-[1200px] mx-auto w-full px-6 py-6 space-y-6">
+      {/* greeting + stats */}
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <DashboardHero pageCount={stats.pageCount} compact />
         <div className="grid grid-cols-3 gap-2 lg:w-auto lg:min-w-[380px]">
@@ -107,24 +98,27 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <section aria-labelledby="recent-pages-heading" className="lg:col-span-8">
-          <div className="flex items-center justify-between mb-2">
-            <SectionLabel id="recent-pages-heading">
-              Recent Pages — <span className="font-mono">{subject.slug}</span>
-            </SectionLabel>
-            <span className="text-xs text-foreground-tertiary font-mono">
-              {recentPages.length}
-            </span>
-          </div>
-          <ul className="rounded-md border border-border bg-surface divide-y divide-border">
-            {recentPages.map((page) => (
+      {/* ingest hero — the dashboard's primary feature */}
+      <DashboardIngestHero />
+
+      {/* recent pages */}
+      <section aria-labelledby="recent-pages-heading">
+        <div className="flex items-center justify-between mb-2">
+          <SectionLabel id="recent-pages-heading">
+            Recent Pages — <span className="font-mono normal-case">{subject.slug}</span>
+          </SectionLabel>
+          <span className="text-xs text-foreground-tertiary font-mono">{recentPages.length}</span>
+        </div>
+        <ul className="rounded-md border border-border bg-surface divide-y divide-border">
+          {recentPages.map((page) => {
+            const tags = (page.tags ?? []).filter((t) => t !== 'meta').slice(0, 2);
+            return (
               <li key={`${page.subjectId}:${page.slug}`}>
                 <Link
                   href={`/wiki/${page.slug}`}
                   className="group flex items-center gap-3 h-11 px-3 hover:bg-subtle transition-colors focus-ring rounded-md"
                 >
-                  <span className="text-foreground-tertiary text-xs font-mono w-4 shrink-0">≡</span>
+                  <span className="text-foreground-tertiary text-xs font-mono w-3.5 shrink-0">≡</span>
                   <span className="flex-1 min-w-0 flex items-center gap-3">
                     <span className="text-sm font-medium text-foreground group-hover:text-accent-strong transition-colors truncate">
                       {page.title}
@@ -135,10 +129,12 @@ export default async function DashboardPage() {
                       </span>
                     )}
                   </span>
-                  {page.tags && page.tags.filter((t) => t !== 'meta').length > 0 && (
+                  {tags.length > 0 && (
                     <span className="hidden lg:flex gap-1 shrink-0">
-                      {page.tags.filter((t) => t !== 'meta').slice(0, 2).map((t) => (
-                        <TagLink key={t} tag={t} subjectSlug={subject.slug} />
+                      {tags.map((t) => (
+                        <Tag key={t} tone="neutral">
+                          {t}
+                        </Tag>
                       ))}
                     </span>
                   )}
@@ -147,24 +143,23 @@ export default async function DashboardPage() {
                   </time>
                 </Link>
               </li>
-            ))}
-          </ul>
-        </section>
+            );
+          })}
+        </ul>
+      </section>
 
-        <aside className="lg:col-span-4 space-y-4">
-          <section aria-labelledby="add-knowledge-heading" className="space-y-2">
-            <SectionLabel id="add-knowledge-heading">Add Knowledge</SectionLabel>
-            <DashboardIngestPanel compact />
-          </section>
-
-          <section aria-labelledby="wiki-graph-heading" className="space-y-2">
-            <SectionLabel id="wiki-graph-heading">Wiki Graph — {subject.slug}</SectionLabel>
-            <div className="h-60">
-              <MiniGraphView key={subject.id} fill />
-            </div>
-          </section>
-        </aside>
-      </div>
+      {/* knowledge graph — kept from the live app (the design relocates it to the context panel) */}
+      <section aria-labelledby="wiki-graph-heading">
+        <div className="flex items-center justify-between mb-2">
+          <SectionLabel id="wiki-graph-heading">
+            Wiki Graph — <span className="font-mono normal-case">{subject.slug}</span>
+          </SectionLabel>
+          <span className="text-[10px] italic text-foreground-tertiary">drag · scroll · click</span>
+        </div>
+        <div className="h-72 rounded-md border border-border bg-canvas overflow-hidden">
+          <MiniGraphView key={subject.id} fill />
+        </div>
+      </section>
     </div>
   );
 }
