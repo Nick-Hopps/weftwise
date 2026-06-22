@@ -2,6 +2,7 @@ import {
   sqliteTable,
   text,
   integer,
+  blob,
   primaryKey,
   uniqueIndex,
 } from 'drizzle-orm/sqlite-core';
@@ -169,3 +170,19 @@ export const messages = sqliteTable('messages', {
   citationsJson: text('citations_json'),
   createdAt: text('created_at').notNull(),
 });
+
+export const pageEmbeddings = sqliteTable(
+  'page_embeddings',
+  {
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    slug: text('slug').notNull(),
+    model: text('model').notNull(),
+    contentHash: text('content_hash').notNull(),
+    dim: integer('dim').notNull(),
+    vector: blob('vector').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
+);
