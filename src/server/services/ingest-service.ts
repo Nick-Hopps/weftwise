@@ -25,6 +25,7 @@ import {
   reduceCostForResume,
 } from './ingest-prep';
 import { getRuntimeRegistries } from '../worker-runtime';
+import { enqueueEmbedIndex } from './embedding-service';
 import { randomUUID } from 'node:crypto';
 import type { AgentContext } from '../agents/types';
 import type { ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
@@ -204,6 +205,9 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   // 成功（已 commit）→ 清除检查点；失败时不清，留给下次重试
   checkpoint.clear();
+
+  // 写后触发向量回填（未配置 embedding 时 no-op）
+  enqueueEmbedIndex(subject.id);
 
   return result as unknown as Record<string, unknown>;
 });

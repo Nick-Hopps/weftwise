@@ -104,6 +104,10 @@ vi.mock('../../jobs/worker', () => ({
   registerHandler: (type: string, h: (job: unknown, emit: unknown) => Promise<unknown>) => { handlers.set(type, h); },
 }));
 
+vi.mock('../embedding-service', () => ({
+  enqueueEmbedIndex: vi.fn(),
+}));
+
 function makeJob() {
   return {
     id: 'j1',
