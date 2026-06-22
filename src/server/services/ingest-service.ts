@@ -153,6 +153,11 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     citedSources: new Map(),
   };
 
+  // ⑨ 续传补源：从 checkpoint rehydrate 已核查页累积的网页引用源。新 run 为空 no-op；
+  // 续传时这些页会命中 verifier-page 检查点而跳过 verify-page（不再 record），靠此补回，
+  // 使 finalize 仍把崩溃前已核查页的网页导入为 source（闭合 I-1）。
+  for (const c of checkpoint.getCitedSources()) ctx.citedSources!.set(c.url, c);
+
   const existingPages = pagesRepo
     .getAllPages(subjectId)
     .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary }));
