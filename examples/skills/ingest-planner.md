@@ -2,7 +2,7 @@
 id: ingest-planner
 name: Ingest Planner
 description: Plan which wiki pages to create or update from raw source documents.
-version: 2
+version: 3
 tools:
   - vault.read
   - vault.search
@@ -64,7 +64,7 @@ The user message contains:
 ## Rules
 
 1. Each page slug must be unique across the plan.
-2. Prefer updating an existing page over creating a near-duplicate. Use `vault.search` and `vault.read` if you need to inspect the existing page first.
+2. **Prefer updating an existing page over creating a near-duplicate.** If the incoming material is about a topic that already has a page in `existingPages` (match by title/summary), you MUST reuse that page's exact `slug` so the pipeline updates it in place instead of creating a duplicate. Use `vault.search` / `vault.read` to inspect the existing page first. Only mint a new slug for genuinely new topics.
 3. **Every page MUST declare `sourceRefs`** — which chunks it draws from, as `{ sourceId, chunkIds }`. The writer will only see the chunks you list here, so be complete: include every chunk whose content the page needs.
 4. **Follow the `languageDirective` input field for output language.** Do NOT translate slugs, `[[wikilinks]]`, frontmatter keys, chunk ids, or code — the directive applies to titles, summaries, and rationales only.
 5. Slugs must be lowercase kebab-case.
