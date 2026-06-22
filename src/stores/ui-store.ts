@@ -34,6 +34,9 @@ interface UIState {
   currentSubjectId: string | null;
   currentSubjectSlug: string;
 
+  currentConversationId: string | null;
+  setCurrentConversation: (id: string | null) => void;
+
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
   resetSidebarWidth: () => void;
@@ -70,11 +73,12 @@ function syncSubjectCookie(slug: string): void {
   document.cookie = `${SUBJECT_COOKIE_NAME}=${encodeURIComponent(slug)}; path=/; SameSite=Lax; max-age=31536000`;
 }
 
-// Persist migration: v1 → v2 → v3 → v4.
+// Persist migration: v1 → v2 → v3 → v4 → v5.
 // v1: rightPanelOpen/chatOpen/rightPanelWidth
 // v2: contextPanelOpen/contextPanelTab/contextPanelWidth
 // v3: drops contextPanelWidth (right panel is now fixed), adds sidebarWidth.
 // v4: adds currentSubjectId/currentSubjectSlug for first-class subjects.
+// v5: adds currentConversationId (reset on subject change).
 interface LegacyPersistedState {
   darkMode?: boolean;
   rightPanelOpen?: boolean;
@@ -86,6 +90,7 @@ interface LegacyPersistedState {
   sidebarWidth?: number;
   currentSubjectId?: string | null;
   currentSubjectSlug?: string;
+  currentConversationId?: string | null;
 }
 
 function migratePersisted(persisted: unknown, version: number) {
@@ -103,6 +108,7 @@ function migratePersisted(persisted: unknown, version: number) {
       ...baseV3,
       currentSubjectId: prev.currentSubjectId ?? null,
       currentSubjectSlug: prev.currentSubjectSlug ?? GENERAL_SUBJECT_SLUG,
+      currentConversationId: prev.currentConversationId ?? null,
     };
   }
 
@@ -111,6 +117,7 @@ function migratePersisted(persisted: unknown, version: number) {
       ...baseV3,
       currentSubjectId: null,
       currentSubjectSlug: GENERAL_SUBJECT_SLUG,
+      currentConversationId: null,
     };
   }
 
@@ -122,6 +129,7 @@ function migratePersisted(persisted: unknown, version: number) {
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       currentSubjectId: null,
       currentSubjectSlug: GENERAL_SUBJECT_SLUG,
+      currentConversationId: null,
     };
   }
 
@@ -143,6 +151,7 @@ function migratePersisted(persisted: unknown, version: number) {
     sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
     currentSubjectId: null,
     currentSubjectSlug: GENERAL_SUBJECT_SLUG,
+    currentConversationId: null,
   };
 }
 
@@ -159,6 +168,7 @@ export const useUIStore = create<UIState>()(
       settingsDialogOpen: false,
       currentSubjectId: null,
       currentSubjectSlug: GENERAL_SUBJECT_SLUG,
+      currentConversationId: null,
 
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
@@ -184,14 +194,20 @@ export const useUIStore = create<UIState>()(
       openSettingsDialog: () => set({ settingsDialogOpen: true }),
       closeSettingsDialog: () => set({ settingsDialogOpen: false }),
 
+      setCurrentConversation: (id) => set({ currentConversationId: id }),
+
       setCurrentSubject: (subject) => {
-        set({ currentSubjectId: subject.id, currentSubjectSlug: subject.slug });
+        set({
+          currentSubjectId: subject.id,
+          currentSubjectSlug: subject.slug,
+          currentConversationId: null,
+        });
         syncSubjectCookie(subject.slug);
       },
     }),
     {
       name: 'ui-store',
-      version: 4,
+      version: 5,
       migrate: migratePersisted,
       partialize: (s) => ({
         darkMode: s.darkMode,
@@ -200,6 +216,7 @@ export const useUIStore = create<UIState>()(
         sidebarWidth: s.sidebarWidth,
         currentSubjectId: s.currentSubjectId,
         currentSubjectSlug: s.currentSubjectSlug,
+        currentConversationId: s.currentConversationId,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
