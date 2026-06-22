@@ -57,7 +57,7 @@ Route Handler / Worker Handler
 | `llm/task-router` | `resolveTask`（合并 defaults / task / override） |
 | `db/client` | `getDb / getRawDb`（启动时自迁移 legacy schema → subject-aware） |
 | `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo` 的 CRUD + FTS search（全部要求 `subjectId`） |
-| `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead` |
+| `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead / getFileAtCommit / getDiff / getVaultLog / parseGitLog` |
 | `middleware/auth` | `requireAuth / requireCsrf / createSessionResponse` |
 | `middleware/subject` | `resolveSubjectFromRequest(request, { required?, body? })` |
 | `config/env` | `getConfig / vaultPath` |
@@ -128,6 +128,7 @@ src/server/
 |------|------|
 | 2026-04-22 | 初始化：梳理后端分层与交叉引用 |
 | 2026-04-25 | 引入 Subject：subjects 表 + 复合 PK + middleware/subject + 全链路 subjectId |
+| 2026-06-22 | git-service 加 getVaultLog/parseGitLog；新增 operations-repo + wiki/{revert,history}.ts + /api/history* 路由（⑥ 版本历史/diff）|
 
 ---
 

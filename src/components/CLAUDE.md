@@ -70,6 +70,12 @@
 - `tags-index-view.tsx` —— 🆕 标签索引（aggregateTags(/api/pages) → tag+count）
 - `tag-pages-view.tsx` —— 🆕 单标签页列表（pagesWithTag）
 
+### `history/`
+
+- `operation-list.tsx` —— 🆕 操作时间线列表（rowid DESC，含类型/受影响页/时间，可点展开 diff）
+- `operation-diff.tsx` —— 🆕 单次操作 unified diff 渲染（preHead → postHead）
+- `revert-button.tsx` —— 🆕 回滚按钮（前向 Saga 还原，SSE 追踪，完成后刷新列表）
+
 ### `shared/`
 
 - `global-job-tracker.tsx` —— 全局任务状态指示器（读队列中所有任务）
@@ -132,11 +138,13 @@ src/components/
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*}
-├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice}
+├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, merge-dialog, merge-button, split-dialog, split-button}
 ├── chat/         {chat-interface, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
+├── tags/         {tags-index-view, tag-pages-view}
+├── history/      {operation-list, operation-diff, revert-button}
 ├── graph/        {mini-graph-view}
-└── shared/       {global-job-tracker, progress-toast}
+└── shared/       {global-job-tracker, progress-toast, settings-dialog}
 ```
 
 ## 变更记录 (Changelog)
@@ -147,6 +155,7 @@ src/components/
 | 2026-04-25 | Subject：SubjectSwitcher (⌘O) / wiki-page-elsewhere / 各客户端组件接入 subjectId / wiki-link 缓存 key 加 subject |
 | 2026-04-26 | wikiLanguage：`settings-dialog.tsx` 新增 "Wiki language" 行（React Query GET/PUT `/api/settings`，不写 Zustand）|
 | 2026-04-27 | settings-dialog 新增 "Agents" section（5 个 agent runtime 配置控件：max steps / token budget / parallel sub-agents / MCP lifecycle / LLM selection mode）|
+| 2026-06-22 | 新增 `history/` 目录（operation-list/operation-diff/revert-button 职责）；供 ⑥ 版本历史/diff |
 
 ---
 

@@ -26,7 +26,7 @@ SubjectId      = string  // uuid 或 'subject-general' / 'subject-<uuid>' legacy
 Subject        { id: SubjectId, slug, name, description, createdAt, updatedAt }
 WikiPage       { subjectId, slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
 WikiLink       { subjectId, sourceSlug, targetSubjectId, targetSlug, context }
-Job            { id, type: 'ingest'|'lint'|'save-to-wiki', status, subjectId: SubjectId|null,
+Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'merge'|'split', status, subjectId: SubjectId|null,
                  paramsJson, resultJson, createdAt, startedAt, completedAt,
                  leaseExpiresAt, heartbeatAt, attemptCount }
 JobEvent       { id, jobId, type, message, dataJson, createdAt }
@@ -38,6 +38,8 @@ LintFinding    { type, severity, pageSlug, description, suggestedFix }
 ChangesetEntry { action: 'create'|'update'|'delete', path, content }
 Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
                  status: 'pending'|'applied'|'rolled-back' }
+HistoryEntry   { operationId, type: string, affectedPages: HistoryAffectedPage[], timestamp, status }
+HistoryAffectedPage { slug, title, action: 'create'|'update'|'delete' }
 ```
 
 > **扩展规则**：
@@ -107,6 +109,7 @@ src/lib/
 |------|------|
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：contracts 增加 `Subject` / `SubjectId` 与 `subjectId` 字段；`useApiFetch()` hook 自动注入 subjectId；markdown-client 跨主题 `?s=` href |
+| 2026-06-22 | contracts 新增 `HistoryEntry` / `HistoryAffectedPage` 类型（⑥ 版本历史/diff）|
 
 ---
 
