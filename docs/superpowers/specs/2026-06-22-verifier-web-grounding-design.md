@@ -131,7 +131,9 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 **同一 commit**：扩展 `SourceLinkOps`（多 source + `extraStagePaths`）使网页 source 的 raw/sidecar 文件、page_sources、引用页（含更新后的 frontmatter）都进**同一次 ingest commit**——保持 ⑥ 版本历史/回滚的「整次操作一个 commit」粒度。
 
-**已知限制**：⑥ 回滚某次 ingest 操作会把页面正文还原到 preHead，但**不会撤销已导入的网页 source**（sources 行/文件/page_sources 残留为无害孤儿；`rebuild.ts` 以 sidecar 为权威可重建一致状态）。这与现有 ingest source 的累加语义一致，spec 显式接受。
+**已知限制（回滚不撤源）**：⑥ 回滚某次 ingest 操作会把页面正文还原到 preHead，但**不会撤销已导入的网页 source**（sources 行/文件/page_sources 残留为无害孤儿；`rebuild.ts` 以 sidecar 为权威可重建一致状态）。这与现有 ingest source 的累加语义一致，spec 显式接受。
+
+**已知限制（断点续传不补源）**：`ctx.citedSources` 不进 checkpoint，且 `verifier-page` 命中检查点的页会跳过 `runPageVerification`（不重跑 triage/apply、不再累积 citedSources）。因此若 ingest job **崩溃后续传**，崩溃前已核查页的网页 source**不会被导入**——这些页的引用 URL 仍保留在其 frontmatter `sources`（读者可见层，已烘焙进 checkpoint 缓存的页内容），但缺 source 实体行 + `page_sources`（后者当前无阅读 UI）。仅发生在「崩溃 + 续传」这一稀有路径，且读者可见的 frontmatter 层不受影响，故 spec 显式接受为已知限制；如需补齐，fast-follow = 把 citedSources 一并持久化进 `verifier-page` checkpoint。
 
 ---
 
