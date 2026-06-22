@@ -72,6 +72,7 @@
 - `deleteConversation(id): void` —— 级联删 messages
 - `appendMessage(conversationId, role, content, citationsJson): ConversationMessage` —— 新增消息
 - `listMessages(conversationId): ConversationMessage[]` —— 按 `created_at, rowid ASC` 排序
+- `touchConversation(id): void` —— 更新 `updated_at = now`（新消息到达时置顶）
 
 ### `settings-repo.ts`（全局键值设置）
 

@@ -53,7 +53,7 @@
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key；接入会话载入/保存/切换（`useEffect` 载历史 + `loadedConversationIdRef` 守卡防自身覆盖 + done 设 ref/id+invalidate）
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key；接入会话载入/保存/切换（`useEffect` 载历史 + `loadedConversationIdRef` 守卫防自身覆盖 + done 设 ref/id+invalidate）
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx`
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`，body 带 `subjectId`
