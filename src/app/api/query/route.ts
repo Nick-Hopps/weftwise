@@ -172,7 +172,7 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        const context = prepareQueryContext(trimmedQuestion, subject.id, pageSlug);
+        const context = await prepareQueryContext(trimmedQuestion, subject.id, pageSlug);
 
         if (context.length === 0) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
