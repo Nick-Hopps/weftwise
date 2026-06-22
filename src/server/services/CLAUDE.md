@@ -127,6 +127,7 @@ src/server/services/
 | 2026-06-20 | ingest 流水线扩展为 5 阶段：新增 enricher（callout 增益层）+ verifier（参数化自检，P2），均为结构化输出无 tools；CONTENT_STAGE_FACTOR=3 预算估算 + DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M |
 | 2026-06-22 | 新增 `merge-service`（任务类型 `merge`）：LLM 融合两页 + 删源页 + 同事务重链（④b）|
 | 2026-06-22 | 新增 `split-service`（任务类型 `split`）：LLM 拆 N 页 + 删源页 + 同事务重指主页（④c）|
+| 2026-06-22 | ingest 增量合并：writer fanout step 加 `injectExistingPageForUpdate:true`，更新已有页时 orchestrator 注入现有正文，writer 并入新材料而非整页覆盖（⑤）|
 
 ---
 
