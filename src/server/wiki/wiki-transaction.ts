@@ -177,8 +177,10 @@ export function validateChangeset(
 }
 
 export interface SourceLinkOps {
-  sourceId: string;
-  pageSlugs: string[];
+  /** 每个 source → 其关联的页 slug 列表（多源：ingest 原始源 + 本次核查引用的网页源）。 */
+  links: Array<{ sourceId: string; pageSlugs: string[] }>;
+  /** 提交前已写入 vault 工作树、需纳入本 commit 的额外文件路径（raw 源文件 + sidecar），相对 vault 根。 */
+  extraStagePaths?: string[];
   linkPageSource: (subjectId: string, pageSlug: string, sourceId: string) => void;
   updateSourcePageLinks: (sourceId: string, pageSlugs: string[]) => void;
   /** sidecar 更新失败时的告警出口；缺省时静默（不影响 changeset 提交）。 */
@@ -238,30 +240,37 @@ export async function applyChangeset(
         indexTouchedPages(working.subjectId, touchedSlugs);
 
         if (sourceOps) {
-          for (const slug of sourceOps.pageSlugs) {
-            sourceOps.linkPageSource(working.subjectId, slug, sourceOps.sourceId);
+          for (const link of sourceOps.links) {
+            for (const slug of link.pageSlugs) {
+              sourceOps.linkPageSource(working.subjectId, slug, link.sourceId);
+            }
           }
         }
       });
       updateIndex();
 
       if (sourceOps) {
-        try {
-          sourceOps.updateSourcePageLinks(sourceOps.sourceId, sourceOps.pageSlugs);
-        } catch (err) {
-          // sidecar 更新不阻断提交，但必须让调用方可见
-          sourceOps.onWarning?.(
-            `Failed to update source page links for source ${sourceOps.sourceId}: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-          );
+        for (const link of sourceOps.links) {
+          try {
+            sourceOps.updateSourcePageLinks(link.sourceId, link.pageSlugs);
+          } catch (err) {
+            sourceOps.onWarning?.(
+              `Failed to update source page links for source ${link.sourceId}: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
         }
       }
 
       const affectedPaths = working.entries.map((e) => e.path);
+      const stagePaths =
+        sourceOps?.extraStagePaths && sourceOps.extraStagePaths.length > 0
+          ? [...affectedPaths, ...sourceOps.extraStagePaths]
+          : affectedPaths;
       const postHead = await commitVaultChanges(
         `[subject:${working.subjectSlug}] Apply changeset ${working.id} (job: ${working.jobId})`,
-        affectedPaths
+        stagePaths
       );
 
       db
