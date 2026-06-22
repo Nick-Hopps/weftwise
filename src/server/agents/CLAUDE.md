@@ -97,7 +97,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `agent-loop.ts` | 单个 agent 的 tool-call 驱动循环；调用 `llm/provider-registry::resolveModel(route)` 获取模型，循环执行直到 stop 或 budget 超限 |
-| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入）；step 支持 `checkpointAs`（'plan'/'writer-page'/'enricher-page'/'verifier-page'/'chunk-summary'），命中检查点跳过 LLM，每页完成即落盘；fanout step 可携带 `injectPriorPageAs`，自动将上一阶段对应 path 的 content 注入当前阶段输入；`ctx.pending` 按 path upsert（last-write-wins，后阶段覆盖前阶段）|
+| `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入）；step 支持 `checkpointAs`（'plan'/'writer-page'/'enricher-page'/'verifier-page'/'chunk-summary'），命中检查点跳过 LLM，每页完成即落盘；fanout step 可携带 `injectPriorPageAs`，自动将上一阶段对应 path 的 content 注入当前阶段输入；亦可携带 `injectExistingPageForUpdate`（仅 writer step 启用），当本页 slug 命中 `existingPages`（=更新已有页）时经 `ctx.overlay.readPage` 注入现有正文 `existingPageContent`，供 writer 增量并入而非覆盖（⑤）；`ctx.pending` 按 path upsert（last-write-wins，后阶段覆盖前阶段）|
 | `budget.ts` | `createBudgetTracker`（job 级 token）+ `createRunStepTracker`（单实例 step）；超限抛 `BudgetExceededError` |
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
 | `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变 |
@@ -275,6 +275,7 @@ src/server/agents/
 | 2026-06-20 | 断点续传：新增 `checkpoint.ts`（IngestCheckpoint 句柄）；`AgentContext.checkpoint?` 可选字段；`PipelineStep.checkpointAs` 逐页续传（命中检查点跳过 LLM，writer 完成即落盘）|
 | 2026-06-20 | P2 双层增益：新增 enricher（`[!type]` callout 增益层）+ verifier（参数化自检，结构化输出无 tools）fanout 步骤；orchestrator pending last-write-wins upsert + 跨阶段 injectPriorPageAs 注入；checkpoint 扩展 enricher-page/verifier-page 类型；DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M（CONTENT_STAGE_FACTOR=3）|
 | 2026-06-21 | 删除 tool-using `ingest-reviewer`（packyapi openai-compatible 上工具死循环）：新增无 tools 的 `ingest-indexer`（结构化输出 `{indexMd, logMd}`）；commit 抽出 `commitPending` 并上移到 `ingest-service::finalizeIngest`（service 层收口，符合 Saga 契约）；流水线由 5 阶段收敛为 4 内容阶段 + service finalize；`commit_changeset` tool 降级为 `commitPending` 薄包装（已无 skill 引用）|
+| 2026-06-22 | 增量合并：fanout step 加 `injectExistingPageForUpdate`，writer 更新已有页时 orchestrator 确定性注入现有正文 `existingPageContent`（`buildFanoutInput` 改 async），writer skill v5 并入新材料而非覆盖、planner skill v3 强化复用 slug（⑤）|
 
 ---
 
