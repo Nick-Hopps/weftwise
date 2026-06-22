@@ -61,6 +61,18 @@
 - `getById(id): OperationRow | null` —— 取单条记录
 - `markReverted(id): void` —— 设 `status='reverted'`（表示用户手动回滚过该操作；与 `rolled-back` 区分）
 
+### `conversations-repo.ts` 🆕
+
+多轮对话持久化（⑦）：`subject_id` scoped，级联 ON DELETE CASCADE。
+
+- `createConversation(subjectId, title): Conversation` —— 新建会话
+- `listConversations(subjectId): Conversation[]` —— 按 `updated_at DESC, rowid DESC` 排序
+- `getConversation(id): Conversation | null` —— 取单条（不限 subject，由路由校验）
+- `renameConversation(id, title): void` —— 改标题 + touch `updated_at`
+- `deleteConversation(id): void` —— 级联删 messages
+- `appendMessage(conversationId, role, content, citationsJson): ConversationMessage` —— 新增消息
+- `listMessages(conversationId): ConversationMessage[]` —— 按 `created_at, rowid ASC` 排序
+
 ### `settings-repo.ts`（全局键值设置）
 
 通用 key/value 表，承载所有"全 app 单实例"的全局设置（首个使用方：`wikiLanguage`，存语言名字符串如 "English" / "Chinese"）。
@@ -117,6 +129,8 @@
 | `job_events` | `id` | 顺序由 `created_at` 决定；SSE 用 `Last-Event-Id` 续播 |
 | `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back` |
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
+| `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
+| `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
 
 ## 扩展指南
 
@@ -153,7 +167,8 @@ src/server/db/
     ├── sources-repo.ts        # subject-scoped
     ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
     ├── checkpoints-repo.ts    # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
-    └── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
+    ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
+    └── conversations-repo.ts  # 多轮对话 CRUD（⑦）
 ```
 
 ## 变更记录 (Changelog)
@@ -166,6 +181,7 @@ src/server/db/
 | 2026-04-27 | settings-repo 新增 5 个 agent 配置 key（maxSteps / maxTokensPerJob / maxParallelSubAgents / mcpLifecycle / taskRouterMode）|
 | 2026-06-20 | ingest_checkpoints 表 + checkpoints-repo（断点续传：getCheckpoints / putCheckpoint / deleteCheckpoints / getProgress）|
 | 2026-06-22 | 新增 operations-repo（版本历史时间线取数：listForSubject/getById/markReverted）（⑥）|
+| 2026-06-22 | 新增 conversations/messages 两表 + conversations-repo（多轮对话持久化，subject-scoped，级联删除）（⑦）|
 
 ---
 

@@ -42,13 +42,15 @@ worker-entry.ts
 
 接入断点续传：启动时 `loadCheckpoint(job.id)` 载入检查点句柄并挂至 `AgentContext.checkpoint`；若 `ckpt.hasAny()` 则 emit `ingest:resuming`；steps 标注 `checkpointAs` 使 orchestrator 逐页续传；预算预检调 `reduceCostForResume(ingest-prep)` 按已写页比例折减估算值；pipeline 成功返回前 `checkpoint.clear()` 删除所有检查点行。
 
-### `query-service.ts` — 任务类型 `'save-to-wiki'` + 同步函数
+### `query-service.ts` — 任务类型 `'save-to-wiki'` + 同步函数 + 多轮记忆
 
-- 同步函数 `answerQuery(question, subjectId, currentPageSlug?)`：
+- 同步函数 `answerQuery(question, subjectId, currentPageSlug?, history?)`：
   1. FTS5 搜 top 5 相关 page（限定 subject）；
-  2. 组装上下文 → `generateStructuredOutput('query', QueryResponseSchema, ...)`，prompt 注入 SubjectContext；
+  2. 组装上下文 + 可选历史记录 → `generateStructuredOutput('query', QueryResponseSchema, ...)`，prompt 注入 SubjectContext；
   3. 返回 `QueryResult { answer, citations, savedAsPage: null }`。
+  - `history` 可选参数：`{ role: 'user'|'assistant', content }[]`，非空时注入 buildQueryUserPrompt 的 transcript 段。
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue），走 changeset 写入对应 subject。
+- 流式分支 `streamQueryAnswer(...)` 新增 `history` 可选参透传。
 
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 该 subject 知识库为空时的兜底回答。
 
@@ -110,7 +112,8 @@ worker-entry.ts
 src/server/services/
 ├── ingest-service.ts   # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts      # 预检/预算/常量纯函数
-├── query-service.ts    # 问答 + save-to-wiki
+├── query-service.ts    # 问答 + save-to-wiki + 多轮记忆
+├── conversation-title.ts # 🆕 确定性会话标题派生纯函数
 ├── lint-service.ts     # 全库 lint 扫描
 ├── merge-service.ts    # 合并两页（LLM 融合 + 删源页 + 同事务重链）
 └── split-service.ts    # 拆分一页（LLM 拆 N 页 + 删源页 + 同事务重指主页）
@@ -128,6 +131,7 @@ src/server/services/
 | 2026-06-22 | 新增 `merge-service`（任务类型 `merge`）：LLM 融合两页 + 删源页 + 同事务重链（④b）|
 | 2026-06-22 | 新增 `split-service`（任务类型 `split`）：LLM 拆 N 页 + 删源页 + 同事务重指主页（④c）|
 | 2026-06-22 | ingest 增量合并：writer fanout step 加 `injectExistingPageForUpdate:true`，更新已有页时 orchestrator 注入现有正文，writer 并入新材料而非整页覆盖（⑤）|
+| 2026-06-22 | query-service 多轮记忆：answerQuery/streamQueryAnswer 加 history 参（注入 transcript），conversations-repo CRUD 落库多轮；新增 conversation-title.ts deriveConversationTitle 确定性派生（⑦）|
 
 ---
 
