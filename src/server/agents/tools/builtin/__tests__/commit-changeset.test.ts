@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '../../../types';
 
 const txMocks = vi.hoisted(() => ({
@@ -12,22 +12,31 @@ const txMocks = vi.hoisted(() => ({
     postHead: null,
     status: 'pending',
   })),
+  applyChangeset: vi.fn(async (changeset: { entries: unknown[] }, _sourceOps?: unknown) => ({
+    ...changeset,
+    postHead: 'sha-1',
+    status: 'applied',
+  })),
 }));
 
 vi.mock('../../../../wiki/wiki-transaction', () => ({
   createChangeset: txMocks.createChangeset,
   validateChangeset: vi.fn(() => ({ valid: true, errors: [], warnings: [] })),
-  applyChangeset: vi.fn(async (changeset: { entries: unknown[] }) => ({
-    ...changeset,
-    postHead: 'sha-1',
-    status: 'applied',
-  })),
+  applyChangeset: txMocks.applyChangeset,
   rollbackChangeset: vi.fn(async () => undefined),
 }));
 
 // Stamping looks up the existing page to preserve `created` on update.
 vi.mock('../../../../db/repos/pages-repo', () => ({
   getPageBySlug: vi.fn(() => null),
+}));
+
+vi.mock('../../../../db/repos/sources-repo', () => ({
+  linkPageSource: vi.fn(),
+}));
+
+vi.mock('../../../../sources/source-store', () => ({
+  updateSourcePageLinks: vi.fn(),
 }));
 
 import { commitChangesetTool, commitPending } from '../commit-changeset';
@@ -192,5 +201,67 @@ describe('commitPending', () => {
     await expect(commitPending(ctx, [
       { action: 'create', path: 'wiki/general/index.md', content: 'x' },
     ])).rejects.toThrow(/already invoked/);
+  });
+});
+
+// SourceLinkOps 构造：Task 5 多源升级验证
+describe('commitPending sourceOps', () => {
+  beforeEach(() => {
+    txMocks.applyChangeset.mockReset();
+    txMocks.applyChangeset.mockImplementation(async (changeset: { entries: unknown[] }, _sourceOps?: unknown) => ({
+      ...changeset,
+      postHead: 'sha123',
+      status: 'applied',
+    }));
+  });
+
+  function makeIngestCtx(sourceId?: string) {
+    return makeCtx({
+      job: {
+        id: 'job1',
+        type: 'ingest',
+        paramsJson: JSON.stringify(sourceId ? { sourceId } : {}),
+        subjectId: 'sub1',
+      } as AgentContext['job'],
+      subject: { id: 'sub1', slug: 'general', name: 'General', description: '', createdAt: '', updatedAt: '' },
+    });
+  }
+
+  it('merges ingest single source + web links into links[], adds extraStagePaths', async () => {
+    const ctx = makeIngestCtx('src-file');
+    const supplied = [{ action: 'create' as const, path: 'wiki/general/a.md', content: '---\ntitle: A\n---\n' }];
+    await commitPending(ctx, supplied, {
+      links: [{ sourceId: 'web-1', pageSlugs: ['a'] }],
+      extraStagePaths: ['raw/general/web-x.md', '.llm-wiki/sources/general/web-1.json'],
+    });
+    const sourceOps = (txMocks.applyChangeset.mock.calls[0] as unknown[])[1] as {
+      links: Array<{ sourceId: string; pageSlugs: string[] }>;
+      extraStagePaths: string[];
+    };
+    expect(sourceOps.links).toEqual(
+      expect.arrayContaining([
+        { sourceId: 'src-file', pageSlugs: ['a'] },
+        { sourceId: 'web-1', pageSlugs: ['a'] },
+      ]),
+    );
+    expect(sourceOps.extraStagePaths).toEqual([
+      'raw/general/web-x.md',
+      '.llm-wiki/sources/general/web-1.json',
+    ]);
+  });
+
+  it('passes undefined sourceOps when no ingest source and no web links', async () => {
+    // 非 ingest 任务且无 web links，sourceOps 应为 undefined（向后兼容）
+    const ctx = makeCtx({
+      job: {
+        id: 'job2',
+        type: 'merge',
+        paramsJson: '{}',
+        subjectId: 'sub1',
+      } as AgentContext['job'],
+    });
+    const supplied = [{ action: 'create' as const, path: 'wiki/general/a.md', content: '---\ntitle: A\n---\n' }];
+    await commitPending(ctx, supplied);
+    expect((txMocks.applyChangeset.mock.calls[0] as unknown[])[1]).toBeUndefined();
   });
 });

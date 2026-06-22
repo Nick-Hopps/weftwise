@@ -284,8 +284,7 @@ describe('applyChangeset', () => {
     ]);
     const linkPageSource = vi.fn();
     const applied = await applyChangeset(cs, {
-      sourceId: 'src-1',
-      pageSlugs: ['a'],
+      links: [{ sourceId: 'src-1', pageSlugs: ['a'] }],
       linkPageSource,
       updateSourcePageLinks: vi.fn(() => {
         throw new Error('sidecar boom');
@@ -306,8 +305,7 @@ describe('applyChangeset', () => {
       { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },
     ]);
     const applied = await applyChangeset(cs, {
-      sourceId: 'src-1',
-      pageSlugs: ['a'],
+      links: [{ sourceId: 'src-1', pageSlugs: ['a'] }],
       linkPageSource: vi.fn(),
       updateSourcePageLinks: vi.fn(() => {
         throw new Error('sidecar boom');

@@ -65,6 +65,7 @@ function slugFromPath(path: string): string | null {
 export async function commitPending(
   ctx: AgentContext,
   supplied: ChangesetEntry[],
+  webSources?: { links: Array<{ sourceId: string; pageSlugs: string[] }>; extraStagePaths: string[] },
 ): Promise<IngestResult> {
   if (ctx.committed.value) {
     throw new Error('commit_changeset already invoked in this run');
@@ -112,19 +113,29 @@ export async function commitPending(
     .map((e) => slugFromPath(e.path))
     .filter((s): s is string => s !== null);
 
-  // ingest 任务需要在提交时写 page_sources 溯源（页面 ↔ 源文件多对多）
-  let sourceOps: SourceLinkOps | undefined;
+  // ingest 任务需要在提交时写 page_sources 溯源（页面 ↔ 源文件多对多）。
+  // ⑨：核查引用的网页源亦并入 links + 其 raw/sidecar 文件随同一 commit（extraStagePaths）。
+  const links: Array<{ sourceId: string; pageSlugs: string[] }> = [];
   if (ctx.job.type === 'ingest') {
     const params = JSON.parse(ctx.job.paramsJson || '{}') as { sourceId?: string };
     if (params.sourceId) {
-      sourceOps = {
-        sourceId: params.sourceId,
-        pageSlugs: [...pagesCreated, ...pagesUpdated],
-        linkPageSource: sourcesRepo.linkPageSource,
-        updateSourcePageLinks,
-        onWarning: (message) => ctx.emit('ingest:warn', message),
-      };
+      links.push({ sourceId: params.sourceId, pageSlugs: [...pagesCreated, ...pagesUpdated] });
     }
+  }
+  if (webSources?.links?.length) {
+    links.push(...webSources.links);
+  }
+  const extraStagePaths = webSources?.extraStagePaths ?? [];
+
+  let sourceOps: SourceLinkOps | undefined;
+  if (links.length > 0 || extraStagePaths.length > 0) {
+    sourceOps = {
+      links,
+      extraStagePaths,
+      linkPageSource: sourcesRepo.linkPageSource,
+      updateSourcePageLinks,
+      onWarning: (message) => ctx.emit('ingest:warn', message),
+    };
   }
 
   const applied = await applyChangeset(changeset, sourceOps);
