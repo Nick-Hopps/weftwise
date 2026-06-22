@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/cn';
 import type { AppSettings } from '@/lib/contracts';
-import { SettingRow, NumberSettingRow, SelectSettingRow } from './settings-rows';
+import { SettingRow, NumberSettingRow, SelectSettingRow, TextSettingRow } from './settings-rows';
 
 const WIKI_LANGUAGE_PRESETS = [
   { value: 'English', label: 'English' },
@@ -229,6 +229,40 @@ export function SettingsContent({
             Failed to save: {(savePartial.error as Error).message}
           </p>
         )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-4">
+        <div className="text-sm font-semibold text-foreground">Web search</div>
+        <p className="text-xs text-foreground-tertiary -mt-2">
+          Used by the ingest verifier to fact-check augmentation callouts and import cited pages as sources. Leave the API key empty to disable (verifier falls back to self-check).
+        </p>
+
+        <SelectSettingRow
+          label="Provider"
+          value={settings?.webSearchProvider ?? 'tavily'}
+          options={[{ value: 'tavily', label: 'Tavily' }]}
+          onChange={(v) => savePartial.mutate({ webSearchProvider: v as 'tavily' })}
+          pending={savePartial.isPending}
+        />
+        <TextSettingRow
+          label="API key"
+          description="Stored in app settings; empty disables web grounding"
+          type="password"
+          placeholder="tvly-…"
+          value={settings?.webSearchApiKey ?? ''}
+          onSave={(v) => savePartial.mutate({ webSearchApiKey: v })}
+          pending={savePartial.isPending}
+        />
+        <NumberSettingRow
+          label="Max results per query"
+          value={settings?.webSearchMaxResults ?? 5}
+          min={1}
+          max={10}
+          onSave={(v) => savePartial.mutate({ webSearchMaxResults: v })}
+          pending={savePartial.isPending}
+        />
       </div>
 
       <Separator />
