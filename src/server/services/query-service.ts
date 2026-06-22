@@ -104,6 +104,7 @@ export function streamQueryAnswer(
   context: QueryContextPage[],
   subject: Subject,
   abortSignal?: AbortSignal,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
 ) {
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
@@ -112,7 +113,7 @@ export function streamQueryAnswer(
   return streamTextResponse(
     'query',
     systemPrompt,
-    buildQueryUserPrompt(question, context, promptCtx),
+    buildQueryUserPrompt(question, context, promptCtx, history),
     abortSignal,
   );
 }
