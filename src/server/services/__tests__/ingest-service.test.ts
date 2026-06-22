@@ -21,6 +21,7 @@ vi.mock('../../sources/source-store', () => ({
   getRawSourceContent: () => 'raw content',
   getRawSourceBuffer: () => null,
   updateSourceChunks: vi.fn(),
+  saveRawSource: vi.fn(() => ({ id: 'web-src-1', contentHash: 'abc' })),
 }));
 
 let mockMaxTokens = 100_000;
@@ -108,6 +109,12 @@ vi.mock('../embedding-service', () => ({
   enqueueEmbedIndex: vi.fn(),
 }));
 
+vi.mock('../../search/web-search', () => ({
+  extractContent: vi.fn(async () => []),
+  isWebSearchConfigured: vi.fn(() => false),
+  webSearch: vi.fn(async () => []),
+}));
+
 function makeJob() {
   return {
     id: 'j1',
@@ -180,7 +187,8 @@ describe('ingest-service', () => {
       initialInput: { chunkRefs: Array<{ content: string }>; existingPages: unknown[]; outline: string };
       ctx: { chunkStore: Map<string, unknown> };
     };
-    expect(opts.steps.map((s) => s.kind)).toEqual(['sequence', 'fanout', 'fanout', 'fanout']);
+    // 小文件：planner(sequence) + writer/enricher(fanout×2) + verifier(verify) = 4 步
+    expect(opts.steps.map((s) => s.kind)).toEqual(['sequence', 'fanout', 'fanout', 'verify']);
     expect(opts.initialInput.chunkRefs[0].content).toContain('短内容');
     expect(opts.initialInput.existingPages).toEqual([
       { slug: 'existing-a', title: 'Existing A', summary: 'sum A' },
@@ -202,7 +210,8 @@ describe('ingest-service', () => {
       initialInput: { chunkRefs: Array<{ content: string }> };
     };
     expect(opts.steps[0]).toMatchObject({ kind: 'map', skillId: 'ingest-chunk-summarizer' });
-    expect(opts.steps.map((s) => s.kind)).toEqual(['map', 'sequence', 'fanout', 'fanout', 'fanout']);
+    // 大文件：map + planner(sequence) + writer/enricher(fanout×2) + verifier(verify) = 5 步
+    expect(opts.steps.map((s) => s.kind)).toEqual(['map', 'sequence', 'fanout', 'fanout', 'verify']);
     expect(opts.initialInput.chunkRefs[0].content).toBe('');
   });
 
@@ -214,7 +223,9 @@ describe('ingest-service', () => {
     await handler(makeJob(), vi.fn());
     const opts = (mockRunPipeline.mock.calls as unknown as Array<[unknown]>)[0][0] as { steps: Array<Record<string, unknown>> };
     expect(opts.steps.some((s) => s.skillId === 'ingest-reviewer')).toBe(false);
-    expect(opts.steps[opts.steps.length - 1]).toMatchObject({ kind: 'fanout', skillId: 'ingest-verifier' });
+    // ⑨：verifier 步已切换为 verify kind（双段式核查，无 skillId）
+    expect(opts.steps[opts.steps.length - 1]).toMatchObject({ kind: 'verify' });
+    expect(opts.steps[opts.steps.length - 1]).not.toMatchObject({ skillId: 'ingest-verifier' });
   });
 
   it('预检超预算：流水线启动前失败且不调 runPipeline', async () => {

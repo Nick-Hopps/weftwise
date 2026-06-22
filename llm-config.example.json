@@ -34,7 +34,9 @@
       "maxTokens": 4096,
       "temperature": 0
     },
-    "embedding": { "profile": "openai-default", "model": "text-embedding-3-small" }
+    "embedding": { "profile": "openai-default", "model": "text-embedding-3-small" },
+    "skill:ingest-verifier-triage": { "profile": "default" },
+    "skill:ingest-verifier-apply": { "profile": "default" }
   },
   "providers": {
     "anthropic-default": {
