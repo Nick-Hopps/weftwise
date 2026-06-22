@@ -133,7 +133,7 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 **已知限制（回滚不撤源）**：⑥ 回滚某次 ingest 操作会把页面正文还原到 preHead，但**不会撤销已导入的网页 source**（sources 行/文件/page_sources 残留为无害孤儿；`rebuild.ts` 以 sidecar 为权威可重建一致状态）。这与现有 ingest source 的累加语义一致，spec 显式接受。
 
-**已知限制（断点续传不补源）**：`ctx.citedSources` 不进 checkpoint，且 `verifier-page` 命中检查点的页会跳过 `runPageVerification`（不重跑 triage/apply、不再累积 citedSources）。因此若 ingest job **崩溃后续传**，崩溃前已核查页的网页 source**不会被导入**——这些页的引用 URL 仍保留在其 frontmatter `sources`（读者可见层，已烘焙进 checkpoint 缓存的页内容），但缺 source 实体行 + `page_sources`（后者当前无阅读 UI）。仅发生在「崩溃 + 续传」这一稀有路径，且读者可见的 frontmatter 层不受影响，故 spec 显式接受为已知限制；如需补齐，fast-follow = 把 citedSources 一并持久化进 `verifier-page` checkpoint。
+**断点续传补源（已闭合，原 I-1 终审发现 → fast-follow 修复）**：`ctx.citedSources` 现持久化进 checkpoint（新 kind `'cited-sources'`，整张去重列表单 blob；`verify-page` 在 `recordCitedSources` 后同步 `putCitedSources`），并在 `ingest-service` 创建 ctx 后、pipeline 前从 checkpoint **rehydrate** 回 `ctx.citedSources`。因此即使 ingest job **崩溃后续传**、崩溃前已核查页命中 `verifier-page` 检查点而跳过 `runPageVerification`，`finalizeIngest` 仍能从 rehydrate 出的 `ctx.citedSources` 把这些页的网页**完整导入为 source**（source 实体 + `page_sources` + 已在缓存页内的 frontmatter URL，三层齐全）。`checkpoint.clear()`（成功 finalize 后）连带清掉该 blob。
 
 ---
 
