@@ -8,6 +8,7 @@
 
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
+import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
 import {
   generateStructuredOutput,
@@ -51,11 +52,11 @@ export interface QueryContextPage {
   isCurrent?: boolean;
 }
 
-export function prepareQueryContext(
+export async function prepareQueryContext(
   question: string,
   subjectId: SubjectId,
   currentPageSlug?: string,
-): QueryContextPage[] {
+): Promise<QueryContextPage[]> {
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) return [];
 
@@ -74,17 +75,14 @@ export function prepareQueryContext(
     }
   }
 
-  const searchResults = pagesRepo.searchPages(subjectId, question);
-  for (const r of searchResults.slice(0, TOP_N_FTS)) {
-    if (contextBySlug.has(r.page.slug)) continue;
-    const doc = readPageInSubject(subject.slug, r.page.slug);
-    const content = doc?.body ?? r.snippet;
-    if (content.trim().length === 0) continue;
-    contextBySlug.set(r.page.slug, {
-      slug: r.page.slug,
-      title: r.page.title,
-      content,
-    });
+  const rankedSlugs = await hybridRankSlugs(subjectId, question, TOP_N_FTS);
+  for (const slug of rankedSlugs) {
+    if (contextBySlug.has(slug)) continue;
+    const page = pagesRepo.getPageBySlug(subjectId, slug);
+    const doc = readPageInSubject(subject.slug, slug);
+    const content = doc?.body ?? '';
+    if (!page || content.trim().length === 0) continue;
+    contextBySlug.set(slug, { slug, title: page.title, content });
   }
 
   return [...contextBySlug.values()];
@@ -158,7 +156,7 @@ export async function runQuery(
   subject: Subject,
   currentPageSlug?: string,
 ): Promise<QueryResult> {
-  const context = prepareQueryContext(question, subject.id, currentPageSlug);
+  const context = await prepareQueryContext(question, subject.id, currentPageSlug);
 
   if (context.length === 0) {
     return {
