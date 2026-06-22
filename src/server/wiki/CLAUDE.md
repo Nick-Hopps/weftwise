@@ -50,6 +50,8 @@ operations.status = 'applied'                   ← 释放 lock
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
 | `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
+| `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
+| `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
 | `vault-mutex.ts` | `acquireVaultLock / releaseVaultLock` | 单进程 in-memory mutex（因为 worker 单实例运行） |
 
@@ -119,6 +121,8 @@ src/server/wiki/
 ├── indexer.ts            # 写入 pages + FTS
 ├── relink.ts             # 改标题/重指引用 重写（纯函数）
 ├── split-plan.ts         # 拆分页 slug 派生 + 恰一主页（纯函数）
+├── revert.ts             # 还原 changeset 条目派生（纯函数，⑥）
+├── history.ts            # 合成 HistoryEntry 时间线（纯函数，⑥）
 └── rebuild.ts            # vault → DB 全量重建
 ```
 
@@ -131,6 +135,7 @@ src/server/wiki/
 | 2026-06-22 | 新增 `relink.ts::rewriteBacklinkText`（改标题→重写同-subject backlink 文本）；接入 `PUT /api/pages` 同事务联动（④a）|
 | 2026-06-22 | `relink.ts` 增 `repointLinksToPage`（按解析后 target slug 匹配，覆盖 title/slug-form），供 `merge-service` 合并时把指向被删页的引用重链到存活页（④b）|
 | 2026-06-22 | 新增 `split-plan.ts::planSplitPages`（拆分页 slug 派生 + 兜底恰一主页）；`split-service` 拆分时复用 `repointLinksToPage` 把指向被删页的引用重指主页（④c）|
+| 2026-06-22 | 新增 `revert.ts::buildRevertEntries`（回滚 inverse 条目纯函数）+ `history.ts::buildHistoryEntries`（operations 行+git 时间合成时间线条目）；供 ⑥ 版本历史/回滚 |
 
 ---
 

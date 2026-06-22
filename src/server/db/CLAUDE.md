@@ -53,6 +53,14 @@
 
 - `upsertSource(subjectId, payload) / findByHash(subjectId, hash) / linkPageToSource(subjectId, pageSlug, sourceId)`
 
+### `operations-repo.ts`
+
+版本历史/回滚核心（⑥）：管理 Saga 操作记录与可恢复性。
+
+- `listForSubject(subjectId, { limit, offset }): OperationRow[]` —— 按 `rowid DESC` 倒序，包含 `{ rowid, subject_id, preHead, postHead, changeset_json, status, created_at, job_type, job_id }`（LEFT JOIN jobs 取 type；仅返回 `status IN (applied, reverted)`）
+- `getById(id): OperationRow | null` —— 取单条记录
+- `markReverted(id): void` —— 设 `status='reverted'`（表示用户手动回滚过该操作；与 `rolled-back` 区分）
+
 ### `settings-repo.ts`（全局键值设置）
 
 通用 key/value 表，承载所有"全 app 单实例"的全局设置（首个使用方：`wikiLanguage`，存语言名字符串如 "English" / "Chinese"）。
@@ -139,12 +147,13 @@ src/server/db/
 ├── client.ts          # 单例连接 + ensureTables + FTS + legacy 自迁移
 ├── schema.ts          # Drizzle schema（subjects / pages 复合 PK / target_subject_id）
 └── repos/
-    ├── subjects-repo.ts  # 主题 CRUD + countPages + deleteIfEmpty
-    ├── pages-repo.ts     # 全部强制 subjectId
-    ├── jobs-repo.ts      # 写入/查询带 subject_id
-    ├── sources-repo.ts       # subject-scoped
-    ├── settings-repo.ts      # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
-    └── checkpoints-repo.ts   # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
+    ├── subjects-repo.ts       # 主题 CRUD + countPages + deleteIfEmpty
+    ├── pages-repo.ts          # 全部强制 subjectId
+    ├── jobs-repo.ts           # 写入/查询带 subject_id
+    ├── sources-repo.ts        # subject-scoped
+    ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
+    ├── checkpoints-repo.ts    # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
+    └── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
 ```
 
 ## 变更记录 (Changelog)
@@ -156,6 +165,7 @@ src/server/db/
 | 2026-04-26 | wikiLanguage：新增 `app_settings` 表 + `settings-repo.ts`（`getWikiLanguage` / `setWikiLanguage`）|
 | 2026-04-27 | settings-repo 新增 5 个 agent 配置 key（maxSteps / maxTokensPerJob / maxParallelSubAgents / mcpLifecycle / taskRouterMode）|
 | 2026-06-20 | ingest_checkpoints 表 + checkpoints-repo（断点续传：getCheckpoints / putCheckpoint / deleteCheckpoints / getProgress）|
+| 2026-06-22 | 新增 operations-repo（版本历史时间线取数：listForSubject/getById/markReverted）（⑥）|
 
 ---
 
