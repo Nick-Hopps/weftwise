@@ -63,7 +63,7 @@ resolveTask(task, overrides?) → ResolvedTaskRoute
 | 文件 | 用途 |
 |------|------|
 | `ingest-prompt.ts` | **多阶段**：plan → page body → index body。对应 `IngestPlanSchema / PageBodySchema / IndexBodySchema` |
-| `query-prompt.ts` | 回答用户问题 + 引用。`QueryResponseSchema` |
+| `query-prompt.ts` | 回答用户问题 + 引用；`buildQueryUserPrompt` 加可选 history 参注入多轮 transcript。`QueryResponseSchema` |
 | `lint-prompt.ts` | 扫描整库/单页的 lint finding。 |
 
 ### `client.ts` / `errors.ts`
@@ -166,6 +166,7 @@ src/server/llm/
 | 2026-04-27 | LLMTaskSchema 接受 `skill:<id>` key；`config.tasks` 改为 `z.record`（开放字典）；`provider-registry` 导出 `resolveModel` 供 agent-loop 使用 |
 | 2026-06-22 | 新增内置 task `merge`（`BUILTIN_LLM_TASKS` 加 'merge'）+ `prompts/merge-prompt.ts`（`MERGE_SYSTEM_PROMPT` / `buildMergeUserPrompt` / `MergeResultSchema`），供合并两页融合正文（④b）|
 | 2026-06-22 | 新增内置 task `split` + `prompts/split-prompt.ts`（`SPLIT_SYSTEM_PROMPT` / `buildSplitUserPrompt` / `SplitResultSchema`，`pages.min(2)`、恰一 `isPrimary`），供拆分一页（④c）|
+| 2026-06-22 | `query-prompt.ts` buildQueryUserPrompt 加可选 history 参（多轮记忆注入 transcript 段）；供 ⑦ 对话持久化 + 多轮记忆 |
 
 ---
 

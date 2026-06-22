@@ -53,7 +53,8 @@
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key；接入会话载入/保存/切换（`useEffect` 载历史 + `loadedConversationIdRef` 守卡防自身覆盖 + done 设 ref/id+invalidate）
+- `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx`
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`，body 带 `subjectId`
 
@@ -139,7 +140,7 @@ src/components/
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*}
 ├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, merge-dialog, merge-button, split-dialog, split-button}
-├── chat/         {chat-interface, message-list, save-to-wiki-button}
+├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── tags/         {tags-index-view, tag-pages-view}
 ├── history/      {operation-list, operation-diff, revert-button}
@@ -156,6 +157,7 @@ src/components/
 | 2026-04-26 | wikiLanguage：`settings-dialog.tsx` 新增 "Wiki language" 行（React Query GET/PUT `/api/settings`，不写 Zustand）|
 | 2026-04-27 | settings-dialog 新增 "Agents" section（5 个 agent runtime 配置控件：max steps / token budget / parallel sub-agents / MCP lifecycle / LLM selection mode）|
 | 2026-06-22 | 新增 `history/` 目录（operation-list/operation-diff/revert-button 职责）；供 ⑥ 版本历史/diff |
+| 2026-06-22 | 新增 `chat/conversation-switcher.tsx`；`chat-interface` 接入会话载入/保存/切换；`context-panel-chat-tab` 嵌入 switcher；供 ⑦ 对话持久化 + 多轮记忆 |
 
 ---
 

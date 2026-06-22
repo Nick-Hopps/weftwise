@@ -48,6 +48,9 @@
 | `/api/pages/[...slug]` | PUT | 改整文件 markdown（Saga 重索引）。若 frontmatter 标题变化且 `refreshReferences`(默认 true)，同事务把本 subject 内以旧标题书写的 `[[Old Title]]` 引用重写为新标题（排除自引用页），返回 `referencesUpdated` 计数；slug/URL/文件不动 |
 | `/api/search` | GET | FTS5 全文搜索（`?q=...&subjectId=...`） |
 | `/api/graph` | GET | 返回图视图需要的节点 + 边数据（`?subjectId=...`） |
+| `/api/conversations` | GET | 🆕 列出当前 subject 会话（`updated_at DESC, rowid DESC`）|
+| `/api/conversations/[id]` | GET / PATCH / DELETE | 🆕 读单个会话含 messages / 重命名（仅 title）/ 删除（跨 subject→404，PATCH 空 title→400）|
+| `/api/query` | POST | 默认流式分支扩展：body 加 `conversationId?`（无/跨 subject 静默当新会话防泄漏）→ 载末 8 条历史注入 prompt → 流末 best-effort 落库 → done 回传 `{subjectId, conversationId}`；save-as-page/save-to-wiki 模式不持久化 |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
 | `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录（需 auth + CSRF） |
 
@@ -127,6 +130,7 @@ src/app/
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |
 | 2026-04-25 | Subject：新增 `/api/subjects` + `(app)/subjects` 管理页；既有路由全部 subject 化（`resolveSubjectFromRequest`） |
 | 2026-06-22 | 新增 `(app)/history/page.tsx` + `/api/history*` 三个路由（GET 列表、GET diff、POST 回滚），支持前向 Saga 还原（⑥ 版本历史/diff）|
+| 2026-06-22 | 新增 `/api/conversations` + `/api/conversations/[id]` 四个路由（GET 列表、GET/PATCH/DELETE 详情）；`POST /api/query` 默认流式支持 conversationId 多轮 + 落库（⑦ 对话持久化 + 多轮记忆）|
 
 ---
 

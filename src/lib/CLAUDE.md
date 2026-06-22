@@ -10,7 +10,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry` |
+| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry / Conversation / ConversationMessage` |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
@@ -40,6 +40,8 @@ Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
                  status: 'pending'|'applied'|'rolled-back' }
 HistoryEntry   { id, sha, date, type: string, message, affectedPages: HistoryAffectedPage[], status: 'applied'|'reverted' }
 HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
+Conversation   { id, subjectId, title, createdAt, updatedAt }
+ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: {pageSlug,excerpt}[]|null, createdAt }
 ```
 
 > **扩展规则**：
@@ -110,6 +112,7 @@ src/lib/
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：contracts 增加 `Subject` / `SubjectId` 与 `subjectId` 字段；`useApiFetch()` hook 自动注入 subjectId；markdown-client 跨主题 `?s=` href |
 | 2026-06-22 | contracts 新增 `HistoryEntry` / `HistoryAffectedPage` 类型（⑥ 版本历史/diff）|
+| 2026-06-22 | contracts 新增 `Conversation` / `ConversationMessage` 类型（⑦ 对话持久化 + 多轮记忆）|
 
 ---
 
