@@ -172,6 +172,21 @@ export interface Changeset {
   status: 'pending' | 'applied' | 'rolled-back';
 }
 
+export interface HistoryAffectedPage {
+  slug: string;
+  action: 'create' | 'update' | 'delete';
+}
+
+export interface HistoryEntry {
+  id: string;             // operation id
+  sha: string | null;     // postHead
+  date: string | null;    // commit ISO 时间；git 取不到则 null
+  type: string;           // 'ingest'|'merge'|'split'|'save-to-wiki'|'edit'|'delete'
+  message: string;        // commit message（含 [subject:<slug>] 前缀，原样）
+  affectedPages: HistoryAffectedPage[];
+  status: 'applied' | 'reverted';
+}
+
 export const DEFAULT_WIKI_LANGUAGE = 'English';
 
 export const WikiLanguageSchema = z
