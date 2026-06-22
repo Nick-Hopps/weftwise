@@ -18,7 +18,9 @@ interface UseJobStreamResult {
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_DELAY_MS = 2000;
-const MAX_EVENTS = 200;
+// A full ingest emits ~800 events; retain enough that the live view's timeline
+// keeps every phase from the start of a long run (not just the tail).
+const MAX_EVENTS = 1200;
 
 export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStreamResult {
   const [events, setEvents] = useState<JobStreamEvent[]>([]);

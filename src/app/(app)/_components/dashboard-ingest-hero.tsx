@@ -13,6 +13,7 @@ import {
   Link2,
   ListChecks,
   Loader2,
+  Maximize2,
   PenLine,
   Plus,
   ScanText,
@@ -30,6 +31,7 @@ import { Input, Textarea } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
+import { IngestLiveView } from './ingest-live-view';
 import type { CheckpointProgress, Job } from '@/lib/contracts';
 
 /** The six agent phases, shown as a "what the agent does" preview while idle. */
@@ -57,6 +59,7 @@ export function DashboardIngestHero() {
   const [sourceName, setSourceName] = useState<string>('');
   const [createdPages, setCreatedPages] = useState<string[]>([]);
   const [showLog, setShowLog] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const { events, status, latestMessage } = useJobStream(jobId, reconnectKey);
@@ -78,8 +81,9 @@ export function DashboardIngestHero() {
     let promptIn = 0;
     for (const e of events) {
       if (e.type !== 'agent:step') continue;
-      const d = e.data as { kind?: string; tokensIn?: number; cacheHitTokens?: number };
-      if (d.kind !== 'final') continue;
+      // Emitted payload is nested under evt.data.data by the SSE bridge.
+      const d = e.data?.data as { kind?: string; tokensIn?: number; cacheHitTokens?: number } | undefined;
+      if (d?.kind !== 'final') continue;
       if (typeof d.tokensIn === 'number') promptIn += d.tokensIn;
       if (typeof d.cacheHitTokens === 'number') cacheHit += d.cacheHitTokens;
     }
@@ -94,9 +98,11 @@ export function DashboardIngestHero() {
 
   useEffect(() => {
     if (!isDone) return;
-    const doneEvent = events.find((e) => e.type === 'ingest:complete');
-    const data = doneEvent?.data as { result?: { pagesCreated?: string[] } } | undefined;
-    if (data?.result?.pagesCreated) setCreatedPages(data.result.pagesCreated);
+    // The worker emits the IngestResult on `job:completed`; older builds used
+    // `ingest:complete` — accept either.
+    const doneEvent = events.find((e) => e.type === 'job:completed' || e.type === 'ingest:complete');
+    const result = (doneEvent?.data?.data as { result?: { pagesCreated?: string[] } } | undefined)?.result;
+    if (result?.pagesCreated) setCreatedPages(result.pagesCreated);
   }, [isDone, events]);
 
   const reset = () => {
@@ -108,6 +114,7 @@ export function DashboardIngestHero() {
     setSourceName('');
     setPaste(false);
     setShowLog(false);
+    setLiveOpen(false);
     setCheckpointProgress(null);
     if (fileRef.current) fileRef.current.value = '';
   };
@@ -197,6 +204,7 @@ export function DashboardIngestHero() {
       }
       const data = await res.json();
       setJobId(data.jobId);
+      setLiveOpen(true);
       window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -231,6 +239,7 @@ export function DashboardIngestHero() {
       }
       const data = await res.json();
       setJobId(data.jobId);
+      setLiveOpen(true);
       window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -263,13 +272,30 @@ export function DashboardIngestHero() {
     return () => window.removeEventListener('keydown', onKey);
   }, [phase, paste]);
 
+  // Full-screen live view — auto-opened on start, dismissable to the background.
+  const liveView =
+    liveOpen && jobId ? (
+      <IngestLiveView
+        jobId={jobId}
+        sourceName={sourceName || 'Ingesting source'}
+        status={status}
+        events={events}
+        latestMessage={latestMessage}
+        createdPages={createdPages}
+        onBackground={() => setLiveOpen(false)}
+        onIngestAnother={reset}
+      />
+    ) : null;
+
   // ── Running ───────────────────────────────────────────────────────────────
   if (phase === 'running') {
     return (
-      <section
-        aria-label="Ingest in progress"
-        className="relative overflow-hidden rounded-lg border border-accent/35 bg-surface shadow-sm p-5"
-      >
+      <>
+        {liveView}
+        <section
+          aria-label="Ingest in progress"
+          className="relative overflow-hidden rounded-lg border border-accent/35 bg-surface shadow-sm p-5"
+        >
         <div className="flex items-center gap-3">
           <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" aria-hidden />
           <div className="min-w-0 flex-1">
@@ -281,13 +307,22 @@ export function DashboardIngestHero() {
               {latestMessage || 'starting up the agent'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowLog((s) => !s)}
-            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-foreground-secondary hover:bg-subtle hover:text-foreground transition-colors focus-ring"
-          >
-            {showLog ? 'Hide log' : 'View log'}
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setLiveOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-accent hover:bg-accent/10 transition-colors focus-ring"
+            >
+              <Maximize2 className="h-3.5 w-3.5" /> Watch live
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLog((s) => !s)}
+              className="rounded-md px-2 py-1 text-xs font-medium text-foreground-secondary hover:bg-subtle hover:text-foreground transition-colors focus-ring"
+            >
+              {showLog ? 'Hide log' : 'View log'}
+            </button>
+          </div>
         </div>
 
         {/* indeterminate progress — concrete phase % lands in the live ingest view */}
@@ -307,18 +342,21 @@ export function DashboardIngestHero() {
           </p>
         )}
 
-        {showLog && <EventLog events={events} />}
-      </section>
+          {showLog && <EventLog events={events} />}
+        </section>
+      </>
     );
   }
 
   // ── Done ────────────────────────────────────────────────────────────────────
   if (phase === 'done') {
     return (
-      <section
-        aria-label="Ingest complete"
-        className="flex flex-wrap items-center gap-5 rounded-lg border border-success-border/50 bg-surface shadow-sm p-5"
-      >
+      <>
+        {liveView}
+        <section
+          aria-label="Ingest complete"
+          className="flex flex-wrap items-center gap-5 rounded-lg border border-success-border/50 bg-surface shadow-sm p-5"
+        >
         <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-success/12 text-success">
           <CircleCheck className="h-[22px] w-[22px]" aria-hidden />
         </span>
@@ -355,17 +393,20 @@ export function DashboardIngestHero() {
             </Link>
           )}
         </div>
-      </section>
+        </section>
+      </>
     );
   }
 
   // ── Failed ────────────────────────────────────────────────────────────────
   if (phase === 'failed') {
     return (
-      <section
-        aria-label="Ingest failed"
-        className="rounded-lg border border-danger/40 bg-surface shadow-sm p-5"
-      >
+      <>
+        {liveView}
+        <section
+          aria-label="Ingest failed"
+          className="rounded-lg border border-danger/40 bg-surface shadow-sm p-5"
+        >
         <div className="flex items-start gap-3">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-danger/12 text-danger">
             <X className="h-[18px] w-[18px]" aria-hidden />
@@ -395,7 +436,8 @@ export function DashboardIngestHero() {
             Ingest another source
           </Button>
         </div>
-      </section>
+        </section>
+      </>
     );
   }
 
@@ -559,10 +601,9 @@ function EventLog({ events }: { events: ReturnType<typeof useJobStream>['events'
       ) : (
         events.slice(-20).map((evt, i) => {
           const isError = evt.type === 'agent:error';
+          const payload = evt.data?.data as { detail?: string; finishReason?: string } | undefined;
           const msg = (evt.data?.message as string) || evt.type;
-          const why = isError
-            ? ((evt.data?.detail as string) || (evt.data?.finishReason as string) || '')
-            : '';
+          const why = isError ? (payload?.detail || payload?.finishReason || '') : '';
           return (
             <li
               key={i}
