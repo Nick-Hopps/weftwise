@@ -14,6 +14,12 @@ import {
   setAgentMcpLifecycle,
   getAgentTaskRouterMode,
   setAgentTaskRouterMode,
+  getWebSearchProvider,
+  setWebSearchProvider,
+  getWebSearchApiKey,
+  setWebSearchApiKey,
+  getWebSearchMaxResults,
+  setWebSearchMaxResults,
 } from '@/server/db/repos/settings-repo';
 import {
   WikiLanguageSchema,
@@ -22,6 +28,9 @@ import {
   AgentMaxParallelSubAgentsSchema,
   AgentMcpLifecycleSchema,
   AgentTaskRouterModeSchema,
+  WebSearchProviderSchema,
+  WebSearchApiKeySchema,
+  WebSearchMaxResultsSchema,
   type AppSettings,
 } from '@/lib/contracts';
 
@@ -35,6 +44,9 @@ function readSettings(): AppSettings {
     agentMaxParallelSubAgents: getAgentMaxParallelSubAgents(),
     agentMcpLifecycle: getAgentMcpLifecycle(),
     agentTaskRouterMode: getAgentTaskRouterMode(),
+    webSearchProvider: getWebSearchProvider(),
+    webSearchApiKey: getWebSearchApiKey(),
+    webSearchMaxResults: getWebSearchMaxResults(),
   };
 }
 
@@ -51,6 +63,9 @@ const PutBodySchema = z.object({
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema.optional(),
   agentMcpLifecycle: AgentMcpLifecycleSchema.optional(),
   agentTaskRouterMode: AgentTaskRouterModeSchema.optional(),
+  webSearchProvider: WebSearchProviderSchema.optional(),
+  webSearchApiKey: WebSearchApiKeySchema.optional(),
+  webSearchMaxResults: WebSearchMaxResultsSchema.optional(),
 });
 
 export async function PUT(request: NextRequest) {
@@ -81,6 +96,9 @@ export async function PUT(request: NextRequest) {
   if (d.agentMaxParallelSubAgents !== undefined) setAgentMaxParallelSubAgents(d.agentMaxParallelSubAgents);
   if (d.agentMcpLifecycle !== undefined) setAgentMcpLifecycle(d.agentMcpLifecycle);
   if (d.agentTaskRouterMode !== undefined) setAgentTaskRouterMode(d.agentTaskRouterMode);
+  if (d.webSearchProvider !== undefined) setWebSearchProvider(d.webSearchProvider);
+  if (d.webSearchApiKey !== undefined) setWebSearchApiKey(d.webSearchApiKey);
+  if (d.webSearchMaxResults !== undefined) setWebSearchMaxResults(d.webSearchMaxResults);
 
   return NextResponse.json(readSettings());
 }

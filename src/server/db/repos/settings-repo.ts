@@ -16,6 +16,13 @@ import {
   DEFAULT_AGENT_TASK_ROUTER_MODE,
   type AgentMcpLifecycle,
   type AgentTaskRouterMode,
+  WebSearchProviderSchema,
+  WebSearchApiKeySchema,
+  WebSearchMaxResultsSchema,
+  DEFAULT_WEB_SEARCH_PROVIDER,
+  DEFAULT_WEB_SEARCH_API_KEY,
+  DEFAULT_WEB_SEARCH_MAX_RESULTS,
+  type WebSearchProvider,
 } from '@/lib/contracts';
 
 const KEY_WIKI_LANGUAGE = 'wikiLanguage';
@@ -24,6 +31,10 @@ const KEY_AGENT_MAX_TOKENS_PER_JOB = 'agentMaxTokensPerJob';
 const KEY_AGENT_MAX_PARALLEL_SUB_AGENTS = 'agentMaxParallelSubAgents';
 const KEY_AGENT_MCP_LIFECYCLE = 'agentMcpLifecycle';
 const KEY_AGENT_TASK_ROUTER_MODE = 'agentTaskRouterMode';
+
+const KEY_WEB_SEARCH_PROVIDER = 'webSearchProvider';
+const KEY_WEB_SEARCH_API_KEY = 'webSearchApiKey';
+const KEY_WEB_SEARCH_MAX_RESULTS = 'webSearchMaxResults';
 
 function readKey(key: string): string | undefined {
   const db = getDb();
@@ -174,4 +185,55 @@ export function setAgentTaskRouterMode(value: AgentTaskRouterMode): AgentTaskRou
   const v = AgentTaskRouterModeSchema.parse(value);
   writeKey(KEY_AGENT_TASK_ROUTER_MODE, v);
   return v;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Web Search Backend Configuration (⑨ verifier 联网核查)
+// 全 app 单实例配置；服务层每次实时读，UI 改即时生效、无需重启 worker。
+// ─────────────────────────────────────────────────────────────────
+
+export function getWebSearchProvider(): WebSearchProvider {
+  const raw = readKey(KEY_WEB_SEARCH_PROVIDER);
+  if (raw === undefined) return DEFAULT_WEB_SEARCH_PROVIDER;
+  const parsed = WebSearchProviderSchema.safeParse(raw);
+  return parsed.success ? parsed.data : DEFAULT_WEB_SEARCH_PROVIDER;
+}
+
+export function setWebSearchProvider(value: WebSearchProvider): WebSearchProvider {
+  const v = WebSearchProviderSchema.parse(value);
+  writeKey(KEY_WEB_SEARCH_PROVIDER, v);
+  return v;
+}
+
+export function getWebSearchApiKey(): string {
+  return readKey(KEY_WEB_SEARCH_API_KEY) ?? DEFAULT_WEB_SEARCH_API_KEY;
+}
+
+export function setWebSearchApiKey(value: string): string {
+  const v = WebSearchApiKeySchema.parse(value);
+  writeKey(KEY_WEB_SEARCH_API_KEY, v);
+  return v;
+}
+
+export function getWebSearchMaxResults(): number {
+  return readNumber(KEY_WEB_SEARCH_MAX_RESULTS, DEFAULT_WEB_SEARCH_MAX_RESULTS);
+}
+
+export function setWebSearchMaxResults(value: number): number {
+  const v = WebSearchMaxResultsSchema.parse(value);
+  writeKey(KEY_WEB_SEARCH_MAX_RESULTS, String(v));
+  return v;
+}
+
+/** 一次读取三字段，供 web-search.ts 使用。 */
+export function getWebSearchConfig(): {
+  provider: WebSearchProvider;
+  apiKey: string;
+  maxResults: number;
+} {
+  return {
+    provider: getWebSearchProvider(),
+    apiKey: getWebSearchApiKey(),
+    maxResults: getWebSearchMaxResults(),
+  };
 }
