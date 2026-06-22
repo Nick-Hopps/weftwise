@@ -33,7 +33,8 @@
       "model": "claude-sonnet-4-6",
       "maxTokens": 4096,
       "temperature": 0
-    }
+    },
+    "embedding": { "profile": "openai-default", "model": "text-embedding-3-small" }
   },
   "providers": {
     "anthropic-default": {
