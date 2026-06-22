@@ -105,3 +105,43 @@ describe('examples/skills round-trip', () => {
     expect(summarizer!.model?.maxTokens).toBeUndefined();
   });
 });
+
+describe('ingest-verifier-triage / -apply (⑨)', () => {
+  it('both load with version >= 1 and outputSchema', async () => {
+    const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
+    const triage = skills.find((s) => s.id === 'ingest-verifier-triage');
+    const apply = skills.find((s) => s.id === 'ingest-verifier-apply');
+    expect(triage).toBeDefined();
+    expect(apply).toBeDefined();
+    expect(triage!.version).toBeGreaterThanOrEqual(1);
+    expect(apply!.version).toBeGreaterThanOrEqual(1);
+    expect(triage!.outputSchema).toBeDefined();
+    expect(apply!.outputSchema).toBeDefined();
+  });
+
+  it('triage outputSchema accepts doubtfulClaims, rejects missing query', async () => {
+    const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
+    const triage = skills.find((s) => s.id === 'ingest-verifier-triage')!;
+    expect(triage.outputSchema!.safeParse({ doubtfulClaims: [] }).success).toBe(true);
+    expect(triage.outputSchema!.safeParse({
+      doubtfulClaims: [{ excerpt: 'e', query: 'q', reason: 'r' }],
+    }).success).toBe(true);
+    expect(triage.outputSchema!.safeParse({
+      doubtfulClaims: [{ excerpt: 'e', reason: 'r' }],
+    }).success).toBe(false);
+  });
+
+  it('apply outputSchema accepts citedSources array', async () => {
+    const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
+    const apply = skills.find((s) => s.id === 'ingest-verifier-apply')!;
+    expect(apply.outputSchema!.safeParse({
+      action: 'update',
+      path: 'wiki/general/x.md',
+      content: '...',
+      citedSources: [{ url: 'https://a.com', title: 'T' }],
+    }).success).toBe(true);
+    expect(apply.outputSchema!.safeParse({
+      action: 'update', path: 'p', content: 'c', citedSources: [{ url: 'u' }],
+    }).success).toBe(false);
+  });
+});
