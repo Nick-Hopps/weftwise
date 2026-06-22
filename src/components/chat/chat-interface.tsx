@@ -7,9 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
-import { apiFetch } from '@/lib/api-fetch';
+import { apiFetch, useApiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
 import type { ChatMessage, Citation } from './message-list';
+import type { ConversationMessage } from '@/lib/contracts';
 
 type PendingAction = { kind: 'reset' } | null;
 
@@ -97,6 +98,9 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
+  const currentConversationId = useUIStore((s) => s.currentConversationId);
+  const setCurrentConversation = useUIStore((s) => s.setCurrentConversation);
+  const apiFetchClient = useApiFetch();
 
   // Derive the currently-open wiki page slug from the route so that questions
   // typed in the context panel's chat tab are always answered with that page
@@ -118,6 +122,33 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+
+  // 监听 currentConversationId 变化：非 null 则从服务端载入历史消息，null 则清空
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentConversationId) {
+      setMessages([]);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await apiFetchClient(`/api/conversations/${currentConversationId}`);
+        if (!res.ok) { if (!cancelled) setMessages([]); return; }
+        const data = (await res.json()) as { messages: ConversationMessage[] };
+        if (cancelled) return;
+        setMessages(
+          data.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+            citations: m.citations ?? [],
+          })),
+        );
+      } catch {
+        if (!cancelled) setMessages([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentConversationId, apiFetchClient]);
 
   const lastAssistantMessage =
     [...messages].reverse().find((m) => m.role === 'assistant') ?? null;
@@ -223,6 +254,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       const queryBody: Record<string, unknown> = { question };
       if (currentPageSlug) queryBody.pageSlug = currentPageSlug;
       if (subjectId) queryBody.subjectId = subjectId;
+      const conversationId = useUIStore.getState().currentConversationId;
+      if (conversationId) queryBody.conversationId = conversationId;
 
       const response = await apiFetch('/api/query', {
         method: 'POST',
@@ -257,6 +290,14 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             } else if (event === 'citations') {
               const citations = (data as { citations: Citation[] }).citations;
               updateLastAssistant((msg) => ({ ...msg, citations }));
+            } else if (event === 'done') {
+              const convId = (data as { conversationId?: string }).conversationId;
+              if (convId) {
+                if (convId !== useUIStore.getState().currentConversationId) {
+                  setCurrentConversation(convId);
+                }
+                queryClient.invalidateQueries({ queryKey: ['conversations'] });
+              }
             }
           });
         }
@@ -278,7 +319,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, pendingAction, performReset, currentPageSlug]);
+  }, [input, isLoading, pendingAction, performReset, currentPageSlug, setCurrentConversation, queryClient]);
 
   // Abort any in-flight SSE stream when the component unmounts to avoid
   // leaking work and stale setState calls after the panel closes.

@@ -1,6 +1,7 @@
 'use client';
 
 import { ChatInterface } from '@/components/chat/chat-interface';
+import { ConversationSwitcher } from '@/components/chat/conversation-switcher';
 
 /**
  * Chat tab content for the unified Context Panel.
@@ -12,7 +13,10 @@ import { ChatInterface } from '@/components/chat/chat-interface';
 export function ContextPanelChatTab() {
   return (
     <div className="flex flex-col h-full">
-      <ChatInterface variant="embedded" hideHeader />
+      <ConversationSwitcher />
+      <div className="min-h-0 flex-1">
+        <ChatInterface variant="embedded" hideHeader />
+      </div>
     </div>
   );
 }
