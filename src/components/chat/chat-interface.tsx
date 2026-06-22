@@ -1,16 +1,64 @@
 'use client';
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
-import { Send, StopCircle, Trash2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, Send, StopCircle, TextQuote, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/input';
 import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
 import { apiFetch, useApiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
+import { useCurrentSubject } from '@/hooks/use-current-subject';
+import { cn } from '@/lib/cn';
 import type { ChatMessage, Citation } from './message-list';
 import type { ConversationMessage } from '@/lib/contracts';
+
+interface Passage {
+  id: string;
+  section: string;
+  text: string;
+}
+
+/** Split a page's markdown into referenceable passages, tagged by section. */
+function parsePassages(content: string, title: string): Passage[] {
+  const lines = content.replace(/\r/g, '').split('\n');
+  const out: Passage[] = [];
+  let section = title;
+  let buf: string[] = [];
+  const clean = (s: string) =>
+    s
+      .replace(/\[\[([^\]|]*)\|?([^\]]*)\]\]/g, (_m, a, b) => b || a)
+      .replace(/[*`_>#]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  const flush = () => {
+    const raw = clean(buf.join(' '));
+    buf = [];
+    if (raw.length >= 24) out.push({ id: String(out.length), section, text: raw });
+  };
+  for (const line of lines) {
+    const h = line.match(/^#{1,3}\s+(.*)/);
+    if (h) {
+      flush();
+      section = clean(h[1]) || section;
+      continue;
+    }
+    if (line.trim() === '') {
+      flush();
+      continue;
+    }
+    if (/^\s*[-*]\s/.test(line)) {
+      flush();
+      buf.push(line.replace(/^\s*[-*]\s/, ''));
+      flush();
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return out.slice(0, 40);
+}
 
 type PendingAction = { kind: 'reset' } | null;
 
@@ -115,6 +163,36 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       return match[1];
     }
   }, [pathname]);
+
+  // Referenceable passages from the open page (context-panel chat only).
+  const { id: ctxSubjectId } = useCurrentSubject();
+  const canReference = variant === 'embedded' && !!currentPageSlug;
+  const { data: pageContent } = useQuery({
+    queryKey: ['page-detail', ctxSubjectId, currentPageSlug],
+    queryFn: async () => {
+      if (!currentPageSlug) return null;
+      const res = await apiFetchClient(`/api/pages/${currentPageSlug}`);
+      if (!res.ok) return null;
+      return (await res.json()) as { title: string; content: string };
+    },
+    enabled: canReference && !!ctxSubjectId,
+    staleTime: 30_000,
+  });
+  const passages = useMemo(
+    () =>
+      pageContent?.content
+        ? parsePassages(pageContent.content, pageContent.title ?? currentPageSlug ?? '')
+        : [],
+    [pageContent, currentPageSlug],
+  );
+  const [refs, setRefs] = useState<Passage[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Drop pinned references when navigating to a different page.
+  useEffect(() => {
+    setRefs([]);
+    setPickerOpen(false);
+  }, [currentPageSlug]);
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -251,6 +329,15 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       return;
     }
 
+    // Pinned passages travel as extra context to the model, then clear.
+    const sentRefs = refs;
+    setRefs([]);
+    const backendQuestion = sentRefs.length
+      ? `Use these excerpts from "${pageContent?.title ?? currentPageSlug}" as context:\n${sentRefs
+          .map((r) => `> [${r.section}] ${r.text}`)
+          .join('\n')}\n\nQuestion: ${question}`
+      : question;
+
     setIsLoading(true);
     setMessages((prev) => [...prev, { role: 'user', content: question }]);
     setMessages((prev) => [...prev, { role: 'assistant', content: '', citations: [] }]);
@@ -258,7 +345,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
 
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
-      const queryBody: Record<string, unknown> = { question };
+      const queryBody: Record<string, unknown> = { question: backendQuestion };
       if (currentPageSlug) queryBody.pageSlug = currentPageSlug;
       if (subjectId) queryBody.subjectId = subjectId;
       const conversationId = useUIStore.getState().currentConversationId;
@@ -328,7 +415,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, pendingAction, performReset, currentPageSlug, setCurrentConversation, queryClient]);
+  }, [input, isLoading, pendingAction, performReset, currentPageSlug, refs, pageContent, setCurrentConversation, queryClient]);
 
   // Abort any in-flight SSE stream when the component unmounts to avoid
   // leaking work and stale setState calls after the panel closes.
@@ -404,8 +491,45 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
         </div>
       )}
 
-      <div className="border-t border-border p-3">
-        <div className="flex gap-2 items-end">
+      <div className="relative border-t border-border p-3">
+        {pickerOpen && canReference && (
+          <ReferencePicker
+            passages={passages}
+            selected={refs}
+            onPick={(p) => {
+              setRefs((r) => (r.some((x) => x.id === p.id) ? r : [...r, p]));
+              setPickerOpen(false);
+              textareaRef.current?.focus();
+            }}
+            onClose={() => setPickerOpen(false)}
+          />
+        )}
+
+        {refs.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {refs.map((r) => (
+              <span
+                key={r.id}
+                className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-accent/25 bg-accent-subtle py-1 pl-2 pr-1"
+              >
+                <TextQuote className="h-3 w-3 shrink-0 text-accent" />
+                <span className="max-w-[180px] truncate text-[11px] font-medium text-accent-strong">
+                  {r.section}: {r.text}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
+                  aria-label="Remove reference"
+                  className="inline-flex rounded-sm p-0.5 text-accent-strong hover:bg-accent/10"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-end gap-2">
           <Textarea
             ref={textareaRef}
             value={input}
@@ -421,18 +545,82 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               Stop
             </Button>
           ) : (
-            <Button
-              intent="primary"
-              size="base"
-              onClick={sendMessage}
-              disabled={!input.trim()}
-            >
+            <Button intent="primary" size="base" onClick={sendMessage} disabled={!input.trim()}>
               <Send className="h-3.5 w-3.5" />
               Send
             </Button>
           )}
         </div>
+
+        {canReference && passages.length > 0 && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={() => setPickerOpen((o) => !o)}
+              title="Reference a passage from this page"
+              className={cn(
+                'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-foreground-secondary transition-colors hover:bg-subtle focus-ring',
+                pickerOpen && 'bg-subtle',
+              )}
+            >
+              <TextQuote className="h-3.5 w-3.5" /> Reference passage
+            </button>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+/** Popover listing the current page's passages to attach as chat references. */
+function ReferencePicker({
+  passages,
+  selected,
+  onPick,
+  onClose,
+}: {
+  passages: Passage[];
+  selected: Passage[];
+  onPick: (p: Passage) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div onClick={onClose} className="fixed inset-0 z-overlay" aria-hidden />
+      <div className="absolute bottom-[calc(100%-8px)] left-3 right-3 z-sheet animate-slide-down overflow-hidden rounded-lg border border-border bg-surface shadow-md">
+        <div className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
+          Reference from this page
+        </div>
+        <div className="max-h-56 overflow-y-auto p-1">
+          {passages.map((p) => {
+            const on = selected.some((x) => x.id === p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => onPick(p)}
+                disabled={on}
+                className={cn(
+                  'flex w-full items-start gap-2 rounded-md px-2.5 py-2 text-left',
+                  on ? 'opacity-55' : 'hover:bg-subtle',
+                )}
+              >
+                {on ? (
+                  <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+                ) : (
+                  <TextQuote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+                )}
+                <span className="min-w-0">
+                  <span className="mb-0.5 block text-[11px] font-semibold text-foreground-secondary">
+                    {p.section}
+                  </span>
+                  <span className="block text-xs text-foreground line-clamp-2">{p.text}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }
