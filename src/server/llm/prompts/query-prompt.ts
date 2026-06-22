@@ -67,6 +67,7 @@ export function buildQueryUserPrompt(
   question: string,
   relevantPages: { slug: string; title: string; content: string; isCurrent?: boolean }[],
   ctx: PromptContext,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
 ): string {
   const currentPage = relevantPages.find((p) => p.isCurrent);
   const pagesSection =
@@ -95,13 +96,25 @@ All pages below are scoped to this subject. Do not invent information from other
     ? `\nThe user is currently viewing the page \`${currentPage.slug}\` ("${currentPage.title}"). If the question uses vague references like "this", "this page", "here", or asks for a summary/explanation without naming a topic, assume they are asking about that page.\n`
     : '';
 
+  const historySection =
+    history.length === 0
+      ? ''
+      : `## Conversation so far
+${history
+  .map((m) => `**${m.role === 'assistant' ? 'Assistant' : 'User'}**: ${m.content}`)
+  .join('\n\n')}
+
+---
+
+`;
+
   return `${languageDirective}${subjectSection}## Relevant wiki pages
 
 ${pagesSection}
 
 ---
 
-## User question
+${historySection}## User question
 ${currentPageHint}
 <user_input>
 ${question}
