@@ -100,6 +100,14 @@ export interface ChunkRef {
   content: string;
 }
 
+/** ⑨ 核查阶段引用的网页源（跨页按 url 去重；finalize 时导入为 source）。 */
+export interface CitedSource {
+  url: string;
+  title: string;
+  citedBy: string[];        // 引用该网页的页面 slug 列表
+  fallbackContent: string;  // extract 失败时兜底的正文（取自搜索 snippet）
+}
+
 export interface AgentContext {
   job: Job;
   subject: Subject;
@@ -119,6 +127,8 @@ export interface AgentContext {
   budgetSnapshot: AgentBudget;
   /** 断点续传句柄；仅 ingest 注入，缺省时不续传。 */
   checkpoint?: IngestCheckpoint;
+  /** ⑨ 核查阶段累积的网页引用源；仅 ingest 注入（Map<url, CitedSource>）。 */
+  citedSources?: Map<string, CitedSource>;
 }
 
 // Forward-declared interfaces; concrete classes live in their own files.
