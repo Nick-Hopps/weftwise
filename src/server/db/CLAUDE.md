@@ -78,10 +78,10 @@
 
 向量语义检索（⑧）：`subject_id` scoped，FK CASCADE。
 
-- `upsertEmbedding(subjectId, slug, model, embedding, contentHash): void` —— 按 `(subject_id, slug)` upsert
-- `listForSubject(subjectId, model?): PageEmbedding[]` —— 按 model 可选过滤
-- `deleteBySlug(subjectId, slug): void` —— 删除页面向量（写/删 changeset 触发）
-- `pruneOrphans(subjectId, liveSlugs): void` —— 删除孤儿向量（embed-index 任务调用）
+- `upsertEmbedding(row: { subjectId, slug, model, contentHash, dim, vector: Buffer }): void` —— 按 `(subject_id, slug)` ON CONFLICT 覆盖
+- `listForSubject(subjectId, model): { slug, contentHash, dim, vector: Buffer }[]` —— **按 model 过滤**（只返回当前模型向量）
+- `deleteBySlug(subjectId, slug): void` —— 删单页向量（导出备用；当前删除/拆分由 embed-index `pruneOrphans` 统一清理）
+- `pruneOrphans(subjectId, liveSlugs): void` —— 删 slug ∉ liveSlugs 的孤儿向量（embed-index 任务每次调用）
 
 ### `settings-repo.ts`（全局键值设置）
 
