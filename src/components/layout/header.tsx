@@ -110,11 +110,31 @@ export function Header() {
           </span>
         </IconButton>
 
-        <Link href="/" className="flex items-center gap-2 px-1 focus-ring rounded-sm">
+        <Link
+          href="/"
+          aria-label="Agentic Wiki — home"
+          className="flex items-center gap-2 px-1 focus-ring rounded-sm"
+        >
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-sm bg-accent text-accent-fg">
-            <span className="text-xs font-bold">W</span>
+            {/* Network glyph — a linked "vault" mark with an accent-cored hub node */}
+            <svg width="24" height="24" viewBox="0 0 40 40" fill="none" aria-hidden>
+              <path
+                d="M9 13 L13.5 27 L20 16 L26.5 27 L31 13"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                opacity="0.9"
+              />
+              <circle cx="9" cy="13" r="2.8" fill="currentColor" />
+              <circle cx="13.5" cy="27" r="2.8" fill="currentColor" />
+              <circle cx="26.5" cy="27" r="2.8" fill="currentColor" />
+              <circle cx="31" cy="13" r="2.8" fill="currentColor" />
+              <circle cx="20" cy="16" r="3.9" fill="currentColor" />
+              <circle cx="20" cy="16" r="1.7" className="fill-accent" />
+            </svg>
           </span>
-          <span className="hidden sm:inline text-sm font-semibold tracking-tight text-foreground">
+          <span className="hidden sm:inline font-display text-[16px] font-semibold tracking-[-0.02em] text-foreground">
             Agentic Wiki
           </span>
         </Link>
@@ -154,12 +174,19 @@ export function Header() {
           size="base"
           onClick={() => openContextPanel('chat')}
           aria-label="Ask your wiki (⌘J)"
-          title="Ask your wiki (⌘J)"
+          data-tip="Ask your wiki"
+          className="tip tip-b text-accent hover:text-accent-hover"
         >
           <Sparkles />
         </IconButton>
 
-        <IconButton size="base" onClick={toggleDarkMode} aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
+        <IconButton
+          size="base"
+          onClick={toggleDarkMode}
+          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          data-tip={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="tip tip-b"
+        >
           {darkMode ? <Sun /> : <Moon />}
         </IconButton>
 
@@ -167,7 +194,8 @@ export function Header() {
           size="base"
           onClick={toggleContextPanel}
           aria-label={contextPanelOpen ? 'Close context panel' : 'Open context panel'}
-          className={cn(contextPanelOpen && 'bg-subtle text-foreground')}
+          data-tip={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}
+          className={cn('tip tip-b', contextPanelOpen && 'bg-subtle text-foreground')}
         >
           {/* Simple panel-right glyph */}
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

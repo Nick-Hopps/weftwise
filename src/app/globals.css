@@ -296,3 +296,51 @@
     @apply outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-canvas;
   }
 }
+
+/* =============================================================================
+ * CSS-only tooltip for icon-only controls.
+ *   Set `data-tip="…"` + class `tip` (renders above) or `tip tip-b` (below).
+ *   Keep a real `aria-label` on the control — this is purely visual.
+ * ============================================================================= */
+.tip {
+  position: relative;
+}
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%) translateY(4px);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: var(--z-tooltip);
+  background: rgb(var(--color-fg-primary));
+  color: rgb(var(--color-bg-surface));
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+.tip.tip-b::after {
+  bottom: auto;
+  top: calc(100% + 6px);
+  transform: translateX(-50%) translateY(-4px);
+}
+.tip:hover::after,
+.tip:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tip::after {
+    transition: opacity var(--duration-fast) linear;
+  }
+}
