@@ -232,6 +232,17 @@ export const AgentMaxParallelSubAgentsSchema = z.number().int().min(1).max(10);
 export type AgentMcpLifecycle = z.infer<typeof AgentMcpLifecycleSchema>;
 export type AgentTaskRouterMode = z.infer<typeof AgentTaskRouterModeSchema>;
 
+export const DEFAULT_WEB_SEARCH_PROVIDER = 'tavily' as const;
+export const DEFAULT_WEB_SEARCH_API_KEY = '';
+export const DEFAULT_WEB_SEARCH_MAX_RESULTS = 5;
+
+export const WebSearchProviderSchema = z.enum(['tavily']);
+// 允许空串：空 = 未配置 / 关闭联网核查（优雅降级纯自检）
+export const WebSearchApiKeySchema = z.string().trim().max(200);
+export const WebSearchMaxResultsSchema = z.number().int().min(1).max(10);
+
+export type WebSearchProvider = z.infer<typeof WebSearchProviderSchema>;
+
 export interface AppSettings {
   wikiLanguage: string;
   agentMaxSteps: number;
@@ -239,6 +250,9 @@ export interface AppSettings {
   agentMaxParallelSubAgents: number;
   agentMcpLifecycle: AgentMcpLifecycle;
   agentTaskRouterMode: AgentTaskRouterMode;
+  webSearchProvider: WebSearchProvider;
+  webSearchApiKey: string;
+  webSearchMaxResults: number;
 }
 
 export const AppSettingsSchema = z.object({
@@ -248,4 +262,7 @@ export const AppSettingsSchema = z.object({
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema,
   agentMcpLifecycle: AgentMcpLifecycleSchema,
   agentTaskRouterMode: AgentTaskRouterModeSchema,
+  webSearchProvider: WebSearchProviderSchema,
+  webSearchApiKey: WebSearchApiKeySchema,
+  webSearchMaxResults: WebSearchMaxResultsSchema,
 });

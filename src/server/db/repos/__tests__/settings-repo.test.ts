@@ -62,3 +62,37 @@ describe('settings-repo agent keys', () => {
     expect(() => repo.setAgentTaskRouterMode('bogus')).toThrow();
   });
 });
+
+describe('settings-repo web search keys', () => {
+  it('returns defaults when no row exists', async () => {
+    const repo = await import('../settings-repo');
+    expect(repo.getWebSearchProvider()).toBe('tavily');
+    expect(repo.getWebSearchApiKey()).toBe('');
+    expect(repo.getWebSearchMaxResults()).toBe(5);
+    expect(repo.getWebSearchConfig()).toEqual({ provider: 'tavily', apiKey: '', maxResults: 5 });
+  });
+
+  it('roundtrips after set', async () => {
+    const repo = await import('../settings-repo');
+    repo.setWebSearchProvider('tavily');
+    repo.setWebSearchApiKey('  tvly-abc123  ');
+    repo.setWebSearchMaxResults(8);
+    expect(repo.getWebSearchApiKey()).toBe('tvly-abc123'); // trimmed
+    expect(repo.getWebSearchMaxResults()).toBe(8);
+    expect(repo.getWebSearchConfig()).toEqual({ provider: 'tavily', apiKey: 'tvly-abc123', maxResults: 8 });
+  });
+
+  it('allows empty apiKey (means not configured)', async () => {
+    const repo = await import('../settings-repo');
+    expect(() => repo.setWebSearchApiKey('')).not.toThrow();
+    expect(repo.getWebSearchApiKey()).toBe('');
+  });
+
+  it('rejects out-of-range maxResults and bad provider', async () => {
+    const repo = await import('../settings-repo');
+    expect(() => repo.setWebSearchMaxResults(0)).toThrow();
+    expect(() => repo.setWebSearchMaxResults(11)).toThrow();
+    // @ts-expect-error testing runtime guard
+    expect(() => repo.setWebSearchProvider('bing')).toThrow();
+  });
+});
