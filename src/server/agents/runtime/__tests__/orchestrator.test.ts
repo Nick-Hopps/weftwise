@@ -625,6 +625,72 @@ describe('orchestrator.runPipeline: 多内容阶段（增益）', () => {
     expect(forA[0].content).toBe('enriched');
   });
 
+  it('writer 更新已有页（slug 命中 existingPages + flag）时注入 existingPageContent', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'existing-a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w', output: { action: 'update', path: 'wiki/general/existing-a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    const readPage = vi.fn().mockResolvedValue({ markdown: 'EXISTING BODY' });
+    ctx.overlay.readPage = readPage as unknown as AgentContext['overlay']['readPage'];
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', injectExistingPageForUpdate: true },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    const writerInput = mockRun.mock.calls[1][0].input as Record<string, unknown>;
+    expect(writerInput.existingPageContent).toBe('EXISTING BODY');
+    expect(readPage).toHaveBeenCalledWith('general', 'existing-a');
+  });
+
+  it('writer 新建页（slug 不在 existingPages）不注入、也不读页', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'brand-new', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w', output: { action: 'create', path: 'wiki/general/brand-new.md', content: '' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    const readPage = vi.fn().mockResolvedValue({ markdown: 'X' });
+    ctx.overlay.readPage = readPage as unknown as AgentContext['overlay']['readPage'];
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', injectExistingPageForUpdate: true },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    const writerInput = mockRun.mock.calls[1][0].input as Record<string, unknown>;
+    expect(writerInput.existingPageContent).toBeUndefined();
+    expect(readPage).not.toHaveBeenCalled();
+  });
+
+  it('未设 injectExistingPageForUpdate 时即使 slug 命中也不注入', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'existing-a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w', output: { action: 'update', path: 'wiki/general/existing-a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    const readPage = vi.fn().mockResolvedValue({ markdown: 'EXISTING BODY' });
+    ctx.overlay.readPage = readPage as unknown as AgentContext['overlay']['readPage'];
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    const writerInput = mockRun.mock.calls[1][0].input as Record<string, unknown>;
+    expect(writerInput.existingPageContent).toBeUndefined();
+    expect(readPage).not.toHaveBeenCalled();
+  });
+
   it('强制规范 path：模型吐裸 slug 时 orchestrator 纠正为 wiki/<subject>/<slug>.md', async () => {
     mockRun.mockReset();
     mockRun.mockImplementationOnce(async (opts: { input: unknown }) => {

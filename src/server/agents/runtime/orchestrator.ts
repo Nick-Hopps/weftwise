@@ -5,7 +5,7 @@ import type { ChangesetEntry } from '@/lib/contracts';
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
-  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string }
+  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string; injectExistingPageForUpdate?: boolean }
   | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string; checkpointAs?: 'chunk-summary' };
 
 export class WriterConflictError extends Error {
@@ -129,7 +129,7 @@ export async function runPipeline(opts: {
           overlay: baseOverlay.snapshot(),
           parentRunId: opts.ctx.rootRunId,
         };
-        const r = await runAgentLoop({ skill, ctx: childCtx, input: buildFanoutInput(carry, item, opts.ctx, step) });
+        const r = await runAgentLoop({ skill, ctx: childCtx, input: await buildFanoutInput(carry, item, opts.ctx, step) });
         // 路径强制规范：fanout over plan.pages 时 orchestrator 已知 slug+subjectSlug，
         // 不信任模型自填的 path——实测 verifier 等会吐裸 slug（如 "quicksort" 而非
         // "wiki/general/quicksort.md"），导致落到 vault 根、indexer 解析不出 slug 而漏建索引。
@@ -208,12 +208,12 @@ function readPath(obj: unknown, path: string): unknown {
   }, obj);
 }
 
-function buildFanoutInput(
+async function buildFanoutInput(
   carry: unknown,
   item: unknown,
   ctx: AgentContext,
-  step: { injectPriorPageAs?: string },
-): unknown {
+  step: { injectPriorPageAs?: string; injectExistingPageForUpdate?: boolean },
+): Promise<unknown> {
   if (!isPlainObject(carry) || !isPlainObject(item)) return item;
 
   const relevantChunks = resolveRelevantChunks(item, ctx);
@@ -245,6 +245,17 @@ function buildFanoutInput(
       base[step.injectPriorPageAs] = prior.content;
     } else {
       ctx.emit('ingest:warn', `Enrich/verify for "${item.slug}" found no prior-stage page at ${path}`, { slug: item.slug });
+    }
+  }
+  // 增量合并：writer 阶段若本页 slug 命中 existingPages（=更新已有页），注入现有正文供 writer 并入。
+  if (step.injectExistingPageForUpdate && typeof item.slug === 'string') {
+    const existing = Array.isArray(carry.existingPages) ? carry.existingPages : [];
+    const isUpdate = existing.some(
+      (p) => isPlainObject(p) && (p as { slug?: unknown }).slug === item.slug,
+    );
+    if (isUpdate) {
+      const page = await ctx.overlay.readPage(String(carry.subjectSlug), item.slug);
+      if (page?.markdown) base.existingPageContent = page.markdown;
     }
   }
   return base;
