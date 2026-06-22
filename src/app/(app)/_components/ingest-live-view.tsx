@@ -62,12 +62,14 @@ const MILESTONE_SKILLS = new Set([
 ]);
 
 /** The raw stream has hundreds of low-level agent events; the timeline shows
- *  only meaningful milestones: phase signals, per-page completions, errors. */
+ *  only meaningful milestones: phase signals, per-page starts, errors.
+ *  NB: `agent:run-started` carries skillId+label; `agent:run-completed` does
+ *  not (see agent-loop.ts), so we key per-page entries off run-started. */
 function isMilestone(evt: JobStreamEvent): boolean {
   const t = evt.type;
   if (t.startsWith('ingest:')) return true;
   if (t === 'job:completed' || t === 'agent:error') return true;
-  if (t === 'agent:run-completed') {
+  if (t === 'agent:run-started') {
     const sk = payloadOf(evt).skillId;
     return typeof sk === 'string' && MILESTONE_SKILLS.has(sk);
   }
