@@ -35,6 +35,19 @@ export function getSource(id: string): Source | null {
   return row ? rowToSource(row) : null;
 }
 
+/** All ingested source documents for a subject, newest first. */
+export function listSourcesForSubject(subjectId: SubjectId): Source[] {
+  const db = getDb();
+  const rows = db
+    .select()
+    .from(sources)
+    .where(eq(sources.subjectId, subjectId))
+    .all();
+  return rows
+    .map(rowToSource)
+    .sort((a, b) => (b.parsedAt ?? '').localeCompare(a.parsedAt ?? ''));
+}
+
 export function getSourceByFilename(
   subjectId: SubjectId,
   filename: string

@@ -34,6 +34,13 @@ interface IngestLiveViewProps {
   createdPages: string[];
   onBackground: () => void;
   onIngestAnother: () => void;
+  /** When true, render as a docked region filling its parent instead of a
+   *  fixed full-screen overlay (used by the dedicated /ingest workspace). */
+  inline?: boolean;
+  /** Failure recovery — retry / resume the same job. */
+  onRetry?: () => void;
+  retrying?: boolean;
+  retryLabel?: string;
 }
 
 interface Phase {
@@ -135,6 +142,10 @@ export function IngestLiveView({
   createdPages,
   onBackground,
   onIngestAnother,
+  inline = false,
+  onRetry,
+  retrying = false,
+  retryLabel = 'Retry',
 }: IngestLiveViewProps) {
   const done = status === 'completed';
   const failed = status === 'failed';
@@ -151,14 +162,16 @@ export function IngestLiveView({
     return () => clearInterval(id);
   }, [running]);
 
-  // Escape sends the job to the background.
+  // Escape sends the job to the background (overlay mode only — on the docked
+  // /ingest page Escape must not yank the user away).
   useEffect(() => {
+    if (inline) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onBackground();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onBackground]);
+  }, [onBackground, inline]);
 
   // Current phase = the furthest phase any event has reached.
   const curPhase = useMemo(() => {
@@ -201,10 +214,10 @@ export function IngestLiveView({
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Ingest progress"
-      className="fixed inset-0 z-command flex flex-col bg-canvas"
+      {...(inline
+        ? { 'aria-label': 'Ingest progress' }
+        : { role: 'dialog', 'aria-modal': true, 'aria-label': 'Ingest progress' })}
+      className={cn('flex flex-col bg-canvas', inline ? 'h-full min-h-0' : 'fixed inset-0 z-command')}
     >
       {/* top bar */}
       <div className="shrink-0 border-b border-border bg-surface">
@@ -249,6 +262,11 @@ export function IngestLiveView({
             <span className="h-5 w-px bg-border" aria-hidden />
             {done || failed ? (
               <>
+                {failed && onRetry && (
+                  <Button intent="primary" onClick={onRetry} loading={retrying} disabled={retrying}>
+                    {retryLabel}
+                  </Button>
+                )}
                 <Button intent="outline" onClick={onIngestAnother}>
                   <Plus className="h-3.5 w-3.5" /> Ingest another
                 </Button>
@@ -258,7 +276,7 @@ export function IngestLiveView({
                   </Link>
                 )}
                 {(failed || createdPages.length === 0) && (
-                  <Button intent="primary" onClick={onBackground}>
+                  <Button intent="ghost" onClick={onBackground}>
                     Close
                   </Button>
                 )}

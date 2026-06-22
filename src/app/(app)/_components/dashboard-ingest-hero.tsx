@@ -1,546 +1,218 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import Link from 'next/link';
-import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
-  ArrowRight,
-  CircleCheck,
-  ClipboardPaste,
   FileUp,
   GitCommitHorizontal,
-  Layers,
-  Link2,
   ListChecks,
   Loader2,
   Maximize2,
   PenLine,
-  Plus,
   ScanText,
   ShieldCheck,
   Sparkles,
   UploadCloud,
-  X,
+  Wand2,
   type LucideIcon,
 } from 'lucide-react';
-import { useJobStream } from '@/hooks/use-job-stream';
+import { useJobStream, type JobStreamEvent } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
-import { Button, buttonVariants } from '@/components/ui/button';
-import { Input, Textarea } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
-import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
-import { IngestLiveView } from './ingest-live-view';
-import type { CheckpointProgress, Job } from '@/lib/contracts';
 
-/** The six agent phases, shown as a "what the agent does" preview while idle. */
-const PIPELINE: ReadonlyArray<{ label: string; Icon: LucideIcon }> = [
-  { label: 'Parse', Icon: ScanText },
-  { label: 'Plan', Icon: ListChecks },
-  { label: 'Write', Icon: PenLine },
-  { label: 'Link', Icon: Link2 },
-  { label: 'Lint', Icon: ShieldCheck },
-  { label: 'Commit', Icon: GitCommitHorizontal },
+/** The real ingest pipeline's six phases, in order. */
+const PHASES: ReadonlyArray<{ label: string; verb: string; Icon: LucideIcon }> = [
+  { label: 'Parse', verb: 'Parsing source', Icon: ScanText },
+  { label: 'Plan', verb: 'Planning changes', Icon: ListChecks },
+  { label: 'Write', verb: 'Writing pages', Icon: PenLine },
+  { label: 'Enrich', verb: 'Enriching pages', Icon: Wand2 },
+  { label: 'Verify', verb: 'Verifying claims', Icon: ShieldCheck },
+  { label: 'Commit', verb: 'Committing changeset', Icon: GitCommitHorizontal },
 ];
 
-export function DashboardIngestHero() {
-  const queryClient = useQueryClient();
-  const [paste, setPaste] = useState(false);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [reconnectKey, setReconnectKey] = useState(0);
-  const [retrying, setRetrying] = useState(false);
-  const [checkpointProgress, setCheckpointProgress] = useState<CheckpointProgress | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [textInput, setTextInput] = useState('');
-  const [filenameInput, setFilenameInput] = useState('');
-  const [sourceName, setSourceName] = useState<string>('');
-  const [createdPages, setCreatedPages] = useState<string[]>([]);
-  const [showLog, setShowLog] = useState(false);
-  const [liveOpen, setLiveOpen] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+function payloadOf(evt: JobStreamEvent): Record<string, unknown> {
+  const inner = evt.data?.data;
+  return inner && typeof inner === 'object' ? (inner as Record<string, unknown>) : {};
+}
 
-  const { events, status, latestMessage } = useJobStream(jobId, reconnectKey);
+/** Skills whose `label` payload names a page being written into the vault. */
+const PAGE_SKILLS = new Set(['ingest-writer', 'ingest-enricher']);
 
-  const isProcessing = jobId !== null && status === 'streaming';
-  const isDone = status === 'completed';
-  const isFailed = status === 'failed';
-  const phase: 'idle' | 'running' | 'done' | 'failed' = isProcessing
-    ? 'running'
-    : isDone
-      ? 'done'
-      : isFailed
-        ? 'failed'
-        : 'idle';
+/** Count of unique pages the run has drafted so far (mirrors the live view). */
+function pagesWritten(events: JobStreamEvent[]): number {
+  const seen = new Set<string>();
+  for (const e of events) {
+    const p = payloadOf(e);
+    const skillId = typeof p.skillId === 'string' ? p.skillId : '';
+    const label = typeof p.label === 'string' ? p.label : '';
+    if (PAGE_SKILLS.has(skillId) && label) seen.add(label);
+  }
+  return seen.size;
+}
 
-  // Aggregate prompt-cache hits across agent runs so the saving is visible.
-  const cacheStats = useMemo(() => {
-    let cacheHit = 0;
-    let promptIn = 0;
-    for (const e of events) {
-      if (e.type !== 'agent:step') continue;
-      // Emitted payload is nested under evt.data.data by the SSE bridge.
-      const d = e.data?.data as { kind?: string; tokensIn?: number; cacheHitTokens?: number } | undefined;
-      if (d?.kind !== 'final') continue;
-      if (typeof d.tokensIn === 'number') promptIn += d.tokensIn;
-      if (typeof d.cacheHitTokens === 'number') cacheHit += d.cacheHitTokens;
+/** Furthest pipeline phase any event has reached (mirrors ingest-live-view). */
+function currentPhase(events: JobStreamEvent[]): number {
+  let max = 0;
+  for (const e of events) {
+    const t = e.type;
+    const skillId = typeof payloadOf(e).skillId === 'string' ? (payloadOf(e).skillId as string) : '';
+    let idx: number | null = null;
+    if (t === 'ingest:committing' || skillId === 'ingest-indexer') idx = 5;
+    else if (t === 'ingest:verify' || skillId.startsWith('ingest-verifier')) idx = 4;
+    else if (skillId === 'ingest-enricher') idx = 3;
+    else if (skillId === 'ingest-writer') idx = 2;
+    else if (t === 'ingest:planning' || skillId === 'ingest-planner') idx = 1;
+    else if (
+      t === 'ingest:parsing' ||
+      t === 'ingest:chunking' ||
+      t === 'ingest:start' ||
+      t === 'ingest:resuming' ||
+      skillId === 'ingest-chunk-summarizer'
+    ) {
+      idx = 0;
     }
-    const pct = promptIn > 0 ? Math.round((cacheHit / promptIn) * 100) : 0;
-    return { cacheHit, promptIn, pct };
-  }, [events]);
+    if (idx !== null && idx > max) max = idx;
+  }
+  return max;
+}
 
-  useEffect(() => {
-    if (!isDone) return;
-    queryClient.invalidateQueries({ queryKey: ['pages'] });
-  }, [isDone, queryClient]);
+/**
+ * Dashboard ingest hero — the dashboard's primary call to action. It does not
+ * run the ingest itself (that lives on the dedicated `/ingest` workspace); it
+ * invites the user there, and reflects a background ingest's progress when one
+ * is running.
+ */
+export function DashboardIngestHero() {
+  const router = useRouter();
+  const [jobId, setJobId] = useState<string | null>(null);
+  const { events, status, latestMessage } = useJobStream(jobId);
 
-  useEffect(() => {
-    if (!isDone) return;
-    // The worker emits the IngestResult on `job:completed`; older builds used
-    // `ingest:complete` — accept either.
-    const doneEvent = events.find((e) => e.type === 'job:completed' || e.type === 'ingest:complete');
-    const result = (doneEvent?.data?.data as { result?: { pagesCreated?: string[] } } | undefined)?.result;
-    if (result?.pagesCreated) setCreatedPages(result.pagesCreated);
-  }, [isDone, events]);
-
-  const reset = () => {
-    setJobId(null);
-    setError(null);
-    setCreatedPages([]);
-    setTextInput('');
-    setFilenameInput('');
-    setSourceName('');
-    setPaste(false);
-    setShowLog(false);
-    setLiveOpen(false);
-    setCheckpointProgress(null);
-    if (fileRef.current) fileRef.current.value = '';
-  };
-
-  // Manual retry: requeue the same job, then force an SSE reconnect for that id.
-  const handleRetry = useCallback(async () => {
-    if (!jobId) return;
-    setRetrying(true);
-    setError(null);
+  // Track a running background ingest (poll + the start event).
+  const check = useCallback(async () => {
+    if (jobId) return;
+    const subjectId = useUIStore.getState().currentSubjectId;
     try {
-      const res = await apiFetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Retry failed (${res.status})`);
-      }
-      setCheckpointProgress(null);
-      setReconnectKey((k) => k + 1);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRetrying(false);
+      const qs = subjectId ? `&subjectId=${encodeURIComponent(subjectId)}` : '';
+      const res = await apiFetch(`/api/jobs?status=running&type=ingest${qs}`);
+      if (!res.ok) return;
+      const jobs = (await res.json()) as Array<{ id: string }>;
+      if (Array.isArray(jobs) && jobs.length > 0) setJobId(jobs[jobs.length - 1].id);
+    } catch {
+      /* ignore */
     }
   }, [jobId]);
 
-  // After a failure, fetch this job's checkpoint progress for the retry label.
   useEffect(() => {
-    if (status !== 'failed' || !jobId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch(`/api/jobs/${jobId}`);
-        if (!res.ok) return;
-        const job = (await res.json()) as { checkpointProgress?: CheckpointProgress | null };
-        if (!cancelled) setCheckpointProgress(job.checkpointProgress ?? null);
-      } catch {
-        /* silent — the progress label is a nicety */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [status, jobId]);
+    check();
+    const interval = setInterval(check, 5000);
+    return () => clearInterval(interval);
+  }, [check]);
 
-  // On mount, restore the most recent resumable failed ingest for this subject.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const subjectId = useUIStore.getState().currentSubjectId;
-      if (!subjectId) return;
-      try {
-        // Reflect an in-progress background ingest if the user returns mid-run.
-        const runningRes = await apiFetch(
-          `/api/jobs?status=running&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
-        );
-        if (runningRes.ok) {
-          const running = (await runningRes.json()) as Job[];
-          if (running.length > 0) {
-            if (!cancelled) setJobId(running[running.length - 1].id);
-            return;
-          }
-        }
-        const res = await apiFetch(
-          `/api/jobs?status=failed&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
-        );
-        if (!res.ok) return;
-        const jobs = (await res.json()) as Array<Job & { checkpointProgress: CheckpointProgress | null }>;
-        const resumable = jobs.filter((j) => j.checkpointProgress);
-        if (resumable.length === 0) return;
-        const latest = resumable[resumable.length - 1]; // listJobs is createdAt-ascending
-        if (cancelled) return;
-        setCheckpointProgress(latest.checkpointProgress);
-        setJobId(latest.id);
-      } catch {
-        /* silent */
-      }
-    })();
-    return () => {
-      cancelled = true;
+    const onStarted = (e: Event) => {
+      const detail = (e as CustomEvent<{ jobId: string }>).detail;
+      if (detail?.jobId) setJobId(detail.jobId);
     };
-    // Resume is attempted once, on mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    window.addEventListener('wiki:job-started', onStarted);
+    return () => window.removeEventListener('wiki:job-started', onStarted);
   }, []);
 
-  const uploadFile = useCallback(async (file: File) => {
-    setError(null);
-    setCreatedPages([]);
-    setUploading(true);
-    setSourceName(file.name);
-    try {
-      const subjectId = useUIStore.getState().currentSubjectId;
-      const formData = new FormData();
-      formData.append('file', file);
-      if (subjectId) formData.append('subjectId', subjectId);
-      const res = await apiFetch('/api/ingest', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Upload failed (${res.status})`);
-      }
-      const data = await res.json();
-      setJobId(data.jobId);
-      setLiveOpen(true);
-      window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUploading(false);
-    }
-  }, []);
+  // Drop the tracked job shortly after it settles.
+  useEffect(() => {
+    if (status !== 'completed' && status !== 'failed') return;
+    const t = setTimeout(() => setJobId(null), 2000);
+    return () => clearTimeout(t);
+  }, [status]);
 
-  const handleTextSubmit = async (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setError(null);
-    setCreatedPages([]);
-    if (!textInput.trim()) {
-      setError('Please enter some text to ingest.');
-      return;
-    }
-    setUploading(true);
-    const filename = filenameInput.trim() || `note-${Date.now()}.md`;
-    setSourceName(filename);
-    try {
-      const subjectId = useUIStore.getState().currentSubjectId;
-      const res = await apiFetch('/api/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          subjectId ? { text: textInput, filename, subjectId } : { text: textInput, filename },
-        ),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Submit failed (${res.status})`);
-      }
-      const data = await res.json();
-      setJobId(data.jobId);
-      setLiveOpen(true);
-      window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      if (phase !== 'idle') return;
-      const file = e.dataTransfer.files[0];
-      if (file) uploadFile(file);
-    },
-    [uploadFile, phase],
-  );
-
-  // ⌘/Ctrl-I opens the file picker while the hero is idle.
+  // ⌘/Ctrl-I opens the ingest workspace.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (phase !== 'idle' || paste) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'i') {
         e.preventDefault();
-        fileRef.current?.click();
+        router.push('/ingest');
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, paste]);
+  }, [router]);
 
-  // Full-screen live view — auto-opened on start, dismissable to the background.
-  const liveView =
-    liveOpen && jobId ? (
-      <IngestLiveView
-        jobId={jobId}
-        sourceName={sourceName || 'Ingesting source'}
-        status={status}
-        events={events}
-        latestMessage={latestMessage}
-        createdPages={createdPages}
-        onBackground={() => setLiveOpen(false)}
-        onIngestAnother={reset}
-      />
-    ) : null;
+  const running = !!jobId && status === 'streaming';
 
-  // ── Running ───────────────────────────────────────────────────────────────
-  if (phase === 'running') {
+  // ── Running strip ───────────────────────────────────────────────────────────
+  if (running) {
+    const idx = currentPhase(events);
+    const pct = Math.min(97, Math.round(((idx + 0.5) / PHASES.length) * 100));
+    const phase = PHASES[idx];
+    const pages = pagesWritten(events);
+    const status = latestMessage ? latestMessage.replace(/\[\[|\]\]/g, '') : 'Starting…';
     return (
-      <>
-        {liveView}
-        <section
-          aria-label="Ingest in progress"
-          className="relative overflow-hidden rounded-lg border border-accent/35 bg-surface shadow-sm p-5"
-        >
-        <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => router.push('/ingest')}
+        aria-label="Open the running ingest"
+        className="ig-sheen group relative w-full overflow-hidden rounded-lg border border-accent/35 bg-surface p-5 text-left shadow-sm transition-colors hover:bg-subtle/40 focus-ring"
+      >
+        <div className="relative z-[1] flex items-center gap-3">
           <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="truncate font-mono text-sm font-semibold text-foreground">
-              {sourceName || 'Ingesting source'}
-            </p>
+            <p className="text-sm font-semibold text-foreground">Ingest in progress</p>
             <p className="mt-0.5 truncate text-xs text-foreground-secondary">
-              <span className="font-semibold text-accent-strong">Working…</span>{' '}
-              {latestMessage || 'starting up the agent'}
+              <span className="font-semibold text-accent-strong">{phase.verb}…</span>
             </p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setLiveOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-accent hover:bg-accent/10 transition-colors focus-ring"
-            >
-              <Maximize2 className="h-3.5 w-3.5" /> Watch live
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowLog((s) => !s)}
-              className="rounded-md px-2 py-1 text-xs font-medium text-foreground-secondary hover:bg-subtle hover:text-foreground transition-colors focus-ring"
-            >
-              {showLog ? 'Hide log' : 'View log'}
-            </button>
-          </div>
-        </div>
-
-        {/* indeterminate progress — concrete phase % lands in the live ingest view */}
-        <div className="mt-3.5 h-1 overflow-hidden rounded-full bg-subtle">
-          <span className="ingest-bar-indeterminate block h-full w-1/4 rounded-full bg-accent" />
-        </div>
-
-        {cacheStats.promptIn > 0 && (
-          <p
-            className="mt-3 text-[11px] text-foreground-tertiary"
-            title="Input tokens served from the provider prefix cache (billed ~0.1×)"
-          >
-            Prompt cache hits{' '}
-            <span className="font-mono tabular-nums text-foreground-secondary">
-              {cacheStats.cacheHit.toLocaleString()} / {cacheStats.promptIn.toLocaleString()} ({cacheStats.pct}%)
-            </span>
-          </p>
-        )}
-
-          {showLog && <EventLog events={events} />}
-        </section>
-      </>
-    );
-  }
-
-  // ── Done ────────────────────────────────────────────────────────────────────
-  if (phase === 'done') {
-    return (
-      <>
-        {liveView}
-        <section
-          aria-label="Ingest complete"
-          className="flex flex-wrap items-center gap-5 rounded-lg border border-success-border/50 bg-surface shadow-sm p-5"
-        >
-        <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-success/12 text-success">
-          <CircleCheck className="h-[22px] w-[22px]" aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-foreground">Ingest complete</p>
-          <p className="mt-0.5 text-xs text-foreground-secondary">
-            {createdPages.length > 0
-              ? `${createdPages.length} ${createdPages.length === 1 ? 'page' : 'pages'} added`
-              : 'Vault updated'}
-            {sourceName && (
-              <>
-                {' from '}
-                <span className="font-mono text-foreground">{sourceName}</span>
-              </>
-            )}
-          </p>
-          {createdPages.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {createdPages.slice(0, 6).map((slug) => (
-                <Link key={slug} href={`/wiki/${slug}`} className="focus-ring rounded-sm">
-                  <Tag tone="accent">{slug}</Tag>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex shrink-0 gap-2">
-          <Button intent="outline" onClick={reset}>
-            <Plus className="h-3.5 w-3.5" /> Ingest another
-          </Button>
-          {createdPages.length > 0 && (
-            <Link href={`/wiki/${createdPages[0]}`} className={buttonVariants({ intent: 'primary' })}>
-              <ArrowRight className="h-3.5 w-3.5" /> View pages
-            </Link>
-          )}
-        </div>
-        </section>
-      </>
-    );
-  }
-
-  // ── Failed ────────────────────────────────────────────────────────────────
-  if (phase === 'failed') {
-    return (
-      <>
-        {liveView}
-        <section
-          aria-label="Ingest failed"
-          className="rounded-lg border border-danger/40 bg-surface shadow-sm p-5"
-        >
-        <div className="flex items-start gap-3">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-danger/12 text-danger">
-            <X className="h-[18px] w-[18px]" aria-hidden />
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-accent group-hover:bg-accent/10">
+            <Maximize2 className="h-3.5 w-3.5" /> Watch live
           </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground">Ingest failed</p>
-            <p className="mt-0.5 text-xs text-danger break-words">
-              {error || latestMessage || 'The agent stopped before committing.'}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setShowLog((s) => !s)}
-            className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-foreground-secondary hover:bg-subtle hover:text-foreground transition-colors focus-ring"
-          >
-            {showLog ? 'Hide log' : 'View log'}
-          </button>
         </div>
-        {showLog && <EventLog events={events} />}
-        <div className="mt-3.5 flex items-center gap-2">
-          <Button intent="primary" size="sm" onClick={handleRetry} loading={retrying} disabled={retrying}>
-            {checkpointProgress
-              ? `Resume${checkpointProgress.totalPages ? ` · ${checkpointProgress.writerPages}/${checkpointProgress.totalPages} pages` : ''}`
-              : 'Retry'}
-          </Button>
-          <Button intent="ghost" size="sm" onClick={reset}>
-            Ingest another source
-          </Button>
-        </div>
-        </section>
-      </>
-    );
-  }
 
-  // ── Idle: paste form ────────────────────────────────────────────────────────
-  if (paste) {
-    return (
-      <section
-        aria-label="Paste text to ingest"
-        className="rounded-lg border border-border bg-surface shadow-sm p-5 space-y-3"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
-            <ClipboardPaste className="h-4 w-4 text-accent" aria-hidden /> Paste text
+        {/* mini phase stepper */}
+        <div className="relative z-[1] mt-3.5 flex gap-1">
+          {PHASES.map((p, i) => (
+            <span
+              key={p.label}
+              className={cn(
+                'h-1 flex-1 rounded-full transition-colors',
+                i < idx ? 'bg-success' : i === idx ? 'bg-accent' : 'bg-subtle',
+              )}
+            />
+          ))}
+        </div>
+
+        {/* status line: live step (left) · drafted-so-far + percent (right) */}
+        <div className="relative z-[1] mt-3 flex items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-xs text-foreground-tertiary">{status}</span>
+          <span className="shrink-0 text-xs text-foreground-secondary">
+            <strong className="font-semibold tabular-nums text-foreground">{pages}</strong> pages
+            {' · '}
+            <span className="font-mono tabular-nums">{pct}%</span>
           </span>
-          <button
-            type="button"
-            onClick={() => setPaste(false)}
-            className="rounded-md px-2 py-1 text-xs font-medium text-foreground-secondary hover:bg-subtle hover:text-foreground transition-colors focus-ring"
-          >
-            Back
-          </button>
         </div>
-        <form onSubmit={handleTextSubmit} className="space-y-3">
-          <label htmlFor="ingest-filename-input" className="sr-only">
-            Filename for the pasted content
-          </label>
-          <Input
-            id="ingest-filename-input"
-            type="text"
-            placeholder="Filename (optional, e.g. my-notes.md)"
-            value={filenameInput}
-            onChange={(e) => setFilenameInput(e.target.value)}
-          />
-          <label htmlFor="ingest-text-input" className="sr-only">
-            Source text content
-          </label>
-          <Textarea
-            id="ingest-text-input"
-            rows={7}
-            autoFocus
-            placeholder="Paste Markdown, notes, or any text — the agent will file it into the right pages…"
-            value={textInput}
-            onChange={(e) => setTextInput(e.target.value)}
-            className="resize-y"
-          />
-          {error && (
-            <p role="alert" className="text-xs text-danger">
-              {error}
-            </p>
-          )}
-          <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-1.5 text-xs text-foreground-tertiary">
-              <Layers className="h-3.5 w-3.5" /> Filing into the active subject
-            </span>
-            <Button type="submit" intent="primary" loading={uploading} disabled={uploading || !textInput.trim()}>
-              <Sparkles className="h-3.5 w-3.5" /> Start ingest
-            </Button>
-          </div>
-        </form>
-      </section>
+      </button>
     );
   }
 
-  // ── Idle: launcher ────────────────────────────────────────────────────────
+  // ── Idle launcher ─────────────────────────────────────────────────────────────
   return (
-    <section
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragging(true);
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => router.push('/ingest')}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          router.push('/ingest');
+        }
       }}
-      onDragLeave={() => setIsDragging(false)}
-      onDrop={handleDrop}
       aria-label="Ingest a source"
       className={cn(
-        'relative overflow-hidden rounded-lg border-[1.5px] border-dashed shadow-sm',
-        'grid items-center gap-6 p-6 md:grid-cols-[minmax(0,1fr)_320px]',
-        'transition-colors duration-fast ease-standard',
-        isDragging ? 'border-accent bg-accent/5' : 'border-border-strong bg-surface',
+        'group relative grid cursor-pointer items-center gap-6 overflow-hidden rounded-lg border-[1.5px] border-dashed border-border-strong bg-surface p-6 shadow-sm',
+        'transition-colors duration-fast ease-standard hover:border-accent hover:bg-accent/[0.04]',
+        'md:grid-cols-[minmax(0,1fr)_320px]',
       )}
     >
-      <input
-        ref={fileRef}
-        id="ingest-file-input"
-        type="file"
-        accept=".md,.mdx,.txt,.html,.htm,.pdf"
-        className="sr-only"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) uploadFile(file);
-        }}
-      />
-
       {/* invitation */}
       <div className="flex min-w-0 flex-col gap-3.5">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent-strong">
@@ -553,31 +225,17 @@ export function DashboardIngestHero() {
           <div className="min-w-0">
             <h2 className="text-[19px] font-semibold tracking-tight text-foreground">Ingest a source</h2>
             <p className="mt-0.5 text-sm leading-relaxed text-foreground-secondary text-pretty">
-              Drop a document or paste text. The agent reads, writes, links, and lints it into your vault —
-              and runs in the background while you keep working.
+              Drop a document or paste text. The agent reads, writes, links, and lints it into your
+              vault — and runs in the background while you keep working.
             </p>
           </div>
         </div>
-        {error && (
-          <p role="alert" className="text-xs text-danger">
-            {error}
-          </p>
-        )}
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            intent="primary"
-            size="lg"
-            loading={uploading}
-            disabled={uploading}
-            onClick={() => fileRef.current?.click()}
-          >
+          <Button intent="primary" size="lg" onClick={(e) => { e.stopPropagation(); router.push('/ingest'); }}>
             <FileUp className="h-[15px] w-[15px]" /> Choose a file
             <Kbd className="ml-1 border-transparent bg-accent-hover/40 text-accent-fg">⌘I</Kbd>
           </Button>
-          <Button intent="outline" size="lg" onClick={() => setPaste(true)}>
-            <ClipboardPaste className="h-[15px] w-[15px]" /> Paste text
-          </Button>
-          <span className="text-xs text-foreground-tertiary">or drag &amp; drop anywhere</span>
+          <span className="text-xs text-foreground-tertiary">or paste text · all in one place</span>
         </div>
       </div>
 
@@ -586,7 +244,7 @@ export function DashboardIngestHero() {
         <span className="mb-1 text-[11px] font-medium uppercase tracking-wider text-foreground-tertiary">
           What the agent does
         </span>
-        {PIPELINE.map(({ label, Icon }, i) => (
+        {PHASES.map(({ label, Icon }, i) => (
           <div key={label} className="flex h-[26px] items-center gap-2.5">
             <span className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
               <Icon className="h-3 w-3" aria-hidden />
@@ -599,38 +257,6 @@ export function DashboardIngestHero() {
           </div>
         ))}
       </div>
-    </section>
-  );
-}
-
-/** Compact streamed event log, shared by the running & failed strips. */
-function EventLog({ events }: { events: ReturnType<typeof useJobStream>['events'] }) {
-  return (
-    <ul className="mt-3 max-h-40 space-y-1 overflow-y-auto rounded-md border border-border bg-canvas p-3">
-      {events.length === 0 ? (
-        <li className="text-xs italic text-foreground-tertiary">Waiting for events…</li>
-      ) : (
-        events.slice(-20).map((evt, i) => {
-          const isError = evt.type === 'agent:error';
-          const payload = evt.data?.data as { detail?: string; finishReason?: string } | undefined;
-          const msg = (evt.data?.message as string) || evt.type;
-          const why = isError ? (payload?.detail || payload?.finishReason || '') : '';
-          return (
-            <li
-              key={i}
-              className={cn('flex gap-2 text-xs', isError ? 'text-danger' : 'text-foreground-secondary')}
-            >
-              <span className={cn('shrink-0', isError ? 'text-danger' : 'text-foreground-tertiary')}>
-                {isError ? '✗' : '›'}
-              </span>
-              <span className="truncate">
-                {msg}
-                {why ? ` — ${why}` : ''}
-              </span>
-            </li>
-          );
-        })
-      )}
-    </ul>
+    </div>
   );
 }

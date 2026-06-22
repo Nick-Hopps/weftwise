@@ -299,7 +299,9 @@
 
 /* =============================================================================
  * CSS-only tooltip for icon-only controls.
- *   Set `data-tip="…"` + class `tip` (renders above) or `tip tip-b` (below).
+ *   Set `data-tip="…"` + class `tip` (above), `tip tip-b` (below), or
+ *   `tip tip-l` (to the left — for controls pinned to the right edge of an
+ *   overflow-clipping container, where a centered tip would be cut off).
  *   Keep a real `aria-label` on the control — this is purely visual.
  * ============================================================================= */
 .tip {
@@ -334,10 +336,21 @@
   top: calc(100% + 6px);
   transform: translateX(-50%) translateY(-4px);
 }
+.tip.tip-l::after {
+  left: auto;
+  right: calc(100% + 6px);
+  bottom: auto;
+  top: 50%;
+  transform: translateY(-50%) translateX(4px);
+}
 .tip:hover::after,
 .tip:focus-visible::after {
   opacity: 1;
   transform: translateX(-50%);
+}
+.tip.tip-l:hover::after,
+.tip.tip-l:focus-visible::after {
+  transform: translateY(-50%);
 }
 @media (prefers-reduced-motion: reduce) {
   .tip::after {
@@ -359,6 +372,62 @@
 }
 .ingest-bar-indeterminate {
   animation: ingest-indeterminate 1.4s var(--ease-standard) infinite;
+}
+
+/* =============================================================================
+ * Live ingest micro-animations — the blinking "now" dot, typing caret, node
+ * pop-in, and the expanding ring around the page being written. Referenced by
+ * the ingest live view and the chat composer.
+ * ============================================================================= */
+@keyframes ig-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.ig-blink { animation: ig-blink 1.1s ease-in-out infinite; }
+
+@keyframes ig-caret {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.ig-caret { animation: ig-caret 1s step-end infinite; }
+
+@keyframes ig-pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.ig-pop { animation: ig-pop 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes ig-ring {
+  0% { transform: scale(0.5); opacity: 0.8; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+.ig-ring { animation: ig-ring 1.1s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+
+/* A soft accent highlight that sweeps left→right across a card while a job is
+ * running — the "still working" cue on the ingest hero's running strip. The
+ * host must be `position: relative; overflow: hidden`, and its content should
+ * sit at `z-index: 1` so the sheen passes behind it. */
+@keyframes ig-sheen {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(220%); }
+}
+.ig-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgb(var(--color-accent-primary) / 0.1) 50%,
+    transparent 80%
+  );
+  animation: ig-sheen 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ig-blink, .ig-caret, .ig-pop, .ig-ring { animation: none !important; }
+  .ig-sheen::after { animation: none !important; display: none; }
 }
 
 /* =============================================================================

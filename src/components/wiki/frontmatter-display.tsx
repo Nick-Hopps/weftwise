@@ -61,8 +61,8 @@ export default function FrontmatterDisplay({
           {editHref && (
             <Link
               href={editHref}
-              title="Edit this page"
-              className="shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
+              data-tip="Edit this page"
+              className="tip tip-b shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
             >
               <Pencil className="h-3.5 w-3.5" />
               Edit

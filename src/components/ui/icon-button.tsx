@@ -17,6 +17,7 @@ export const iconButtonVariants = cva(
         primary: 'bg-accent text-accent-fg hover:bg-accent-hover',
         ghost:   'bg-transparent text-foreground-secondary hover:bg-subtle hover:text-foreground',
         outline: 'bg-surface text-foreground border border-border hover:bg-subtle',
+        danger:  'bg-danger text-accent-fg hover:bg-danger-border',
       },
       size: {
         sm:   'h-6 w-6 rounded-sm [&>svg]:h-3 [&>svg]:w-3',

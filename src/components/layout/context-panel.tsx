@@ -84,15 +84,24 @@ export function ContextPanel({ variant = 'docked' }: ContextPanelProps) {
       {/* One shared <Tabs> scope so that TabsTrigger's aria-controls maps to
           the matching TabsContent id. */}
       <Tabs value={effectiveTab} onValueChange={handleTabChange} className="flex flex-col h-full">
-        <header className="flex items-center justify-between gap-2 px-3 h-header border-b border-border shrink-0">
-          <TabsList>
-            {isWikiRoute && <TabsTrigger value="context">Context</TabsTrigger>}
-            <TabsTrigger value="chat">Ask AI</TabsTrigger>
-          </TabsList>
-          <IconButton size="sm" aria-label="Close panel" onClick={closeContextPanel}>
-            <X />
-          </IconButton>
-        </header>
+        {/* On article pages the [Context | Ask AI] tab strip is meaningful. On
+            other routes only the chat exists, so the lone "Ask AI" tab is
+            redundant: drop the whole top bar on the desktop dock, but keep a
+            minimal close button on the mobile sheet (a full-width sheet has no
+            other always-visible way to close). */}
+        {(isWikiRoute || variant === 'sheet') && (
+          <header className="flex items-center justify-between gap-2 px-3 h-header border-b border-border shrink-0">
+            {isWikiRoute && (
+              <TabsList>
+                <TabsTrigger value="context">Context</TabsTrigger>
+                <TabsTrigger value="chat">Ask AI</TabsTrigger>
+              </TabsList>
+            )}
+            <IconButton size="sm" className="ml-auto" aria-label="Close panel" onClick={closeContextPanel}>
+              <X />
+            </IconButton>
+          </header>
+        )}
 
         <div className="flex-1 min-h-0 relative">
           {isWikiRoute && (

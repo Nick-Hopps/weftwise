@@ -2,9 +2,9 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Send, StopCircle, TextQuote, Trash2, X } from 'lucide-react';
+import { ArrowUp, Check, StopCircle, TextQuote, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/input';
+import { IconButton } from '@/components/ui/icon-button';
 import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
 import { apiFetch, useApiFetch } from '@/lib/api-fetch';
@@ -185,8 +185,10 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
         : [],
     [pageContent, currentPageSlug],
   );
+  const canRef = canReference && passages.length > 0;
   const [refs, setRefs] = useState<Passage[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
   // Drop pinned references when navigating to a different page.
   useEffect(() => {
     setRefs([]);
@@ -290,6 +292,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     const question = input.trim();
     if (!question || isLoading) return;
     setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
     if (pendingAction?.kind === 'reset') {
       setMessages((prev) => [...prev, { role: 'user', content: question }]);
@@ -505,68 +508,98 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
           />
         )}
 
-        {refs.length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {refs.map((r) => (
-              <span
-                key={r.id}
-                className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-accent/25 bg-accent-subtle py-1 pl-2 pr-1"
-              >
-                <TextQuote className="h-3 w-3 shrink-0 text-accent" />
-                <span className="max-w-[180px] truncate text-[11px] font-medium text-accent-strong">
-                  {r.section}: {r.text}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
-                  aria-label="Remove reference"
-                  className="inline-flex rounded-sm p-0.5 text-accent-strong hover:bg-accent/10"
+        {/* Composer — one rounded surface holding references, the field, and the
+            action row, with a focus ring on the whole container. */}
+        <div
+          className={cn(
+            'overflow-hidden rounded-lg border bg-canvas transition-[border-color,box-shadow] duration-fast ease-standard',
+            composerFocused
+              ? 'border-border-strong ring-[3px] ring-accent/20'
+              : 'border-border',
+          )}
+        >
+          {refs.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-2.5 pt-2.5">
+              {refs.map((r) => (
+                <span
+                  key={r.id}
+                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-accent/25 bg-accent-subtle py-1 pl-2 pr-1"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+                  <TextQuote className="h-3 w-3 shrink-0 text-accent" />
+                  <span className="max-w-[170px] truncate text-[11px] font-medium text-accent-strong">
+                    {r.section}: {r.text}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
+                    aria-label="Remove reference"
+                    className="inline-flex rounded-sm p-0.5 text-accent-strong hover:bg-accent/10"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
 
-        <div className="flex items-end gap-2">
-          <Textarea
+          <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              e.target.style.height = 'auto';
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
+            }}
             onKeyDown={handleKeyDown}
+            onFocus={() => setComposerFocused(true)}
+            onBlur={() => setComposerFocused(false)}
             placeholder="Ask a question…"
             rows={2}
-            className="flex-1 resize-none"
+            className="block w-full resize-none border-0 bg-transparent px-3 pb-1 pt-2.5 text-sm leading-5 text-foreground placeholder:text-input-placeholder focus:outline-none"
           />
-          {isLoading ? (
-            <Button intent="danger" size="base" onClick={handleStop}>
-              <StopCircle className="h-3.5 w-3.5" />
-              Stop
-            </Button>
-          ) : (
-            <Button intent="primary" size="base" onClick={sendMessage} disabled={!input.trim()}>
-              <Send className="h-3.5 w-3.5" />
-              Send
-            </Button>
-          )}
-        </div>
 
-        {canReference && passages.length > 0 && (
-          <div className="mt-2">
+          <div className="flex items-center justify-between px-2 pb-2 pt-0.5">
             <button
               type="button"
-              onClick={() => setPickerOpen((o) => !o)}
-              title="Reference a passage from this page"
+              onClick={() => canRef && setPickerOpen((o) => !o)}
+              disabled={!canRef}
+              title={canRef ? undefined : 'Open a page to reference its content'}
               className={cn(
-                'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-foreground-secondary transition-colors hover:bg-subtle focus-ring',
+                'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs transition-colors focus-ring',
+                canRef
+                  ? 'text-foreground-secondary hover:bg-subtle'
+                  : 'cursor-not-allowed text-foreground-tertiary opacity-60',
                 pickerOpen && 'bg-subtle',
               )}
             >
-              <TextQuote className="h-3.5 w-3.5" /> Reference passage
+              <TextQuote className="h-3.5 w-3.5" />
+              <span>Reference</span>
             </button>
+
+            {isLoading ? (
+              <IconButton
+                intent="danger"
+                aria-label="Stop generating"
+                data-tip="Stop"
+                onClick={handleStop}
+                className="tip tip-l rounded-full"
+              >
+                <StopCircle />
+              </IconButton>
+            ) : (
+              <IconButton
+                intent="primary"
+                aria-label="Send"
+                data-tip="Send · Enter"
+                onClick={sendMessage}
+                disabled={!input.trim()}
+                className="tip tip-l rounded-full"
+              >
+                <ArrowUp />
+              </IconButton>
+            )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

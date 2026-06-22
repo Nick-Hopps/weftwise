@@ -382,9 +382,10 @@ function SubjectCard({
                 aria-label={
                   canDelete ? 'Delete subject' : 'Cannot delete: subject has pages or is active'
                 }
+                data-tip={canDelete ? 'Delete subject' : undefined}
                 title={
                   canDelete
-                    ? 'Delete subject'
+                    ? undefined
                     : isActive
                       ? 'Switch away before deleting'
                       : `Empty the subject first (${subject.pageCount} pages)`
@@ -399,7 +400,7 @@ function SubjectCard({
                   }
                   deleteMutation.mutate(subject.id);
                 }}
-                className={cn(canDelete ? 'text-danger hover:text-danger' : 'opacity-50')}
+                className={cn(canDelete ? 'tip tip-l text-danger hover:text-danger' : 'opacity-50')}
               >
                 <Trash2 />
               </IconButton>

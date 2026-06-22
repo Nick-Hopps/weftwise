@@ -11,8 +11,8 @@ export function MergeButton({ slug, title }: { slug: string; title: string }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        title="Merge another page into this one"
-        className="shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
+        data-tip="Merge another page into this one"
+        className="tip tip-b shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
       >
         <GitMerge className="h-3.5 w-3.5" />
         Merge

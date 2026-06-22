@@ -33,7 +33,13 @@
 ```
 
 - **展开态**：沿用今天的卡片，**新增收起 chevron**（`ChevronRight`，lucide-react）置于头部。该 chevron **运行中与结束后都显示**（区别于今天只在结束时出现的 X）。结束态头部仍同时显示既有的关闭 X。
-- **收起态**：卡片向右滑出屏幕（`translate-x-[calc(100%+1rem)] opacity-0`，复用现有 `transition-all duration-base ease-standard` 过渡），其位置由一个**贴右缘的窄竖向把手**占据：状态图标（运行中 `Loader2` 转圈 / 完成 `Check` / 失败 `X`，沿用 `StatusIcon` 语义与颜色 token）叠加百分比文本。把手是真实 `<button>`，点击展开。
+- **收起态**：卡片向右滑出屏幕（`translate-x-[calc(100%+1rem)] opacity-0`，复用 `transition-all duration-base ease-standard` 过渡），由一个**贴右缘的窄竖向把手**占据：状态图标（运行中 `Loader2` 转圈 / 完成 `Check` / 失败 `X`，沿用 `StatusIcon` 语义与颜色 token）叠加百分比文本。把手是真实 `<button>`，点击展开。
+
+- **把手定位（关键，经两轮反馈收敛）**：
+  - 外层是一个 `fixed bottom-4 right-0 z-sheet pointer-events-none` 的**定位容器**；卡片在常规流内 `mr-4`（静止仍在右下角 right-4 处）；把手 `!absolute right-0 top-0`（`!absolute` 覆盖 `.tip` 带来的 `position: relative`）。
+  - 把手 `top-0` 对齐到卡片**顶部（header 行）**，使把手的加载图标与展开态 header 的加载图标落在**同一水平线**（实测 y 差 ~4px）。这样收起 = 卡片向右平移退场、把手从右缘滑入（`translate-x-full ↔ translate-x-0`），读作**水平收起**而非「从右下角跳到屏幕中部」的大跳变（第一版垂直居中方案被否的原因）。
+  - 容器 `pointer-events-none` + 仅活动半边 `pointer-events-auto`：容器横跨的空白区永不挡住下方控件（如聊天「发送」按钮）；卡片顶部对齐又使把手始终高于底部发送键，双重保证不遮挡。
+- **把手 tooltip**：把手加 `tip tip-l` + `data-tip="Expand progress"`（`.tip-l` 专为右缘控件设计，气泡朝左弹出），保留真实 `aria-label`。
 
 ## 四、状态与生命周期
 

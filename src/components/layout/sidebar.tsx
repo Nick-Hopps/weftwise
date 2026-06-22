@@ -8,17 +8,16 @@ import {
   Activity,
   ChevronDown,
   FileText,
+  FileType2,
   Hash,
   History,
   Pin,
   Plus,
-  Search,
   Settings2,
 } from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { IconButton } from '@/components/ui/icon-button';
-import { Input } from '@/components/ui/input';
 import { SectionLabel } from '@/components/ui/panel';
 import { Separator } from '@/components/ui/separator';
 import { useUIStore } from '@/stores/ui-store';
@@ -32,6 +31,12 @@ interface PageItem {
   path: string;
   tags: string[];
   updatedAt: string;
+}
+
+interface SourceItem {
+  id: string;
+  filename: string;
+  format?: string;
 }
 
 function isMetaPage(page: PageItem): boolean {
@@ -69,8 +74,8 @@ interface SidebarProps {
 
 export function Sidebar({ onNavigate }: SidebarProps = {}) {
   const pathname = usePathname();
-  const [filter, setFilter] = useState('');
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [sourcesOpen, setSourcesOpen] = useState(true);
   const openSettingsDialog = useUIStore((s) => s.openSettingsDialog);
   const apiFetch = useApiFetch();
   const { id: subjectId } = useCurrentSubject();
@@ -78,6 +83,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   const { data: lintSummary } = useLintSummary(false);
   const criticalCount = lintSummary?.bySeverity.critical ?? 0;
   const isHealthActive = pathname === '/health';
+  const isIngestActive = pathname === '/ingest';
 
   const { data: allPages = [], isLoading } = useQuery({
     queryKey: ['pages', subjectId],
@@ -90,13 +96,23 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
     enabled: !!subjectId,
   });
 
+  const { data: sources = [] } = useQuery({
+    queryKey: ['sources', subjectId],
+    queryFn: async () => {
+      const res = await apiFetch('/api/sources');
+      if (!res.ok) return [] as SourceItem[];
+      const body = (await res.json()) as { sources?: SourceItem[] };
+      return body.sources ?? [];
+    },
+    staleTime: 30_000,
+    enabled: !!subjectId,
+  });
+
   const visiblePages = useMemo(() => {
-    const q = filter.trim().toLowerCase();
     return allPages
       .filter((p) => !isMetaPage(p))
-      .filter((p) => (q ? p.title.toLowerCase().includes(q) : true))
       .sort((a, b) => a.title.localeCompare(b.title));
-  }, [allPages, filter]);
+  }, [allPages]);
 
   const metaPages = useMemo(
     () => sortMetaPages(allPages.filter(isMetaPage)),
@@ -114,7 +130,6 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [visiblePages]);
 
-  const totalVisible = visiblePages.length;
   const totalAll = allPages.filter((p) => !(p.tags ?? []).includes('meta')).length;
   const isActive = (slug: string) => pathname === `/wiki/${slug}`;
   const toggleGroup = (key: string) => {
@@ -123,30 +138,21 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
 
   return (
     <div className="flex flex-col h-full w-full bg-canvas border-r border-border overflow-hidden">
-      {/* Top quick action (primary CTA) */}
+      {/* Top quick action (primary CTA) — opens the dedicated ingest workspace */}
       <div className="px-2 py-2 shrink-0">
         <Link
-          href="/"
+          href="/ingest"
           onClick={onNavigate}
-          className="flex items-center gap-2 h-8 px-2.5 rounded-md text-sm font-medium text-accent bg-accent/8 hover:bg-accent/12 transition-colors focus-ring"
+          className={cn(
+            'flex items-center gap-2 h-8 px-2.5 rounded-md text-sm font-medium transition-colors focus-ring',
+            isIngestActive
+              ? 'text-accent-fg bg-accent hover:bg-accent'
+              : 'text-accent bg-accent/8 hover:bg-accent/12',
+          )}
         >
           <Plus className="h-3.5 w-3.5" />
           <span>New Ingest</span>
         </Link>
-      </div>
-
-      {/* Filter */}
-      <div className="px-2 pb-2 shrink-0">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-foreground-tertiary pointer-events-none" />
-          <Input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter pages…"
-            aria-label="Filter pages"
-            className="h-8 pl-8 text-sm"
-          />
-        </div>
       </div>
 
       <Separator />
@@ -189,10 +195,6 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
         ) : totalAll === 0 ? (
           <p className="px-4 py-6 text-xs text-foreground-tertiary italic text-center">
             No pages yet. Ingest a source to get started.
-          </p>
-        ) : totalVisible === 0 ? (
-          <p className="px-4 py-6 text-xs text-foreground-tertiary italic text-center">
-            No pages match &ldquo;{filter}&rdquo;.
           </p>
         ) : (
           <div className="px-2 space-y-2">
@@ -239,6 +241,49 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Sources — the original documents ingested into this subject */}
+        {sources.length > 0 && (
+          <div className="px-2 mt-2">
+            <button
+              type="button"
+              onClick={() => setSourcesOpen((o) => !o)}
+              aria-expanded={sourcesOpen}
+              className="w-full flex items-center justify-between px-2 h-6 rounded-md text-xs font-medium text-foreground-tertiary hover:text-foreground hover:bg-subtle transition-colors focus-ring"
+            >
+              <span className="flex items-center gap-1.5 uppercase tracking-wider">
+                <ChevronDown
+                  className={cn('h-3 w-3 transition-transform', !sourcesOpen && '-rotate-90')}
+                />
+                Sources
+              </span>
+              <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
+                {sources.length}
+              </span>
+            </button>
+            {sourcesOpen && (
+              <nav aria-label="Ingested sources" className="mt-0.5">
+                {sources.map((source) => (
+                  <Link
+                    key={source.id}
+                    href={`/sources/${source.id}`}
+                    onClick={onNavigate}
+                    title={`Open ${source.filename}`}
+                    className={cn(
+                      'flex items-center gap-2 h-8 pl-5 pr-2 rounded-md text-sm transition-colors focus-ring',
+                      pathname === `/sources/${source.id}`
+                        ? 'bg-accent-subtle text-accent-strong font-medium'
+                        : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
+                    )}
+                  >
+                    <FileType2 className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
+                    <span className="truncate">{source.filename}</span>
+                  </Link>
+                ))}
+              </nav>
+            )}
           </div>
         )}
       </div>
@@ -298,7 +343,8 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           <IconButton
             size="sm"
             aria-label="Open settings"
-            title="Settings"
+            data-tip="Settings"
+            className="tip tip-l"
             onClick={openSettingsDialog}
           >
             <Settings2 />
