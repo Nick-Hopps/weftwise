@@ -9,6 +9,7 @@ import {
   ChevronDown,
   FileText,
   Hash,
+  History,
   Pin,
   Plus,
   Search,
@@ -276,6 +277,19 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
         >
           <Hash className="h-3.5 w-3.5 text-foreground-tertiary" />
           Tags
+        </Link>
+        <Link
+          href="/history"
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center gap-2 h-8 px-2 rounded-md text-sm transition-colors focus-ring',
+            pathname.startsWith('/history')
+              ? 'bg-subtle text-foreground font-medium'
+              : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
+          )}
+        >
+          <History className="h-3.5 w-3.5 text-foreground-tertiary" />
+          History
         </Link>
         <div className="flex items-center justify-between px-1">
           <span className="text-xs text-foreground-tertiary">
