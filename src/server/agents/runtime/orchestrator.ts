@@ -1,11 +1,13 @@
 import type { AgentContext, SkillTemplate } from '../types';
 import { runAgentLoop, AgentCancelled, type AgentRunResult } from './agent-loop';
+import { runPageVerification } from './verify-page';
 import { BudgetExceededError } from './budget';
 import type { ChangesetEntry } from '@/lib/contracts';
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
   | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string; injectExistingPageForUpdate?: boolean }
+  | { kind: 'verify'; fromOutput: string; checkpointAs?: 'verifier-page'; injectPriorPageAs?: string }
   | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string; checkpointAs?: 'chunk-summary' };
 
 export class WriterConflictError extends Error {
@@ -106,9 +108,10 @@ export async function runPipeline(opts: {
       carry = isPlainObject(carry)
         ? { ...carry, [step.intoOutput]: results }
         : { [step.intoOutput]: results };
-    } else {
-      // fanout 分支：overlay 快照隔离、WriterConflictError 检测、putEntries 合并
-      const skill = opts.resolveSkill(step.skillId);
+    } else if (step.kind === 'fanout' || step.kind === 'verify') {
+      // fanout / verify 分支：overlay 快照隔离、WriterConflictError 检测、putEntries 合并。
+      // verify 与 fanout 共用全部骨架，仅「每项的计算」不同（verify 跑两段式核查而非单 skill）。
+      const skill = step.kind === 'fanout' ? opts.resolveSkill(step.skillId) : undefined;
       const items = readPath(carry, step.fromOutput);
       if (!Array.isArray(items)) {
         throw new Error(`Fanout source at "${step.fromOutput}" is not an array (got ${typeof items})`);
@@ -129,7 +132,10 @@ export async function runPipeline(opts: {
           overlay: baseOverlay.snapshot(),
           parentRunId: opts.ctx.rootRunId,
         };
-        const r = await runAgentLoop({ skill, ctx: childCtx, input: await buildFanoutInput(carry, item, opts.ctx, step) });
+        const input = await buildFanoutInput(carry, item, opts.ctx, step);
+        const r = step.kind === 'verify'
+          ? await runPageVerification({ resolveSkill: opts.resolveSkill, ctx: childCtx, input })
+          : await runAgentLoop({ skill: skill!, ctx: childCtx, input });
         // 路径强制规范：fanout over plan.pages 时 orchestrator 已知 slug+subjectSlug，
         // 不信任模型自填的 path——实测 verifier 等会吐裸 slug（如 "quicksort" 而非
         // "wiki/general/quicksort.md"），导致落到 vault 根、indexer 解析不出 slug 而漏建索引。

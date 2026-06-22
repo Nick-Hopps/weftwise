@@ -6,9 +6,15 @@ import type { AgentContext, SkillTemplate, StoredChunk, IngestCheckpoint } from 
 import type { ChangesetEntry } from '@/lib/contracts';
 
 const mockRun = vi.fn();
+const mockRunPageVerification = vi.fn();
+
 vi.mock('../agent-loop', () => ({
   runAgentLoop: (opts: { skill: { id: string }; input: unknown }) => mockRun(opts),
   AgentCancelled: class extends Error {},
+}));
+
+vi.mock('../verify-page', () => ({
+  runPageVerification: (o: unknown) => mockRunPageVerification(o),
 }));
 
 function ctxStub(chunks: StoredChunk[] = [], checkpoint?: IngestCheckpoint): AgentContext {
@@ -708,5 +714,30 @@ describe('orchestrator.runPipeline: 多内容阶段（增益）', () => {
     const paths = ctx.pending.entries.map((e) => e.path);
     expect(paths).toContain('wiki/general/quicksort.md');
     expect(paths).not.toContain('quicksort');
+  });
+});
+
+describe('orchestrator verify step', () => {
+  it('routes verify-kind step to runPageVerification, not runAgentLoop', async () => {
+    mockRun.mockReset();
+    mockRunPageVerification.mockReset();
+    mockRunPageVerification.mockResolvedValue({
+      runId: 'v', output: { action: 'update', path: 'wiki/general/a.md', content: 'X' },
+      tokensUsed: 1, stepCount: 1, cacheHitTokens: 0,
+    });
+    const steps: import('../orchestrator').PipelineStep[] = [
+      { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
+    ];
+    const ctx = ctxStub();
+    await runPipeline({
+      steps,
+      resolveSkill: (id) => ({ id, name: id }) as never,
+      ctx,
+      initialInput: { subjectSlug: 'general', plan: { pages: [{ slug: 'a', title: 'A' }] } },
+    });
+    expect(mockRunPageVerification).toHaveBeenCalledTimes(1);
+    expect(mockRun).not.toHaveBeenCalled();
+    // entry 暂存进 pending（path 经规范化）
+    expect(ctx.pending.entries[0]).toMatchObject({ path: 'wiki/general/a.md' });
   });
 });
