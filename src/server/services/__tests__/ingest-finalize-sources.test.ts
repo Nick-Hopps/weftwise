@@ -18,7 +18,6 @@ describe('buildWebSourceImports', () => {
   ];
 
   it('uses extracted content when available, builds links + extraStagePaths', () => {
-    const saved = (filename: string) => ({ id: filename === 'F' ? 'src-1' : 'src-1' }); // stub
     const plan = buildWebSourceImports({
       cites,
       subjectSlug: 'general',
