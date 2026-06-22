@@ -39,12 +39,17 @@ ingest-service.ts
         │       ctx.pending 按 path upsert（last-write-wins，覆盖 writer 产出）
         │       checkpointAs: 'enricher-page'
         │
-        ├── step 4: fanout skill 'ingest-verifier' × N pages  (fanout)
-        │     └── 结构化输出（generateObject，无 tools）——参数化自检（P2）
-        │       读取 step 3 的页面内容（injectPriorPageAs），按参数化维度核查
+        ├── step 4: verify (kind:'verify') × N pages  ——P3 联网核查（⑨）
+        │     └── runtime/verify-page.ts::runPageVerification（全程 generateObject 无 tools）
+        │       读取 step 3 的页面内容（injectPriorPageAs:'content'），逐页两段式：
+        │         ① triage skill 'ingest-verifier-triage' → { doubtfulClaims:[{excerpt,query,reason}] }
+        │         ② 编排层 Tavily 搜索（query 去重+上限3+Promise.allSettled）
+        │         ③ apply skill 'ingest-verifier-apply' → 证据驱动改 callout + citedSources
+        │       降级：未配置/triage 空/零证据 → 既有 'ingest-verifier'(v2) 自检 或 passthrough
+        │       provenance：citedSources 累积进 ctx.citedSources；URL 追加进页 frontmatter sources
         │       ctx.pending 按 path upsert（last-write-wins，覆盖 enricher 产出）
         │       checkpointAs: 'verifier-page'
-        │       ⚠️ 注意：web-search 增强型核查为 P3，当前 P2 仅结构化参数化自检
+        │       搜索后端配置在全局设置 app_settings（settings-repo::getWebSearchConfig）
         │
         ▼  runPipeline 返回（不在 agent 内提交）
   ────────────────────────────────────────────────────
@@ -90,7 +95,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 
 ### `types.ts`
 
-所有 agent 内部类型定义（`AgentStep` / `SkillDef` / `ToolCall` / `BudgetSnapshot` 等）。不依赖 `contracts.ts`（单向依赖，agents 消费 contracts，不反向注入）。
+所有 agent 内部类型定义（`AgentStep` / `SkillDef` / `ToolCall` / `BudgetSnapshot` / `CitedSource`<⑨> 等）+ `AgentContext.citedSources?: Map<string, CitedSource>`（⑨ 核查累积桶，仅 ingest 注入）。不依赖 `contracts.ts`（单向依赖，agents 消费 contracts，不反向注入）。
 
 ### `runtime/`
 
@@ -101,6 +106,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `budget.ts` | `createBudgetTracker`（job 级 token）+ `createRunStepTracker`（单实例 step）；超限抛 `BudgetExceededError` |
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
 | `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变 |
+| `verify-page.ts` | `runPageVerification({ resolveSkill, ctx, input }): Promise<AgentRunResult>`（⑨）——逐页两段式联网核查：triage→编排层 `webSearch`→apply / 降级到 `ingest-verifier`(v2) 自检 / triage 空时 passthrough；apply 的 citedSources URL 经 `parseFrontmatter/serializeFrontmatter` 确定性追加进页 frontmatter `sources`，并累积进 `ctx.citedSources`（按 url 去重、合并 citedBy、fallbackContent 取匹配 snippet）。全程无 tools |
 
 ### `skills/`
 
@@ -276,6 +282,7 @@ src/server/agents/
 | 2026-06-20 | P2 双层增益：新增 enricher（`[!type]` callout 增益层）+ verifier（参数化自检，结构化输出无 tools）fanout 步骤；orchestrator pending last-write-wins upsert + 跨阶段 injectPriorPageAs 注入；checkpoint 扩展 enricher-page/verifier-page 类型；DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M（CONTENT_STAGE_FACTOR=3）|
 | 2026-06-21 | 删除 tool-using `ingest-reviewer`（packyapi openai-compatible 上工具死循环）：新增无 tools 的 `ingest-indexer`（结构化输出 `{indexMd, logMd}`）；commit 抽出 `commitPending` 并上移到 `ingest-service::finalizeIngest`（service 层收口，符合 Saga 契约）；流水线由 5 阶段收敛为 4 内容阶段 + service finalize；`commit_changeset` tool 降级为 `commitPending` 薄包装（已无 skill 引用）|
 | 2026-06-22 | 增量合并：fanout step 加 `injectExistingPageForUpdate`，writer 更新已有页时 orchestrator 确定性注入现有正文 `existingPageContent`（`buildFanoutInput` 改 async），writer skill v5 并入新材料而非覆盖、planner skill v3 强化复用 slug（⑤）|
+| 2026-06-22 | P3 联网核查（⑨）：verifier 阶段由 fanout 'ingest-verifier' 改为 `verify` step kind → 新 `runtime/verify-page.ts::runPageVerification` 逐页两段式（triage `ingest-verifier-triage` → 编排层 Tavily 搜索 → apply `ingest-verifier-apply`），全程 generateObject 无 tools（绕开 packyapi 工具死循环）；未配置/零证据降级既有 `ingest-verifier`(v2) 自检；新增 `CitedSource` 类型 + `AgentContext.citedSources`；`commit_changeset`/`commitPending` 接受第三参 webSources（network 引用源 links+extraStagePaths）|
 
 ---
 
