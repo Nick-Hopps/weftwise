@@ -148,3 +148,24 @@ export const ingestCheckpoints = sqliteTable(
     pk: primaryKey({ columns: [t.jobId, t.kind, t.key] }),
   })
 );
+
+export const conversations = sqliteTable('conversations', {
+  id: text('id').primaryKey(),
+  subjectId: text('subject_id')
+    .notNull()
+    .references(() => subjects.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const messages = sqliteTable('messages', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id')
+    .notNull()
+    .references(() => conversations.id, { onDelete: 'cascade' }),
+  role: text('role').notNull(),
+  content: text('content').notNull(),
+  citationsJson: text('citations_json'),
+  createdAt: text('created_at').notNull(),
+});
