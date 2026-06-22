@@ -30,27 +30,44 @@ generateStructuredOutput<T>(
 ): Promise<T>
 
 streamTextResponse(task, systemPrompt, userPrompt, overrides?): StreamTextResult
+
+generateEmbeddings(texts: string[]): Promise<number[][]>
+
+isEmbeddingConfigured(): boolean
+
+embeddingModelId(): string
 ```
 
-两者都自带：
+前两个自带：
 - AbortController 超时（`route.timeoutMs`，默认 8 分钟）。
 - 统一日志前缀 `[LLM][Task: ...][Model: ...]`。
 - 错误上下文补全（`usage` / `finishReason` / `cause`）。
 
-### `task-router.ts`
+后三个（向量模型，⑧）：
+- `generateEmbeddings` — embedMany 包装，支持 openai / openai-compatible / ollama；其余供应商抛 `LLMConfigError`。
+- `isEmbeddingConfigured` — 检查 `tasks.embedding.model` 是否配置，不配置 false（允许优雅降级）。
+- `embeddingModelId` — 返回配置的嵌入模型名（不配置时抛 `LLMConfigError`）。
+
+### `task-router.ts` / `provider-factory.ts`
 
 ```ts
 resolveTask(task, overrides?) → ResolvedTaskRoute
+
+getLanguageModel(route: ResolvedTaskRoute) → LanguageModel
+
+getEmbeddingModel(route: ResolvedTaskRoute) → LanguageModel  // ⑧ 向量模型工厂
 ```
 
 `ResolvedTaskRoute` 同时包含 AI SDK 的 `CallSettings`（`maxTokens` / `temperature` / `topP` / ...）和应用级字段（`timeoutMs` / `logLabel`）。
+`getEmbeddingModel` 路由 embedding task 到相应 provider 的向量模型（openai / openai-compatible / ollama；其余 provider 直接抛错）。
 
 ### `config-schema.ts`
 
 用 zod 定义的：
-- `LLMTaskSchema`（枚举）、`LLMProviderKindSchema`（8 种 provider）。
+- `LLMTaskSchema`（内置 `ingest|query|lint|merge|split|embedding` 枚举 + 开放 `skill:*` 前缀）、`LLMProviderKindSchema`（8 种 provider）。
 - 每种 provider 的 discriminated union（`AnthropicProfileSchema` / ... / `OpenAICompatibleProfileSchema`）。
 - `LLMRouteOverride`（可在单次调用处覆盖路由）。
+- `tasks` key space 支持 `embedding` 内置任务与 `skill:<id>` 动态任务（⑧ 向量）。
 
 ### `prompts/`
 
@@ -65,6 +82,8 @@ resolveTask(task, overrides?) → ResolvedTaskRoute
 | `ingest-prompt.ts` | **多阶段**：plan → page body → index body。对应 `IngestPlanSchema / PageBodySchema / IndexBodySchema` |
 | `query-prompt.ts` | 回答用户问题 + 引用；`buildQueryUserPrompt` 加可选 history 参注入多轮 transcript。`QueryResponseSchema` |
 | `lint-prompt.ts` | 扫描整库/单页的 lint finding。 |
+| `merge-prompt.ts` | 融合两页正文与摘要（④b）。`MergeResultSchema` |
+| `split-prompt.ts` | 拆一页成多页（④c）。`SplitResultSchema` (pages.min(2)，恰一 isPrimary) |
 
 ### `client.ts` / `errors.ts`
 
@@ -87,13 +106,15 @@ resolveTask(task, overrides?) → ResolvedTaskRoute
   "tasks": {
     "ingest": { "temperature": 0.2 },
     "query":  { "profile": "cheap", "model": "gpt-4o-mini" },
-    "lint":   { "profile": "local", "model": "llama3.1" }
+    "lint":   { "profile": "local", "model": "llama3.1" },
+    "embedding": { "profile": "cheap", "model": "text-embedding-3-small" }
   }
 }
 ```
 
 - `llm-config.json` 入 `.gitignore`（含 API key 引用时避免泄漏）。
 - 必须提供 `defaults.profile` + `defaults.model`，否则 `resolveTask` 抛 `LLMConfigError`。
+- ⑧ `tasks.embedding` 可选（不配置则向量检索 no-op，query 回落纯 FTS）；仅 openai / openai-compatible / ollama 支持（需配置 `textEmbeddingModel`）。
 
 ## `PromptContext` & wikiLanguage 注入
 
@@ -147,14 +168,16 @@ src/server/llm/
 ├── config-loader.ts           # 读取并缓存 llm-config.json
 ├── config-schema.ts           # Zod schema（providers / tasks / overrides）
 ├── errors.ts                  # LLMConfigError
-├── provider-factory.ts        # ResolvedTaskRoute → LanguageModel
-├── provider-registry.ts       # generateStructuredOutput / streamTextResponse
+├── provider-factory.ts        # ResolvedTaskRoute → LanguageModel + getEmbeddingModel（⑧）
+├── provider-registry.ts       # generateStructuredOutput / streamTextResponse + generateEmbeddings/isEmbeddingConfigured/embeddingModelId（⑧）
 ├── task-router.ts             # defaults ← task ← overrides 合并
 └── prompts/
     ├── prompt-context.ts      # PromptContext interface + renderLanguageDirective
     ├── ingest-prompt.ts       # 多阶段 plan / page-body / index
     ├── query-prompt.ts        # 用户问答 + 引用
-    └── lint-prompt.ts         # 全库扫查
+    ├── lint-prompt.ts         # 全库扫查
+    ├── merge-prompt.ts        # 融合两页（④b）
+    └── split-prompt.ts        # 拆分一页（④c）
 ```
 
 ## 变更记录 (Changelog)
@@ -167,6 +190,7 @@ src/server/llm/
 | 2026-06-22 | 新增内置 task `merge`（`BUILTIN_LLM_TASKS` 加 'merge'）+ `prompts/merge-prompt.ts`（`MERGE_SYSTEM_PROMPT` / `buildMergeUserPrompt` / `MergeResultSchema`），供合并两页融合正文（④b）|
 | 2026-06-22 | 新增内置 task `split` + `prompts/split-prompt.ts`（`SPLIT_SYSTEM_PROMPT` / `buildSplitUserPrompt` / `SplitResultSchema`，`pages.min(2)`、恰一 `isPrimary`），供拆分一页（④c）|
 | 2026-06-22 | `query-prompt.ts` buildQueryUserPrompt 加可选 history 参（多轮记忆注入 transcript 段）；供 ⑦ 对话持久化 + 多轮记忆 |
+| 2026-06-22 | 新增内置 task `embedding` + `provider-factory.getEmbeddingModel(route)` + `provider-registry.generateEmbeddings/isEmbeddingConfigured/embeddingModelId`（⑧ 向量语义检索）；llm-config `tasks.embedding` 仅 openai-compatible 支持；未配置时向量检索 no-op 回落纯 FTS |
 
 ---
 

@@ -42,10 +42,13 @@ worker-entry.ts
 
 接入断点续传：启动时 `loadCheckpoint(job.id)` 载入检查点句柄并挂至 `AgentContext.checkpoint`；若 `ckpt.hasAny()` 则 emit `ingest:resuming`；steps 标注 `checkpointAs` 使 orchestrator 逐页续传；预算预检调 `reduceCostForResume(ingest-prep)` 按已写页比例折减估算值；pipeline 成功返回前 `checkpoint.clear()` 删除所有检查点行。
 
-### `query-service.ts` — 任务类型 `'save-to-wiki'` + 同步函数 + 多轮记忆
+### `query-service.ts` — 任务类型 `'save-to-wiki'` + 同步函数 + 多轮记忆 + 混合检索
 
+- 同步函数 `prepareQueryContext(query, subjectId)`（⑧ 改 async）：
+  1. 若配置了 embedding 则 FTS5 + 向量语义两路（`hybridRankSlugs`，RRF 合并）；否则纯 FTS5。
+  2. 返回 top K 相关页面摘要。
 - 同步函数 `answerQuery(question, subjectId, currentPageSlug?, history?)`：
-  1. FTS5 搜 top 5 相关 page（限定 subject）；
+  1. 调 `prepareQueryContext` 获取检索结果；
   2. 组装上下文 + 可选历史记录 → `generateStructuredOutput('query', QueryResponseSchema, ...)`，prompt 注入 SubjectContext；
   3. 返回 `QueryResult { answer, citations, savedAsPage: null }`。
   - `history` 可选参数：`{ role: 'user'|'assistant', content }[]`，非空时注入 buildQueryUserPrompt 的 transcript 段。
@@ -68,6 +71,17 @@ worker-entry.ts
 ### `split-service.ts` — 任务类型 `'split'`
 
 把源页 A 拆成 N 个独立新页（A 删除）。`params { sourceSlug, hint?, subjectId }`。流程：读 A → 单次 `generateStructuredOutput('split', SplitResultSchema, …)` 产 `{ pages: [{title,body,summary,isPrimary}] }`（`.min(2)`，<2 抛错）→ `wiki/split-plan.ts::planSplitPages` 服务端派生唯一 slug（冲突加后缀、排除 A.slug）+ 兜底恰一 primary → 每新页确定性拼装 frontmatter（title/body/summary 用 LLM、`tags`/`sources`/`created` 继承 A、updated=now）且正文经 `repointLinksToPage` 把指向 A 的自引用重指主页 → 单 `createChangeset` `[create×N, delete A, ...update 本 subject backlink 源页（重指主页，排除 A）]` → validate → apply。发 `split:start` / `split:complete`（result 含 `primarySlug`，供前端跳主页）。跨 subject 指向 A 的引用不重指。
+
+### `embedding-service.ts` 🆕 — 任务类型 `'embed-index'`
+
+向量嵌入索引脱离 Saga（⑧）。`params { subjectId }`；若未配置 embedding 则 no-op。
+
+- **回填缺/过期页**：按 `content_hash + model` 判定（hash 变 / model 更新 / 首次生成），调 `generateEmbeddings` 逐页嵌入（按 content 前 8000 token 截断），写 `page_embeddings` upsert。
+- **清理孤儿**：对比 live page slugs，删除孤儿向量（如 page 被删）。
+- 入队接口：`enqueueEmbedIndex(subjectId): Job`（返回 job）。
+- 触发时机：
+  - 写操作后 enqueue（ingest finalize / merge / split / 页面编辑 PUT/DELETE）。
+  - worker 启动时对每个 subject 自愈检查。
 
 ## 关键依赖与配置
 
@@ -112,11 +126,12 @@ worker-entry.ts
 src/server/services/
 ├── ingest-service.ts   # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts      # 预检/预算/常量纯函数
-├── query-service.ts    # 问答 + save-to-wiki + 多轮记忆
+├── query-service.ts    # 问答 + save-to-wiki + 多轮记忆 + 混合检索（⑧）
 ├── conversation-title.ts # 🆕 确定性会话标题派生纯函数
 ├── lint-service.ts     # 全库 lint 扫描
 ├── merge-service.ts    # 合并两页（LLM 融合 + 删源页 + 同事务重链）
-└── split-service.ts    # 拆分一页（LLM 拆 N 页 + 删源页 + 同事务重指主页）
+├── split-service.ts    # 拆分一页（LLM 拆 N 页 + 删源页 + 同事务重指主页）
+└── embedding-service.ts # 🆕 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
 ```
 
 ## 变更记录 (Changelog)
@@ -132,6 +147,7 @@ src/server/services/
 | 2026-06-22 | 新增 `split-service`（任务类型 `split`）：LLM 拆 N 页 + 删源页 + 同事务重指主页（④c）|
 | 2026-06-22 | ingest 增量合并：writer fanout step 加 `injectExistingPageForUpdate:true`，更新已有页时 orchestrator 注入现有正文，writer 并入新材料而非整页覆盖（⑤）|
 | 2026-06-22 | query-service 多轮记忆：answerQuery/streamQueryAnswer 加 history 参（注入 transcript），conversations-repo CRUD 落库多轮；新增 conversation-title.ts deriveConversationTitle 确定性派生（⑦）|
+| 2026-06-22 | 新增 `embedding-service`（任务类型 `embed-index`）：向量嵌入回填/清理（content_hash+model 判过期，FK CASCADE，未配置 no-op）；query-service prepareQueryContext 改 async 走 hybridRankSlugs（RRF 合并 FTS+向量）；写操作后 enqueue（⑧）|
 
 ---
 
