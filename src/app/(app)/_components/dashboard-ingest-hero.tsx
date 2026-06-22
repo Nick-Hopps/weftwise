@@ -165,6 +165,17 @@ export function DashboardIngestHero() {
       const subjectId = useUIStore.getState().currentSubjectId;
       if (!subjectId) return;
       try {
+        // Reflect an in-progress background ingest if the user returns mid-run.
+        const runningRes = await apiFetch(
+          `/api/jobs?status=running&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
+        );
+        if (runningRes.ok) {
+          const running = (await runningRes.json()) as Job[];
+          if (running.length > 0) {
+            if (!cancelled) setJobId(running[running.length - 1].id);
+            return;
+          }
+        }
         const res = await apiFetch(
           `/api/jobs?status=failed&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
         );

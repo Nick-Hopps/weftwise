@@ -10,6 +10,7 @@ import { Kbd } from '@/components/ui/kbd';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { SubjectSwitcher } from './subject-switcher';
+import { IngestPill } from './ingest-pill';
 import { cn } from '@/lib/cn';
 
 interface PageLite {
@@ -158,6 +159,9 @@ export function Header() {
         <span className="flex-1 text-left">Search pages, ask AI…</span>
         <Kbd>⌘K</Kbd>
       </button>
+
+      {/* Background-ingest progress (visible while an ingest runs in the background) */}
+      <IngestPill />
 
       {/* Right: icon actions */}
       <div className="flex items-center gap-1 shrink-0">
