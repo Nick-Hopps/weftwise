@@ -53,10 +53,13 @@ Route Handler / Worker Handler
 | `wiki/wikilinks` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink` |
 | `wiki/indexer` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex`（写 pages + wiki_links + FTS） |
 | `wiki/page-identity` | `parseWikiPath / wikiPathFor(subjectSlug, slug) / normalizeSlug / GENERAL_SUBJECT_SLUG` |
-| `llm/provider-registry` | `generateStructuredOutput / streamTextResponse` |
+| `llm/provider-registry` | `generateStructuredOutput / streamTextResponse / generateEmbeddings / isEmbeddingConfigured / embeddingModelId`（⑧） |
 | `llm/task-router` | `resolveTask`（合并 defaults / task / override） |
+| `search/vector-math` | `encodeVector / decodeVector / cosineSimilarity / rrfMerge`（⑧ 向量纯函数） |
+| `search/semantic-search` | `semanticSearch(query, subjectId, model)`（⑧ 向量 topK cosine） |
+| `search/hybrid-retrieval` | `hybridRankSlugs(query, subjectId)`（⑧ FTS + 向量 RRF；未配置回落纯 FTS） |
 | `db/client` | `getDb / getRawDb`（启动时自迁移 legacy schema → subject-aware） |
-| `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo` 的 CRUD + FTS search（全部要求 `subjectId`） |
+| `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo / embeddingsRepo` 的 CRUD + FTS search（全部要求 `subjectId`）|
 | `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead / getFileAtCommit / getDiff / getVaultLog / parseGitLog` |
 | `middleware/auth` | `requireAuth / requireCsrf / createSessionResponse` |
 | `middleware/subject` | `resolveSubjectFromRequest(request, { required?, body? })` |
@@ -81,9 +84,10 @@ Route Handler / Worker Handler
 | `wiki_links` | 每条 `[[link]]` 的 source/target/context；`subject_id` + `target_subject_id` 让 graph/lint 能 join |
 | `sources` | 原始源文件元数据（带 `subject_id`） |
 | `page_sources` | 页面 ↔ 源 多对多溯源（PK `(subject_id, page_slug, source_id)`） |
-| `jobs` | 任务队列（带 `subject_id` + `lease_expires_at` / `heartbeat_at` / `attempt_count`） |
+| `jobs` | 任务队列（带 `subject_id` + `lease_expires_at` / `heartbeat_at` / `attempt_count`）；task.type 支持 `embed-index`（⑧） |
 | `job_events` | SSE 事件持久化，供断线续播 |
 | `operations` | Saga changeset 及其 `preHead` / `postHead` / `subject_id`，供崩溃回滚 |
+| `page_embeddings` | 向量嵌入存储（PK `(subject_id, slug)` + model + content_hash + vector BLOB，FK CASCADE）（⑧） |
 | `pages_fts` | FTS5 虚拟表，title + summary + body（含 UNINDEXED `subject_id` / `slug`） |
 
 ## 测试与质量
@@ -112,6 +116,7 @@ src/server/
 ├── worker-entry.ts                # Worker 进程 main
 ├── db/           → 见 db/CLAUDE.md
 ├── wiki/         → 见 wiki/CLAUDE.md
+├── search/       → 向量语义检索（vector-math / semantic-search / hybrid-retrieval，⑧）
 ├── jobs/         → 见 jobs/CLAUDE.md
 ├── llm/          → 见 llm/CLAUDE.md
 ├── services/     → 见 services/CLAUDE.md
@@ -129,6 +134,7 @@ src/server/
 | 2026-04-22 | 初始化：梳理后端分层与交叉引用 |
 | 2026-04-25 | 引入 Subject：subjects 表 + 复合 PK + middleware/subject + 全链路 subjectId |
 | 2026-06-22 | git-service 加 getVaultLog/parseGitLog；新增 operations-repo + wiki/{revert,history}.ts + /api/history* 路由（⑥ 版本历史/diff）|
+| 2026-06-22 | 新增 search/ 模块（vector-math/semantic-search/hybrid-retrieval）+ embeddings-repo + embed-index worker 任务（⑧ 向量语义检索）|
 
 ---
 

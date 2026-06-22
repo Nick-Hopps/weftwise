@@ -74,6 +74,15 @@
 - `listMessages(conversationId): ConversationMessage[]` —— 按 `created_at, rowid ASC` 排序
 - `touchConversation(id): void` —— 更新 `updated_at = now`（新消息到达时置顶）
 
+### `embeddings-repo.ts` 🆕
+
+向量语义检索（⑧）：`subject_id` scoped，FK CASCADE。
+
+- `upsertEmbedding(subjectId, slug, model, embedding, contentHash): void` —— 按 `(subject_id, slug)` upsert
+- `listForSubject(subjectId, model?): PageEmbedding[]` —— 按 model 可选过滤
+- `deleteBySlug(subjectId, slug): void` —— 删除页面向量（写/删 changeset 触发）
+- `pruneOrphans(subjectId, liveSlugs): void` —— 删除孤儿向量（embed-index 任务调用）
+
 ### `settings-repo.ts`（全局键值设置）
 
 通用 key/value 表，承载所有"全 app 单实例"的全局设置（首个使用方：`wikiLanguage`，存语言名字符串如 "English" / "Chinese"）。
@@ -132,6 +141,7 @@
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
+| `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 
 ## 扩展指南
 
@@ -169,7 +179,8 @@ src/server/db/
     ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
     ├── checkpoints-repo.ts    # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
-    └── conversations-repo.ts  # 多轮对话 CRUD（⑦）
+    ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
+    └── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
 ```
 
 ## 变更记录 (Changelog)
@@ -183,6 +194,7 @@ src/server/db/
 | 2026-06-20 | ingest_checkpoints 表 + checkpoints-repo（断点续传：getCheckpoints / putCheckpoint / deleteCheckpoints / getProgress）|
 | 2026-06-22 | 新增 operations-repo（版本历史时间线取数：listForSubject/getById/markReverted）（⑥）|
 | 2026-06-22 | 新增 conversations/messages 两表 + conversations-repo（多轮对话持久化，subject-scoped，级联删除）（⑦）|
+| 2026-06-22 | 新增 page_embeddings 表 + embeddings-repo（向量语义检索，subject-scoped，FK CASCADE，无 legacy 迁移）（⑧）|
 
 ---
 
