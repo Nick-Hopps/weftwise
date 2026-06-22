@@ -76,6 +76,7 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
     // ⑨ 续传补源：整张去重后列表存为单 blob（kind='cited-sources'，key 固定空串）。
     getCitedSources: () => citedSources,
     putCitedSources: (list) => {
+      // DB 优先：落盘成功后再写内存（与其余 put* 一致）。
       checkpointsRepo.putCheckpoint(jobId, 'cited-sources', '', { list });
       citedSources = list;
     },
