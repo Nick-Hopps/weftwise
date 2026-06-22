@@ -30,7 +30,8 @@ ingest 内容流水线四阶段：`planner → writer×N → enricher×N → ver
 | 维度 | 选择 | 理由 |
 |------|------|------|
 | **核查架构** | 确定性两段式（triage → 编排层搜索 → apply），全程 `generateObject` 无 tools | 绕开 packyapi 工具死循环；与既有架构一致 |
-| **搜索后端** | HTTP 搜索 API（Tavily 契约：search + extract），key 存 `llm-config.json` | worker 进程内最简、最确定；无需 MCP transport/bridge/lifecycle 机制 |
+| **搜索后端** | HTTP 搜索 API（Tavily 契约：search + extract） | worker 进程内最简、最确定；无需 MCP transport/bridge/lifecycle 机制 |
+| **后端配置位置** | 落**全局设置** `app_settings`（`settings-repo` + 设置面板），非 `llm-config.json` | 符合 CLAUDE.md 全局设置规则：server 单一真实源、服务层实时读取、UI 改无需重启 worker、不镜像 Zustand |
 | **开关/降级** | 配了就开、没配就降级到当前 P2 自检 | 零新增 UI 开关；未配置时零行为变化 |
 | **网页 source 内容** | 按需抓正文：apply 定下被引用 URL 后，仅对这些 URL 调 extract 拉全页正文导入 | 导入真正可读、可再-ingest 的完整 source；只为被引用页抓取（不浪费） |
 
@@ -75,7 +76,7 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 | 文件 | 职责 |
 |------|------|
-| `src/server/search/web-search.ts` | `isWebSearchConfigured(): boolean`；`webSearch(query, opts?): Promise<WebSearchResult[]>`（Tavily search）；`extractContent(urls): Promise<Array<{ url; content }>>`（Tavily extract，按需抓正文）。配置读 `llm-config.json::webSearch`；未配置时 `isWebSearchConfigured` 返回 false，其余函数抛 `LLMConfigError`（与 ⑧ embedding 守卫一致）。类型 `WebSearchResult { title; url; snippet }` 本模块内定义 |
+| `src/server/search/web-search.ts` | `isWebSearchConfigured(): boolean`；`webSearch(query, opts?): Promise<WebSearchResult[]>`（Tavily search）；`extractContent(urls): Promise<Array<{ url; content }>>`（Tavily extract，按需抓正文）。**配置经 `settings-repo::getWebSearchConfig()` 实时读 `app_settings`**（每次调用读 DB，UI 改即时生效、无需重启 worker）；未配置（apiKey 空）时 `isWebSearchConfigured` 返回 false，其余函数抛 `LLMConfigError`（与 ⑧ embedding 守卫一致）。类型 `WebSearchResult { title; url; snippet }` 本模块内定义 |
 | `src/server/agents/runtime/verify-page.ts` | `runPageVerification(opts): Promise<AgentRunResult>`：triage → 搜索 → apply / 逐页降级；空 claims passthrough；frontmatter `sources` 追加；累积 `ctx.citedSources`。固定引用三个 skill id（triage/apply/self-check），经传入的 `resolveSkill` 解析、复用 `runAgentLoop` 执行每次 LLM 调用 |
 | `examples/skills/ingest-verifier-triage.md` | 结构化无 tools；version 1；outputSchema = `{ doubtfulClaims: [{ excerpt, query, reason }] }`。只挑 callout 层中「值得联网核查的存疑断言」，confident 常识不挑 |
 | `examples/skills/ingest-verifier-apply.md` | 结构化无 tools；version 1；outputSchema = `{ action, path, content, citedSources:[{url,title}] }`。拿 evidence 修正/软化/删除 callout；忠实正文逐字复刻、不加新 callout、frontmatter 不动；`citedSources` 只列**实际据以修正/支撑**的网页 |
@@ -84,13 +85,16 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 | 文件 | 改动 |
 |------|------|
-| `src/server/llm/config-schema.ts` | 加可选 `webSearch?: { provider: 'tavily'; apiKey: string; maxResults?: number }`（zod；provider 当前枚举仅 `'tavily'`，留扩展位） |
+| `src/lib/contracts.ts` | 加 `WebSearchProviderSchema`（`z.enum(['tavily'])`，默认 `'tavily'`）/ `WebSearchApiKeySchema`（`z.string().max(N)`，**允许空串=未配置/关闭**）/ `WebSearchMaxResultsSchema`（`z.number().int().min(1).max(10)`，默认 5）+ 对应 `DEFAULT_*`；`AppSettings` 加 `webSearchProvider` / `webSearchApiKey` / `webSearchMaxResults` 三字段 |
+| `src/server/db/repos/settings-repo.ts` | 加 3 个 key（`webSearchProvider`/`webSearchApiKey`/`webSearchMaxResults`）+ getter/setter（沿用 `readKey/writeKey/readNumber` 模式、zod 校验）+ 便捷 `getWebSearchConfig(): { provider; apiKey; maxResults }` 供 web-search.ts 一次读取 |
+| `src/app/api/settings/route.ts` | `readSettings()` 补 3 字段；`PutBodySchema` 补 3 个 optional；PUT 分支补 set 调用 |
+| `src/components/shared/settings-dialog.tsx` | 加 "Web search" section（provider 选择[当前仅 tavily] + apiKey 输入[password] + maxResults 数字），走 `GET/PUT /api/settings` + 本地 state，**不写 Zustand** |
 | `src/server/agents/types.ts` | `PipelineStep` 联合加 `{ kind:'verify'; fromOutput; injectPriorPageAs?; checkpointAs?:'verifier-page' }`；`AgentContext` 加可选 `citedSources?`（累积桶）；类型 `CitedSource { url; title; citedBy: string[] }` |
 | `src/server/agents/runtime/orchestrator.ts` | fanout 分支 per-item：`step.kind==='verify'` → `runPageVerification(...)`，否则 `runAgentLoop(...)`；其余骨架不动。`ctx.citedSources` 在 runPipeline 入口初始化 |
 | `src/server/wiki/wiki-transaction.ts` | `SourceLinkOps` 由单 source 升级为 `{ links: Array<{ sourceId; pageSlugs: string[] }>; extraStagePaths?: string[]; linkPageSource; updateSourcePageLinks; onWarning? }`；`applyChangeset` 提交时 stage `affectedPaths ∪ extraStagePaths`，并遍历 `links` 写 page_sources + `updateSourcePageLinks` |
 | `src/server/agents/tools/builtin/commit-changeset.ts` | `commitPending` 构造新版 `SourceLinkOps`：原 ingest 单源并入 `links`；接受调用方传入的 web source `links` + `extraStagePaths` |
 | `src/server/services/ingest-service.ts` | verifier fanout step → `kind:'verify'`；`finalizeIngest` 在 commit 前遍历 `ctx.citedSources`：`extractContent(url)` → `saveRawSource(subject, filenameFromUrl, content)` → sourceId，组装 `links` + `extraStagePaths`（raw 文件 + sidecar），传入 `commitPending`；`MIN_SKILL_VERSIONS` 加 `ingest-verifier-triage:1`、`ingest-verifier-apply:1` |
-| `llm-config.example.json` | 加 `webSearch` 示例块 + `tasks["skill:ingest-verifier-triage"]` / `["skill:ingest-verifier-apply"]` 注释示例 |
+| `llm-config.example.json` | 仅加 `tasks["skill:ingest-verifier-triage"]` / `["skill:ingest-verifier-apply"]` 模型路由注释示例（**搜索后端配置不在这里**，见全局设置） |
 
 既有 `ingest-verifier`(v2) skill **保留不动**（降级路径）。新 skill 文件随 worker `seedSkillFiles` 自动播种（文件不存在才写），**无需手动删 vault 文件**。
 
@@ -131,23 +135,22 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 ---
 
-## 七、配置
+## 七、配置（全局设置）
 
-`llm-config.json`（gitignored，不入库）新增：
+搜索后端是"全 app 单实例"配置，落 `app_settings`（与 `wikiLanguage`/agent runtime 设置同管道），**不进 `llm-config.json`**：
 
-```jsonc
-{
-  "webSearch": {
-    "provider": "tavily",        // 当前仅支持 tavily
-    "apiKey": "tvly-...",        // 缺失/空 = 未配置 → 优雅降级纯自检
-    "maxResults": 5              // 可选，每 query 取回结果数，默认 5
-  }
-}
-```
+| key（`app_settings`） | schema / 默认 | 说明 |
+|------|------|------|
+| `webSearchProvider` | `z.enum(['tavily'])`，默认 `'tavily'` | 当前仅 tavily，留扩展位 |
+| `webSearchApiKey` | `z.string().max(N)`，默认 `''` | **空串 = 未配置/关闭 → 优雅降级纯自检** |
+| `webSearchMaxResults` | `z.number().int().min(1).max(10)`，默认 `5` | 每 query 取回结果数 |
 
-`isWebSearchConfigured()` = `provider` 合法 且 `apiKey` 非空。`config-schema.ts` 用 zod 校验该块。`llm-config.example.json` 给出示例。
+- 写读经 `settings-repo`（`getWebSearchConfig()` 一次读三字段；每次读 DB，UI 改即时生效、无需重启 worker）。
+- `GET/PUT /api/settings` 收口（auth 守卫；GET 返回 apiKey 原值——与本 app 既有威胁模型一致：设置接口 auth-gated，`llm-config.json` 亦明文存 key）。
+- 设置面板新增 "Web search" section（provider 选择 + apiKey password 输入 + maxResults），本地 state 暂存 + `useMutation` PUT，**不写 Zustand**。
+- `isWebSearchConfigured()` = provider 合法 且 apiKey 非空（trim 后）。
 
-**模型**：triage/apply 可经 `tasks["skill:ingest-verifier-triage"]` / `["skill:ingest-verifier-apply"]` 指定（task-router 已支持 `skill:` 前缀）；建议 apply 用强推理模型。缺省走 chat 默认模型。
+**模型路由（仍在 `llm-config.json`）**：triage/apply 可经 `tasks["skill:ingest-verifier-triage"]` / `["skill:ingest-verifier-apply"]` 指定模型（task-router 已支持 `skill:` 前缀）；建议 apply 用强推理模型。缺省走 chat 默认模型。这是模型选择，与上面的"搜索后端配置"分属两处，互不混淆。
 
 ---
 
@@ -186,8 +189,9 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 | 单元 | 用例 |
 |------|------|
-| `web-search.ts`（mock fetch） | 未配置 → `isWebSearchConfigured`=false；配置 → search 解析 Tavily 响应为 `WebSearchResult[]`；extract 解析正文；HTTP 错误抛出/被上层捕获；未配置调用 `webSearch` 抛 `LLMConfigError` |
-| `config-schema.ts` | `webSearch` 块合法/非法（缺 apiKey、坏 provider）校验 |
+| `web-search.ts`（mock fetch + mock settings-repo） | 未配置（apiKey 空）→ `isWebSearchConfigured`=false；配置 → search 解析 Tavily 响应为 `WebSearchResult[]`；extract 解析正文；HTTP 错误抛出/被上层捕获；未配置调用 `webSearch` 抛 `LLMConfigError` |
+| `settings-repo.ts`（沿用临时 DB fixture） | webSearch 三 key get/set round-trip + 默认回落；`getWebSearchConfig` 聚合；apiKey 空/非空、maxResults 越界校验 |
+| `contracts.ts` schemas | `WebSearch*Schema` 合法/非法（坏 provider、maxResults 越界）；apiKey 允许空串 |
 | `verify-page.ts`（mock skill + mock web-search） | ①未配置→自检 skill ②triage 空→passthrough（不调搜索/apply）③有证据→apply，citedSources 追加进 frontmatter `sources`、记入 `ctx.citedSources` ④有存疑+零证据→自检 skill ⑤passthrough/apply 的 action 由 existingPages 正确推断 |
 | `wiki-transaction.ts`（扩展 SourceLinkOps） | 多 `links` 各自写 page_sources；`extraStagePaths` 进 stage 列表；空 links/paths 向后兼容（不破坏现有单源 ingest 链路） |
 | `orchestrator.ts` | `kind:'verify'` step 路由到 `runPageVerification`；checkpoint 命中 `verifier-page` 跳过；pending upsert / 冲突检测仍生效 |
@@ -207,13 +211,16 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
   （各自 __tests__）
 
 修改:
-  src/server/llm/config-schema.ts            # webSearch 块
+  src/lib/contracts.ts                       # WebSearch 三 schema + DEFAULT + AppSettings 三字段
+  src/server/db/repos/settings-repo.ts       # 3 key getter/setter + getWebSearchConfig
+  src/app/api/settings/route.ts              # readSettings + PutBodySchema + set 分支补 3 字段
+  src/components/shared/settings-dialog.tsx  # "Web search" section（不写 Zustand）
   src/server/agents/types.ts                 # verify step kind + AgentContext.citedSources + CitedSource
   src/server/agents/runtime/orchestrator.ts  # verify step 路由 + citedSources 初始化
   src/server/wiki/wiki-transaction.ts        # SourceLinkOps 多源 + extraStagePaths
   src/server/agents/tools/builtin/commit-changeset.ts  # commitPending 接 web source links
   src/server/services/ingest-service.ts      # verify step; finalizeIngest 导入 cited sources; MIN_SKILL_VERSIONS
-  llm-config.example.json                    # webSearch 示例
+  llm-config.example.json                    # 仅 skill 模型路由示例（搜索后端不在此）
 
 文档（合并后同步）:
   src/server/agents/CLAUDE.md / search 相关 / src/server/CLAUDE.md / 根 CLAUDE.md changelog
@@ -236,13 +243,14 @@ verifier 步骤由「单次 fanout skill」升级为**逐页两段式**（`kind:
 
 ## 十四、实现阶段建议（供 writing-plans 拆任务）
 
-1. `web-search.ts`（纯 HTTP 客户端 + 配置守卫）+ `config-schema.ts` webSearch 块 —— 叶子、可独立测。
-2. 两个 skill 模板（triage/apply）+ examples-roundtrip。
-3. `wiki-transaction.ts` `SourceLinkOps` 多源 + `extraStagePaths`（向后兼容）+ `commit-changeset.ts` 适配。
-4. `verify-page.ts`（triage→搜索→apply→降级→frontmatter 追加→citedSources 累积）+ `types.ts` 类型。
-5. `orchestrator.ts` verify step 路由 + citedSources 初始化。
-6. `ingest-service.ts` verify step 接线 + `finalizeIngest` 导入 cited sources + `MIN_SKILL_VERSIONS` + `llm-config.example.json`。
+1. 全局设置链路：`contracts.ts` 三 schema/默认 + `settings-repo` 三 key/`getWebSearchConfig` + `/api/settings` 三字段 + settings-dialog "Web search" section —— 自成一组、可独立测。
+2. `web-search.ts`（纯 HTTP 客户端：Tavily search+extract + 经 `getWebSearchConfig` 的配置守卫）—— 叶子、mock fetch 可独立测。
+3. 两个 skill 模板（triage/apply）+ examples-roundtrip。
+4. `wiki-transaction.ts` `SourceLinkOps` 多源 + `extraStagePaths`（向后兼容）+ `commit-changeset.ts` 适配。
+5. `verify-page.ts`（triage→搜索→apply→降级→frontmatter 追加→citedSources 累积）+ `types.ts` 类型。
+6. `orchestrator.ts` verify step 路由 + citedSources 初始化。
+7. `ingest-service.ts` verify step 接线 + `finalizeIngest` 导入 cited sources + `MIN_SKILL_VERSIONS` + `llm-config.example.json`。
 
 ---
 
-_本设计经 brainstorm 确认：确定性两段式（绕开 packyapi 工具死循环）+ HTTP/Tavily 后端 + 配了就开/没配降级 + 按需抓正文把被引用网页导入为 source（三层 provenance：source 实体 + page_sources + frontmatter 可见），同一 ingest commit 落地。_
+_本设计经 brainstorm 确认：确定性两段式（绕开 packyapi 工具死循环）+ HTTP/Tavily 后端（配置落全局设置 `app_settings`，设置面板可配）+ 配了就开/没配降级 + 按需抓正文把被引用网页导入为 source（三层 provenance：source 实体 + page_sources + frontmatter 可见），同一 ingest commit 落地。_
