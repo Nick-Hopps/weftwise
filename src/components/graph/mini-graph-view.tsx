@@ -208,7 +208,8 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
                 size="sm"
                 onClick={recenter}
                 aria-label={currentSlug ? 'Center on current page' : 'Fit graph to view'}
-                title={currentSlug ? 'Center on current page' : 'Fit to view'}
+                data-tip={currentSlug ? 'Center on current page' : 'Fit to view'}
+                className="tip tip-l"
               >
                 {currentSlug ? <Target /> : <Compass />}
               </IconButton>
@@ -216,7 +217,8 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
                 size="sm"
                 onClick={openFullscreen}
                 aria-label="Expand graph to fullscreen"
-                title="Expand"
+                data-tip="Expand"
+                className="tip tip-l"
               >
                 <Maximize2 />
               </IconButton>

@@ -53,27 +53,23 @@ export function Shell({ children }: ShellProps) {
       <Header />
 
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Left Sidebar — desktop inline (resizable) */}
-        {sidebarOpen && (
-          <>
-            <div
-              className="hidden lg:flex flex-col shrink-0 overflow-hidden"
-              style={hydrated ? { width: sidebarWidth } : { width: 240 }}
-            >
-              <Sidebar />
-            </div>
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize sidebar"
-              onPointerDown={handleSidebarResizeStart}
-              onDoubleClick={() => useUIStore.getState().resetSidebarWidth()}
-              className="hidden lg:flex items-center justify-center shrink-0 w-1 cursor-col-resize group hover:bg-accent/30 active:bg-accent/50 transition-colors"
-            >
-              <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-accent group-active:bg-accent-active transition-colors" />
-            </div>
-          </>
-        )}
+        {/* Left Sidebar — desktop inline (resizable, always present) */}
+        <div
+          className="hidden lg:flex flex-col shrink-0 overflow-hidden"
+          style={hydrated ? { width: sidebarWidth } : { width: 240 }}
+        >
+          <Sidebar />
+        </div>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          onPointerDown={handleSidebarResizeStart}
+          onDoubleClick={() => useUIStore.getState().resetSidebarWidth()}
+          className="hidden lg:flex items-center justify-center shrink-0 w-1 cursor-col-resize group hover:bg-accent/30 active:bg-accent/50 transition-colors"
+        >
+          <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-accent group-active:bg-accent-active transition-colors" />
+        </div>
 
         {/* Left Sidebar — mobile overlay */}
         {sidebarOpen && (

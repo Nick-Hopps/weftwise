@@ -59,7 +59,8 @@ export function FullscreenGraph({
             size="base"
             onClick={onRecenter}
             aria-label={hasCurrent ? 'Center on current page' : 'Fit graph to view'}
-            title={hasCurrent ? 'Center on current page' : 'Fit to view'}
+            data-tip={hasCurrent ? 'Center on current page' : 'Fit to view'}
+            className="tip tip-l"
           >
             {hasCurrent ? <Target /> : <Compass />}
           </IconButton>
@@ -67,7 +68,8 @@ export function FullscreenGraph({
             size="base"
             onClick={onClose}
             aria-label="Close fullscreen (Esc)"
-            title="Exit fullscreen"
+            data-tip="Exit fullscreen"
+            className="tip tip-l"
           >
             <Minimize2 />
           </IconButton>

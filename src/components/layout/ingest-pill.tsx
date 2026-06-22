@@ -42,7 +42,7 @@ function currentPhase(events: JobStreamEvent[]): number {
 
 /**
  * Background-ingest progress pill shown in the header while an ingest runs.
- * Clicking it returns to the dashboard, where the live view / running strip lives.
+ * Clicking it opens the ingest workspace, where the live view lives.
  */
 export function IngestPill() {
   const router = useRouter();
@@ -93,9 +93,10 @@ export function IngestPill() {
   return (
     <button
       type="button"
-      onClick={() => router.push('/')}
-      title="Open ingest"
-      className="hidden shrink-0 items-center gap-2 h-8 rounded-full border border-accent/30 bg-accent/[0.08] pl-2 pr-2.5 text-xs text-accent-strong transition-colors hover:bg-accent/[0.13] focus-ring sm:flex"
+      onClick={() => router.push('/ingest')}
+      aria-label="Open ingest"
+      data-tip="Open ingest"
+      className="tip tip-b hidden shrink-0 items-center gap-2 h-8 rounded-full border border-accent/30 bg-accent/[0.08] pl-2 pr-2.5 text-xs text-accent-strong transition-colors hover:bg-accent/[0.13] focus-ring sm:flex"
     >
       <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
       <span className="font-medium whitespace-nowrap">{PHASES[idx]}…</span>

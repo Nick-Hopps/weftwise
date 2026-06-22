@@ -133,7 +133,8 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
         intent={showSplit ? 'primary' : 'outline'}
         size="sm"
         onClick={() => setSplit((s) => !s)}
-        title="Show the documents this page was written from"
+        data-tip="Show the documents this page was written from"
+        className="tip tip-b"
       >
         <FileStack className="h-3.5 w-3.5" />
         {showSplit ? 'Hide sources' : `Sources (${sourceCount})`}

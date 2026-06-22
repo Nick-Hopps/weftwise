@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Menu, Moon, Search, SidebarOpen, SidebarClose, Sun, Sparkles } from 'lucide-react';
+import { Menu, Moon, Search, Sun, Sparkles } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { IconButton } from '@/components/ui/icon-button';
 import { Kbd } from '@/components/ui/kbd';
@@ -83,7 +83,6 @@ function Breadcrumb({ pathname }: { pathname: string }) {
 export function Header() {
   const pathname = usePathname() ?? '/';
   const {
-    sidebarOpen,
     toggleSidebar,
     toggleCommandPalette,
     toggleDarkMode,
@@ -97,18 +96,17 @@ export function Header() {
 
   return (
     <header className="flex items-center gap-3 h-header px-3 border-b border-border bg-surface shrink-0 z-header">
-      {/* Left: sidebar toggle + logo + breadcrumb */}
+      {/* Left: logo + breadcrumb. The sidebar is resizable but not collapsible
+          on desktop (per design); only a mobile hamburger remains. */}
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <IconButton
           size="base"
           onClick={toggleSidebar}
-          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          className="lg:inline-flex"
+          aria-label="Open navigation"
+          data-tip="Open navigation"
+          className="tip tip-b lg:hidden"
         >
-          {sidebarOpen ? <SidebarClose className="lg:hidden xl:inline" /> : <SidebarOpen />}
-          <span className="lg:hidden">
-            <Menu />
-          </span>
+          <Menu />
         </IconButton>
 
         <Link
@@ -169,7 +167,8 @@ export function Header() {
           size="base"
           onClick={toggleCommandPalette}
           aria-label="Search"
-          className="sm:hidden"
+          data-tip="Search"
+          className="tip tip-b sm:hidden"
         >
           <Search />
         </IconButton>
