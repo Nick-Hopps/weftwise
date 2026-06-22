@@ -11,11 +11,14 @@ import {
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
+import * as conversationsRepo from '@/server/db/repos/conversations-repo';
+import { deriveConversationTitle } from '@/server/services/conversation-title';
 
 export const runtime = 'nodejs';
 
 const QueryBodySchema = z.object({
   question: z.string().min(1).optional(),
+  conversationId: z.string().optional(),
   saveAsPage: z.boolean().optional(),
   pageTitle: z.string().optional(),
   answer: z.string().optional(),
@@ -108,6 +111,29 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
   const trimmedQuestion = question.trim();
 
+  const MAX_HISTORY_MESSAGES = 8;
+
+  // 确定/创建会话（跨 subject 的 conversationId 静默当新会话，防泄漏他 subject 历史）
+  const requestedConvId = parsed.data.conversationId;
+  let activeConversationId: string;
+  if (requestedConvId) {
+    const existing = conversationsRepo.getConversation(requestedConvId);
+    activeConversationId =
+      existing && existing.subjectId === subject.id
+        ? existing.id
+        : conversationsRepo.createConversation(subject.id, deriveConversationTitle(trimmedQuestion)).id;
+  } else {
+    activeConversationId = conversationsRepo.createConversation(
+      subject.id,
+      deriveConversationTitle(trimmedQuestion),
+    ).id;
+  }
+
+  const history = conversationsRepo
+    .listMessages(activeConversationId)
+    .slice(-MAX_HISTORY_MESSAGES)
+    .map((m) => ({ role: m.role, content: m.content }));
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
@@ -124,6 +150,24 @@ export async function POST(request: NextRequest) {
         );
       };
 
+      const persistTurn = (
+        answer: string,
+        cits: { pageSlug: string; excerpt: string }[],
+      ) => {
+        try {
+          conversationsRepo.appendMessage(activeConversationId, 'user', trimmedQuestion, null);
+          conversationsRepo.appendMessage(
+            activeConversationId,
+            'assistant',
+            answer,
+            JSON.stringify(cits),
+          );
+          conversationsRepo.touchConversation(activeConversationId);
+        } catch (err) {
+          console.error('[query] persist conversation turn failed', err);
+        }
+      };
+
       const onAbort = () => closeStream();
       request.signal.addEventListener('abort', onAbort, { once: true });
 
@@ -133,7 +177,8 @@ export async function POST(request: NextRequest) {
         if (context.length === 0) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
           emit('citations', { citations: [] });
-          emit('done', { subjectId: subject.id });
+          persistTurn(NO_QUERY_CONTEXT_ANSWER, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           closeStream();
           return;
         }
@@ -144,6 +189,7 @@ export async function POST(request: NextRequest) {
           context,
           subject,
           request.signal,
+          history,
         );
 
         let fullAnswer = '';
@@ -166,7 +212,8 @@ export async function POST(request: NextRequest) {
         }
 
         emit('citations', { citations: streamedCitations });
-        emit('done', { subjectId: subject.id });
+        persistTurn(fullAnswer, streamedCitations);
+        emit('done', { subjectId: subject.id, conversationId: activeConversationId });
       } catch (error) {
         if (!request.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error);
