@@ -5,6 +5,7 @@
  * side-effect import：worker-entry import 本文件即完成 registerHandler('merge', ...)。
  */
 import { registerHandler } from '../jobs/worker';
+import { enqueueEmbedIndex } from './embedding-service';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import { readPageInSubject } from '../wiki/wiki-store';
@@ -126,6 +127,9 @@ async function runMergeJob(
     `Merged into "${targetSlug}"; repointed ${referencesRepointed} reference(s)`,
     { mergedSlug: targetSlug, deletedSlug: sourceSlug, referencesRepointed },
   );
+
+  // 写后触发向量回填（未配置 embedding 时 no-op）
+  enqueueEmbedIndex(subject.id);
 
   return { mergedSlug: targetSlug, deletedSlug: sourceSlug, referencesRepointed };
 }

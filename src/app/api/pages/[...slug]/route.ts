@@ -13,6 +13,7 @@ import {
 import { buildWikiPath } from '@/server/wiki/page-identity';
 import { parseFrontmatter } from '@/server/wiki/frontmatter';
 import { rewriteBacklinkText } from '@/server/wiki/relink';
+import { enqueueEmbedIndex } from '@/server/services/embedding-service';
 import type { ChangesetEntry } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
@@ -156,6 +157,8 @@ export async function PUT(
   }
 
   await applyChangeset(changeset);
+  // 写后触发向量回填（未配置 embedding 时 no-op）
+  enqueueEmbedIndex(subject.id);
   return NextResponse.json({ ok: true, slug, subjectId: subject.id, referencesUpdated });
 }
 
@@ -196,5 +199,7 @@ export async function DELETE(
   ]);
 
   await applyChangeset(changeset);
+  // 删除后触发向量回填（prune 孤儿；未配置 embedding 时 no-op）
+  enqueueEmbedIndex(subject.id);
   return NextResponse.json({ ok: true, slug, subjectId: subject.id });
 }

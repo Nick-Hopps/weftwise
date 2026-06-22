@@ -144,6 +144,15 @@ async function main() {
   await ensureVaultRepo();
   log.info('Vault repository ready');
 
+  // Self-heal: 启动时为每个 subject 入队 embed-index 回填存量向量
+  // （handler 未配置 embedding 时 no-op，永远安全）
+  try {
+    const { enqueueEmbedIndex } = await import('./services/embedding-service');
+    for (const s of subjectsRepo.listSubjects()) enqueueEmbedIndex(s.id);
+  } catch (err) {
+    log.warn('embed-index self-heal enqueue failed', err);
+  }
+
   // Boot agent runtime (skills + tools + MCP pool)
   const runtime = await bootRuntime();
 
