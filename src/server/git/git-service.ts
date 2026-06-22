@@ -129,3 +129,49 @@ export async function isClean(): Promise<boolean> {
   const status = await git.status();
   return status.isClean();
 }
+
+export interface VaultCommit {
+  sha: string;
+  date: string;
+  message: string;
+}
+
+/**
+ * 解析 `git log --pretty=format:%H%x1f%cI%x1f%s` 的原始输出。
+ * 每行一个提交，字段用单元分隔符 \x1f 分隔（正文不会出现该字符）。
+ */
+export function parseGitLog(raw: string): VaultCommit[] {
+  if (!raw) return [];
+  const commits: VaultCommit[] = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    const parts = line.split('\x1f');
+    const sha = parts[0];
+    if (!sha) continue;
+    commits.push({
+      sha,
+      date: parts[1] ?? '',
+      message: parts.slice(2).join('\x1f'),
+    });
+  }
+  return commits;
+}
+
+/**
+ * 取 vault git 提交日志（最新在前，默认上限 2000 条）。
+ * 仅用于给时间线补充显示时间戳/commit message；列表完整性由 operations 表保证。
+ */
+export async function getVaultLog(limit = 2000): Promise<VaultCommit[]> {
+  const git = getVaultGit();
+  try {
+    const raw = await git.raw([
+      'log',
+      '-n',
+      String(limit),
+      '--pretty=format:%H%x1f%cI%x1f%s',
+    ]);
+    return parseGitLog(raw);
+  } catch {
+    return [];
+  }
+}
