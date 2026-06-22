@@ -3,7 +3,7 @@ import { registerHandler } from '../jobs/worker';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import { parseSourceAsync, requiresBuffer } from '../sources/parser-registry';
-import { getRawSourceContent, getRawSourceBuffer, updateSourceChunks } from '../sources/source-store';
+import { getRawSourceContent, getRawSourceBuffer, updateSourceChunks, saveRawSource } from '../sources/source-store';
 import {
   getAgentMaxSteps,
   getAgentMaxTokensPerJob,
@@ -26,8 +26,9 @@ import {
 } from './ingest-prep';
 import { getRuntimeRegistries } from '../worker-runtime';
 import { enqueueEmbedIndex } from './embedding-service';
-import { randomUUID } from 'node:crypto';
-import type { AgentContext } from '../agents/types';
+import { createHash, randomUUID } from 'node:crypto';
+import { extractContent } from '../search/web-search';
+import type { AgentContext, CitedSource } from '../agents/types';
 import type { ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
 
 // 当前单源；prepareIngest 已接受数组，未来多源批量在此扩展
@@ -117,6 +118,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   const MIN_SKILL_VERSIONS: Record<string, number> = {
     'ingest-planner': 2, 'ingest-writer': 4, 'ingest-indexer': 1,
     'ingest-enricher': 1, 'ingest-verifier': 2,
+    'ingest-verifier-triage': 1, 'ingest-verifier-apply': 1,
   };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
     const s = skillRegistry.get(skillId);
@@ -148,6 +150,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     chunkStore: prep.chunkStore,
     budgetSnapshot,
     checkpoint,
+    citedSources: new Map(),
   };
 
   const existingPages = pagesRepo
@@ -165,7 +168,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     { kind: 'sequence', skillId: 'ingest-planner', carryThrough: carryKeys, checkpointAs: 'plan' },
     { kind: 'fanout', skillId: 'ingest-writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page', injectExistingPageForUpdate: true },
     { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
-    { kind: 'fanout', skillId: 'ingest-verifier', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
+    { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
   ];
 
   emit('ingest:planning', `Planning source: ${filename}`, { path: inline ? 'inline' : 'map-reduce' });
@@ -268,5 +271,86 @@ async function finalizeIngest(
     { action: existingLog ? 'update' : 'create', path: buildWikiPath(ctx.subject.slug, 'log'), content: out.logMd },
   ];
 
-  return commitPending(ctx, metaEntries);
+  // ⑨：把核查累积的网页引用源导入为 source（按需抓正文，extract 失败回落 snippet），
+  // 经扩展后的 commitPending 随同一次 ingest commit 落地（raw/sidecar 文件 + page_sources）。
+  const cites = ctx.citedSources ? [...ctx.citedSources.values()] : [];
+  let webSources: { links: Array<{ sourceId: string; pageSlugs: string[] }>; extraStagePaths: string[] } | undefined;
+  if (cites.length > 0) {
+    // 按需抓正文：一次性 extract 全部被引用 URL（失败的 URL 不在结果里，回落 snippet）。
+    let extractedByUrl = new Map<string, string>();
+    try {
+      const extracted = await extractContent(cites.map((c) => c.url));
+      extractedByUrl = new Map(extracted.map((e) => [e.url, e.content]));
+    } catch (err) {
+      ctx.emit('ingest:warn', `Web extract failed; falling back to snippets`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    const plan = buildWebSourceImports({
+      cites,
+      subjectSlug: ctx.subject.slug,
+      contentFor: (url) => extractedByUrl.get(url) ?? null,
+      saveSource: (filename, content) => saveRawSource(ctx.subject, filename, content),
+    });
+    if (plan.links.length > 0) {
+      webSources = { links: plan.links, extraStagePaths: plan.extraStagePaths };
+    }
+  }
+
+  return commitPending(ctx, metaEntries, webSources);
+}
+
+/** 从 URL 派生安全的 .md 文件名（host + 末段 + 短 hash）。 */
+export function filenameFromUrl(url: string): string {
+  const hash = createHash('sha256').update(url).digest('hex').slice(0, 8);
+  let base = 'page';
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
+    base = `${host}-${last}`.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    base = base.slice(0, 80) || 'page';
+  } catch {
+    base = 'page';
+  }
+  return `web-${base}-${hash}.md`;
+}
+
+export interface WebSourceImportPlan {
+  links: Array<{ sourceId: string; pageSlugs: string[] }>;
+  extraStagePaths: string[];
+  filenames: string[];
+}
+
+/**
+ * 把核查累积的网页引用源组装为导入计划（纯逻辑，IO 经回调注入便于测试）。
+ * - contentFor(url): extract 正文或 null（null 则用 fallbackContent=snippet）。
+ * - saveSource(filename, content, url): 落盘 source，返回 { id }；抛错则跳过该源。
+ */
+export function buildWebSourceImports(args: {
+  cites: CitedSource[];
+  subjectSlug: string;
+  contentFor: (url: string) => string | null;
+  saveSource: (filename: string, content: string, url: string) => { id: string };
+}): WebSourceImportPlan {
+  const links: Array<{ sourceId: string; pageSlugs: string[] }> = [];
+  const extraStagePaths: string[] = [];
+  const filenames: string[] = [];
+  for (const c of args.cites) {
+    const filename = filenameFromUrl(c.url);
+    const body = args.contentFor(c.url) ?? c.fallbackContent;
+    const fileContent = `# ${c.title}\n\nSource: ${c.url}\n\n${body}`;
+    try {
+      const saved = args.saveSource(filename, fileContent, c.url);
+      links.push({ sourceId: saved.id, pageSlugs: c.citedBy });
+      extraStagePaths.push(
+        `raw/${args.subjectSlug}/${filename}`,
+        `.llm-wiki/sources/${args.subjectSlug}/${saved.id}.json`,
+      );
+      filenames.push(filename);
+    } catch {
+      // 单个源失败不阻断其余；frontmatter 中该 URL 仍保留（读者可见引用）。
+    }
+  }
+  return { links, extraStagePaths, filenames };
 }
