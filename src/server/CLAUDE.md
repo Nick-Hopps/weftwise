@@ -58,6 +58,7 @@ Route Handler / Worker Handler
 | `search/vector-math` | `encodeVector / decodeVector / cosineSimilarity / rrfMerge`（⑧ 向量纯函数） |
 | `search/semantic-search` | `semanticSearch(query, subjectId, model)`（⑧ 向量 topK cosine） |
 | `search/hybrid-retrieval` | `hybridRankSlugs(query, subjectId)`（⑧ FTS + 向量 RRF；未配置回落纯 FTS） |
+| `search/web-search` | `isWebSearchConfigured() / webSearch(query) / extractContent(urls)`（⑨ Tavily HTTP search+extract；配置经 `settings-repo::getWebSearchConfig` 实时读 `app_settings`；未配置抛 `LLMConfigError`） |
 | `db/client` | `getDb / getRawDb`（启动时自迁移 legacy schema → subject-aware） |
 | `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo / embeddingsRepo` 的 CRUD + FTS search（全部要求 `subjectId`）|
 | `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead / getFileAtCommit / getDiff / getVaultLog / parseGitLog` |
@@ -135,6 +136,7 @@ src/server/
 | 2026-04-25 | 引入 Subject：subjects 表 + 复合 PK + middleware/subject + 全链路 subjectId |
 | 2026-06-22 | git-service 加 getVaultLog/parseGitLog；新增 operations-repo + wiki/{revert,history}.ts + /api/history* 路由（⑥ 版本历史/diff）|
 | 2026-06-22 | 新增 search/ 模块（vector-math/semantic-search/hybrid-retrieval）+ embeddings-repo + embed-index worker 任务（⑧ 向量语义检索）|
+| 2026-06-22 | 新增 `search/web-search.ts`（Tavily search+extract，⑨ verifier 联网核查）；`wiki-transaction::SourceLinkOps` 升级为多源 `{ links:[{sourceId,pageSlugs}], extraStagePaths? }`（向后兼容，网页源随同一 ingest commit 落地）；settings-repo 加 web 搜索 3 key（⑨）|
 
 ---
 

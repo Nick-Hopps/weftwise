@@ -81,7 +81,7 @@
 
 - `global-job-tracker.tsx` —— 全局任务状态指示器（读队列中所有任务）
 - `progress-toast.tsx` —— SSE 进度条 toast
-- `settings-dialog.tsx` 现包含 "Wiki language" 行：通过 `useQuery(['app-settings'])` 读 `GET /api/settings`，本地 `useState` 暂存 input，`useMutation` 发 `PUT /api/settings`。**不**写 Zustand —— 服务端 `app_settings` 表是唯一真实源。`settings-dialog` 现包含 "Agents" section（5 个控件：max steps / token budget / parallel sub-agents / MCP lifecycle / LLM selection mode），同样走 `GET/PUT /api/settings` + 本地 state 暂存，不写 Zustand。
+- `settings-dialog.tsx` 现包含 "Wiki language" 行：通过 `useQuery(['app-settings'])` 读 `GET /api/settings`，本地 `useState` 暂存 input，`useMutation` 发 `PUT /api/settings`。**不**写 Zustand —— 服务端 `app_settings` 表是唯一真实源。`settings-dialog` 现包含 "Agents" section（5 个控件：max steps / token budget / parallel sub-agents / MCP lifecycle / LLM selection mode），同样走 `GET/PUT /api/settings` + 本地 state 暂存，不写 Zustand。`settings-dialog` 现包含 "Web search" section（⑨：provider 选择 / API key（password，经新增 `TextSettingRow`）/ max results），驱动 ingest verifier 联网核查；同样走 `GET/PUT /api/settings`，apiKey 空=未配置（核查降级纯自检）。设置行原语在 `layout/settings-rows.tsx`（`SettingRow/NumberSettingRow/SelectSettingRow/TextSettingRow`<⑨>），内容区在 `layout/settings-content.tsx`。
 
 ### `providers.tsx`
 
@@ -158,6 +158,7 @@ src/components/
 | 2026-04-27 | settings-dialog 新增 "Agents" section（5 个 agent runtime 配置控件：max steps / token budget / parallel sub-agents / MCP lifecycle / LLM selection mode）|
 | 2026-06-22 | 新增 `history/` 目录（operation-list/operation-diff/revert-button 职责）；供 ⑥ 版本历史/diff |
 | 2026-06-22 | 新增 `chat/conversation-switcher.tsx`；`chat-interface` 接入会话载入/保存/切换；`context-panel-chat-tab` 嵌入 switcher；供 ⑦ 对话持久化 + 多轮记忆 |
+| 2026-06-22 | `layout/settings-rows.tsx` 加 `TextSettingRow`（password/允许空）；`settings-content.tsx` 加 "Web search" section（provider/apiKey/maxResults，走 /api/settings 不写 Zustand）；供 ⑨ verifier 联网核查搜索后端配置 |
 
 ---
 

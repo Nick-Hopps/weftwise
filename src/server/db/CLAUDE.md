@@ -195,6 +195,7 @@ src/server/db/
 | 2026-06-22 | 新增 operations-repo（版本历史时间线取数：listForSubject/getById/markReverted）（⑥）|
 | 2026-06-22 | 新增 conversations/messages 两表 + conversations-repo（多轮对话持久化，subject-scoped，级联删除）（⑦）|
 | 2026-06-22 | 新增 page_embeddings 表 + embeddings-repo（向量语义检索，subject-scoped，FK CASCADE，无 legacy 迁移）（⑧）|
+| 2026-06-22 | settings-repo 加 web 搜索 3 key（`webSearchProvider/webSearchApiKey/webSearchMaxResults` + getter/setter + `getWebSearchConfig()`，无新表，复用 app_settings）（⑨ verifier 联网核查）|
 
 ---
 
