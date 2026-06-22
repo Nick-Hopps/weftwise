@@ -122,18 +122,24 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  // 记录「当前内存消息所属的会话 id」——防止 done 设置新 id 后再重拉覆盖流式消息
+  const loadedConversationIdRef = useRef<string | null>(null);
 
   // 监听 currentConversationId 变化：非 null 则从服务端载入历史消息，null 则清空
+  // 注意：done 事件会先把 loadedConversationIdRef 设为新 id，再 setCurrentConversation
+  // 这样 useEffect 进来时 ref === currentConversationId，跳过重拉，避免覆盖流式消息
   useEffect(() => {
     let cancelled = false;
+    if (currentConversationId === loadedConversationIdRef.current) return; // 自身 done 设置/未变，跳过重拉
     if (!currentConversationId) {
       setMessages([]);
+      loadedConversationIdRef.current = null;
       return;
     }
     (async () => {
       try {
         const res = await apiFetchClient(`/api/conversations/${currentConversationId}`);
-        if (!res.ok) { if (!cancelled) setMessages([]); return; }
+        if (!res.ok) { if (!cancelled) { setMessages([]); loadedConversationIdRef.current = currentConversationId; } return; }
         const data = (await res.json()) as { messages: ConversationMessage[] };
         if (cancelled) return;
         setMessages(
@@ -143,8 +149,9 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             citations: m.citations ?? [],
           })),
         );
+        loadedConversationIdRef.current = currentConversationId;
       } catch {
-        if (!cancelled) setMessages([]);
+        if (!cancelled) { setMessages([]); loadedConversationIdRef.current = currentConversationId; }
       }
     })();
     return () => { cancelled = true; };
@@ -293,6 +300,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             } else if (event === 'done') {
               const convId = (data as { conversationId?: string }).conversationId;
               if (convId) {
+                // 先同步 ref，使随后 useEffect 因 ref === currentConversationId 而跳过重拉
+                loadedConversationIdRef.current = convId;
                 if (convId !== useUIStore.getState().currentConversationId) {
                   setCurrentConversation(convId);
                 }
