@@ -12,7 +12,7 @@ import {
   getAgentAutoCurate,
 } from '../db/repos/settings-repo';
 import * as queue from '../jobs/queue';
-import { renderLanguageDirective } from '../llm/prompts/prompt-context';
+import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, runSingle, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
@@ -31,7 +31,7 @@ import { enqueueEmbedIndex } from './embedding-service';
 import { createHash, randomUUID } from 'node:crypto';
 import { extractContent } from '../search/web-search';
 import type { AgentContext, CitedSource } from '../agents/types';
-import type { ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
+import type { AugmentationLevel, ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
 
 // 当前单源；prepareIngest 已接受数组，未来多源批量在此扩展
 interface IngestParams {
@@ -58,6 +58,33 @@ async function loadCleanText(filename: string, subjectSlug: string): Promise<str
   }
   const parsed = await parseSourceAsync(filename, textContent, bufferContent);
   return parsed.cleanText;
+}
+
+/**
+ * 构造 ingest 流水线 steps。`level === 'off'` 时跳过 enricher + verify（退回纯忠实层）。
+ * 抽为纯函数以便单测；handler 把 inline/level/carryKeys 传入。
+ */
+export function buildIngestSteps(opts: {
+  inline: boolean;
+  level: AugmentationLevel;
+  carryKeys: string[];
+}): PipelineStep[] {
+  const { inline, level, carryKeys } = opts;
+  const augmentSteps: PipelineStep[] =
+    level === 'off'
+      ? []
+      : [
+          { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
+          { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
+        ];
+  return [
+    ...(inline
+      ? []
+      : [{ kind: 'map', skillId: 'ingest-chunk-summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs', checkpointAs: 'chunk-summary' } as PipelineStep]),
+    { kind: 'sequence', skillId: 'ingest-planner', carryThrough: carryKeys, checkpointAs: 'plan' },
+    { kind: 'fanout', skillId: 'ingest-writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page', injectExistingPageForUpdate: true },
+    ...augmentSteps,
+  ];
 }
 
 registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown>> => {
@@ -166,17 +193,13 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   const languageDirective = renderLanguageDirective(getWikiLanguage());
 
+  const augmentationLevel = subject.augmentationLevel;
+  const augmentationDirective =
+    augmentationLevel === 'off' ? '' : renderAugmentationDirective(augmentationLevel);
+
   // carry 透传 key：让 planner 输出后 fanout/reviewer 仍能读到上下文（planner outputSchema 只有 plan）
-  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective'];
-  const steps: PipelineStep[] = [
-    ...(inline
-      ? []
-      : [{ kind: 'map', skillId: 'ingest-chunk-summarizer', fromOutput: 'chunkRefs', intoOutput: 'chunkRefs', checkpointAs: 'chunk-summary' } as const]),
-    { kind: 'sequence', skillId: 'ingest-planner', carryThrough: carryKeys, checkpointAs: 'plan' },
-    { kind: 'fanout', skillId: 'ingest-writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page', injectExistingPageForUpdate: true },
-    { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
-    { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
-  ];
+  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective', 'augmentationDirective'];
+  const steps = buildIngestSteps({ inline, level: augmentationLevel, carryKeys });
 
   emit('ingest:planning', `Planning source: ${filename}`, { path: inline ? 'inline' : 'map-reduce' });
 
@@ -197,6 +220,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       existingPages,
       outline: prep.outline,
       languageDirective,
+      augmentationDirective,
     },
   }) as {
     plan?: { pages?: Array<{ slug: string; title: string; summary?: string }> };
