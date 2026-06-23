@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layers, Plus, Trash2 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import { normalizeSubjectSlug } from '@/lib/slug';
-import type { SubjectListEntry } from '@/lib/contracts';
+import type { SubjectListEntry, AugmentationLevel } from '@/lib/contracts';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
@@ -46,6 +46,7 @@ interface PatchSubjectPayload {
   id: string;
   name?: string;
   description?: string;
+  augmentationLevel?: AugmentationLevel;
 }
 
 async function patchSubject(payload: PatchSubjectPayload): Promise<SubjectListEntry> {
@@ -366,6 +367,25 @@ function SubjectCard({
           <>
             <SectionLabel className="text-[10px]">Slug</SectionLabel>
             <code className="font-mono text-xs text-foreground-secondary">{subject.slug}</code>
+
+            <SectionLabel className="text-[10px]">Augmentation</SectionLabel>
+            <select
+              value={subject.augmentationLevel}
+              onChange={(e) =>
+                patchMutation.mutate({
+                  id: subject.id,
+                  augmentationLevel: e.target.value as AugmentationLevel,
+                })
+              }
+              disabled={patchMutation.isPending}
+              aria-label="Augmentation level"
+              className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground focus-ring"
+            >
+              <option value="off">off — 纯忠实层</option>
+              <option value="light">light — 少量增益</option>
+              <option value="standard">standard — 平衡（默认）</option>
+              <option value="deep">deep — 充分增益</option>
+            </select>
 
             {subject.description && (
               <p className="text-sm text-foreground-secondary line-clamp-3">{subject.description}</p>
