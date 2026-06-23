@@ -41,6 +41,7 @@ export function ReenrichDialog({
   }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function start() {
+    if (running) return;
     setError(null);
     const res = await apiFetch('/api/re-enrich', {
       method: 'POST',
@@ -59,14 +60,15 @@ export function ReenrichDialog({
   const running = jobId !== null && status !== 'failed';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={running ? undefined : onClose}>
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby="reenrich-dialog-title"
         className="w-full max-w-md rounded-lg border border-border bg-background p-5 shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-sm font-semibold text-foreground">Re-enrich &ldquo;{title}&rdquo;</h2>
+        <h2 id="reenrich-dialog-title" className="text-sm font-semibold text-foreground">Re-enrich &ldquo;{title}&rdquo;</h2>
         <p className="mt-2 text-sm text-foreground-secondary">
           Re-run the augmentation pass: layers fresh learning callouts onto the existing faithful prose,
           then verifies them. The faithful text is preserved.
