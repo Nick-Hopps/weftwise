@@ -97,6 +97,7 @@ export function HealthView() {
     setScope(next);
     setJobId(null);
     setSemanticErrored(false);
+    setCurateJobId(null);
   }
 
   const [typeFilter, setTypeFilter] = useState<LintFinding['type'] | null>(null);
