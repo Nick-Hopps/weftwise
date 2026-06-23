@@ -6,7 +6,8 @@ import { ArrowLeft, ExternalLink, FileText } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
-import type { PageSourceFormat } from '@/lib/contracts';
+import { HtmlSourceFrame } from '@/components/wiki/html-source-frame';
+import type { PageSourceFormat, HtmlSafety } from '@/lib/contracts';
 
 const PROSE_CLASS = cn(
   'text-[15px] leading-7 text-prose-body',
@@ -29,6 +30,8 @@ interface SourceViewerProps {
   format: PageSourceFormat;
   /** Raw text for markdown/text sources (read server-side). */
   content?: string;
+  /** 仅 html：服务端启发式扫描结论。 */
+  htmlSafety?: HtmlSafety;
 }
 
 const FORMAT_LABEL: Record<PageSourceFormat, string> = {
@@ -38,7 +41,7 @@ const FORMAT_LABEL: Record<PageSourceFormat, string> = {
   text: 'Text',
 };
 
-export function SourceViewer({ id, filename, format, content }: SourceViewerProps) {
+export function SourceViewer({ id, filename, format, content, htmlSafety }: SourceViewerProps) {
   const rawUrl = `/api/sources/${id}/raw`;
   const rendered = useMemo(
     () => (format === 'markdown' && content ? renderMarkdown(content) : null),
@@ -78,12 +81,7 @@ export function SourceViewer({ id, filename, format, content }: SourceViewerProp
       {format === 'pdf' ? (
         <iframe src={rawUrl} title={filename} className="min-h-0 flex-1 border-0 bg-canvas" />
       ) : format === 'html' ? (
-        <iframe
-          src={rawUrl}
-          title={filename}
-          sandbox=""
-          className="min-h-0 flex-1 border-0 bg-white"
-        />
+        <HtmlSourceFrame src={rawUrl} title={filename} safety={htmlSafety} className="min-h-0 flex-1" />
       ) : format === 'markdown' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <article className={cn(PROSE_CLASS, 'mx-auto max-w-[760px] px-6 py-8')}>{rendered}</article>
