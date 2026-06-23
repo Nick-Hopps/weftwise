@@ -237,6 +237,7 @@ async function buildFanoutInput(
     existingPages: carry.existingPages,
     plan: carry.plan,
     languageDirective: carry.languageDirective,
+    augmentationDirective: carry.augmentationDirective,
     ...item,
     relevantChunks,
   };
