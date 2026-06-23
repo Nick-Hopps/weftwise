@@ -1,6 +1,7 @@
 import path from 'path';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import { getSourceMetadata, getRawSourceContent } from './source-store';
+import { analyzeHtmlSafety } from './html-safety';
 import type { PageSourceDoc, PageSourceFormat, Subject } from '@/lib/contracts';
 
 /** Per-source content caps — sources can be whole books, so we never ship the
@@ -52,10 +53,17 @@ export function readPageSources(
 
     const base = { id: src.id, name: src.filename, format, added } as PageSourceDoc;
 
-    // pdf / html 在客户端由 iframe 加载完整原始文件（见 wiki-reading-view 的 SourceBody），
-    // 这里只下发元数据，不再准备分页文本 / HTML 正文 payload。
-    if (format === 'pdf' || format === 'html') {
+    // pdf 在客户端由浏览器原生阅读器加载，只下发元数据。
+    if (format === 'pdf') {
       docs.push({ ...base, meta: FORMAT_LABEL[format] });
+      continue;
+    }
+
+    // html：读原文做启发式危险扫描，只下发 verdict（仍不下发 HTML 正文 payload，
+    // iframe 通过 /api/sources/<id>/raw 自行加载完整文件）。
+    if (format === 'html') {
+      const html = getRawSourceContent(subject.slug, src.filename) ?? '';
+      docs.push({ ...base, meta: FORMAT_LABEL[format], htmlSafety: analyzeHtmlSafety(html) });
       continue;
     }
 
