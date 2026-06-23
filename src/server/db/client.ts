@@ -413,6 +413,25 @@ function migratePageEmbeddings(): void {
   `);
 }
 
+function migratePageMaturity(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('page_maturity')) return;
+  sqlite.exec(`
+    CREATE TABLE page_maturity (
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      slug TEXT NOT NULL,
+      passes INTEGER NOT NULL DEFAULT 0,
+      last_enriched_at TEXT,
+      interval_days INTEGER NOT NULL DEFAULT 1,
+      next_due_at TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'active',
+      priority INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (subject_id, slug)
+    );
+  `);
+}
+
 // 特例：FTS5 虚拟表不支持 _new + INSERT FROM 重建（索引可由 pages 重建），缺列时直接 DROP 重建
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
@@ -456,6 +475,7 @@ function ensureTables() {
     migrateConversations();
     migrateMessages();
     migratePageEmbeddings();
+    migratePageMaturity();
     ensurePagesFts();
   } finally {
     rawSqlite.pragma('foreign_keys = ON');
