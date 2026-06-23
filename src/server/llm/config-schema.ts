@@ -5,7 +5,7 @@ import { z } from 'zod';
 // Enums
 // ---------------------------------------------------------------------------
 
-const BUILTIN_LLM_TASKS = ['ingest', 'query', 'lint', 'merge', 'split', 'embedding'] as const;
+const BUILTIN_LLM_TASKS = ['ingest', 'query', 'lint', 'merge', 'split', 'embedding', 'curate'] as const;
 export const LLMTaskSchema = z.string().refine(
   (s) => (BUILTIN_LLM_TASKS as readonly string[]).includes(s) || /^skill:[a-z0-9][a-z0-9-]*$/.test(s),
   { message: "Task must be 'ingest', 'query', 'lint', 'merge', 'split', 'embedding', or 'skill:<id>'" },
