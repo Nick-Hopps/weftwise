@@ -4,7 +4,7 @@ import type { HtmlSafety } from '@/lib/contracts';
 const RULES: { test: RegExp; signal: string }[] = [
   { test: /\beval\s*\(/i, signal: '使用了 eval() 动态执行代码' },
   { test: /\bnew\s+Function\s*\(|\bFunction\s*\(\s*['"]/i, signal: '使用了 Function() 构造动态代码' },
-  { test: /document\s*\.\s*write(ln)?\s*\(/i, signal: '使用了 document.write 动态写入' },
+  { test: /document\s*\.\s*write(?:ln)?\s*\(/i, signal: '使用了 document.write 动态写入' },
   { test: /<script\b[^>]*\bsrc\s*=/i, signal: '引入了外部脚本 <script src>' },
   {
     test: /\bfetch\s*\(|XMLHttpRequest|new\s+WebSocket\s*\(|navigator\s*\.\s*sendBeacon/i,
@@ -23,8 +23,19 @@ const RULES: { test: RegExp; signal: string }[] = [
   { test: /document\s*\.\s*cookie|localStorage|sessionStorage/i, signal: '访问了 cookie / 本地存储' },
 ];
 
-/** <script> 块内出现超长无空白串视为混淆。 */
-const OBFUSCATION = /<script\b[^>]*>[^]*?[^\s'"<>]{1000,}[^]*?<\/script>/i;
+/** 逐个抽取 <script> body，再判定是否含超长无空白串（疑似混淆）。
+ *  分两步而非单一正则，避免双 lazy 量词在大输入上回溯爆炸。 */
+const SCRIPT_BLOCK = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+const LONG_TOKEN = /[^\s'"<>]{1000,}/;
+
+function hasObfuscatedScript(html: string): boolean {
+  SCRIPT_BLOCK.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = SCRIPT_BLOCK.exec(html)) !== null) {
+    if (LONG_TOKEN.test(match[1])) return true;
+  }
+  return false;
+}
 
 /**
  * 启发式扫描 HTML 原文，判断是否含可疑脚本。
@@ -38,6 +49,6 @@ export function analyzeHtmlSafety(html: string): HtmlSafety {
   for (const rule of RULES) {
     if (rule.test.test(html)) signals.push(rule.signal);
   }
-  if (OBFUSCATION.test(html)) signals.push('含超长无空白脚本串（疑似混淆）');
+  if (hasObfuscatedScript(html)) signals.push('含超长无空白脚本串（疑似混淆）');
   return { risk: signals.length > 0 ? 'suspicious' : 'safe', signals };
 }
