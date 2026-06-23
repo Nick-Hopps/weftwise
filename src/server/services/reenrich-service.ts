@@ -9,12 +9,13 @@
  * sources URL 留痕（不落 raw/page_sources），简化实现、避免触碰 ingest finalize。
  */
 import { randomUUID } from 'node:crypto';
-import type { Job } from '@/lib/contracts';
+import type { Job, PageMaturity } from '@/lib/contracts';
 import type { AgentContext } from '../agents/types';
 import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
 import { registerHandler } from '../jobs/worker';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
+import * as maturityRepo from '../db/repos/maturity-repo';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
 import { loadCheckpoint } from '../agents/runtime/checkpoint';
@@ -28,6 +29,7 @@ import {
 import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
 import { getRuntimeRegistries } from '../worker-runtime';
 import { enqueueEmbedIndex } from './embedding-service';
+import { countCallouts, nextMaturity, type MaturityNext } from './maintenance-policy';
 
 interface ReenrichParams {
   slug: string;
@@ -63,6 +65,25 @@ export function buildReenrichInitialInput(opts: {
     languageDirective: opts.languageDirective,
     augmentationDirective: opts.augmentationDirective,
   };
+}
+
+/** 用「新增 callout 数」作收敛信号，结合当前成熟度推导下一态。 */
+export function deriveMaturityUpdate(opts: {
+  draftContent: string;
+  finalContent: string;
+  current: PageMaturity | null;
+  now: Date;
+}): MaturityNext {
+  const newIncrement = Math.max(0, countCallouts(opts.finalContent) - countCallouts(opts.draftContent));
+  return nextMaturity(
+    {
+      state: opts.current?.state ?? 'active',
+      passes: opts.current?.passes ?? 0,
+      intervalDays: opts.current?.intervalDays ?? 1,
+      newIncrement,
+    },
+    opts.now,
+  );
 }
 
 registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unknown>> => {
@@ -151,6 +172,25 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
 
   // 流水线把核查后页 upsert 进 ctx.pending；commitPending 提交（无 index/log meta）。
   const result = await commitPending(ctx, []);
+
+  // 维护层：用本遍 callout 增量推进成熟度（draft = 旧正文，final = 提交版正文）。
+  const path = `wiki/${subject.slug}/${slug}.md`;
+  const finalContent = ctx.pending.entries.find((e) => e.path === path)?.content ?? existing.markdown;
+  const now = new Date();
+  const next = deriveMaturityUpdate({
+    draftContent: existing.markdown,
+    finalContent,
+    current: maturityRepo.get(subject.id, slug),
+    now,
+  });
+  maturityRepo.applyAfterEnrich(subject.id, slug, next, now.toISOString());
+  emit('reenrich:maturity', `Maturity → ${next.state}, next in ${next.intervalDays}d`, {
+    slug,
+    passes: next.passes,
+    state: next.state,
+    intervalDays: next.intervalDays,
+  });
+
   checkpoint.clear();
   enqueueEmbedIndex(subject.id);
   return result as unknown as Record<string, unknown>;
