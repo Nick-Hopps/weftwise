@@ -43,3 +43,24 @@ export function renderLanguageDirective(language: string): string {
     '=== END OUTPUT LANGUAGE ===',
   ].join('\n');
 }
+
+/**
+ * 渲染「AUGMENTATION LEVEL」块，注入 enricher user prompt，调节 callout 密度/深度。
+ * `off` 不走 enricher（service 层直接跳过该阶段），故此函数只接 light/standard/deep。
+ */
+export function renderAugmentationDirective(level: 'light' | 'standard' | 'deep'): string {
+  const guidance: Record<typeof level, string> = {
+    light:
+      'Add ONLY the 1–2 highest-value callouts per major section — prioritise one [!intuition] and at most one [!example]. Keep it sparse; most sections get no callout.',
+    standard:
+      'Add callouts at genuine points of difficulty — typically an [!intuition] plus an occasional [!example]/[!quiz]/[!pitfall] per major section. Aim for balanced, non-repetitive coverage.',
+    deep:
+      'Be generous: layer [!intuition], worked [!example]s, [!quiz] self-tests, [!background] prerequisites, [!diagram]s, and [!pitfall]s throughout. Maximise learning scaffolding while staying correct and on-topic.',
+  };
+  return [
+    '=== AUGMENTATION LEVEL ===',
+    guidance[level],
+    'Regardless of level: never pad with low-confidence claims (a verifier stage scrutinises every callout), and never alter the faithful prose.',
+    '=== END AUGMENTATION LEVEL ===',
+  ].join('\n');
+}
