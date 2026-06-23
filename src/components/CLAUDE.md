@@ -23,6 +23,11 @@
 | `context-panel-sheet.tsx` | 移动端抽屉版本（off-canvas） |
 | `context-panel-context-tab.tsx` | "上下文"Tab：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
 | `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface`，发问 body 含 subjectId |
+| `settings-dialog.tsx` | 🔀 两栏式 Settings 弹窗容器（`max-w-3xl` + 固定高度）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `appearance`）+ Esc/遮罩关闭；左 `<SettingsNav>` + 右 `<SettingsContent>` |
+| `settings-nav.tsx` | 🆕 左侧分类导航栏（遍历 `SETTINGS_CATEGORIES`，选中高亮 `bg-accent-subtle`/`aria-current`，点击经 `onSelect` 切换） |
+| `settings-content.tsx` | 右内容区：按 `active` 渲染 5 个 panel（Appearance/Language/Agents/Web search/About），复用 `settings-rows` 原语；服务端 `app_settings` 唯一真实源，不写 Zustand |
+| `settings-categories.ts` | 🆕 分类元数据单一来源：`CategoryId` 类型 + `SETTINGS_CATEGORIES`(id/label/icon) + `DEFAULT_CATEGORY`，被 dialog/nav/content 共用避免循环依赖 |
+| `settings-rows.tsx` | 行级原语：`SettingRow/NumberSettingRow/SelectSettingRow/TextSettingRow`（带本地暂存+校验） |
 
 ### `ui/` — 设计系统
 
@@ -81,7 +86,8 @@
 
 - `global-job-tracker.tsx` —— 全局任务状态指示器（读队列中所有任务）
 - `progress-toast.tsx` —— SSE 进度条 toast
-- `settings-dialog.tsx` 现包含 "Wiki language" 行：通过 `useQuery(['app-settings'])` 读 `GET /api/settings`，本地 `useState` 暂存 input，`useMutation` 发 `PUT /api/settings`。**不**写 Zustand —— 服务端 `app_settings` 表是唯一真实源。`settings-dialog` 现包含 "Agents" section（5 个控件：max steps / token budget / parallel sub-agents / MCP lifecycle / LLM selection mode），同样走 `GET/PUT /api/settings` + 本地 state 暂存，不写 Zustand。`settings-dialog` 现包含 "Web search" section（⑨：provider 选择 / API key（password，经新增 `TextSettingRow`）/ max results），驱动 ingest verifier 联网核查；同样走 `GET/PUT /api/settings`，apiKey 空=未配置（核查降级纯自检）。设置行原语在 `layout/settings-rows.tsx`（`SettingRow/NumberSettingRow/SelectSettingRow/TextSettingRow`<⑨>），内容区在 `layout/settings-content.tsx`。
+
+> Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
 
 ### `providers.tsx`
 
@@ -138,14 +144,14 @@ src/components/
 ├── providers.tsx
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
-├── layout/       {shell, header, sidebar, subject-switcher, context-panel*}
+├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
 ├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, merge-dialog, merge-button, split-dialog, split-button}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── tags/         {tags-index-view, tag-pages-view}
 ├── history/      {operation-list, operation-diff, revert-button}
 ├── graph/        {mini-graph-view}
-└── shared/       {global-job-tracker, progress-toast, settings-dialog}
+└── shared/       {global-job-tracker, progress-toast}
 ```
 
 ## 变更记录 (Changelog)
@@ -159,6 +165,7 @@ src/components/
 | 2026-06-22 | 新增 `history/` 目录（operation-list/operation-diff/revert-button 职责）；供 ⑥ 版本历史/diff |
 | 2026-06-22 | 新增 `chat/conversation-switcher.tsx`；`chat-interface` 接入会话载入/保存/切换；`context-panel-chat-tab` 嵌入 switcher；供 ⑦ 对话持久化 + 多轮记忆 |
 | 2026-06-22 | `layout/settings-rows.tsx` 加 `TextSettingRow`（password/允许空）；`settings-content.tsx` 加 "Web search" section（provider/apiKey/maxResults，走 /api/settings 不写 Zustand）；供 ⑨ verifier 联网核查搜索后端配置 |
+| 2026-06-23 | Settings 弹窗改两栏式：新增 `settings-categories.ts`（5 类元数据单源）+ `settings-nav.tsx`（左导航）；`settings-dialog` 加宽 `max-w-3xl`+固定高度+`active` 分类 state；`settings-content` 拆为 5 个 panel 按分类切换；行级原语与 `/api/settings` 数据流不变；spec 见 docs/superpowers/specs/2026-06-23-settings-two-column-layout-design.md |
 
 ---
 
