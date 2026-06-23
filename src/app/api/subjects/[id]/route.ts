@@ -3,12 +3,14 @@ import { z } from 'zod';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import { SubjectError } from '@/server/db/repos/subjects-repo';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
+import { AugmentationLevelSchema } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
 const PatchSubjectSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
   description: z.string().max(500).optional(),
+  augmentationLevel: AugmentationLevelSchema.optional(),
 });
 
 interface SubjectRouteContext {
@@ -53,7 +55,17 @@ export async function PATCH(request: NextRequest, { params }: SubjectRouteContex
   }
 
   try {
-    const subject = subjectsRepo.rename(id, parsed.data);
+    const { augmentationLevel, ...renameFields } = parsed.data;
+    let subject = subjectsRepo.getById(id);
+    if (!subject) {
+      return NextResponse.json({ error: 'Subject not found' }, { status: 404 });
+    }
+    if (renameFields.name !== undefined || renameFields.description !== undefined) {
+      subject = subjectsRepo.rename(id, renameFields);
+    }
+    if (augmentationLevel !== undefined) {
+      subject = subjectsRepo.setAugmentationLevel(id, augmentationLevel);
+    }
     return NextResponse.json(subject);
   } catch (err) {
     if (err instanceof SubjectError) {
