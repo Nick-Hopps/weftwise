@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { getSource } from '@/server/db/repos/sources-repo';
 import { getById as getSubjectById } from '@/server/db/repos/subjects-repo';
 import { getRawSourceContent } from '@/server/sources/source-store';
+import { analyzeHtmlSafety } from '@/server/sources/html-safety';
 import { SourceViewer } from '../../_components/source-viewer';
 import type { PageSourceFormat } from '@/lib/contracts';
 
@@ -40,8 +41,18 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
     format === 'markdown' || format === 'text'
       ? getRawSourceContent(subject.slug, source.filename) ?? undefined
       : undefined;
+  const htmlSafety =
+    format === 'html'
+      ? analyzeHtmlSafety(getRawSourceContent(subject.slug, source.filename) ?? '')
+      : undefined;
 
   return (
-    <SourceViewer id={source.id} filename={source.filename} format={format} content={content} />
+    <SourceViewer
+      id={source.id}
+      filename={source.filename}
+      format={format}
+      content={content}
+      htmlSafety={htmlSafety}
+    />
   );
 }
