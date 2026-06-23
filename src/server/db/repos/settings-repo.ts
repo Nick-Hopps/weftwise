@@ -14,6 +14,8 @@ import {
   DEFAULT_AGENT_MAX_TOKENS_PER_JOB,
   DEFAULT_AGENT_MCP_LIFECYCLE,
   DEFAULT_AGENT_TASK_ROUTER_MODE,
+  AgentAutoCurateSchema,
+  DEFAULT_AGENT_AUTO_CURATE,
   type AgentMcpLifecycle,
   type AgentTaskRouterMode,
   WebSearchProviderSchema,
@@ -31,6 +33,7 @@ const KEY_AGENT_MAX_TOKENS_PER_JOB = 'agentMaxTokensPerJob';
 const KEY_AGENT_MAX_PARALLEL_SUB_AGENTS = 'agentMaxParallelSubAgents';
 const KEY_AGENT_MCP_LIFECYCLE = 'agentMcpLifecycle';
 const KEY_AGENT_TASK_ROUTER_MODE = 'agentTaskRouterMode';
+const KEY_AGENT_AUTO_CURATE = 'agentAutoCurate';
 
 const KEY_WEB_SEARCH_PROVIDER = 'webSearchProvider';
 const KEY_WEB_SEARCH_API_KEY = 'webSearchApiKey';
@@ -184,6 +187,27 @@ export function getAgentTaskRouterMode(): AgentTaskRouterMode {
 export function setAgentTaskRouterMode(value: AgentTaskRouterMode): AgentTaskRouterMode {
   const v = AgentTaskRouterModeSchema.parse(value);
   writeKey(KEY_AGENT_TASK_ROUTER_MODE, v);
+  return v;
+}
+
+/**
+ * Returns whether ingest auto-triggers a curation pass on success. Falls back to
+ * DEFAULT_AGENT_AUTO_CURATE (true). Stored as 'true'/'false' string in app_settings.
+ * Reads DB on every call so the toggle takes effect without a worker restart.
+ */
+export function getAgentAutoCurate(): boolean {
+  const raw = readKey(KEY_AGENT_AUTO_CURATE);
+  if (raw === undefined) return DEFAULT_AGENT_AUTO_CURATE;
+  return raw === 'true';
+}
+
+/**
+ * Persists the auto-curate toggle. Validates via AgentAutoCurateSchema.
+ * Returns the validated value.
+ */
+export function setAgentAutoCurate(value: boolean): boolean {
+  const v = AgentAutoCurateSchema.parse(value);
+  writeKey(KEY_AGENT_AUTO_CURATE, String(v));
   return v;
 }
 

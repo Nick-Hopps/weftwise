@@ -277,6 +277,16 @@ function AgentsPanel({
         }
         pending={savePartial.isPending}
       />
+      <SelectSettingRow
+        label="Auto-curate after ingest（摄入后自动整理结构）"
+        value={(settings?.agentAutoCurate ?? true) ? 'on' : 'off'}
+        options={[
+          { value: 'on', label: 'On' },
+          { value: 'off', label: 'Off' },
+        ]}
+        onChange={(v) => savePartial.mutate({ agentAutoCurate: v === 'on' })}
+        pending={savePartial.isPending}
+      />
 
       {savePartial.isError && (
         <p role="alert" className="text-xs text-danger">
