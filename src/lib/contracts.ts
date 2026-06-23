@@ -124,6 +124,14 @@ export interface Source {
 
 export type PageSourceFormat = 'pdf' | 'markdown' | 'html' | 'text';
 
+export type HtmlRisk = 'safe' | 'suspicious';
+
+export interface HtmlSafety {
+  risk: HtmlRisk;
+  /** 命中的高危信号的中文人读说明；safe 时为空数组。 */
+  signals: string[];
+}
+
 /**
  * A source document a page was written from, prepared for the split reading
  * view. Markdown/text ship their (capped) body in `text`; pdf/html ship no
@@ -139,6 +147,8 @@ export interface PageSourceDoc {
   truncated?: boolean;
   /** markdown/text 的正文（已截断）。pdf/html 不下发 payload（由 iframe 渲染）。 */
   text?: string;
+  /** 仅 html 有意义：服务端启发式扫描结论，驱动 iframe sandbox 决策与警告条。 */
+  htmlSafety?: HtmlSafety;
 }
 
 export interface IngestResult {
