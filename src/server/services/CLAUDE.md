@@ -12,7 +12,8 @@
 worker-entry.ts
   ├── import './services/ingest-service';   // register 'ingest'
   ├── import './services/lint-service';     // register 'lint'
-  └── import './services/query-service';    // register 'save-to-wiki'
+  ├── import './services/query-service';    // register 'save-to-wiki'
+  └── import './services/curate-service';  // register 'curate'
 ```
 
 ## 对外接口（Handlers 概览）
@@ -65,13 +66,24 @@ worker-entry.ts
 
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
-### `merge-service.ts` — 任务类型 `'merge'`
+### `curate-service.ts` 🆕 — 任务类型 `'curate'`
 
-把 source 页合并进 target 页（A 存活）。`params { targetSlug, sourceSlug, subjectId }`。流程：读 A/B 两页 → 单次 `generateStructuredOutput('merge', MergeResultSchema, …)` 产 `{ mergedBody, mergedSummary }` → 确定性拼装 A 新 frontmatter（保 A title/created、`tags`/`sources` 并集、summary 用 LLM、updated=now via `stampSystemFrontmatter`）→ `repointLinksToPage` 把合并体自身 + 本 subject 内所有指向 B 的 backlink 源页（排除 A/B 自身）重链到 A → 单 `createChangeset` `[update A, delete B, ...update 引用页]` → validate → apply（删 B 时 wiki_links/page_sources 级联自动清）。发 `merge:start` / `merge:complete`。跨 subject 指向 B 的引用不重链（单事务约束）。
+Agent 驱动的 subject 结构策展（merge/split 内化）。`params { subjectId, scope: 'subject'|'pages', touchedSlugs? }`。
 
-### `split-service.ts` — 任务类型 `'split'`
+**流程（三阶段）**：
 
-把源页 A 拆成 N 个独立新页（A 删除）。`params { sourceSlug, hint?, subjectId }`。流程：读 A → 单次 `generateStructuredOutput('split', SplitResultSchema, …)` 产 `{ pages: [{title,body,summary,isPrimary}] }`（`.min(2)`，<2 抛错）→ `wiki/split-plan.ts::planSplitPages` 服务端派生唯一 slug（冲突加后缀、排除 A.slug）+ 兜底恰一 primary → 每新页确定性拼装 frontmatter（title/body/summary 用 LLM、`tags`/`sources`/`created` 继承 A、updated=now）且正文经 `repointLinksToPage` 把指向 A 的自引用重指主页 → 单 `createChangeset` `[create×N, delete A, ...update 本 subject backlink 源页（重指主页，排除 A）]` → validate → apply。发 `split:start` / `split:complete`（result 含 `primarySlug`，供前端跳主页）。跨 subject 指向 A 的引用不重指。
+1. **triage**：读取本 subject 全量页面元数据（title/summary/tags/slug），单次 `generateStructuredOutput('curate', CurateTriageSchema)` 产出候选 merge 对（A+B）+ 候选 split 页清单，附理由。
+2. **confirm（逐候选）**：读取候选页完整正文，对 merge 候选调 `generateStructuredOutput('curate', CurateMergeConfirmSchema)`，对 split 候选调 `generateStructuredOutput('curate', CurateSplitConfirmSchema)`，产出 go/no-go 决策（no-go 发 `curate:skip` 带理由）。
+3. **execute（逐候选）**：go 的候选复用 `wiki/page-ops.ts::executePageMerge` / `executePageSplit`（不含 emit / embed enqueue —— curate-service 自持）；执行失败单候选发 `curate:warn` 并继续其余候选，不中止整体任务。
+
+**护栏**：
+- `applyDecisionCaps`：merge≤5 / split≤5，超出截断并警告。
+- `scope:'pages'`（auto，由 ingest finalize 在 `agentAutoCurate=true` 时自动入队）：执行阶段每个候选必须至少涉及一个 `touchedSlugs` 中的页（`restrictToSeed`），否则跳过；防止自动策展无边界扩散。
+- `scope:'subject'`（manual，Health 页 "Tidy structure" 按钮）：整个 subject 无 seed 过滤。
+
+**事件**：`curate:start` / `curate:plan`（triage 结果）/ `curate:merge`（merge 执行成功）/ `curate:split`（split 执行成功）/ `curate:skip`（confirm no-go）/ `curate:warn`（执行失败）/ `curate:complete`。
+
+> merge/split 的 LLM 调用与 Saga 执行已抽取至 `wiki/page-ops.ts`，curate-service 与未来其他调用方均可复用；curate-service 自己只负责编排与 emit。
 
 ### `embedding-service.ts` 🆕 — 任务类型 `'embed-index'`
 
@@ -98,6 +110,7 @@ worker-entry.ts
   4. **强校验 `job.subjectId`**（除非显式是全局型任务），通过 `subjectsRepo.getById(job.subjectId)` 解析为 Subject；
   5. 在 `worker-entry.ts` import 新文件；
   6. Route Handler 里：先 `resolveSubjectFromRequest(request, { required: true, body })` → `queue.enqueue('<name>', subject.id, params)`。
+- **复用 merge/split 执行逻辑**：不要在新 service 里重复 LLM+Saga 逻辑；调用 `wiki/page-ops.ts::executePageMerge` / `executePageSplit`（无 emit/enqueue，由调用方自行发事件/入队 embed）。
 
 - **emit 事件规范**（供前端 SSE 消费）：
   - `job:started` / `job:completed` / `job:failed` / `job:retrying` 由 `worker.ts` 自动发射。
@@ -128,11 +141,10 @@ src/server/services/
 ├── ingest-service.ts   # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts      # 预检/预算/常量纯函数
 ├── query-service.ts    # 问答 + save-to-wiki + 多轮记忆 + 混合检索（⑧）
-├── conversation-title.ts # 🆕 确定性会话标题派生纯函数
+├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts     # 全库 lint 扫描
-├── merge-service.ts    # 合并两页（LLM 融合 + 删源页 + 同事务重链）
-├── split-service.ts    # 拆分一页（LLM 拆 N 页 + 删源页 + 同事务重指主页）
-└── embedding-service.ts # 🆕 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
+├── curate-service.ts   # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
+└── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
 ```
 
 ## 变更记录 (Changelog)
@@ -144,12 +156,11 @@ src/server/services/
 | 2026-04-27 | ingest-service 切换为 multi-agent runtime；旧多阶段 LLM 直调与 buildLogContent helper 移除 |
 | 2026-06-20 | ingest-service 接入断点续传（loadCheckpoint / steps checkpointAs / reduceCostForResume 预检折减 / emit ingest:resuming / 成功 clear）|
 | 2026-06-20 | ingest 流水线扩展为 5 阶段：新增 enricher（callout 增益层）+ verifier（参数化自检，P2），均为结构化输出无 tools；CONTENT_STAGE_FACTOR=3 预算估算 + DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M |
-| 2026-06-22 | 新增 `merge-service`（任务类型 `merge`）：LLM 融合两页 + 删源页 + 同事务重链（④b）|
-| 2026-06-22 | 新增 `split-service`（任务类型 `split`）：LLM 拆 N 页 + 删源页 + 同事务重指主页（④c）|
 | 2026-06-22 | ingest 增量合并：writer fanout step 加 `injectExistingPageForUpdate:true`，更新已有页时 orchestrator 注入现有正文，writer 并入新材料而非整页覆盖（⑤）|
 | 2026-06-22 | query-service 多轮记忆：answerQuery/streamQueryAnswer 加 history 参（注入 transcript），conversations-repo CRUD 落库多轮；新增 conversation-title.ts deriveConversationTitle 确定性派生（⑦）|
 | 2026-06-22 | 新增 `embedding-service`（任务类型 `embed-index`）：向量嵌入回填/清理（content_hash+model 判过期，FK CASCADE，未配置 no-op）；query-service prepareQueryContext 改 async 走 hybridRankSlugs（RRF 合并 FTS+向量）；写操作后 enqueue（⑧）|
 | 2026-06-22 | ingest verifier 阶段→ P3 联网核查（⑨）：steps 第4步改 `verify` step kind（`verify-page.ts::runPageVerification` 两段式 triage→Tavily→apply，全程无 tools）；`finalizeIngest` 把 `ctx.citedSources` 经 `extractContent`+`buildWebSourceImports`+`saveRawSource` 导入为 source，作 `commitPending` 第三参随同一 commit 落地；`MIN_SKILL_VERSIONS` 加 triage/apply；未配置 web 搜索退化为 P2 自检 |
+| 2026-06-23 | 删除 `merge-service`（任务类型 `'merge'`）与 `split-service`（任务类型 `'split'`）；merge/split 执行逻辑内化至 `wiki/page-ops.ts`；新增 `curate-service`（任务类型 `'curate'`：triage→confirm→execute，seed 护栏，caps merge≤5/split≤5）；ingest finalize 在 `agentAutoCurate=true` 时自动入队 curate（scope:'pages', touchedSlugs）|
 
 ---
 

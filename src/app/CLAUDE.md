@@ -35,8 +35,7 @@
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
-| `/api/merge` | POST | 校验 `{ targetSlug, sourceSlug }`（A≠B、非 meta、A/B 均存在，否则 400/404）后入队 `merge` 任务（把 source 合并进 target、删 source、重链）；返回 202 + `{ jobId }` |
-| `/api/split` | POST | 校验 `{ sourceSlug, hint? }`（非 meta、源页存在，否则 400/404）后入队 `split` 任务（把源页拆成 N 个新页、删源页、引用重指主页）；返回 202 + `{ jobId }` |
+| `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：triage → confirm → 执行 merge/split，caps merge≤5/split≤5）；返回 202 + `{ jobId }` |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：从 preHead 重建 inverse changeset、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -102,8 +101,7 @@ src/app/
     ├── query/route.ts
     ├── lint/route.ts
     ├── lint/latest/route.ts
-    ├── merge/route.ts
-    ├── split/route.ts
+    ├── curate/route.ts                  # 🆕 POST 入队 curate（agent 策展）
     ├── jobs/route.ts
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
@@ -131,6 +129,7 @@ src/app/
 | 2026-04-25 | Subject：新增 `/api/subjects` + `(app)/subjects` 管理页；既有路由全部 subject 化（`resolveSubjectFromRequest`） |
 | 2026-06-22 | 新增 `(app)/history/page.tsx` + `/api/history*` 三个路由（GET 列表、GET diff、POST 回滚），支持前向 Saga 还原（⑥ 版本历史/diff）|
 | 2026-06-22 | 新增 `/api/conversations` + `/api/conversations/[id]` 四个路由（GET 列表、GET/PATCH/DELETE 详情）；`POST /api/query` 默认流式支持 conversationId 多轮 + 落库（⑦ 对话持久化 + 多轮记忆）|
+| 2026-06-23 | 删除 `/api/merge` 和 `/api/split` 路由（逐页按钮已移除）；新增 `POST /api/curate`（全 subject agent 策展，入队 curate 任务）；merge/split LLM 逻辑内化为 page-ops 供 curate-service 调用 |
 
 ---
 

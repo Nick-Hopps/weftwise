@@ -46,15 +46,11 @@
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
-- `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行支持可选 `editHref` 渲染 Edit 按钮
+- `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行支持可选 `editHref` 渲染 Edit 按钮（Merge/Split 按钮已移除，策展入口移至 Health 页）
 - `page-skeleton.tsx` —— loading skeleton
 - `page-editor.tsx` —— 🆕 在线编辑容器：拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；错误内联、dirty 守卫
 - `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装，data-color-mode 跟随 darkMode
 - `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
-- `merge-button.tsx` —— 🆕 阅读页标题行「Merge」入口（与 Edit 并列），点开 `merge-dialog`
-- `merge-dialog.tsx` —— 🆕 合并弹窗：搜选本 subject 另一页 B（排除自身 + meta）→ `POST /api/merge` → `useJobStream` 追踪 `merge:*` → 完成失效 8 个 query key + `router.refresh` + 关闭；运行中防误关
-- `split-button.tsx` —— 🆕 标题行「Split」入口（Scissors 图标），点开 `split-dialog`
-- `split-dialog.tsx` —— 🆕 拆分弹窗：可选 hint textarea → `POST /api/split` → `useJobStream` 追踪 `split:*` → 完成 `GET /api/jobs/<id>` 读 `resultJson.primarySlug` → 失效缓存 + `router.push` 跳主页（取不到兜底 `/`）+ 关闭；运行中防误关
 
 ### `chat/`
 
@@ -75,6 +71,10 @@
 
 - `tags-index-view.tsx` —— 🆕 标签索引（aggregateTags(/api/pages) → tag+count）
 - `tag-pages-view.tsx` —— 🆕 单标签页列表（pagesWithTag）
+
+### `health/`
+
+- `health-view.tsx` —— 🆕 知识库体检主视图；"Tidy structure" 按钮触发 `POST /api/curate`（全 subject agent 策展）+ `useJobStream` 追踪 `curate:*` 事件，展示策展进度；同时展示 lint findings 按严重度分组
 
 ### `history/`
 
@@ -145,10 +145,11 @@ src/components/
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
-├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, merge-dialog, merge-button, split-dialog, split-button}
+├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── tags/         {tags-index-view, tag-pages-view}
+├── health/       {health-view}
 ├── history/      {operation-list, operation-diff, revert-button}
 ├── graph/        {mini-graph-view}
 └── shared/       {global-job-tracker, progress-toast}
@@ -166,6 +167,7 @@ src/components/
 | 2026-06-22 | 新增 `chat/conversation-switcher.tsx`；`chat-interface` 接入会话载入/保存/切换；`context-panel-chat-tab` 嵌入 switcher；供 ⑦ 对话持久化 + 多轮记忆 |
 | 2026-06-22 | `layout/settings-rows.tsx` 加 `TextSettingRow`（password/允许空）；`settings-content.tsx` 加 "Web search" section（provider/apiKey/maxResults，走 /api/settings 不写 Zustand）；供 ⑨ verifier 联网核查搜索后端配置 |
 | 2026-06-23 | Settings 弹窗改两栏式：新增 `settings-categories.ts`（5 类元数据单源）+ `settings-nav.tsx`（左导航）；`settings-dialog` 加宽 `max-w-3xl`+固定高度+`active` 分类 state；`settings-content` 拆为 5 个 panel 按分类切换；行级原语与 `/api/settings` 数据流不变；spec 见 docs/superpowers/specs/2026-06-23-settings-two-column-layout-design.md |
+| 2026-06-23 | 删除 `wiki/{merge,split}-{button,dialog}.tsx`（4 个文件）；`frontmatter-display` 不再渲染 Merge/Split 按钮；新增 `health/health-view.tsx` 的 "Tidy structure" 入口（`POST /api/curate` + `useJobStream` 追踪 `curate:*`）；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-23-agent-driven-page-curation* |
 
 ---
 
