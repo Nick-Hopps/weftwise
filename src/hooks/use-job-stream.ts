@@ -169,6 +169,14 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         // Split events
         'split:start',
         'split:complete',
+        // Curate events
+        'curate:start',
+        'curate:plan',
+        'curate:merge',
+        'curate:split',
+        'curate:skip',
+        'curate:warn',
+        'curate:complete',
       ];
 
       const listeners: Array<{ type: string; handler: (e: Event) => void }> = [];
