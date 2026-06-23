@@ -33,6 +33,12 @@ describe('analyzeHtmlSafety', () => {
     expect(res.risk).toBe('suspicious');
   });
 
+  it('<script> 内超长无空白串判为 suspicious', () => {
+    const res = analyzeHtmlSafety(`<script>${'a'.repeat(1001)}</script>`);
+    expect(res.risk).toBe('suspicious');
+    expect(res.signals.some((s) => s.includes('混淆'))).toBe(true);
+  });
+
   it('空串 / 纯空白判为 safe', () => {
     expect(analyzeHtmlSafety('').risk).toBe('safe');
     expect(analyzeHtmlSafety('   \n\t ').risk).toBe('safe');
