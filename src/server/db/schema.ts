@@ -187,3 +187,21 @@ export const pageEmbeddings = sqliteTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
 );
+
+export const pageMaturity = sqliteTable(
+  'page_maturity',
+  {
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    slug: text('slug').notNull(),
+    passes: integer('passes').notNull().default(0),
+    lastEnrichedAt: text('last_enriched_at'),
+    intervalDays: integer('interval_days').notNull().default(1),
+    nextDueAt: text('next_due_at').notNull(),
+    state: text('state').notNull().default('active'),
+    priority: integer('priority').notNull().default(0),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
+);

@@ -307,3 +307,20 @@ export const AppSettingsSchema = z.object({
   webSearchApiKey: WebSearchApiKeySchema,
   webSearchMaxResults: WebSearchMaxResultsSchema,
 });
+
+// ── P5 维护层：页面成熟度 ──────────────────────────────────────────────────
+
+export type MaturityState = 'active' | 'dormant' | 'graduated';
+
+/** 每页成熟度（维护层 P5）。spacing 阶梯由 maintenance-policy 推进。 */
+export interface PageMaturity {
+  subjectId: SubjectId;
+  slug: string;
+  passes: number;
+  lastEnrichedAt: string | null;
+  intervalDays: number;
+  nextDueAt: string;
+  state: MaturityState;
+  priority: number;
+  updatedAt: string;
+}
