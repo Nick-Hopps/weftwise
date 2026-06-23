@@ -171,6 +171,8 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'curate:skip',
         'curate:warn',
         'curate:complete',
+        // Re-enrich events
+        'reenrich:start',
       ];
 
       const listeners: Array<{ type: string; handler: (e: Event) => void }> = [];
