@@ -30,6 +30,31 @@ export function expandScopeWithNeighbors(
   return [...out].filter((s) => !metaSlugs.has(s));
 }
 
+/**
+ * auto 路径护栏：只保留「至少含一个 seed（本次受影响）页」的候选。
+ * seedSet 为 null（手动全库路径）时原样放行。返回保留集 + 被丢弃的候选（供 emit skip）。
+ */
+export function restrictToSeed(
+  decisions: CurateTriage,
+  seedSet: Set<string> | null,
+): {
+  kept: CurateTriage;
+  droppedMerges: CurateTriage['merges'];
+  droppedSplits: CurateTriage['splits'];
+} {
+  if (!seedSet) return { kept: decisions, droppedMerges: [], droppedSplits: [] };
+  const mergeHasSeed = (m: CurateTriage['merges'][number]) => seedSet.has(m.aSlug) || seedSet.has(m.bSlug);
+  const splitHasSeed = (s: CurateTriage['splits'][number]) => seedSet.has(s.slug);
+  return {
+    kept: {
+      merges: decisions.merges.filter(mergeHasSeed),
+      splits: decisions.splits.filter(splitHasSeed),
+    },
+    droppedMerges: decisions.merges.filter((m) => !mergeHasSeed(m)),
+    droppedSplits: decisions.splits.filter((s) => !splitHasSeed(s)),
+  };
+}
+
 /** 截断 triage 候选到上限内，返回保留集合与各自丢弃数。 */
 export function applyDecisionCaps(
   triage: CurateTriage,
