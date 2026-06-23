@@ -14,6 +14,8 @@ import { useUIStore } from '@/stores/ui-store';
 import { IconButton } from '@/components/ui/icon-button';
 import type { AppSettings } from '@/lib/contracts';
 import { SettingsContent } from './settings-content';
+import { SettingsNav } from './settings-nav';
+import { DEFAULT_CATEGORY, type CategoryId } from './settings-categories';
 
 /** PUT /api/settings 的共用请求体逻辑（部分字段更新）。 */
 async function putSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
@@ -51,6 +53,12 @@ export function SettingsDialog() {
   });
 
   const [languageDraft, setLanguageDraft] = useState('');
+  const [active, setActive] = useState<CategoryId>(DEFAULT_CATEGORY);
+
+  // 每次打开弹窗回到默认分类，行为可预期。
+  useEffect(() => {
+    if (isOpen) setActive(DEFAULT_CATEGORY);
+  }, [isOpen]);
 
   useEffect(() => {
     if (settingsQuery.data) {
@@ -96,9 +104,9 @@ export function SettingsDialog() {
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
-        className="w-full max-w-md mx-4 bg-surface rounded-lg shadow-lg border border-border overflow-hidden animate-slide-down"
+        className="flex h-[70vh] max-h-[560px] w-full max-w-3xl mx-4 flex-col bg-surface rounded-lg shadow-lg border border-border overflow-hidden animate-slide-down"
       >
-        <div className="flex items-center justify-between h-12 px-4 border-b border-border">
+        <div className="flex items-center justify-between h-12 shrink-0 px-4 border-b border-border">
           <h2 id="settings-dialog-title" className="text-sm font-semibold text-foreground">
             Settings
           </h2>
@@ -107,18 +115,23 @@ export function SettingsDialog() {
           </IconButton>
         </div>
 
-        <SettingsContent
-          darkMode={darkMode}
-          toggleDarkMode={toggleDarkMode}
-          sidebarWidth={sidebarWidth}
-          resetSidebarWidth={resetSidebarWidth}
-          settings={settingsQuery.data}
-          settingsLoading={settingsQuery.isLoading}
-          languageDraft={languageDraft}
-          setLanguageDraft={setLanguageDraft}
-          saveLanguage={saveLanguage}
-          savePartial={savePartial}
-        />
+        <div className="flex min-h-0 flex-1">
+          <SettingsNav active={active} onSelect={setActive} />
+
+          <SettingsContent
+            active={active}
+            darkMode={darkMode}
+            toggleDarkMode={toggleDarkMode}
+            sidebarWidth={sidebarWidth}
+            resetSidebarWidth={resetSidebarWidth}
+            settings={settingsQuery.data}
+            settingsLoading={settingsQuery.isLoading}
+            languageDraft={languageDraft}
+            setLanguageDraft={setLanguageDraft}
+            saveLanguage={saveLanguage}
+            savePartial={savePartial}
+          />
+        </div>
       </div>
     </div>
   );
