@@ -52,3 +52,6 @@ data/
 *.db-shm
 *.db-wal
 *.db.bak.*
+
+# SDD 流程草稿（ledger/briefs/reports），不入库
+.superpowers/
