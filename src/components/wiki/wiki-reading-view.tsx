@@ -110,8 +110,8 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
 
   const article = (
     <>
-      <PageRenderer {...rendererProps} narrow={showSplit} />
-      <Backlinks backlinks={backlinks} narrow={showSplit} />
+      <PageRenderer {...rendererProps} />
+      <Backlinks backlinks={backlinks} />
     </>
   );
 
@@ -135,7 +135,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
         size="sm"
         onClick={() => setSplit((s) => !s)}
         data-tip="Show the documents this page was written from"
-        className="tip tip-b"
+        className="tip tip-l"
       >
         <FileStack className="h-3.5 w-3.5" />
         {showSplit ? 'Hide sources' : `Sources (${sourceCount})`}
@@ -149,7 +149,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
         {toolbar}
         <div className="grid grid-cols-1 lg:grid-cols-2 lg:flex-1 lg:min-h-0">
           <div className="min-w-0 lg:overflow-y-auto">{article}</div>
-          <div className="min-w-0 border-t border-border bg-canvas lg:border-l lg:border-t-0 lg:overflow-y-auto">
+          <div className="min-w-0 border-t border-border bg-canvas lg:border-l lg:border-t-0 lg:min-h-0 lg:overflow-hidden">
             <SourcesPane docs={docs} loading={loading} error={error} />
           </div>
         </div>
@@ -165,10 +165,10 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   );
 }
 
-function Backlinks({ backlinks, narrow }: { backlinks: BacklinkItem[]; narrow: boolean }) {
+function Backlinks({ backlinks }: { backlinks: BacklinkItem[] }) {
   if (backlinks.length === 0) return null;
   return (
-    <div className={cn('mx-auto w-full px-6 pb-12', narrow ? 'max-w-[62ch]' : 'max-w-content')}>
+    <div className="mx-auto w-full px-6 pb-12 max-w-[var(--reading-max-width)]">
       <div className="border-t border-border pt-6">
         <SectionLabel className="mb-3 flex items-center gap-1.5">
           <Link2 className="h-3 w-3" />
@@ -234,8 +234,8 @@ function SourcesPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* file tab strip */}
-      <div className="flex shrink-0 items-stretch overflow-x-auto border-b border-border bg-surface">
+      {/* file tab strip — 横向可滚动，但隐藏滚动条且不允许纵向溢出（保证 tab 全高） */}
+      <div className="flex shrink-0 items-stretch overflow-x-auto overflow-y-hidden scrollbar-none border-b border-border bg-surface">
         {docs.map((s, idx) => {
           const on = idx === i;
           const Icon = FORMAT_ICON[s.format];

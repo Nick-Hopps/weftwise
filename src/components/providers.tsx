@@ -10,6 +10,7 @@ import { GENERAL_SUBJECT_SLUG, useUIStore } from '@/stores/ui-store';
 import { apiFetch } from '@/lib/api-fetch';
 import type { SubjectListEntry } from '@/lib/contracts';
 import { GlobalJobTracker } from '@/components/shared/global-job-tracker';
+import { ScrollbarAutohide } from '@/components/shared/scrollbar-autohide';
 import { CommandPalette } from '@/components/search/command-palette';
 import { ContextPanelSheet } from '@/components/layout/context-panel-sheet';
 import { SettingsDialog } from '@/components/layout/settings-dialog';
@@ -137,6 +138,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <DarkModeInitializer />
+      <ScrollbarAutohide />
       <GlobalHotkeys />
       <SubjectsBootstrap />
       {children}

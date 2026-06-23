@@ -17,7 +17,10 @@ interface PageRendererProps {
   titleSlugMap?: Record<string, string>;
   editHref?: string;
   subjectSlug?: string;
-  /** Tighten the prose measure for the split (sources) reading view. */
+  /**
+   * 保留以兼容调用方；正文统一用 `max-w-reading` 宽测度，分栏时由窄栏自然收窄，
+   * 不再额外收紧 measure。
+   */
   narrow?: boolean;
 }
 
@@ -63,12 +66,11 @@ export default function PageRenderer({
   titleSlugMap,
   editHref,
   subjectSlug,
-  narrow = false,
 }: PageRendererProps) {
   const rendered = useMemo(() => renderMarkdown(content, titleSlugMap, { math: true }), [content, titleSlugMap]);
 
   return (
-    <article className={`wp-rise mx-auto px-6 py-10 ${narrow ? 'max-w-[62ch]' : 'max-w-content'}`}>
+    <article className="wp-rise mx-auto px-6 py-10 max-w-[var(--reading-max-width)]">
       {title && (
         <FrontmatterDisplay
           title={title}
