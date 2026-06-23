@@ -93,6 +93,10 @@ export function SettingsContent(props: SettingsContentProps) {
           <WebSearchPanel settings={props.settings} savePartial={props.savePartial} />
         )}
 
+        {props.active === 'maintenance' && (
+          <MaintenancePanel settings={props.settings} savePartial={props.savePartial} />
+        )}
+
         {props.active === 'about' && <AboutPanel />}
       </div>
     </div>
@@ -330,6 +334,49 @@ function WebSearchPanel({
         min={1}
         max={10}
         onSave={(v) => savePartial.mutate({ webSearchMaxResults: v })}
+        pending={savePartial.isPending}
+      />
+
+      {savePartial.isError && (
+        <p role="alert" className="text-xs text-danger">
+          Failed to save: {(savePartial.error as Error).message}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MaintenancePanel({
+  settings,
+  savePartial,
+}: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  return (
+    <div className="space-y-4">
+      <SelectSettingRow
+        label="Periodic maintenance"
+        value={settings?.maintenanceEnabled ? 'on' : 'off'}
+        options={[
+          { value: 'off', label: 'off (default)' },
+          { value: 'on', label: 'on — revisit & deepen pages over time' },
+        ]}
+        onChange={(v) => savePartial.mutate({ maintenanceEnabled: v === 'on' })}
+        pending={savePartial.isPending}
+      />
+      <NumberSettingRow
+        label="Sweep interval (hours)"
+        value={settings?.maintenanceSweepIntervalHours ?? 24}
+        min={1}
+        max={168}
+        onSave={(v) => savePartial.mutate({ maintenanceSweepIntervalHours: v })}
+        pending={savePartial.isPending}
+      />
+      <NumberSettingRow
+        label="Max pages per sweep"
+        description="Caps re-enrich jobs enqueued each cycle (cost guardrail)"
+        value={settings?.maintenanceMaxPagesPerSweep ?? 5}
+        min={1}
+        max={50}
+        onSave={(v) => savePartial.mutate({ maintenanceMaxPagesPerSweep: v })}
         pending={savePartial.isPending}
       />
 

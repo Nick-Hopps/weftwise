@@ -152,7 +152,9 @@ src/server/services/
 ├── lint-service.ts      # 全库 lint 扫描
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
-└── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
+├── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
+├── maintenance-policy.ts # 🆕 纯函数：递减回报间隔策略（nextMaturity / shouldGraduate，P5）
+└── maintenance-scheduler.ts # 🆕 纯函数：sweep 页面选取（listDue 过滤、每轮上限，P5）
 ```
 
 ## 变更记录 (Changelog)

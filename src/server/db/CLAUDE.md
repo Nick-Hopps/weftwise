@@ -143,6 +143,7 @@
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
+| `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 
 ## 扩展指南
 
@@ -181,7 +182,8 @@ src/server/db/
     ├── checkpoints-repo.ts    # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
-    └── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
+    ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
+    └── maturity-repo.ts       # 页面成熟度 CRUD（initMaturity / getMaturity / updateMaturity / listDue / listForSubject，P5）
 ```
 
 ## 变更记录 (Changelog)
