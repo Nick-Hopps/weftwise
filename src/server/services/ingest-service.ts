@@ -226,10 +226,14 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       (s) => s !== 'index' && s !== 'log',
     );
     if (touchedSlugs.length > 0) {
-      queue.enqueue('curate', { scope: 'pages', slugs: touchedSlugs, subjectId: subject.id }, subject.id);
-      emit('ingest:complete', `Queued auto-curation for ${touchedSlugs.length} touched page(s).`, {
-        curateSlugs: touchedSlugs.length,
-      });
+      try {
+        queue.enqueue('curate', { scope: 'pages', slugs: touchedSlugs, subjectId: subject.id }, subject.id);
+        emit('ingest:complete', `Queued auto-curation for ${touchedSlugs.length} touched page(s).`, {
+          curateSlugs: touchedSlugs.length,
+        });
+      } catch {
+        // fire-and-forget：自动策展入队失败不影响本次 ingest 的成功返回
+      }
     }
   }
 
