@@ -163,12 +163,6 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         // Save-to-wiki events
         'save:start',
         'save:complete',
-        // Merge events
-        'merge:start',
-        'merge:complete',
-        // Split events
-        'split:start',
-        'split:complete',
         // Curate events
         'curate:start',
         'curate:plan',

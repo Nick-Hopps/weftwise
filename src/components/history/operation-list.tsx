@@ -13,6 +13,7 @@ import { RevertButton } from './revert-button';
 const TYPE_LABELS: Record<string, string> = {
   ingest: '摄入',
   'save-to-wiki': '保存',
+  curate: '整理',
   merge: '合并',
   split: '拆分',
   edit: '编辑',

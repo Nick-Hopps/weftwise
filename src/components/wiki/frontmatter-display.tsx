@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { Pencil } from 'lucide-react';
 import { Tag } from '@/components/ui/tag';
 import { TagLink } from '@/components/wiki/tag-link';
-import { MergeButton } from '@/components/wiki/merge-button';
-import { SplitButton } from '@/components/wiki/split-button';
 
 interface FrontmatterDisplayProps {
   title: string;
@@ -15,7 +13,6 @@ interface FrontmatterDisplayProps {
   updated: string;
   editHref?: string;
   subjectSlug?: string;
-  slug?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -45,7 +42,6 @@ export default function FrontmatterDisplay({
   updated,
   editHref,
   subjectSlug,
-  slug,
 }: FrontmatterDisplayProps) {
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
@@ -56,8 +52,6 @@ export default function FrontmatterDisplay({
           {title}
         </h1>
         <div className="flex items-center gap-2 shrink-0">
-          {slug && <MergeButton slug={slug} title={title} />}
-          {slug && <SplitButton slug={slug} title={title} />}
           {editHref && (
             <Link
               href={editHref}
