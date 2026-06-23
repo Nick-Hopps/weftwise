@@ -10,10 +10,11 @@
 
 ```
 worker-entry.ts
-  ├── import './services/ingest-service';   // register 'ingest'
-  ├── import './services/lint-service';     // register 'lint'
-  ├── import './services/query-service';    // register 'save-to-wiki'
-  └── import './services/curate-service';  // register 'curate'
+  ├── import './services/ingest-service';    // register 'ingest'
+  ├── import './services/lint-service';      // register 'lint'
+  ├── import './services/query-service';     // register 'save-to-wiki'
+  ├── import './services/curate-service';   // register 'curate'
+  └── import './services/reenrich-service'; // register 're-enrich'
 ```
 
 ## 对外接口（Handlers 概览）
@@ -85,6 +86,12 @@ Agent 驱动的 subject 结构策展（merge/split 内化）。`params { subject
 
 > merge/split 的 LLM 调用与 Saga 执行已抽取至 `wiki/page-ops.ts`，curate-service 与未来其他调用方均可复用；curate-service 自己只负责编排与 emit。
 
+### `reenrich-service.ts` 🆕 — 任务类型 `'re-enrich'`
+
+手动重新增益：复用 ingest 增益流水线（enricher → verify），跳过 writer——现有页正文即忠实层，直接当 draft；`commitPending` 收口提交（不重写 index/log）。即便 subject `augmentationLevel` 为 `off` 也强制按 `standard` 跑（用户显式触发语义）。
+
+emit `reenrich:start` 后进入 pipeline；流水线完成后 `checkpoint.clear()`，返回 commit result。需要 `ingest-enricher v2` / `ingest-verifier v2` / `ingest-verifier-triage v1` / `ingest-verifier-apply v1`（不满足则 fail-fast 提示删除旧 skill 文件重播种）。
+
 ### `embedding-service.ts` 🆕 — 任务类型 `'embed-index'`
 
 向量嵌入索引脱离 Saga（⑧）。`params { subjectId }`；若未配置 embedding 则 no-op。
@@ -138,12 +145,13 @@ Agent 驱动的 subject 结构策展（merge/split 内化）。`params { subject
 
 ```
 src/server/services/
-├── ingest-service.ts   # 多阶段 LLM 摄入（分片自适应流水线）
-├── ingest-prep.ts      # 预检/预算/常量纯函数
-├── query-service.ts    # 问答 + save-to-wiki + 多轮记忆 + 混合检索（⑧）
+├── ingest-service.ts    # 多阶段 LLM 摄入（分片自适应流水线）
+├── ingest-prep.ts       # 预检/预算/常量纯函数
+├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆 + 混合检索（⑧）
 ├── conversation-title.ts # 确定性会话标题派生纯函数
-├── lint-service.ts     # 全库 lint 扫描
-├── curate-service.ts   # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
+├── lint-service.ts      # 全库 lint 扫描
+├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
+├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
 └── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
 ```
 
@@ -161,6 +169,7 @@ src/server/services/
 | 2026-06-22 | 新增 `embedding-service`（任务类型 `embed-index`）：向量嵌入回填/清理（content_hash+model 判过期，FK CASCADE，未配置 no-op）；query-service prepareQueryContext 改 async 走 hybridRankSlugs（RRF 合并 FTS+向量）；写操作后 enqueue（⑧）|
 | 2026-06-22 | ingest verifier 阶段→ P3 联网核查（⑨）：steps 第4步改 `verify` step kind（`verify-page.ts::runPageVerification` 两段式 triage→Tavily→apply，全程无 tools）；`finalizeIngest` 把 `ctx.citedSources` 经 `extractContent`+`buildWebSourceImports`+`saveRawSource` 导入为 source，作 `commitPending` 第三参随同一 commit 落地；`MIN_SKILL_VERSIONS` 加 triage/apply；未配置 web 搜索退化为 P2 自检 |
 | 2026-06-23 | 删除 `merge-service`（任务类型 `'merge'`）与 `split-service`（任务类型 `'split'`）；merge/split 执行逻辑内化至 `wiki/page-ops.ts`；新增 `curate-service`（任务类型 `'curate'`：triage→confirm→execute，seed 护栏，caps merge≤5/split≤5）；ingest finalize 在 `agentAutoCurate=true` 时自动入队 curate（scope:'pages', touchedSlugs）|
+| 2026-06-23 | 新增 `reenrich-service`（任务类型 `'re-enrich'`）：手动重新增益，复用 ingest 增益流水线（enricher→verify），跳过 writer，commitPending 收口；P4 增益强度（`subjects.augmentation_level`）贯穿服务层（off→standard 降级） |
 
 ---
 
