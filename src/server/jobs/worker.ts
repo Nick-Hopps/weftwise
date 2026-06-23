@@ -1,6 +1,14 @@
 import * as queue from './queue';
 import * as events from './events';
 import type { Job } from '@/lib/contracts';
+import { runMaintenanceSweep } from '../services/maintenance-scheduler';
+import {
+  getMaintenanceEnabled,
+  getMaintenanceSweepIntervalHours,
+  getMaintenanceMaxPagesPerSweep,
+  getMaintenanceLastSweepAt,
+  setMaintenanceLastSweepAt,
+} from '../db/repos/settings-repo';
 
 type JobHandler = (
   job: Job,
@@ -16,6 +24,32 @@ const handlers = new Map<string, JobHandler>();
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
+const MAINTENANCE_TICK_MS = 60_000; // 每分钟检查一次节律闸门（实际扫描受 intervalHours 控制）
+
+/** 维护节律闸门：从未扫描或距上次 ≥ intervalHours 则应扫。 */
+export function shouldSweep(lastSweepAt: string | null, intervalHours: number, now: Date): boolean {
+  if (!lastSweepAt) return true;
+  return now.getTime() - new Date(lastSweepAt).getTime() >= intervalHours * 3600_000;
+}
+
+function maintenanceTick(): void {
+  if (!getMaintenanceEnabled()) return;
+  const now = new Date();
+  if (!shouldSweep(getMaintenanceLastSweepAt(), getMaintenanceSweepIntervalHours(), now)) return;
+  // 先占位 lastSweepAt 防重入（tick 间隔远小于节律）
+  setMaintenanceLastSweepAt(now.toISOString());
+  const enqueued = runMaintenanceSweep({
+    now,
+    maxPages: getMaintenanceMaxPagesPerSweep(),
+    enqueue: (slug, subjectId) => {
+      queue.enqueue('re-enrich', { slug, subjectId }, subjectId);
+    },
+    log: (msg) => {
+      console.log(`[maintenance] ${msg}`);
+    },
+  });
+  if (enqueued > 0) console.log(`[maintenance] swept: enqueued ${enqueued} re-enrich job(s)`);
+}
 
 export function registerHandler(type: string, handler: JobHandler): void {
   handlers.set(type, handler);
@@ -130,8 +164,18 @@ export function startWorker(pollIntervalMs = 2000): () => void {
     }
   }, pollIntervalMs);
 
+  // 维护层低频 tick：到节律即选页入队 re-enrich（不在此跑 LLM/写盘）。
+  const maintenanceId = setInterval(() => {
+    try {
+      maintenanceTick();
+    } catch (err) {
+      console.error('[maintenance] sweep tick failed', err);
+    }
+  }, MAINTENANCE_TICK_MS);
+
   const cleanup = () => {
     clearInterval(intervalId);
+    clearInterval(maintenanceId);
     cleanupFn = null;
   };
 
