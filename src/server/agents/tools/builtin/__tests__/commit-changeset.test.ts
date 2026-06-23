@@ -223,7 +223,7 @@ describe('commitPending sourceOps', () => {
         paramsJson: JSON.stringify(sourceId ? { sourceId } : {}),
         subjectId: 'sub1',
       } as AgentContext['job'],
-      subject: { id: 'sub1', slug: 'general', name: 'General', description: '', createdAt: '', updatedAt: '' },
+      subject: { id: 'sub1', slug: 'general', name: 'General', description: '', augmentationLevel: 'standard' as const, createdAt: '', updatedAt: '' },
     });
   }
 

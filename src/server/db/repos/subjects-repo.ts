@@ -61,6 +61,7 @@ export function create(input: CreateSubjectInput): Subject {
     slug,
     name: input.name.trim(),
     description: input.description?.trim() ?? '',
+    augmentationLevel: 'standard',
     createdAt: now,
     updatedAt: now,
   };
@@ -122,7 +123,22 @@ function rowToSubject(row: typeof subjects.$inferSelect): Subject {
     slug: row.slug,
     name: row.name,
     description: row.description,
+    augmentationLevel: (row.augmentationLevel ?? 'standard') as Subject['augmentationLevel'],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+export function setAugmentationLevel(id: string, level: Subject['augmentationLevel']): Subject {
+  const subject = getById(id);
+  if (!subject) {
+    throw new SubjectError('not-found', `Subject ${id} not found`);
+  }
+  const updatedAt = new Date().toISOString();
+  const db = getDb();
+  db.update(subjects)
+    .set({ augmentationLevel: level, updatedAt })
+    .where(eq(subjects.id, id))
+    .run();
+  return { ...subject, augmentationLevel: level, updatedAt };
 }

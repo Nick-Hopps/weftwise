@@ -12,6 +12,7 @@ export const subjects = sqliteTable('subjects', {
   slug: text('slug').notNull().unique(),
   name: text('name').notNull(),
   description: text('description').notNull().default(''),
+  augmentationLevel: text('augmentation_level').notNull().default('standard'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

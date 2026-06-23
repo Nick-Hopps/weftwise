@@ -2,11 +2,16 @@ import { z } from 'zod';
 
 export type SubjectId = string;
 
+/** 每个 subject 独立的增益强度（ingest/re-enrich 读取）。`off` = 退回纯忠实层。 */
+export type AugmentationLevel = 'off' | 'light' | 'standard' | 'deep';
+export const DEFAULT_AUGMENTATION_LEVEL: AugmentationLevel = 'standard';
+
 export interface Subject {
   id: SubjectId;
   slug: string;
   name: string;
   description: string;
+  augmentationLevel: AugmentationLevel;
   createdAt: string;
   updatedAt: string;
 }
@@ -17,6 +22,7 @@ export interface SubjectListEntry {
   slug: string;
   name: string;
   description: string;
+  augmentationLevel: AugmentationLevel;
   pageCount: number;
 }
 
@@ -232,6 +238,8 @@ export interface ConversationMessage {
   citations: { pageSlug: string; excerpt: string }[] | null;
   createdAt: string;
 }
+
+export const AugmentationLevelSchema = z.enum(['off', 'light', 'standard', 'deep']);
 
 export const DEFAULT_WIKI_LANGUAGE = 'English';
 
