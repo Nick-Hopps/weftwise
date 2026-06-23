@@ -14,6 +14,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import PageRenderer from './page-renderer';
+import { HtmlSourceFrame } from './html-source-frame';
 import { Button } from '@/components/ui/button';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
@@ -307,11 +308,11 @@ function SourceBody({ source }: { source: PageSourceDoc }) {
 
   if (source.format === 'html') {
     return (
-      <iframe
+      <HtmlSourceFrame
         src={rawUrl}
         title={source.name}
-        sandbox=""
-        className="h-[80vh] w-full border-0 bg-white lg:h-full"
+        safety={source.htmlSafety}
+        className="h-[80vh] lg:h-full"
       />
     );
   }
