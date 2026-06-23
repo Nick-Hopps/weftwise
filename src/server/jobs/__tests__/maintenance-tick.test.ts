@@ -15,4 +15,8 @@ describe('shouldSweep', () => {
     const last = new Date(NOW.getTime() - 25 * 3600_000).toISOString(); // 25h 前
     expect(shouldSweep(last, 24, NOW)).toBe(true);
   });
+  it('恰好等于节律（>= 边界）→ 应扫', () => {
+    const last = new Date(NOW.getTime() - 24 * 3600_000).toISOString(); // 精确 24h 前
+    expect(shouldSweep(last, 24, NOW)).toBe(true);
+  });
 });

@@ -183,7 +183,7 @@ src/server/db/
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
     ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
-    └── maturity-repo.ts       # 页面成熟度 CRUD（initMaturity / getMaturity / updateMaturity / listDue / listForSubject，P5）
+    └── maturity-repo.ts       # 页面成熟度 CRUD（get / ensureRow / listDue / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
 ```
 
 ## 变更记录 (Changelog)
