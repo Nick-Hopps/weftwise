@@ -37,6 +37,7 @@ import './services/lint-service';
 import './services/query-service'; // registers 'save-to-wiki' handler
 import './services/embedding-service';
 import './services/curate-service';
+import './services/reenrich-service';
 
 const log = createLogger('worker');
 
