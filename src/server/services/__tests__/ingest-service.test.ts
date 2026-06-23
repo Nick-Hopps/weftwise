@@ -31,6 +31,11 @@ vi.mock('../../db/repos/settings-repo', () => ({
   getAgentMaxParallelSubAgents: () => 2,
   getAgentTaskRouterMode: () => 'frontmatter-override',
   getWikiLanguage: () => 'Chinese',
+  getAgentAutoCurate: () => false,
+}));
+
+vi.mock('../../jobs/queue', () => ({
+  enqueue: vi.fn(),
 }));
 
 // runPipeline 现在返回内容阶段的 carry（含 plan/subjectSlug/sources/languageDirective），
