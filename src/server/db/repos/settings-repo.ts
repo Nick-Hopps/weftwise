@@ -25,6 +25,12 @@ import {
   DEFAULT_WEB_SEARCH_API_KEY,
   DEFAULT_WEB_SEARCH_MAX_RESULTS,
   type WebSearchProvider,
+  MaintenanceEnabledSchema,
+  MaintenanceSweepIntervalHoursSchema,
+  MaintenanceMaxPagesPerSweepSchema,
+  DEFAULT_MAINTENANCE_ENABLED,
+  DEFAULT_MAINTENANCE_SWEEP_INTERVAL_HOURS,
+  DEFAULT_MAINTENANCE_MAX_PAGES_PER_SWEEP,
 } from '@/lib/contracts';
 
 const KEY_WIKI_LANGUAGE = 'wikiLanguage';
@@ -260,4 +266,81 @@ export function getWebSearchConfig(): {
     apiKey: getWebSearchApiKey(),
     maxResults: getWebSearchMaxResults(),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// P5 维护层设置（Maintenance Layer）
+// maintenanceEnabled 默认 false：避免静默烧 token。
+// maintenanceLastSweepAt 为运行态内部时间戳，不进 AppSettings/route。
+// ─────────────────────────────────────────────────────────────────
+
+const KEY_MAINTENANCE_ENABLED = 'maintenanceEnabled';
+const KEY_MAINTENANCE_SWEEP_INTERVAL_HOURS = 'maintenanceSweepIntervalHours';
+const KEY_MAINTENANCE_MAX_PAGES_PER_SWEEP = 'maintenanceMaxPagesPerSweep';
+const KEY_MAINTENANCE_LAST_SWEEP_AT = 'maintenanceLastSweepAt';
+
+/**
+ * 返回维护层开关。默认 false（避免未配置时静默烧 token）。
+ * 每次调用实时读 DB，修改后无需重启 worker。
+ */
+export function getMaintenanceEnabled(): boolean {
+  const raw = readKey(KEY_MAINTENANCE_ENABLED);
+  if (raw === undefined) return DEFAULT_MAINTENANCE_ENABLED;
+  return raw === 'true';
+}
+
+/**
+ * 持久化维护层开关。经 MaintenanceEnabledSchema 校验。
+ */
+export function setMaintenanceEnabled(value: boolean): boolean {
+  const v = MaintenanceEnabledSchema.parse(value);
+  writeKey(KEY_MAINTENANCE_ENABLED, v ? 'true' : 'false');
+  return v;
+}
+
+/**
+ * 返回扫描间隔（小时，1..168）。默认 24。
+ */
+export function getMaintenanceSweepIntervalHours(): number {
+  return readNumber(KEY_MAINTENANCE_SWEEP_INTERVAL_HOURS, DEFAULT_MAINTENANCE_SWEEP_INTERVAL_HOURS);
+}
+
+/**
+ * 持久化扫描间隔。经 MaintenanceSweepIntervalHoursSchema 校验（1..168）。
+ */
+export function setMaintenanceSweepIntervalHours(value: number): number {
+  const v = MaintenanceSweepIntervalHoursSchema.parse(value);
+  writeKey(KEY_MAINTENANCE_SWEEP_INTERVAL_HOURS, String(v));
+  return v;
+}
+
+/**
+ * 返回每次扫描最大页数（1..50）。默认 5。
+ */
+export function getMaintenanceMaxPagesPerSweep(): number {
+  return readNumber(KEY_MAINTENANCE_MAX_PAGES_PER_SWEEP, DEFAULT_MAINTENANCE_MAX_PAGES_PER_SWEEP);
+}
+
+/**
+ * 持久化每次扫描最大页数。经 MaintenanceMaxPagesPerSweepSchema 校验（1..50）。
+ */
+export function setMaintenanceMaxPagesPerSweep(value: number): number {
+  const v = MaintenanceMaxPagesPerSweepSchema.parse(value);
+  writeKey(KEY_MAINTENANCE_MAX_PAGES_PER_SWEEP, String(v));
+  return v;
+}
+
+/**
+ * 返回上次扫描完成时间（ISO 字符串）。从未扫描过时返回 null。
+ * 仅供维护层 worker 内部读写，不进 AppSettings/route。
+ */
+export function getMaintenanceLastSweepAt(): string | null {
+  return readKey(KEY_MAINTENANCE_LAST_SWEEP_AT) ?? null;
+}
+
+/**
+ * 记录上次扫描完成时间（ISO 字符串）。
+ */
+export function setMaintenanceLastSweepAt(iso: string): void {
+  writeKey(KEY_MAINTENANCE_LAST_SWEEP_AT, iso);
 }

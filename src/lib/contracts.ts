@@ -282,6 +282,18 @@ export const WebSearchMaxResultsSchema = z.number().int().min(1).max(10);
 
 export type WebSearchProvider = z.infer<typeof WebSearchProviderSchema>;
 
+// ── P5 维护层：维护设置 ────────────────────────────────────────────────────
+// maintenanceEnabled 默认 false：维护层默认关闭，避免静默烧 token。
+// maintenanceLastSweepAt 是运行态内部时间戳，不进 AppSettings（仅 settings-repo 内部读写）。
+
+export const DEFAULT_MAINTENANCE_ENABLED = false;
+export const DEFAULT_MAINTENANCE_SWEEP_INTERVAL_HOURS = 24;
+export const DEFAULT_MAINTENANCE_MAX_PAGES_PER_SWEEP = 5;
+
+export const MaintenanceEnabledSchema = z.boolean();
+export const MaintenanceSweepIntervalHoursSchema = z.number().int().min(1).max(168);
+export const MaintenanceMaxPagesPerSweepSchema = z.number().int().min(1).max(50);
+
 export interface AppSettings {
   wikiLanguage: string;
   agentMaxSteps: number;
@@ -293,6 +305,9 @@ export interface AppSettings {
   webSearchProvider: WebSearchProvider;
   webSearchApiKey: string;
   webSearchMaxResults: number;
+  maintenanceEnabled: boolean;
+  maintenanceSweepIntervalHours: number;
+  maintenanceMaxPagesPerSweep: number;
 }
 
 export const AppSettingsSchema = z.object({
@@ -306,6 +321,9 @@ export const AppSettingsSchema = z.object({
   webSearchProvider: WebSearchProviderSchema,
   webSearchApiKey: WebSearchApiKeySchema,
   webSearchMaxResults: WebSearchMaxResultsSchema,
+  maintenanceEnabled: MaintenanceEnabledSchema,
+  maintenanceSweepIntervalHours: MaintenanceSweepIntervalHoursSchema,
+  maintenanceMaxPagesPerSweep: MaintenanceMaxPagesPerSweepSchema,
 });
 
 // ── P5 维护层：页面成熟度 ──────────────────────────────────────────────────

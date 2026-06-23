@@ -22,6 +22,12 @@ import {
   setWebSearchApiKey,
   getWebSearchMaxResults,
   setWebSearchMaxResults,
+  getMaintenanceEnabled,
+  setMaintenanceEnabled,
+  getMaintenanceSweepIntervalHours,
+  setMaintenanceSweepIntervalHours,
+  getMaintenanceMaxPagesPerSweep,
+  setMaintenanceMaxPagesPerSweep,
 } from '@/server/db/repos/settings-repo';
 import {
   WikiLanguageSchema,
@@ -34,6 +40,9 @@ import {
   WebSearchProviderSchema,
   WebSearchApiKeySchema,
   WebSearchMaxResultsSchema,
+  MaintenanceEnabledSchema,
+  MaintenanceSweepIntervalHoursSchema,
+  MaintenanceMaxPagesPerSweepSchema,
   type AppSettings,
 } from '@/lib/contracts';
 
@@ -51,6 +60,9 @@ function readSettings(): AppSettings {
     webSearchProvider: getWebSearchProvider(),
     webSearchApiKey: getWebSearchApiKey(),
     webSearchMaxResults: getWebSearchMaxResults(),
+    maintenanceEnabled: getMaintenanceEnabled(),
+    maintenanceSweepIntervalHours: getMaintenanceSweepIntervalHours(),
+    maintenanceMaxPagesPerSweep: getMaintenanceMaxPagesPerSweep(),
   };
 }
 
@@ -71,6 +83,9 @@ const PutBodySchema = z.object({
   webSearchProvider: WebSearchProviderSchema.optional(),
   webSearchApiKey: WebSearchApiKeySchema.optional(),
   webSearchMaxResults: WebSearchMaxResultsSchema.optional(),
+  maintenanceEnabled: MaintenanceEnabledSchema.optional(),
+  maintenanceSweepIntervalHours: MaintenanceSweepIntervalHoursSchema.optional(),
+  maintenanceMaxPagesPerSweep: MaintenanceMaxPagesPerSweepSchema.optional(),
 });
 
 export async function PUT(request: NextRequest) {
@@ -105,6 +120,9 @@ export async function PUT(request: NextRequest) {
   if (d.webSearchProvider !== undefined) setWebSearchProvider(d.webSearchProvider);
   if (d.webSearchApiKey !== undefined) setWebSearchApiKey(d.webSearchApiKey);
   if (d.webSearchMaxResults !== undefined) setWebSearchMaxResults(d.webSearchMaxResults);
+  if (d.maintenanceEnabled !== undefined) setMaintenanceEnabled(d.maintenanceEnabled);
+  if (d.maintenanceSweepIntervalHours !== undefined) setMaintenanceSweepIntervalHours(d.maintenanceSweepIntervalHours);
+  if (d.maintenanceMaxPagesPerSweep !== undefined) setMaintenanceMaxPagesPerSweep(d.maintenanceMaxPagesPerSweep);
 
   return NextResponse.json(readSettings());
 }
