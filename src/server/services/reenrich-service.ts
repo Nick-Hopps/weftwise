@@ -8,7 +8,7 @@
  * 网页 source 的 raw 文件导入是 ingest-only；re-enrich 仅靠 verifier 写进页 frontmatter 的
  * sources URL 留痕（不落 raw/page_sources），简化实现、避免触碰 ingest finalize。
  */
-import { randomUUID } from 'crypto';
+import { randomUUID } from 'node:crypto';
 import type { Job } from '@/lib/contracts';
 import type { AgentContext } from '../agents/types';
 import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
@@ -27,6 +27,7 @@ import {
 } from '../db/repos/settings-repo';
 import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
 import { getRuntimeRegistries } from '../worker-runtime';
+import { enqueueEmbedIndex } from './embedding-service';
 
 interface ReenrichParams {
   slug: string;
@@ -151,5 +152,6 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
   // 流水线把核查后页 upsert 进 ctx.pending；commitPending 提交（无 index/log meta）。
   const result = await commitPending(ctx, []);
   checkpoint.clear();
+  enqueueEmbedIndex(subject.id);
   return result as unknown as Record<string, unknown>;
 });
