@@ -13,7 +13,7 @@ import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { executePageMerge, executePageSplit } from '../wiki/page-ops';
-import { expandScopeWithNeighbors, applyDecisionCaps, type CurateLimits } from '../wiki/curate-plan';
+import { expandScopeWithNeighbors, applyDecisionCaps, restrictToSeed, type CurateLimits } from '../wiki/curate-plan';
 import { generateStructuredOutput } from '../llm/provider-registry';
 import {
   CurateTriageSchema,
@@ -25,6 +25,8 @@ import {
   CurateSplitConfirmSchema,
   CURATE_SPLIT_CONFIRM_SYSTEM_PROMPT,
   buildCurateSplitConfirmUserPrompt,
+  type CurateMergeConfirm,
+  type CurateSplitConfirm,
 } from '../llm/prompts/curate-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { Job } from '@/lib/contracts';
@@ -55,11 +57,14 @@ async function runCurateJob(
 
   // 1. 解析 scope
   let scopeSlugs: string[];
+  let seedSet: Set<string> | null;
   if (params.scope === 'pages' && Array.isArray(params.slugs)) {
     const seed = params.slugs.filter((s) => !PROTECTED_SYSTEM_PAGES.has(s));
+    seedSet = new Set(seed);
     const links = pagesRepo.getAllLinks(subject.id);
     scopeSlugs = expandScopeWithNeighbors(seed, links, subject.id, PROTECTED_SYSTEM_PAGES);
   } else {
+    seedSet = null;
     scopeSlugs = pagesRepo
       .getAllPages(subject.id)
       .map((p) => p.slug)
@@ -98,7 +103,20 @@ async function runCurateJob(
     buildCurateTriageUserPrompt(metas, promptCtx),
   );
   const normalizedTriage = { merges: triage.merges ?? [], splits: triage.splits ?? [] };
-  const { kept, droppedMerges, droppedSplits } = applyDecisionCaps(normalizedTriage, LIMITS);
+
+  // FIX 1：auto 路径（scope:'pages'）先过 seed 护栏，再截上限
+  const { kept: seedKept, droppedMerges: seedDroppedMerges, droppedSplits: seedDroppedSplits } = restrictToSeed(
+    normalizedTriage,
+    seedSet,
+  );
+  for (const m of seedDroppedMerges) {
+    emit('curate:skip', `Skip merge ${m.aSlug}+${m.bSlug}: does not involve a changed page.`, { ...m });
+  }
+  for (const s of seedDroppedSplits) {
+    emit('curate:skip', `Skip split ${s.slug}: does not involve a changed page.`, { ...s });
+  }
+
+  const { kept, droppedMerges, droppedSplits } = applyDecisionCaps(seedKept, LIMITS);
   if (droppedMerges > 0 || droppedSplits > 0) {
     emit('curate:warn', `Capped over-limit decisions: dropped ${droppedMerges} merge(s) / ${droppedSplits} split(s).`, {
       droppedMerges,
@@ -130,16 +148,24 @@ async function runCurateJob(
       emit('curate:skip', `Skip merge ${cand.aSlug}+${cand.bSlug} (stale/invalid).`, { ...cand });
       continue;
     }
-    const confirm = await generateStructuredOutput(
-      'curate',
-      CurateMergeConfirmSchema,
-      CURATE_MERGE_CONFIRM_SYSTEM_PROMPT,
-      buildCurateMergeConfirmUserPrompt(
-        { slug: cand.aSlug, title: aDoc.frontmatter.title, body: aDoc.body },
-        { slug: cand.bSlug, title: bDoc.frontmatter.title, body: bDoc.body },
-        promptCtx,
-      ),
-    );
+    // FIX 2：confirm LLM 瞬时错误不中止整个 pass，跳过此候选继续
+    let confirm: CurateMergeConfirm;
+    try {
+      confirm = await generateStructuredOutput(
+        'curate',
+        CurateMergeConfirmSchema,
+        CURATE_MERGE_CONFIRM_SYSTEM_PROMPT,
+        buildCurateMergeConfirmUserPrompt(
+          { slug: cand.aSlug, title: aDoc.frontmatter.title, body: aDoc.body },
+          { slug: cand.bSlug, title: bDoc.frontmatter.title, body: bDoc.body },
+          promptCtx,
+        ),
+      );
+    } catch (err) {
+      skipped += 1;
+      emit('curate:skip', `Skip merge ${cand.aSlug}+${cand.bSlug}: confirm failed — ${(err as Error).message}`, { ...cand });
+      continue;
+    }
     if (!confirm.proceed) {
       skipped += 1;
       emit('curate:skip', `Skip merge ${cand.aSlug}+${cand.bSlug}: ${confirm.reason}`, { ...cand });
@@ -161,12 +187,20 @@ async function runCurateJob(
       emit('curate:skip', `Skip split ${cand.slug} (stale/invalid).`, { ...cand });
       continue;
     }
-    const confirm = await generateStructuredOutput(
-      'curate',
-      CurateSplitConfirmSchema,
-      CURATE_SPLIT_CONFIRM_SYSTEM_PROMPT,
-      buildCurateSplitConfirmUserPrompt({ slug: cand.slug, title: doc.frontmatter.title, body: doc.body }, promptCtx),
-    );
+    // FIX 2：confirm LLM 瞬时错误不中止整个 pass，跳过此候选继续
+    let confirm: CurateSplitConfirm;
+    try {
+      confirm = await generateStructuredOutput(
+        'curate',
+        CurateSplitConfirmSchema,
+        CURATE_SPLIT_CONFIRM_SYSTEM_PROMPT,
+        buildCurateSplitConfirmUserPrompt({ slug: cand.slug, title: doc.frontmatter.title, body: doc.body }, promptCtx),
+      );
+    } catch (err) {
+      skipped += 1;
+      emit('curate:skip', `Skip split ${cand.slug}: confirm failed — ${(err as Error).message}`, { ...cand });
+      continue;
+    }
     if (!confirm.proceed) {
       skipped += 1;
       emit('curate:skip', `Skip split ${cand.slug}: ${confirm.reason}`, { ...cand });

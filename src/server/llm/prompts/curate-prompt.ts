@@ -75,6 +75,8 @@ export const CurateMergeConfirmSchema = z.object({
   reason: z.string().describe('Short justification of the decision.'),
 });
 
+export type CurateMergeConfirm = z.infer<typeof CurateMergeConfirmSchema>;
+
 export const CURATE_MERGE_CONFIRM_SYSTEM_PROMPT = `You are a conservative wiki curator deciding whether two specific pages should be merged into one.
 
 You now see the FULL body of both pages. Confirm a merge ONLY if they substantially cover the same topic and one coherent page would serve the reader better.
@@ -115,6 +117,8 @@ export const CurateSplitConfirmSchema = z.object({
     .describe('When proceeding, an optional hint describing how to divide the page (which topics become which pages).'),
   reason: z.string().describe('Short justification of the decision.'),
 });
+
+export type CurateSplitConfirm = z.infer<typeof CurateSplitConfirmSchema>;
 
 export const CURATE_SPLIT_CONFIRM_SYSTEM_PROMPT = `You are a conservative wiki curator deciding whether one specific page should be split into multiple pages.
 
