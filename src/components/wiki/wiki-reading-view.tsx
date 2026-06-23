@@ -286,7 +286,14 @@ function SourcesPane({
 }
 
 function SourceBody({ source }: { source: PageSourceDoc }) {
-  if (source.format === 'pdf') return <PdfDocument pages={source.pages ?? []} />;
+  // PDF/HTML 与首页一致：直接由浏览器加载完整原始文件（PDF 原生阅读器 / 沙箱 iframe）。
+  const rawUrl = `/api/sources/${source.id}/raw`;
+
+  if (source.format === 'pdf') {
+    return (
+      <iframe src={rawUrl} title={source.name} className="h-[80vh] w-full border-0 lg:h-full" />
+    );
+  }
 
   if (source.format === 'markdown') {
     return (
@@ -300,9 +307,12 @@ function SourceBody({ source }: { source: PageSourceDoc }) {
 
   if (source.format === 'html') {
     return (
-      <div className="mx-auto max-w-[62ch] px-7 pb-[72px] pt-7">
-        <div className="src-html" dangerouslySetInnerHTML={{ __html: source.html ?? '' }} />
-      </div>
+      <iframe
+        src={rawUrl}
+        title={source.name}
+        sandbox=""
+        className="h-[80vh] w-full border-0 bg-white lg:h-full"
+      />
     );
   }
 
@@ -311,26 +321,5 @@ function SourceBody({ source }: { source: PageSourceDoc }) {
     <pre className="m-0 max-w-[78ch] whitespace-pre-wrap break-words px-7 pb-[72px] pt-7 font-mono text-[13px] leading-[21px] text-prose-body">
       {source.text}
     </pre>
-  );
-}
-
-/** Minimal PDF-reader chrome: gray backdrop, white paginated sheets, page footer. */
-function PdfDocument({ pages }: { pages: string[] }) {
-  return (
-    <div className="flex flex-col items-center gap-4 px-0 pb-16 pt-5">
-      {pages.map((text, i) => (
-        <div
-          key={i}
-          className="relative w-[min(92%,540px)] rounded-[2px] border border-border bg-white shadow-md"
-        >
-          <pre className="m-0 whitespace-pre-wrap break-words px-9 pb-[52px] pt-10 font-mono text-[12.5px] leading-5 text-[#1a1a1a]">
-            {text}
-          </pre>
-          <div className="absolute bottom-2.5 right-4 font-mono text-[10px] text-[#9a9a9a]">
-            {i + 1} / {pages.length}
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
