@@ -150,12 +150,19 @@
   --color-graph-label:       var(--base-neutral-900);
   --color-graph-active:      var(--base-violet-600);
 
+  /* ─── SEMANTIC · Scrollbar ──────────────────────────────────────────────── */
+  /* 默认透明（隐藏），滚动时渐显（见下方 [data-scrolling] 规则）。 */
+  --color-scrollbar-thumb:       var(--base-neutral-400);
+  --color-scrollbar-thumb-hover: var(--base-neutral-500);
+
   /* ─── COMPONENT · Shell ─────────────────────────────────────────────────── */
   --header-height:            48px;
   --sidebar-width:            240px;
   --sidebar-width-collapsed:  0px;
   --context-panel-width:      320px;
   --content-max-width:        65ch;
+  /* wiki 正文阅读测度：比 content 更宽但保留上限（宽屏两侧留少量留白）。 */
+  --reading-max-width:        1040px;
 
   /* ─── COMPONENT · z-index ───────────────────────────────────────────────── */
   --z-header:   20;
@@ -215,6 +222,9 @@
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.45);
   --shadow-md: 0 4px 12px rgb(0 0 0 / 0.55), 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow-lg: 0 12px 32px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+
+  --color-scrollbar-thumb:       82 82 91;
+  --color-scrollbar-thumb-hover: 113 113 122;
 }
 
 /* =============================================================================
@@ -239,6 +249,53 @@
   ::selection {
     background-color: rgb(var(--color-selection-bg));
     color: rgb(var(--color-fg-primary));
+  }
+
+  /* ─── Scrollbar ───────────────────────────────────────────────────────────
+   * 原生竖向滚动条隐藏，改由 <ScrollbarAutohide> 的浮层 thumb 接管——它是真实
+   * DOM 元素，opacity 可过渡，因此能真正「默认隐藏 / 滚动渐显 / 静止渐隐」
+   * （WebKit 的 ::-webkit-scrollbar-thumb 不支持 transition，无法淡入淡出；
+   * Firefox 的 scrollbar-color 同样不可过渡）。横向滚动条少见（代码块等），
+   * 保留细样式即可。需要彻底无滚动条的容器用 `.scrollbar-none`。 */
+  * {
+    scrollbar-width: none; /* Firefox：隐藏原生，竖向浮层由 JS 提供 */
+  }
+  ::-webkit-scrollbar {
+    width: 0;     /* 竖向：隐藏（浮层接管，正文因此真正满宽无留缝） */
+    height: 10px; /* 横向：保留 */
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--color-scrollbar-thumb));
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: var(--radius-full);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--color-scrollbar-thumb-hover));
+  }
+
+  /* 浮层竖向滚动条 thumb：fixed 定位，覆盖在「正在滚动」的容器右缘，可拖拽。 */
+  .sb-thumb {
+    position: fixed;
+    z-index: var(--z-tooltip);
+    width: 8px;
+    border-radius: var(--radius-full);
+    background-color: rgb(var(--color-scrollbar-thumb));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--duration-base) var(--ease-standard);
+  }
+  .sb-thumb[data-show='1'] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .sb-thumb[data-show='1']:hover,
+  .sb-thumb[data-drag='1'] {
+    background-color: rgb(var(--color-scrollbar-thumb-hover));
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -294,6 +351,14 @@
 @layer utilities {
   .focus-ring {
     @apply outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40 focus-visible:ring-offset-1 focus-visible:ring-offset-canvas;
+  }
+
+  /* 完全隐藏滚动条（仍可滚动）——用于不应出现任何滚动条的容器，如 sources tab 栏。 */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }
 
