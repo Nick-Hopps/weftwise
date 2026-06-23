@@ -126,8 +126,8 @@ export type PageSourceFormat = 'pdf' | 'markdown' | 'html' | 'text';
 
 /**
  * A source document a page was written from, prepared for the split reading
- * view. Content is delivered in one of `pages` (pdf sheets) / `text` / `html`
- * depending on `format`, and may be capped (`truncated`) for large files.
+ * view. Markdown/text ship their (capped) body in `text`; pdf/html ship no
+ * payload and are rendered client-side via an iframe over `/api/sources/{id}/raw`.
  */
 export interface PageSourceDoc {
   id: string;
@@ -135,10 +135,10 @@ export interface PageSourceDoc {
   format: PageSourceFormat;
   added: string;
   meta?: string;
+  /** 仅 markdown/text 有意义：正文按 120K 截断时为 true。pdf/html 直出完整文件，不截断。 */
   truncated?: boolean;
-  pages?: string[];
+  /** markdown/text 的正文（已截断）。pdf/html 不下发 payload（由 iframe 渲染）。 */
   text?: string;
-  html?: string;
 }
 
 export interface IngestResult {

@@ -6,8 +6,6 @@ import type { PageSourceDoc, PageSourceFormat, Subject } from '@/lib/contracts';
 /** Per-source content caps — sources can be whole books, so we never ship the
  *  full text to the client; we send enough to "trace a claim to its origin". */
 const TEXT_CAP = 120_000;
-const PDF_MAX_SHEETS = 60;
-const PDF_SHEET_CAP = 8_000;
 
 interface SidecarChunk {
   id?: string;
@@ -51,38 +49,23 @@ export function readPageSources(
     const format = formatFor(src.filename);
     const sidecar = (getSourceMetadata(src.id) as SourceSidecar | null) ?? {};
     const added = (sidecar.savedAt ?? src.parsedAt ?? '').slice(0, 10);
-    const chunks = Array.isArray(sidecar.chunks) ? sidecar.chunks : [];
 
     const base = { id: src.id, name: src.filename, format, added } as PageSourceDoc;
 
-    if (format === 'pdf') {
-      const usable = chunks.filter((c) => (c.text ?? '').trim().length > 0);
-      const truncated = usable.length > PDF_MAX_SHEETS;
-      const pages = usable.slice(0, PDF_MAX_SHEETS).map((c) => {
-        const heading = (c.heading ?? '').trim();
-        const text = (c.text ?? '').slice(0, PDF_SHEET_CAP);
-        return heading ? `${heading}\n\n${text}` : text;
-      });
-      docs.push({
-        ...base,
-        meta: `${FORMAT_LABEL.pdf} · ${usable.length} ${usable.length === 1 ? 'section' : 'sections'}`,
-        pages: pages.length > 0 ? pages : ['No extracted text available for this source.'],
-        truncated,
-      });
+    // pdf / html 在客户端由 iframe 加载完整原始文件（见 wiki-reading-view 的 SourceBody），
+    // 这里只下发元数据，不再准备分页文本 / HTML 正文 payload。
+    if (format === 'pdf' || format === 'html') {
+      docs.push({ ...base, meta: FORMAT_LABEL[format] });
       continue;
     }
 
-    // markdown / html / text — prefer the original file, fall back to parsed chunks.
+    // markdown / text —— 优先用原始文件，回退到解析后的 chunks。
+    const chunks = Array.isArray(sidecar.chunks) ? sidecar.chunks : [];
     const raw = getRawSourceContent(subject.slug, src.filename);
     const full = raw ?? chunks.map((c) => c.text ?? '').join('\n\n');
     const truncated = full.length > TEXT_CAP;
     const content = truncated ? full.slice(0, TEXT_CAP) : full;
-
-    if (format === 'html') {
-      docs.push({ ...base, meta: FORMAT_LABEL.html, html: content, truncated });
-    } else {
-      docs.push({ ...base, meta: FORMAT_LABEL[format], text: content, truncated });
-    }
+    docs.push({ ...base, meta: FORMAT_LABEL[format], text: content, truncated });
   }
 
   return docs;
