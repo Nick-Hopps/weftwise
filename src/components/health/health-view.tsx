@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, RefreshCw } from 'lucide-react';
+import { Activity, RefreshCw, Wand2 } from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useJobStream } from '@/hooks/use-job-stream';
@@ -58,6 +58,38 @@ export function HealthView() {
       }
     } finally {
       setStarting(false);
+    }
+  }
+
+  const [curateJobId, setCurateJobId] = useState<string | null>(null);
+  const [curateStarting, setCurateStarting] = useState(false);
+  const { status: curateStatus, latestMessage: curateMessage } = useJobStream(curateJobId);
+  const curating = curateStarting || (curateJobId !== null && curateStatus !== 'completed' && curateStatus !== 'failed');
+
+  useEffect(() => {
+    if (curateStatus === 'completed') {
+      queryClient.invalidateQueries({ queryKey: ['pages'] });
+      queryClient.invalidateQueries({ queryKey: ['lint-latest', allSubjects ? 'all' : subjectId] });
+      setCurateJobId(null);
+    } else if (curateStatus === 'failed') {
+      setCurateJobId(null);
+    }
+  }, [curateStatus, queryClient, allSubjects, subjectId]);
+
+  async function runCurate() {
+    setCurateStarting(true);
+    try {
+      const res = await apiFetch('/api/curate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { jobId: string };
+        setCurateJobId(json.jobId);
+      }
+    } finally {
+      setCurateStarting(false);
     }
   }
 
@@ -128,11 +160,19 @@ export function HealthView() {
             <RefreshCw className="h-3.5 w-3.5" />
             {neverRun ? 'Run health check' : 'Re-run'}
           </Button>
+          <Button intent="secondary" onClick={runCurate} loading={curating} disabled={allSubjects}>
+            <Wand2 className="h-3.5 w-3.5" />
+            Tidy structure
+          </Button>
         </div>
       </header>
 
       {running && (
         <p className="text-sm text-foreground-secondary">{latestMessage || 'Running health check…'}</p>
+      )}
+
+      {curating && (
+        <p className="text-sm text-foreground-secondary">{curateMessage || 'Curating structure…'}</p>
       )}
 
       {semanticErrored && (
