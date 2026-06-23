@@ -9,7 +9,9 @@ import {
   getAgentMaxTokensPerJob,
   getAgentMaxParallelSubAgents,
   getWikiLanguage,
+  getAgentAutoCurate,
 } from '../db/repos/settings-repo';
+import * as queue from '../jobs/queue';
 import { renderLanguageDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, runSingle, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
@@ -216,6 +218,20 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   // 写后触发向量回填（未配置 embedding 时 no-op）
   enqueueEmbedIndex(subject.id);
+
+  // 自动策展：ingest 已提交成功 → 对本次受影响页（+ 邻居）做一次保守策展（受全局开关控制）。
+  // fire-and-forget 入队，不影响本次 ingest 的成功返回。
+  if (getAgentAutoCurate()) {
+    const touchedSlugs = [...result.pagesCreated, ...result.pagesUpdated].filter(
+      (s) => s !== 'index' && s !== 'log',
+    );
+    if (touchedSlugs.length > 0) {
+      queue.enqueue('curate', { scope: 'pages', slugs: touchedSlugs, subjectId: subject.id }, subject.id);
+      emit('ingest:complete', `Queued auto-curation for ${touchedSlugs.length} touched page(s).`, {
+        curateSlugs: touchedSlugs.length,
+      });
+    }
+  }
 
   return result as unknown as Record<string, unknown>;
 });
