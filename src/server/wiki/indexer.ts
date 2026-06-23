@@ -9,6 +9,7 @@ import { buildWikiPath } from './page-identity';
 import { parseFrontmatter } from './frontmatter';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
+import * as maturityRepo from '../db/repos/maturity-repo';
 import { getRawDb } from '../db/client';
 import type { WikiPage, SubjectId, Subject } from '@/lib/contracts';
 import type { TitleResolver, ExtractedLink } from './wikilinks';
@@ -61,6 +62,32 @@ function resolveLinkTargetSubject(
   const targetSubject = subjectsRepo.getBySlug(targetSubjectSlug);
   if (!targetSubject) return null;
   return { targetSubjectId: targetSubject.id, targetSlug: target };
+}
+
+/** 收集与 slug 相邻的页（本 subject 内 backlink 源 ∪ 出链目标），去重、排除自身。 */
+export function collectNeighborSlugs(
+  subjectId: SubjectId,
+  slug: string,
+): { subjectId: SubjectId; slug: string }[] {
+  const db = getRawDb();
+  const backlinkSources = db
+    .prepare(
+      `SELECT DISTINCT source_slug AS s FROM wiki_links WHERE target_subject_id = ? AND target_slug = ?`,
+    )
+    .all(subjectId, slug) as Array<{ s: string }>;
+  const outgoing = db
+    .prepare(
+      `SELECT DISTINCT target_slug AS s FROM wiki_links WHERE subject_id = ? AND source_slug = ? AND target_subject_id = ?`,
+    )
+    .all(subjectId, slug, subjectId) as Array<{ s: string }>;
+  const seen = new Set<string>();
+  const out: { subjectId: SubjectId; slug: string }[] = [];
+  for (const r of [...backlinkSources, ...outgoing]) {
+    if (r.s === slug || seen.has(r.s)) continue;
+    seen.add(r.s);
+    out.push({ subjectId, slug: r.s });
+  }
+  return out;
 }
 
 /**
@@ -121,6 +148,16 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
       .filter((l): l is { targetSubjectId: SubjectId; targetSlug: string; context: string } => l !== null);
 
     pagesRepo.setLinksForPage(subjectId, slug, outgoing);
+  }
+
+  // P5 维护层：为本批页建成熟度行 + 按 wiki_links 邻居唤醒相关旧页（整合新知识）。
+  const MAINTENANCE_INITIAL_INTERVAL_DAYS = 1;
+  const now = new Date().toISOString();
+  for (const slug of presentSlugs) {
+    maturityRepo.ensureRow(subjectId, slug, now, MAINTENANCE_INITIAL_INTERVAL_DAYS);
+    for (const nb of collectNeighborSlugs(subjectId, slug)) {
+      maturityRepo.bumpNeighbor(nb.subjectId, nb.slug, now);
+    }
   }
 }
 
