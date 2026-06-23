@@ -108,10 +108,20 @@ function ensureSubjectsAndGeneral(): string {
       slug TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       description TEXT NOT NULL DEFAULT '',
+      augmentation_level TEXT NOT NULL DEFAULT 'standard',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
   `);
+
+  // 存量库补列（同 migrateJobs 的 ALTER ADD COLUMN 增量补齐策略）
+  if (!tableColumns('subjects').includes('augmentation_level')) {
+    try {
+      sqlite.exec(`ALTER TABLE subjects ADD COLUMN augmentation_level TEXT NOT NULL DEFAULT 'standard'`);
+    } catch {
+      // 已存在或不支持
+    }
+  }
 
   const existing = sqlite
     .prepare(`SELECT id FROM subjects WHERE slug = 'general'`)
