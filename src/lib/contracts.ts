@@ -83,7 +83,7 @@ export interface WikiLink {
 
 export interface Job {
   id: string;
-  type: 'ingest' | 'lint' | 'save-to-wiki' | 'merge' | 'split' | 'embed-index' | 'curate';
+  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate';
   status: 'pending' | 'running' | 'completed' | 'failed';
   paramsJson: string;
   resultJson: string | null;
@@ -210,7 +210,7 @@ export interface HistoryEntry {
   id: string;             // operation id
   sha: string | null;     // postHead
   date: string | null;    // commit ISO 时间；git 取不到则 null
-  type: string;           // 'ingest'|'merge'|'split'|'save-to-wiki'|'edit'|'delete'
+  type: string;           // 'ingest'|'curate'|'save-to-wiki'|'edit'|'delete'（merge/split 现归 curate）
   message: string;        // commit message（含 [subject:<slug>] 前缀，原样）
   affectedPages: HistoryAffectedPage[];
   status: 'applied' | 'reverted';

@@ -255,7 +255,7 @@ describe('commitPending sourceOps', () => {
     const ctx = makeCtx({
       job: {
         id: 'job2',
-        type: 'merge',
+        type: 'curate',
         paramsJson: '{}',
         subjectId: 'sub1',
       } as AgentContext['job'],
