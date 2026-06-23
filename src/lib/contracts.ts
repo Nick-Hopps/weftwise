@@ -328,6 +328,8 @@ export const AppSettingsSchema = z.object({
 
 // ── P5 维护层：页面成熟度 ──────────────────────────────────────────────────
 
+// 注：'dormant' 当前为保留/未使用状态。nextMaturity 仅发出 'active'/'graduated'，
+// bumpNeighbor 也始终复活为 'active'。为未来冬眠模式预留，暂不从联合类型中移除。
 export type MaturityState = 'active' | 'dormant' | 'graduated';
 
 /** 每页成熟度（维护层 P5）。spacing 阶梯由 maintenance-policy 推进。 */

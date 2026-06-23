@@ -90,6 +90,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
   const params = JSON.parse(job.paramsJson) as Partial<ReenrichParams>;
   const { slug, subjectId } = params;
   if (!slug || !subjectId) throw new Error('re-enrich job missing slug or subjectId');
+  if (slug === 'index' || slug === 'log') throw new Error('Cannot re-enrich a meta page (index/log)');
 
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) throw new Error(`Subject ${subjectId} not found`);

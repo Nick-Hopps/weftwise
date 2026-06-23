@@ -98,7 +98,7 @@ export function bumpNeighbor(subjectId: string, slug: string, nowIso: string): v
       `UPDATE page_maturity SET
          priority = priority + 1,
          next_due_at = MIN(next_due_at, ?),
-         state = CASE WHEN state = 'active' THEN 'active' ELSE 'active' END,
+         state = 'active', -- dormant/graduated → active（唤醒复活）
          updated_at = ?
        WHERE subject_id = ? AND slug = ?`,
     )

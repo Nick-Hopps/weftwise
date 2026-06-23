@@ -75,9 +75,9 @@ export function collectNeighborSlugs(
   const db = getRawDb();
   const backlinkSources = db
     .prepare(
-      `SELECT DISTINCT source_slug AS s FROM wiki_links WHERE target_subject_id = ? AND target_slug = ?`,
+      `SELECT DISTINCT source_slug AS s FROM wiki_links WHERE subject_id = ? AND target_subject_id = ? AND target_slug = ?`,
     )
-    .all(subjectId, slug) as Array<{ s: string }>;
+    .all(subjectId, subjectId, slug) as Array<{ s: string }>;
   const outgoing = db
     .prepare(
       `SELECT DISTINCT target_slug AS s FROM wiki_links WHERE subject_id = ? AND source_slug = ? AND target_subject_id = ?`,

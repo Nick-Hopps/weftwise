@@ -41,4 +41,20 @@ describe('nextMaturity 递减回报', () => {
     const r = nextMaturity({ state: 'active', passes: 1, intervalDays: 3, newIncrement: 1 }, NOW);
     expect(r.intervalDays).toBe(SPACING_LADDER[2]); // 3 → 7
   });
+
+  it('阶梯顶端（60d）+1 不超出最大档，间隔钳制在 60', () => {
+    // ladderIndex(60)=4，step=1（少量新增），ni=Math.min(4,5)=4 → SPACING_LADDER[4]=60
+    const r = nextMaturity({ state: 'active', passes: 1, intervalDays: 60, newIncrement: 1 }, NOW);
+    expect(r.intervalDays).toBe(60);
+    expect(r.state).toBe('active');
+  });
+
+  it('零增量 + passes 将变为 2（<3）→ 仍 active，间隔 +2 档', () => {
+    // passes=1+1=2 < GRADUATE_AFTER_PASSES(3) → 不毕业
+    // ladderIndex(7)=2，ni=Math.min(4,2+2)=4 → SPACING_LADDER[4]=60
+    const r = nextMaturity({ state: 'active', passes: 1, intervalDays: 7, newIncrement: 0 }, NOW);
+    expect(r.state).toBe('active');
+    expect(r.passes).toBe(2);
+    expect(r.intervalDays).toBe(SPACING_LADDER[4]); // 60
+  });
 });
