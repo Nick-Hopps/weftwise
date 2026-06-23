@@ -22,6 +22,9 @@ interface HtmlSourceFrameProps {
  *
  * 安全边界靠 iframe 的 opaque origin（sandbox 永不含 allow-same-origin）+ raw 路由
  * 的 CSP，不依赖此处的启发式判定。
+ *
+ * 调用方应传入服务端计算的 `safety`：缺省（无 safety）按 safe 处理 = 直接放行脚本
+ * （最不保守分支），故请勿在未经扫描的情况下挂载本组件。
  */
 export function HtmlSourceFrame({ src, title, safety, className }: HtmlSourceFrameProps) {
   const [forceRun, setForceRun] = useState(false);
