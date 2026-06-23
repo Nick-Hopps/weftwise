@@ -109,6 +109,7 @@
 | `agentMaxParallelSubAgents` | number | `3` | fanout writer step 的最大并发数 |
 | `agentMcpLifecycle` | string | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
 | `agentTaskRouterMode` | string | `'frontmatter-override'` | skill LLM 选择策略 |
+| `agentAutoCurate` | boolean | `true` | 🆕 ingest 完成后自动入队 curate（scope:'pages', touched slugs）；false 关闭自动策展 |
 
 对应 getter/setter 统一在 `settings-repo.ts` 封装，UI 通过 `PUT /api/settings` 写入，**不**镜像到 Zustand。
 
@@ -176,7 +177,7 @@ src/server/db/
     ├── pages-repo.ts          # 全部强制 subjectId
     ├── jobs-repo.ts           # 写入/查询带 subject_id
     ├── sources-repo.ts        # subject-scoped
-    ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key）
+    ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key + agentAutoCurate）
     ├── checkpoints-repo.ts    # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
@@ -196,6 +197,7 @@ src/server/db/
 | 2026-06-22 | 新增 conversations/messages 两表 + conversations-repo（多轮对话持久化，subject-scoped，级联删除）（⑦）|
 | 2026-06-22 | 新增 page_embeddings 表 + embeddings-repo（向量语义检索，subject-scoped，FK CASCADE，无 legacy 迁移）（⑧）|
 | 2026-06-22 | settings-repo 加 web 搜索 3 key（`webSearchProvider/webSearchApiKey/webSearchMaxResults` + getter/setter + `getWebSearchConfig()`，无新表，复用 app_settings）（⑨ verifier 联网核查）|
+| 2026-06-23 | settings-repo 新增 `agentAutoCurate` key（boolean，默认 true）+ `getAgentAutoCurate` / `setAgentAutoCurate`；UI 通过 `PUT /api/settings` 写入，Agents settings panel 展示；ingest finalize 读取决定是否自动入队 curate |
 
 ---
 

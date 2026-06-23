@@ -26,7 +26,7 @@ SubjectId      = string  // uuid 或 'subject-general' / 'subject-<uuid>' legacy
 Subject        { id: SubjectId, slug, name, description, createdAt, updatedAt }
 WikiPage       { subjectId, slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
 WikiLink       { subjectId, sourceSlug, targetSubjectId, targetSlug, context }
-Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'merge'|'split', status, subjectId: SubjectId|null,
+Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'curate'|'embed-index', status, subjectId: SubjectId|null,
                  paramsJson, resultJson, createdAt, startedAt, completedAt,
                  leaseExpiresAt, heartbeatAt, attemptCount }
 JobEvent       { id, jobId, type, message, dataJson, createdAt }
@@ -114,6 +114,7 @@ src/lib/
 | 2026-06-22 | contracts 新增 `HistoryEntry` / `HistoryAffectedPage` 类型（⑥ 版本历史/diff）|
 | 2026-06-22 | contracts 新增 `Conversation` / `ConversationMessage` 类型（⑦ 对话持久化 + 多轮记忆）|
 | 2026-06-22 | contracts 加 `WebSearchProviderSchema/WebSearchApiKeySchema/WebSearchMaxResultsSchema` + 默认值 + `WebSearchProvider` 类型；`AppSettings`/`AppSettingsSchema` 加 `webSearchProvider/webSearchApiKey/webSearchMaxResults`（⑨ verifier 联网核查搜索后端配置）|
+| 2026-06-23 | `Job.type` 移除 `'merge'|'split'`，新增 `'curate'`（merge/split 内化为 curate 子步骤，不再是独立 job 类型）；`AppSettings` 加 `agentAutoCurate: boolean`（默认 true，控制 ingest finalize 后是否自动入队 curate scope:'pages'）|
 
 ---
 
