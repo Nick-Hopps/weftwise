@@ -225,6 +225,20 @@ export function appendJobEvent(
   return event;
 }
 
+/**
+ * 删除 created_at 早于 cutoff 的 job_events，止住 job_events 表无界增长。
+ * 返回删除行数。保留近期事件供 SSE 续播（保留窗口远大于单条流的最大寿命）。
+ * 注：DELETE 按 created_at 过滤为全表扫描——不为此单列建索引（避免拖累热路径
+ * appendJobEvent 的写入成本），靠保留窗口把表维持在小规模即可。
+ */
+export function pruneJobEvents(cutoffIso: string): number {
+  const sqlite = getRawDb();
+  const result = sqlite
+    .prepare(`DELETE FROM job_events WHERE created_at < ?`)
+    .run(cutoffIso);
+  return result.changes;
+}
+
 export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
   if (afterId) {
     const sqlite = getRawDb();

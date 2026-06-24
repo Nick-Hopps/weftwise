@@ -40,3 +40,8 @@ export function reclaimExpired(): number {
 export function updateHeartbeat(jobId: string): void {
   jobsRepo.updateHeartbeat(jobId);
 }
+
+/** 清扫早于 cutoff 的 job_events，返回删除行数。 */
+export function pruneEvents(cutoffIso: string): number {
+  return jobsRepo.pruneJobEvents(cutoffIso);
+}
