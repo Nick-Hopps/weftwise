@@ -18,7 +18,7 @@
 | `(app)/page.tsx` | Dashboard 首页（按 `currentSubject` 过滤，空态 / 有内容两种布局） |
 | `(app)/wiki/[...slug]/page.tsx` | 动态 wiki 页面（SSR）：`?s=<slug>` 优先于 cookie；找不到页时通过 `findPageInOtherSubjects` 渲染"是否在其他 subject"提示 |
 | `(app)/subjects/page.tsx` | 🆕 Subject 管理页：卡片网格 + 创建 / 重命名 / 删除（当前激活 + 非空 subject 都禁用删除并 hover 提示原因；slug 通过 `?new=1` 自动展开创建表单） |
-| `(app)/health/page.tsx` | 🆕 知识库体检中心：触发 lint（当前 subject / 全量）+ 按严重度分组展示 findings + 跳转到对应页（只读，自动修复见后续特性）|
+| `(app)/health/page.tsx` | 🆕 知识库体检中心：触发 lint（当前 subject / 全量）+ 按严重度分组展示 findings + 跳转到对应页（含 "Fix issues" 一键修复入口）|
 | `(app)/history/page.tsx` | 🆕 操作时间线：当前 subject 写操作倒序（类型/受影响页/时间戳，仿 /health /tags），单次操作可展开查看 unified diff + 回滚按钮（前向 Saga 还原） |
 | `(app)/wiki/[...slug]/edit/page.tsx` | 🆕 页面在线编辑：`@uiw/react-md-editor` 编辑整文件 markdown，保存走 `PUT /api/pages`（Saga 重索引）后跳回读页 |
 | `(app)/tags/page.tsx` | 🆕 标签索引：列出当前 subject 所有 tag + 页计数（客户端聚合 /api/pages）|
@@ -36,6 +36,7 @@
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：triage → confirm → 执行 merge/split，caps merge≤5/split≤5）；返回 202 + `{ jobId }` |
+| `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：从 preHead 重建 inverse changeset、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -102,6 +103,7 @@ src/app/
     ├── lint/route.ts
     ├── lint/latest/route.ts
     ├── curate/route.ts                  # 🆕 POST 入队 curate（agent 策展）
+    ├── fix/route.ts                     # 🆕 POST 入队 fix（一键修复 lint findings）
     ├── jobs/route.ts
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
@@ -130,6 +132,7 @@ src/app/
 | 2026-06-22 | 新增 `(app)/history/page.tsx` + `/api/history*` 三个路由（GET 列表、GET diff、POST 回滚），支持前向 Saga 还原（⑥ 版本历史/diff）|
 | 2026-06-22 | 新增 `/api/conversations` + `/api/conversations/[id]` 四个路由（GET 列表、GET/PATCH/DELETE 详情）；`POST /api/query` 默认流式支持 conversationId 多轮 + 落库（⑦ 对话持久化 + 多轮记忆）|
 | 2026-06-23 | 删除 `/api/merge` 和 `/api/split` 路由（逐页按钮已移除）；新增 `POST /api/curate`（全 subject agent 策展，入队 curate 任务）；merge/split LLM 逻辑内化为 page-ops 供 curate-service 调用 |
+| 2026-06-24 | 新增 `POST /api/fix`（入队 fix 任务，一键修复 lint findings）；`(app)/health/page.tsx` 加 "Fix issues" 入口 |
 
 ---
 

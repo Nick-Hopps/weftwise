@@ -86,6 +86,27 @@ Agent 驱动的 subject 结构策展（merge/split 内化）。`params { subject
 
 > merge/split 的 LLM 调用与 Saga 执行已抽取至 `wiki/page-ops.ts`，curate-service 与未来其他调用方均可复用；curate-service 自己只负责编排与 emit。
 
+### `fix-service.ts` 🆕 — 任务类型 `'fix'`
+
+一键修复 lint findings。`params { subjectId }`。
+
+**工作清单构建**（`buildFixWorklist`，纯函数 `fix-deterministic.ts`）：
+- **确定性 findings**：调 `runDeterministicChecksForSubject(subjectId)`（新鲜重扫，不依赖快照），取 `missing-frontmatter` + `broken-link` 类型。
+- **语义 findings**：调 `selectLatestFindings(subjectId)`（最近 completed lint 快照），取 `missing-crossref` + `contradiction` 类型。
+- `orphan` / `stale-source` / `coverage-gap` 不在修复范围。
+
+**流程（两阶段）**：
+
+1. **阶段1（确定性补 frontmatter）**：`fixMissingFrontmatter(slug, doc, now)` 纯函数批量填补缺失 frontmatter 字段（title/summary/tags/created），一次 Saga commit 提交所有受影响页（1 commit）。broken-link 在此阶段跳过（需 LLM 判断语义意图）。
+2. **阶段2（LLM 逐页修复）**：对剩余 findings 按页分组（broken-link / missing-crossref / contradiction），逐页调 `generateStructuredOutput('fix', FixPageSchema, ...)`：
+   - `FixPageSchema.proceed`（自我门控）：LLM 判断本页不值得修复时跳过，发 `fix:skip` 带理由。
+   - 修复结果经 `validateChangeset` 校验（拦截新引入的坏链），校验失败发 `fix:warn` 跳过该页。
+   - 每页成功修复独立 1 commit（粒度可回滚）。
+
+**事件**：`fix:start` / `fix:phase1` / `fix:phase2` / `fix:page`（每页开始）/ `fix:skip`（proceed=false 或 validate 失败）/ `fix:warn`（错误继续）/ `fix:complete`。
+
+完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发）。
+
 ### `reenrich-service.ts` 🆕 — 任务类型 `'re-enrich'`
 
 手动重新增益：复用 ingest 增益流水线（enricher → verify），跳过 writer——现有页正文即忠实层，直接当 draft；`commitPending` 收口提交（不重写 index/log）。即便 subject `augmentationLevel` 为 `off` 也强制按 `standard` 跑（用户显式触发语义）。
@@ -151,6 +172,8 @@ src/server/services/
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
+├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2）
+├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / partitionFindings
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
 ├── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
 ├── maintenance-policy.ts # 🆕 纯函数：递减回报间隔策略（SPACING_LADDER / countCallouts / nextMaturity，P5）
@@ -172,6 +195,7 @@ src/server/services/
 | 2026-06-22 | ingest verifier 阶段→ P3 联网核查（⑨）：steps 第4步改 `verify` step kind（`verify-page.ts::runPageVerification` 两段式 triage→Tavily→apply，全程无 tools）；`finalizeIngest` 把 `ctx.citedSources` 经 `extractContent`+`buildWebSourceImports`+`saveRawSource` 导入为 source，作 `commitPending` 第三参随同一 commit 落地；`MIN_SKILL_VERSIONS` 加 triage/apply；未配置 web 搜索退化为 P2 自检 |
 | 2026-06-23 | 删除 `merge-service`（任务类型 `'merge'`）与 `split-service`（任务类型 `'split'`）；merge/split 执行逻辑内化至 `wiki/page-ops.ts`；新增 `curate-service`（任务类型 `'curate'`：triage→confirm→execute，seed 护栏，caps merge≤5/split≤5）；ingest finalize 在 `agentAutoCurate=true` 时自动入队 curate（scope:'pages', touchedSlugs）|
 | 2026-06-23 | 新增 `reenrich-service`（任务类型 `'re-enrich'`）：手动重新增益，复用 ingest 增益流水线（enricher→verify），跳过 writer，commitPending 收口；P4 增益强度（`subjects.augmentation_level`）贯穿服务层（off→standard 降级） |
+| 2026-06-24 | 新增 `fix-service`（任务类型 `'fix'`）：两阶段修复 lint findings——阶段1 确定性补 frontmatter（`fix-deterministic.ts` 纯函数，1 commit）；阶段2 按页 `generateStructuredOutput('fix')` 逐页修复（`proceed` 自我门控 + `validateChangeset` 拦坏链，每页 1 commit）；orphan/stale-source/coverage-gap 不修；完成后 UI 自动重跑 lint |
 
 ---
 
