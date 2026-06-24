@@ -88,6 +88,7 @@ export function HealthView() {
       const d = done?.data as { fixed?: number; skipped?: number; failed?: number } | undefined;
       setFixSummary({ fixed: d?.fixed ?? 0, skipped: d?.skipped ?? 0, failed: d?.failed ?? 0 });
       queryClient.invalidateQueries({ queryKey: ['pages'] });
+      queryClient.invalidateQueries({ queryKey: ['lint-latest', allSubjects ? 'all' : subjectId] });
       setFixJobId(null);
       // 闭环：修复后自动重跑体检刷新 findings
       void runLint();
@@ -95,7 +96,7 @@ export function HealthView() {
       setFixJobId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixStatus, fixEvents]);
+  }, [fixStatus, fixEvents, queryClient, allSubjects, subjectId]);
 
   async function runCurate() {
     setCurateStarting(true);
