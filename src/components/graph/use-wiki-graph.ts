@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import cytoscape from 'cytoscape';
 import { useUIStore } from '@/stores/ui-store';
-import { apiFetch } from '@/lib/api-fetch';
+import { useApiFetch } from '@/lib/api-fetch';
 import { readGraphTheme } from '@/lib/theme/read-theme-vars';
 import { buildStylesheet, applyHighlight } from './graph-stylesheet';
 import { computeNodeSize, LAYOUT_COMPACT } from './graph-layout';
@@ -34,6 +34,10 @@ export function useWikiGraph(
 ) {
   const router = useRouter();
   const darkMode = useUIStore((s) => s.darkMode);
+  // 统一经 useApiFetch 注入 subjectId（/api/graph 非 subject-agnostic）。
+  // 父组件 MiniGraphView 用 key={currentSubjectId} 在切主题时强制重挂，
+  // 故本实例生命周期内 subjectId 恒定，subjectFetch 身份稳定，run-once effect 不受影响。
+  const subjectFetch = useApiFetch();
 
   const cyRef = useRef<cytoscape.Core | null>(null);
   const simRef = useRef<SimulationHandle | null>(null);
@@ -52,12 +56,7 @@ export function useWikiGraph(
     let cancelled = false;
     setIsLoading(true);
 
-    const subjectId = useUIStore.getState().currentSubjectId;
-    const graphUrl = subjectId
-      ? `/api/graph?subjectId=${encodeURIComponent(subjectId)}`
-      : '/api/graph';
-
-    apiFetch(graphUrl)
+    subjectFetch('/api/graph')
       .then((res) => res.json())
       .then((data: WikiGraphData) => {
         if (cancelled) return;
