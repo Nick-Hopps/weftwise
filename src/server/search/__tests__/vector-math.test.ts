@@ -9,6 +9,17 @@ describe('vector-math', () => {
     out.forEach((x, i) => expect(x).toBeCloseTo(v[i], 5));
   });
 
+  it('decode 处理非 4 字节对齐的 Buffer（共享池偏移）也能正确还原', () => {
+    const f32 = Float32Array.from([1, 2, 3]);
+    const src = Buffer.from(f32.buffer);
+    // 构造一个 byteOffset 为奇数（必然非 4 字节对齐）的 Buffer 视图
+    const big = Buffer.allocUnsafe(src.length + 1);
+    const unaligned = big.subarray(1);
+    src.copy(unaligned);
+    expect(unaligned.byteOffset % 4).not.toBe(0); // 前置断言：确实未对齐
+    expect(Array.from(decodeVector(unaligned))).toEqual([1, 2, 3]);
+  });
+
   it('cosine 同向≈1 / 正交=0 / 反向≈-1', () => {
     expect(cosineSimilarity([1, 0], [2, 0])).toBeCloseTo(1, 6);
     expect(cosineSimilarity([1, 0], [0, 1])).toBeCloseTo(0, 6);
