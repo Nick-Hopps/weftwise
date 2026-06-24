@@ -75,7 +75,7 @@
 
 ### `health/`
 
-- `health-view.tsx` —— 🆕 知识库体检主视图；"Tidy structure" 按钮触发 `POST /api/curate`（全 subject agent 策展）+ `useJobStream` 追踪 `curate:*` 事件，展示策展进度；同时展示 lint findings 按严重度分组
+- `health-view.tsx` —— 🆕 知识库体检主视图；"Tidy structure" 按钮触发 `POST /api/curate`（全 subject agent 策展）+ `useJobStream` 追踪 `curate:*` 事件，展示策展进度；同时展示 lint findings 按严重度分组；"Fix issues" 按钮触发 `POST /api/fix`（`fix` job）+ `useJobStream` 追踪 `fix:*` 事件，job 完成后自动重跑 lint 闭环
 
 ### `history/`
 
@@ -170,6 +170,7 @@ src/components/
 | 2026-06-23 | Settings 弹窗改两栏式：新增 `settings-categories.ts`（5 类元数据单源）+ `settings-nav.tsx`（左导航）；`settings-dialog` 加宽 `max-w-3xl`+固定高度+`active` 分类 state；`settings-content` 拆为 5 个 panel 按分类切换；行级原语与 `/api/settings` 数据流不变；spec 见 docs/superpowers/specs/2026-06-23-settings-two-column-layout-design.md |
 | 2026-06-23 | 删除 `wiki/{merge,split}-{button,dialog}.tsx`（4 个文件）；`frontmatter-display` 不再渲染 Merge/Split 按钮；新增 `health/health-view.tsx` 的 "Tidy structure" 入口（`POST /api/curate` + `useJobStream` 追踪 `curate:*`）；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-23-agent-driven-page-curation* |
 | 2026-06-24 | 在线 Markdown 编辑器重做：`page-editor` 改全高 flex + 拉 titleSlugMap；`md-editor` 加 `previewRenderer`(`components.preview`)/`height="100%"`/`wiki-md-editor` 类名；新增 `wiki/editor-preview.tsx`（复用 PageRenderer 仅正文预览）；`globals.css` 加 `.wiki-md-editor` 工具栏/字号增强；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-24-markdown-editor-rework* |
+| 2026-06-24 | `health/health-view.tsx` 加 "Fix issues" 按钮（`POST /api/fix` + `useJobStream` 追踪 `fix:*`，完成后自动重跑 lint）；`use-job-stream` 注册 `fix:*` 事件；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-24-health-fix-findings* |
 
 ---
 
