@@ -1,4 +1,4 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, min } from 'drizzle-orm';
 import { getDb, getRawDb } from '../client';
 import { pages, wikiLinks } from '../schema';
 import type { WikiPage, WikiLink, SubjectId } from '@/lib/contracts';
@@ -111,29 +111,37 @@ export function deletePage(subjectId: SubjectId, slug: string): void {
 
 export function getBacklinks(subjectId: SubjectId, slug: string): WikiPage[] {
   const db = getDb();
-  const links = db
-    .select()
+  // 单条 JOIN 取所有指向 (subjectId, slug) 的源页（替代逐条 getPageBySlug 的 N+1）。
+  // GROUP BY 源页复合 PK 去重；ORDER BY min(link.id) 保留「首现」顺序与旧实现一致；
+  // 悬空链接（无对应 page 行）经 innerJoin 自然剔除；meta 源页保持在 JS 侧过滤。
+  const rows = db
+    .select({
+      subjectId: pages.subjectId,
+      slug: pages.slug,
+      title: pages.title,
+      path: pages.path,
+      summary: pages.summary,
+      contentHash: pages.contentHash,
+      tags: pages.tags,
+      createdAt: pages.createdAt,
+      updatedAt: pages.updatedAt,
+    })
     .from(wikiLinks)
-    .where(
+    .innerJoin(
+      pages,
       and(
-        eq(wikiLinks.targetSubjectId, subjectId),
-        eq(wikiLinks.targetSlug, slug)
+        eq(pages.subjectId, wikiLinks.subjectId),
+        eq(pages.slug, wikiLinks.sourceSlug)
       )
     )
+    .where(
+      and(eq(wikiLinks.targetSubjectId, subjectId), eq(wikiLinks.targetSlug, slug))
+    )
+    .groupBy(pages.subjectId, pages.slug)
+    .orderBy(min(wikiLinks.id))
     .all();
 
-  if (links.length === 0) return [];
-
-  const result: WikiPage[] = [];
-  const seen = new Set<string>();
-  for (const link of links) {
-    const key = metaKey(link.subjectId, link.sourceSlug);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const page = getPageBySlug(link.subjectId, link.sourceSlug);
-    if (page && !isMetaPage(page)) result.push(page);
-  }
-  return result;
+  return rows.map(rowToWikiPage).filter((page) => !isMetaPage(page));
 }
 
 export interface SearchResult {
