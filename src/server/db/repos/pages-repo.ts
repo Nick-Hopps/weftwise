@@ -259,17 +259,21 @@ export function getTitleToSlugMap(subjectId: SubjectId): Map<string, string> {
   return map;
 }
 
-export function getAllLinks(subjectId?: SubjectId): WikiLink[] {
+export function getAllLinks(
+  subjectId?: SubjectId,
+  metaKeys?: Set<string>
+): WikiLink[] {
   const db = getDb();
   const rows = subjectId
     ? db.select().from(wikiLinks).where(eq(wikiLinks.subjectId, subjectId)).all()
     : db.select().from(wikiLinks).all();
-  const metaKeys = getMetaPageKeys();
+  // metaKeys 可由调用方预先计算并复用（避免每次调用都做一次跨主题 getMetaPageKeys 全表扫描）。
+  const keys = metaKeys ?? getMetaPageKeys();
   return rows
     .filter(
       (row) =>
-        !metaKeys.has(metaKey(row.subjectId, row.sourceSlug)) &&
-        !metaKeys.has(metaKey(row.targetSubjectId, row.targetSlug))
+        !keys.has(metaKey(row.subjectId, row.sourceSlug)) &&
+        !keys.has(metaKey(row.targetSubjectId, row.targetSlug))
     )
     .map((row) => ({
       subjectId: row.subjectId,
