@@ -4,6 +4,7 @@ import {
   fixMissingFrontmatter,
   partitionFindings,
   buildFixWorklist,
+  bodyShrankTooMuch,
 } from '../fix-deterministic';
 import type { LintFinding, WikiDocument } from '@/lib/contracts';
 
@@ -95,5 +96,24 @@ describe('buildFixWorklist', () => {
     const det = [f('broken-link', 'a', 'L1'), f('broken-link', 'a', 'L2')];
     const out = buildFixWorklist(det, []);
     expect(out).toHaveLength(2);
+  });
+});
+
+describe('bodyShrankTooMuch', () => {
+  it('修复后正文不足原文 50% → 返回 true', () => {
+    const original = 'a'.repeat(100);
+    const shrunken = 'a'.repeat(10);
+    expect(bodyShrankTooMuch(original, shrunken)).toBe(true);
+  });
+
+  it('小幅外科式收缩（96/100）→ 返回 false', () => {
+    const original = 'a'.repeat(100);
+    const trimmed = 'a'.repeat(96);
+    expect(bodyShrankTooMuch(original, trimmed)).toBe(false);
+  });
+
+  it('原文为空 → 始终返回 false', () => {
+    expect(bodyShrankTooMuch('', 'anything')).toBe(false);
+    expect(bodyShrankTooMuch('   ', '')).toBe(false);
   });
 });
