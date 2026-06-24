@@ -100,14 +100,13 @@
 
 服务层（`ingest` / `query` / `lint`）每次调用时**实时**读取，不在启动时缓存，方便 UI 修改即时生效。
 
-**Phase 1 新增的 5 个 agent 配置 key**（由 `app_settings` 表承载，`runPipeline` 每次调用时实时读取）：
+**Phase 1 新增的 4 个 agent 配置 key**（由 `app_settings` 表承载，`runPipeline` 每次调用时实时读取）：
 
 | Key | 类型 | 默认值 | 说明 |
 |-----|------|--------|------|
 | `agentMaxSteps` | number | `25` | 单 job 跨所有 skill step 的最大 tool-call 轮次 |
 | `agentMaxTokensPerJob` | number | `1200000` | 单 job token 总预算（in + out 合计）；P2 三轮内容阶段后由 500k 提升至 1.2M |
 | `agentMaxParallelSubAgents` | number | `3` | fanout writer step 的最大并发数 |
-| `agentMcpLifecycle` | string | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
 | `agentTaskRouterMode` | string | `'frontmatter-override'` | skill LLM 选择策略 |
 | `agentAutoCurate` | boolean | `true` | 🆕 ingest 完成后自动入队 curate（scope:'pages', touched slugs）；false 关闭自动策展 |
 
@@ -178,7 +177,7 @@ src/server/db/
     ├── pages-repo.ts          # 全部强制 subjectId
     ├── jobs-repo.ts           # 写入/查询带 subject_id
     ├── sources-repo.ts        # subject-scoped
-    ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 5 个 agent 配置 key + agentAutoCurate）
+    ├── settings-repo.ts       # 全局 key/value 设置（wikiLanguage + 4 个 agent 配置 key + agentAutoCurate）
     ├── checkpoints-repo.ts    # ingest 断点 CRUD + getProgress（getCheckpoints / putCheckpoint / deleteCheckpoints）
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
@@ -200,6 +199,7 @@ src/server/db/
 | 2026-06-22 | 新增 page_embeddings 表 + embeddings-repo（向量语义检索，subject-scoped，FK CASCADE，无 legacy 迁移）（⑧）|
 | 2026-06-22 | settings-repo 加 web 搜索 3 key（`webSearchProvider/webSearchApiKey/webSearchMaxResults` + getter/setter + `getWebSearchConfig()`，无新表，复用 app_settings）（⑨ verifier 联网核查）|
 | 2026-06-23 | settings-repo 新增 `agentAutoCurate` key（boolean，默认 true）+ `getAgentAutoCurate` / `setAgentAutoCurate`；UI 通过 `PUT /api/settings` 写入，Agents settings panel 展示；ingest finalize 读取决定是否自动入队 curate |
+| 2026-06-24 | 移除 `agentMcpLifecycle` 设置 key + `getAgentMcpLifecycle` / `setAgentMcpLifecycle`（MCP 功能整体移除，详见根 Changelog）；agent 配置 key 由 5 降为 4 |
 
 ---
 

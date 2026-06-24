@@ -25,9 +25,6 @@ import { vaultReadTool } from './agents/tools/builtin/vault-read';
 import { vaultSearchTool } from './agents/tools/builtin/vault-search';
 import { commitChangesetTool } from './agents/tools/builtin/commit-changeset';
 import { dispatchSkillTool } from './agents/tools/builtin/dispatch-skill';
-import { createMcpPool } from './agents/tools/mcp/client-pool';
-import { loadMcpConfig } from './agents/tools/mcp/config';
-import { getAgentMcpLifecycle } from './db/repos/settings-repo';
 import { setRuntimeRegistries } from './worker-runtime';
 import { createLogger } from './logging';
 
@@ -42,7 +39,7 @@ import './services/fix-service';
 
 const log = createLogger('worker');
 
-async function bootRuntime(): Promise<{ shutdown: () => Promise<void> }> {
+async function bootRuntime(): Promise<void> {
   const skillRegistry = await buildSkillRegistry({
     vaultDir: vaultPath(),
     examplesDir: join(process.cwd(), 'examples', 'skills'),
@@ -60,18 +57,7 @@ async function bootRuntime(): Promise<{ shutdown: () => Promise<void> }> {
   toolRegistry.register(commitChangesetTool as ToolDef);
   toolRegistry.register(dispatchSkillTool as ToolDef);
 
-  const mcpConfig = loadMcpConfig(join(process.cwd(), 'mcp-config.json'));
-  const pool = createMcpPool({
-    config: mcpConfig,
-    lifecycle: getAgentMcpLifecycle(),
-    toolRegistry,
-  });
-  pool.registerToolPlaceholders(toolRegistry);
-  await pool.startEager();
-
   setRuntimeRegistries({ skillRegistry, toolRegistry });
-
-  return { shutdown: () => pool.shutdown() };
 }
 
 async function main() {
@@ -154,8 +140,8 @@ async function main() {
     log.warn('embed-index self-heal enqueue failed', err);
   }
 
-  // Boot agent runtime (skills + tools + MCP pool)
-  const runtime = await bootRuntime();
+  // Boot agent runtime (skills + tools)
+  await bootRuntime();
 
   // Start the worker polling loop (respect env config)
   const pollMs = parseInt(process.env.WORKER_POLL_INTERVAL_MS || '2000', 10);
@@ -166,12 +152,6 @@ async function main() {
   async function shutdown(signal: string) {
     log.info(`Received ${signal}, stopping worker...`);
     stop();
-    try {
-      await runtime.shutdown();
-      log.info('Agent runtime shut down');
-    } catch (err) {
-      log.error('Failed to shut down agent runtime:', err);
-    }
     try {
       getRawDb().close();
       log.info('Database connection closed');

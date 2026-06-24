@@ -10,8 +10,6 @@ import {
   setAgentMaxTokensPerJob,
   getAgentMaxParallelSubAgents,
   setAgentMaxParallelSubAgents,
-  getAgentMcpLifecycle,
-  setAgentMcpLifecycle,
   getAgentTaskRouterMode,
   setAgentTaskRouterMode,
   getAgentAutoCurate,
@@ -34,7 +32,6 @@ import {
   AgentMaxStepsSchema,
   AgentMaxTokensPerJobSchema,
   AgentMaxParallelSubAgentsSchema,
-  AgentMcpLifecycleSchema,
   AgentTaskRouterModeSchema,
   AgentAutoCurateSchema,
   WebSearchProviderSchema,
@@ -54,7 +51,6 @@ function readSettings(): AppSettings {
     agentMaxSteps: getAgentMaxSteps(),
     agentMaxTokensPerJob: getAgentMaxTokensPerJob(),
     agentMaxParallelSubAgents: getAgentMaxParallelSubAgents(),
-    agentMcpLifecycle: getAgentMcpLifecycle(),
     agentTaskRouterMode: getAgentTaskRouterMode(),
     agentAutoCurate: getAgentAutoCurate(),
     webSearchProvider: getWebSearchProvider(),
@@ -77,7 +73,6 @@ const PutBodySchema = z.object({
   agentMaxSteps: AgentMaxStepsSchema.optional(),
   agentMaxTokensPerJob: AgentMaxTokensPerJobSchema.optional(),
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema.optional(),
-  agentMcpLifecycle: AgentMcpLifecycleSchema.optional(),
   agentTaskRouterMode: AgentTaskRouterModeSchema.optional(),
   agentAutoCurate: AgentAutoCurateSchema.optional(),
   webSearchProvider: WebSearchProviderSchema.optional(),
@@ -114,7 +109,6 @@ export async function PUT(request: NextRequest) {
   if (d.agentMaxSteps !== undefined) setAgentMaxSteps(d.agentMaxSteps);
   if (d.agentMaxTokensPerJob !== undefined) setAgentMaxTokensPerJob(d.agentMaxTokensPerJob);
   if (d.agentMaxParallelSubAgents !== undefined) setAgentMaxParallelSubAgents(d.agentMaxParallelSubAgents);
-  if (d.agentMcpLifecycle !== undefined) setAgentMcpLifecycle(d.agentMcpLifecycle);
   if (d.agentTaskRouterMode !== undefined) setAgentTaskRouterMode(d.agentTaskRouterMode);
   if (d.agentAutoCurate !== undefined) setAgentAutoCurate(d.agentAutoCurate);
   if (d.webSearchProvider !== undefined) setWebSearchProvider(d.webSearchProvider);

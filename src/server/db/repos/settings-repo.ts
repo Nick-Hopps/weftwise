@@ -7,16 +7,13 @@ import {
   AgentMaxParallelSubAgentsSchema,
   AgentMaxStepsSchema,
   AgentMaxTokensPerJobSchema,
-  AgentMcpLifecycleSchema,
   AgentTaskRouterModeSchema,
   DEFAULT_AGENT_MAX_PARALLEL_SUB_AGENTS,
   DEFAULT_AGENT_MAX_STEPS,
   DEFAULT_AGENT_MAX_TOKENS_PER_JOB,
-  DEFAULT_AGENT_MCP_LIFECYCLE,
   DEFAULT_AGENT_TASK_ROUTER_MODE,
   AgentAutoCurateSchema,
   DEFAULT_AGENT_AUTO_CURATE,
-  type AgentMcpLifecycle,
   type AgentTaskRouterMode,
   WebSearchProviderSchema,
   WebSearchApiKeySchema,
@@ -37,7 +34,6 @@ const KEY_WIKI_LANGUAGE = 'wikiLanguage';
 const KEY_AGENT_MAX_STEPS = 'agentMaxSteps';
 const KEY_AGENT_MAX_TOKENS_PER_JOB = 'agentMaxTokensPerJob';
 const KEY_AGENT_MAX_PARALLEL_SUB_AGENTS = 'agentMaxParallelSubAgents';
-const KEY_AGENT_MCP_LIFECYCLE = 'agentMcpLifecycle';
 const KEY_AGENT_TASK_ROUTER_MODE = 'agentTaskRouterMode';
 const KEY_AGENT_AUTO_CURATE = 'agentAutoCurate';
 
@@ -149,28 +145,6 @@ export function getAgentMaxParallelSubAgents(): number {
 export function setAgentMaxParallelSubAgents(value: number): number {
   const v = AgentMaxParallelSubAgentsSchema.parse(value);
   writeKey(KEY_AGENT_MAX_PARALLEL_SUB_AGENTS, String(v));
-  return v;
-}
-
-/**
- * Returns MCP lifecycle mode ('lazy' | 'eager' | 'per-job').
- * Falls back to DEFAULT_AGENT_MCP_LIFECYCLE ('lazy').
- * Reads DB on every call so changes take effect without worker restart.
- */
-export function getAgentMcpLifecycle(): AgentMcpLifecycle {
-  const raw = readKey(KEY_AGENT_MCP_LIFECYCLE);
-  if (raw === undefined) return DEFAULT_AGENT_MCP_LIFECYCLE;
-  const parsed = AgentMcpLifecycleSchema.safeParse(raw);
-  return parsed.success ? parsed.data : DEFAULT_AGENT_MCP_LIFECYCLE;
-}
-
-/**
- * Persists MCP lifecycle mode. Validates via AgentMcpLifecycleSchema.
- * Returns the validated value.
- */
-export function setAgentMcpLifecycle(value: AgentMcpLifecycle): AgentMcpLifecycle {
-  const v = AgentMcpLifecycleSchema.parse(value);
-  writeKey(KEY_AGENT_MCP_LIFECYCLE, v);
   return v;
 }
 
