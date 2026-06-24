@@ -92,12 +92,12 @@ operations.status = 'applied'                   ← 释放 lock
 
 ## 测试与质量
 
-当前零测试。强烈建议优先覆盖：
+已覆盖（`__tests__/`，vitest，9 文件）：`wikilinks`（解析 + `[[subject:page]]` 跨主题 + `resolveWikiLinkTarget`）、`wiki-transaction`（validate / rollback 幂等 / applyChangeset）、`frontmatter`（round-trip）、`relink`（改标题/重指引用重写）、`split-plan`、`curate-plan`、`revert`、`history`、`indexer-wakeup`（邻居唤醒）。
 
-- `parseFrontmatter` / `serializeFrontmatter` round-trip（尤其带 emoji / code fence / windows 行尾）
-- `extractWikiLinks` 对 Obsidian 语法：`[[Target]]` / `[[Target|Alias]]` / `[[Target#Section]]`
-- `resolveWikiLinkTarget` 对 alias、重名 page、大小写的行为
-- `rollbackChangeset` 的幂等：连续两次调用不会爆炸
+仍待补充：
+
+- `parseFrontmatter` / `serializeFrontmatter` 的边界（emoji / code fence / windows 行尾）。
+- `resolveWikiLinkTarget` 对重名 page、大小写的更多分支。
 
 ## 常见问题 (FAQ)
 
@@ -142,6 +142,7 @@ src/server/wiki/
 | 2026-06-22 | 新增 `revert.ts::buildRevertEntries`（回滚 inverse 条目纯函数）+ `history.ts::buildHistoryEntries`（operations 行+git 时间合成时间线条目）；供 ⑥ 版本历史/回滚 |
 | 2026-06-22 | `wiki-transaction::SourceLinkOps` 升级为多源：`{ links: Array<{ sourceId; pageSlugs }>; extraStagePaths?: string[]; linkPageSource; updateSourcePageLinks; onWarning? }`；`applyChangeset` stage `affectedPaths ∪ extraStagePaths`、遍历 `links` 写 page_sources（事务内）+ `updateSourcePageLinks`（事务后各自 try/catch）；向后兼容（空 links+paths→sourceOps undefined）。供 ⑨ 把核查引用网页随同一 ingest commit 导入为 source |
 | 2026-06-23 | 新增 `page-ops.ts`（`executePageMerge` / `executePageSplit`，merge/split 执行内核，无 emit/enqueue）；新增 `curate-plan.ts`（`expandScopeWithNeighbors` / `applyDecisionCaps` / `restrictToSeed` 三个纯函数）；relink.ts 与 split-plan.ts 保留不变，由 page-ops 内部调用 |
+| 2026-06-24 | 文档：测试与质量小节更新为实际覆盖（9 文件） |
 
 ---
 

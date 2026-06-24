@@ -93,11 +93,15 @@ Route Handler / Worker Handler
 
 ## 测试与质量
 
-- **当前没有测试**。建议首先覆盖：
-  1. `wiki/wikilinks.ts`（解析+解析目标）
-  2. `wiki/frontmatter.ts`（round-trip）
-  3. `wiki/wiki-transaction.ts`（validate / rollback 的幂等）
-  4. `jobs/worker.ts`（retry 分类 + 租约心跳）
+已覆盖（vitest，82 测试文件 / 519 用例，2026-06-24；各子模块 `__tests__/`）：
+
+- 分布：services 13 / db 12 / llm 11 / agents 11 / wiki 9 / sources 4 / search 4 / jobs 1 / git 1。
+- 重点：wikilinks / wiki-transaction（validate·rollback·applyChangeset）/ frontmatter / relink / split-plan / curate-plan / revert / history；db repos + 热路径索引 EQP；task-router / prompts；agents runtime（budget / agent-loop / orchestrator / overlay-vault / checkpoint）；ingest 流水线（prep / service / chunker / cleaner / finalize-sources / augmentation）；search（vector-math / semantic / hybrid / web）。
+
+仍待补充：
+
+1. `jobs/worker.ts`（`isRetryableError` 分类 + 租约心跳续租）
+2. `db/repos`（`jobs-repo.claimNextJob` 并发原子性、FTS 触发器一致性）
 
 ## 常见问题 (FAQ)
 
@@ -137,6 +141,7 @@ src/server/
 | 2026-06-22 | git-service 加 getVaultLog/parseGitLog；新增 operations-repo + wiki/{revert,history}.ts + /api/history* 路由（⑥ 版本历史/diff）|
 | 2026-06-22 | 新增 search/ 模块（vector-math/semantic-search/hybrid-retrieval）+ embeddings-repo + embed-index worker 任务（⑧ 向量语义检索）|
 | 2026-06-22 | 新增 `search/web-search.ts`（Tavily search+extract，⑨ verifier 联网核查）；`wiki-transaction::SourceLinkOps` 升级为多源 `{ links:[{sourceId,pageSlugs}], extraStagePaths? }`（向后兼容，网页源随同一 ingest commit 落地）；settings-repo 加 web 搜索 3 key（⑨）|
+| 2026-06-24 | 文档：测试与质量小节更新为实际覆盖（82 文件 / 519 用例） |
 
 ---
 
