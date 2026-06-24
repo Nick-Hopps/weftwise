@@ -132,7 +132,7 @@ function compileToolSet(
   const toolSet: ToolSet = {};
   const usedToolNames = new Set<string>();
   for (const t of toolDefs) {
-    // 内部工具名用点号分命名空间（`vault.read`、`mcp.<server>.<tool>`），
+    // 内部工具名用点号分命名空间（如 `vault.read`），
     // 但 provider API 要求 ^[a-zA-Z0-9_-]{1,64}$ —— 在边界处转换。
     const providerName = toProviderToolName(t.name, usedToolNames);
     usedToolNames.add(providerName);
@@ -280,7 +280,7 @@ async function generateTextResult(
  *
  * Provider APIs (OpenAI / DeepSeek / xAI / Mistral / …) require tool names to
  * match `^[a-zA-Z0-9_-]{1,64}$`. Our internal names use dots for namespacing
- * (`vault.read`, `dispatch.skill`, `mcp.<server>.<tool>`), so any non-conforming
+ * (`vault.read`, `dispatch.skill`), so any non-conforming
  * character becomes `_`, the result is capped at 64 chars, and collisions are
  * disambiguated with a numeric suffix.
  */

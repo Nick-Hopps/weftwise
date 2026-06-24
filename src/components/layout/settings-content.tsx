@@ -255,21 +255,6 @@ function AgentsPanel({
         pending={savePartial.isPending}
       />
       <SelectSettingRow
-        label="MCP connection mode"
-        value={settings?.agentMcpLifecycle ?? 'lazy'}
-        options={[
-          { value: 'eager', label: 'eager (connect at boot)' },
-          { value: 'lazy', label: 'lazy (connect on first use)' },
-          { value: 'per-job', label: 'per-job (connect per job)' },
-        ]}
-        onChange={(v) =>
-          savePartial.mutate({
-            agentMcpLifecycle: v as 'eager' | 'lazy' | 'per-job',
-          })
-        }
-        pending={savePartial.isPending}
-      />
-      <SelectSettingRow
         label="LLM selection mode"
         value={settings?.agentTaskRouterMode ?? 'frontmatter-override'}
         options={[

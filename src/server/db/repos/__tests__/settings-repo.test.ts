@@ -24,7 +24,6 @@ describe('settings-repo agent keys', () => {
     expect(repo.getAgentMaxSteps()).toBe(25);
     expect(repo.getAgentMaxTokensPerJob()).toBe(1_200_000);
     expect(repo.getAgentMaxParallelSubAgents()).toBe(3);
-    expect(repo.getAgentMcpLifecycle()).toBe('lazy');
     expect(repo.getAgentTaskRouterMode()).toBe('frontmatter-override');
   });
 
@@ -40,9 +39,7 @@ describe('settings-repo agent keys', () => {
 
   it('roundtrips enum keys after set', async () => {
     const repo = await import('../settings-repo');
-    repo.setAgentMcpLifecycle('eager');
     repo.setAgentTaskRouterMode('task-router-only');
-    expect(repo.getAgentMcpLifecycle()).toBe('eager');
     expect(repo.getAgentTaskRouterMode()).toBe('task-router-only');
   });
 
@@ -56,8 +53,6 @@ describe('settings-repo agent keys', () => {
 
   it('rejects unknown enum values', async () => {
     const repo = await import('../settings-repo');
-    // @ts-expect-error testing runtime guard
-    expect(() => repo.setAgentMcpLifecycle('bogus')).toThrow();
     // @ts-expect-error testing runtime guard
     expect(() => repo.setAgentTaskRouterMode('bogus')).toThrow();
   });

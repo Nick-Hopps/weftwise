@@ -256,11 +256,9 @@ export const WikiLanguageSchema = z
 export const DEFAULT_AGENT_MAX_STEPS = 25;
 export const DEFAULT_AGENT_MAX_TOKENS_PER_JOB = 1_200_000;
 export const DEFAULT_AGENT_MAX_PARALLEL_SUB_AGENTS = 3;
-export const DEFAULT_AGENT_MCP_LIFECYCLE = 'lazy' as const;
 export const DEFAULT_AGENT_TASK_ROUTER_MODE = 'frontmatter-override' as const;
 export const DEFAULT_AGENT_AUTO_CURATE = true;
 
-export const AgentMcpLifecycleSchema = z.enum(['eager', 'lazy', 'per-job']);
 export const AgentTaskRouterModeSchema = z.enum(['task-router-only', 'frontmatter-override']);
 
 export const AgentMaxStepsSchema = z.number().int().min(1).max(200);
@@ -268,7 +266,6 @@ export const AgentMaxTokensPerJobSchema = z.number().int().min(10_000).max(5_000
 export const AgentMaxParallelSubAgentsSchema = z.number().int().min(1).max(10);
 export const AgentAutoCurateSchema = z.boolean();
 
-export type AgentMcpLifecycle = z.infer<typeof AgentMcpLifecycleSchema>;
 export type AgentTaskRouterMode = z.infer<typeof AgentTaskRouterModeSchema>;
 
 export const DEFAULT_WEB_SEARCH_PROVIDER = 'tavily' as const;
@@ -309,7 +306,6 @@ export interface AppSettings {
   agentMaxSteps: number;
   agentMaxTokensPerJob: number;
   agentMaxParallelSubAgents: number;
-  agentMcpLifecycle: AgentMcpLifecycle;
   agentTaskRouterMode: AgentTaskRouterMode;
   agentAutoCurate: boolean;
   webSearchProvider: WebSearchProvider;
@@ -325,7 +321,6 @@ export const AppSettingsSchema = z.object({
   agentMaxSteps: AgentMaxStepsSchema,
   agentMaxTokensPerJob: AgentMaxTokensPerJobSchema,
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema,
-  agentMcpLifecycle: AgentMcpLifecycleSchema,
   agentTaskRouterMode: AgentTaskRouterModeSchema,
   agentAutoCurate: AgentAutoCurateSchema,
   webSearchProvider: WebSearchProviderSchema,

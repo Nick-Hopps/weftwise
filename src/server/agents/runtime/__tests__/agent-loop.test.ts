@@ -248,7 +248,7 @@ describe('runAgentLoop structured output recovery', () => {
 describe('runAgentLoop provider tool-name sanitization', () => {
   // Provider APIs (OpenAI / DeepSeek / ...) require tool names to match
   // ^[a-zA-Z0-9_-]{1,64}$. Internal tool names use dots for namespacing
-  // (`vault.read`, `mcp.<server>.<tool>`), which the provider rejects with
+  // (`vault.read`), which the provider rejects with
   // "Invalid 'tools[0].function.name': string does not match pattern."
   it('sanitizes dotted tool names before passing them to generateText', async () => {
     mocks.generateText.mockReset();

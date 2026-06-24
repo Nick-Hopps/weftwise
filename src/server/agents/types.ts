@@ -28,7 +28,7 @@ export interface SkillTemplate {
   budget?: Partial<AgentBudget>;
 }
 
-export type ToolSource = 'builtin' | 'mcp' | 'dispatch';
+export type ToolSource = 'builtin' | 'dispatch';
 export type ToolSideEffect = 'none' | 'commit';
 
 export interface ToolDef<I = unknown, O = unknown> {

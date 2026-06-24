@@ -125,10 +125,6 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `builtin/vault-search.ts` | `vault.search` — 通过 `pagesRepo.searchPages` 做 FTS5 搜索 |
 | `builtin/commit-changeset.ts` | `commit_changeset` — 仅 reviewer 可用；提交 `ctx.pending ∪ input.entries`（按 path 去重、input 覆盖）→ 调用 `wiki-transaction` Saga |
 | `builtin/dispatch-skill.ts` | `dispatch_skill` — orchestrator fanout 用；触发子 skill 执行（writer × N）|
-| `mcp/config.ts` | MCP 服务器连接配置（从 `app_settings` 读取）|
-| `mcp/transport.ts` | stdio / SSE transport 封装 |
-| `mcp/client-pool.ts` | `McpClientPool` — 按 lifecycle 管理连接：`eager`（worker 启动即连）/ `lazy`（首次工具调用时连）/ `per-job`（每个 job 独立连接，job 结束即断）|
-| `mcp/tool-bridge.ts` | 把 MCP 工具描述转为 `ToolRegistry` 可挂载的 `ToolDef`，处理 JSON Schema ↔ Zod 转换 |
 
 ---
 
@@ -156,14 +152,13 @@ export function createRunStepTracker(maxSteps: number): RunStepTracker    // 单
 
 ## Agent 设置（`app_settings`）
 
-5 个 agent runtime 配置 key，由 `settings-repo.ts` 读写，**每次 `runPipeline` 调用时实时读取**（无需重启 worker）：
+4 个 agent runtime 配置 key，由 `settings-repo.ts` 读写，**每次 `runPipeline` 调用时实时读取**（无需重启 worker）：
 
 | Key | 默认值 | 说明 |
 |-----|--------|------|
 | `agentMaxSteps` | `25` | **单个 agent 实例**内的最大 tool-call 轮次（2026-06 起从 job 级改为实例级；job 级总量防线由 token 预算承担） |
 | `agentMaxTokensPerJob` | `1200000` | 单个 job 的 token 总预算（in + out）；P2 三轮内容阶段后默认预算由 500k 提升至 1.2M |
 | `agentMaxParallelSubAgents` | `3` | fanout writer step 的最大并发数 |
-| `agentMcpLifecycle` | `'lazy'` | MCP 连接生命周期（`eager` / `lazy` / `per-job`）|
 | `agentTaskRouterMode` | `'frontmatter-override'` | skill LLM 选择策略（`frontmatter-override` = skill YAML 中的 `llm_override` 优先；`config-only` = 仅用 `llm-config.json`）|
 
 ---
@@ -184,16 +179,6 @@ llm_override:          # 可选；对应 llm-config.json::tasks."skill:ingest-pl
 ```
 
 内置 skill 模板来自 `examples/skills/`，worker 启动时播种到 vault，**不覆盖用户已有文件**。
-
----
-
-## MCP 生命周期模式
-
-| 模式 | 连接时机 | 断开时机 | 适用场景 |
-|------|----------|----------|----------|
-| `eager` | worker 启动 | worker 关闭 | 低延迟、频繁调用的本地 MCP server |
-| `lazy` | 首次工具调用时 | worker 关闭 | 默认；大多数 MCP server 推荐 |
-| `per-job` | 每个 job 开始 | 每个 job 结束 | 有状态 MCP server、需要隔离会话 |
 
 ---
 
@@ -258,17 +243,12 @@ src/server/agents/
 │   └── __tests__/
 └── tools/
     ├── registry.ts                 # ToolRegistry
-    ├── builtin/
-    │   ├── vault-read.ts           # vault.read
-    │   ├── vault-search.ts         # vault.search
-    │   ├── commit-changeset.ts     # commit_changeset (reviewer only)
-    │   ├── dispatch-skill.ts       # dispatch_skill (fanout)
-    │   └── __tests__/
-    └── mcp/
-        ├── config.ts               # MCP 连接配置
-        ├── transport.ts            # stdio / SSE transport
-        ├── client-pool.ts          # McpClientPool (eager/lazy/per-job)
-        └── tool-bridge.ts          # MCP tool → ToolDef 桥接
+    └── builtin/
+        ├── vault-read.ts           # vault.read
+        ├── vault-search.ts         # vault.search
+        ├── commit-changeset.ts     # commit_changeset (reviewer only)
+        ├── dispatch-skill.ts       # dispatch_skill (fanout)
+        └── __tests__/
 ```
 
 ---
@@ -284,6 +264,7 @@ src/server/agents/
 | 2026-06-22 | 增量合并：fanout step 加 `injectExistingPageForUpdate`，writer 更新已有页时 orchestrator 确定性注入现有正文 `existingPageContent`（`buildFanoutInput` 改 async），writer skill v5 并入新材料而非覆盖、planner skill v3 强化复用 slug（⑤）|
 | 2026-06-22 | P3 联网核查（⑨）：verifier 阶段由 fanout 'ingest-verifier' 改为 `verify` step kind → 新 `runtime/verify-page.ts::runPageVerification` 逐页两段式（triage `ingest-verifier-triage` → 编排层 Tavily 搜索 → apply `ingest-verifier-apply`），全程 generateObject 无 tools（绕开 packyapi 工具死循环）；未配置/零证据降级既有 `ingest-verifier`(v2) 自检；新增 `CitedSource` 类型 + `AgentContext.citedSources`；`commit_changeset`/`commitPending` 接受第三参 webSources（network 引用源 links+extraStagePaths）|
 | 2026-06-22 | ⑨ fast-follow（闭合终审 I-1）：`IngestCheckpoint` 加 `getCitedSources/putCitedSources`（checkpoint kind `'cited-sources'` 单 blob）；`verify-page` record 后同步 persist、`ingest-service` pipeline 前 rehydrate `ctx.citedSources`——崩溃续传命中 verifier-page 检查点跳过 verify 的页，其网页 source 仍被完整导入 |
+| 2026-06-24 | 移除 MCP 功能（冗余死代码）：删除 `tools/mcp/`（config/transport/client-pool/tool-bridge）+ `mcp-config.json` + `@modelcontextprotocol/sdk` 依赖 + `agentMcpLifecycle` 设置（contracts/settings-repo/API/UI）。判定依据：agent-loop 仅解析 skill 显式声明的工具，而所有内置 skill 都不声明 `mcp.*`；且项目已主动放弃 tool-using agent（packyapi openai-compatible 工具死循环），MCP 工具永不可被调用。`ToolSource` union 去掉 `'mcp'` |
 
 ---
 
