@@ -25,6 +25,17 @@ const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 const MAINTENANCE_TICK_MS = 60_000; // 每分钟检查一次节律闸门（实际扫描受 intervalHours 控制）
+const JOB_EVENT_RETENTION_MS = 7 * 24 * 60 * 60_000; // job_events 保留 7 天
+
+/**
+ * job_events 保留清扫：删除超出保留窗口的事件，止住该表无界增长。
+ * 独立于成熟度维护开关（getMaintenanceEnabled，默认关）——基础卫生操作必须始终执行。
+ */
+function pruneOldJobEvents(): void {
+  const cutoff = new Date(Date.now() - JOB_EVENT_RETENTION_MS).toISOString();
+  const removed = queue.pruneEvents(cutoff);
+  if (removed > 0) console.log(`[maintenance] pruned ${removed} expired job_events`);
+}
 
 /** 维护节律闸门：从未扫描或距上次 ≥ intervalHours 则应扫。 */
 export function shouldSweep(lastSweepAt: string | null, intervalHours: number, now: Date): boolean {
@@ -92,6 +103,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 export function startWorker(pollIntervalMs = 2000): () => void {
+  // 启动即清一次积压（存量库可能已累积大量旧事件）。
+  try {
+    pruneOldJobEvents();
+  } catch (err) {
+    console.error('[maintenance] job_events prune failed', err);
+  }
+
   const intervalId = setInterval(async () => {
     // Prevent concurrent job execution — LLM handlers can run for minutes,
     // and parallel git commits would corrupt the vault.
@@ -164,8 +182,13 @@ export function startWorker(pollIntervalMs = 2000): () => void {
     }
   }, pollIntervalMs);
 
-  // 维护层低频 tick：到节律即选页入队 re-enrich（不在此跑 LLM/写盘）。
+  // 维护层低频 tick：清扫过期 job_events（始终执行）+ 到节律选页入队 re-enrich（受开关控制）。
   const maintenanceId = setInterval(() => {
+    try {
+      pruneOldJobEvents();
+    } catch (err) {
+      console.error('[maintenance] job_events prune failed', err);
+    }
     try {
       maintenanceTick();
     } catch (err) {
