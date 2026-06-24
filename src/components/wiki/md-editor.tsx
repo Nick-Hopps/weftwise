@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import { useUIStore } from '@/stores/ui-store';
 
@@ -9,18 +10,24 @@ const MDEditor = dynamic(() => import('@uiw/react-md-editor'), { ssr: false });
 interface MdEditorProps {
   value: string;
   onChange: (next: string) => void;
-  height?: number;
+  /** 自定义预览渲染器：传入则替换 MDEditor 自带预览，保证与阅读页一致。 */
+  previewRenderer?: (source: string) => ReactNode;
 }
 
-export function MdEditor({ value, onChange, height = 520 }: MdEditorProps) {
+export function MdEditor({ value, onChange, previewRenderer }: MdEditorProps) {
   const darkMode = useUIStore((s) => s.darkMode);
   return (
-    <div data-color-mode={darkMode ? 'dark' : 'light'}>
+    <div className="wiki-md-editor h-full" data-color-mode={darkMode ? 'dark' : 'light'}>
       <MDEditor
         value={value}
         onChange={(v) => onChange(v ?? '')}
-        height={height}
+        height="100%"
         preview="live"
+        components={
+          previewRenderer
+            ? { preview: (source) => <>{previewRenderer(source)}</> }
+            : undefined
+        }
       />
     </div>
   );
