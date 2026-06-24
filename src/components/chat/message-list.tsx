@@ -14,6 +14,23 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   citations?: Citation[];
+  activity?: { tool: string; label: string }[];
+}
+
+// 工具活动标记映射
+function toolActivityIcon(tool: string): string {
+  if (tool === 'search_wiki') return '🔍';
+  if (tool === 'read_page') return '📄';
+  if (tool === 'list_pages') return '🗂';
+  return '•';
+}
+
+// 工具活动动词映射
+function toolActivityVerb(tool: string): string {
+  if (tool === 'search_wiki') return 'Searching';
+  if (tool === 'read_page') return 'Reading';
+  if (tool === 'list_pages') return 'Listing pages';
+  return tool;
 }
 
 interface MessageListProps {
@@ -123,7 +140,25 @@ export function MessageList({ messages, isStreaming = false, onSuggestionClick }
               {msg.role === 'user' ? (
                 <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
               ) : (
-                <MarkdownText content={msg.content} />
+                <>
+                  {msg.activity && msg.activity.length > 0 && (
+                    <ul className="mb-1.5 space-y-0.5">
+                      {msg.activity.map((act, aIdx) => (
+                        <li
+                          key={aIdx}
+                          className="text-[11px] text-foreground-tertiary font-mono flex items-center gap-1.5"
+                        >
+                          <span>{toolActivityIcon(act.tool)}</span>
+                          <span className="truncate">
+                            {toolActivityVerb(act.tool)}
+                            {act.label ? `: ${act.label}` : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <MarkdownText content={msg.content} />
+                </>
               )}
               {showStreaming && <StreamingIndicator />}
 
