@@ -155,9 +155,15 @@
 
 ## 测试与质量
 
-- 无测试。建议添加：
-  - `jobs-repo.claimNextJob`：并发情况下只能有一个 worker 拿到（用 `pragma busy_timeout`）。
-  - FTS 触发器：插入/更新/删除 `pages` 后 `pages_fts` 一致性。
+已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
+
+- repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations / conversations / embeddings / maturity / checkpoints / settings。
+- `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描）。
+
+仍待补充：
+
+- `jobs-repo.claimNextJob`：并发情况下只能有一个 worker 拿到（用 `pragma busy_timeout`）。
+- FTS 触发器：插入/更新/删除 `pages` 后 `pages_fts` 一致性。
 
 ## 常见问题 (FAQ)
 
@@ -200,6 +206,7 @@ src/server/db/
 | 2026-06-22 | settings-repo 加 web 搜索 3 key（`webSearchProvider/webSearchApiKey/webSearchMaxResults` + getter/setter + `getWebSearchConfig()`，无新表，复用 app_settings）（⑨ verifier 联网核查）|
 | 2026-06-23 | settings-repo 新增 `agentAutoCurate` key（boolean，默认 true）+ `getAgentAutoCurate` / `setAgentAutoCurate`；UI 通过 `PUT /api/settings` 写入，Agents settings panel 展示；ingest finalize 读取决定是否自动入队 curate |
 | 2026-06-24 | 移除 `agentMcpLifecycle` 设置 key + `getAgentMcpLifecycle` / `setAgentMcpLifecycle`（MCP 功能整体移除，详见根 Changelog）；agent 配置 key 由 5 降为 4 |
+| 2026-06-24 | 性能：补热路径索引（`ensureIndexes`：wiki_links target/source + job_events + jobs）；`getBacklinks`/`getSourcesForPage` 改 JOIN 消除 N+1；`getAllLinks` 加可选 `metaKeys` 参；新增 `pruneJobEvents`；落地 pages/sources/jobs-repo + indexes 单测 |
 
 ---
 

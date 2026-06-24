@@ -80,11 +80,17 @@ emit(jobId, type, message, data?): void
 
 ## 测试与质量
 
-无测试。建议：
+已覆盖：
+
+- `__tests__/maintenance-tick.test.ts`：`shouldSweep` 节律闸门边界。
+- `job_events` 保留清扫（`pruneJobEvents`）与 jobs 表 CRUD/查询见 `db/repos/__tests__/jobs-repo.test.ts`（queue/worker 是对 jobs-repo 的薄封装）。
+
+仍待补充：
 
 - `claimNextJob` 并发原子性（用 `busy_timeout` + `BEGIN IMMEDIATE`）。
 - `reclaimExpired` 的边界：刚好等于过期时间戳是否回收。
 - `requeue` 对 `attempt_count` 的正确自增。
+- `worker.ts`：`isRetryableError` 分类 + 心跳续租。
 
 ## 常见问题 (FAQ)
 
@@ -109,6 +115,7 @@ src/server/jobs/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化 |
+| 2026-06-24 | 新增 `job_events` 保留清扫（worker 维护 tick 调 `queue.pruneEvents` → `jobs-repo.pruneJobEvents`，独立于成熟度维护开关，启动清一次积压）|
 
 ---
 

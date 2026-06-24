@@ -146,10 +146,12 @@ emit `reenrich:start` 后进入 pipeline；流水线完成后 `checkpoint.clear(
 
 ## 测试与质量
 
-- 当前零测试（services 层）。优先级：
-  - `query-service.answerQuery` 在"库为空 / 命中 0 条 / 命中多条"的不同分支；
-  - Saga 失败时 emit 的顺序与最终 job.status 一致；
-  - ingest pipeline 测试见 `src/server/agents/runtime/__tests__/`。
+已覆盖（`__tests__/`，vitest，以纯函数与编排为主）：`lint-deterministic`（broken-link/orphan 取数收敛后行为不变）、`maintenance-policy` / `maintenance-scheduler`、`ingest-prep` / `ingest-service` / `ingest-finalize-sources` / `ingest-augmentation-steps`、`embedding-service`、`fix-deterministic`、`lint-latest`、`reenrich-input` / `reenrich-maturity`、`conversation-title`。ingest pipeline 另见 `src/server/agents/runtime/__tests__/`。
+
+仍待补充：
+
+- `query-service.answerQuery` 在"库为空 / 命中 0 条 / 命中多条"的不同分支；
+- Saga 失败时 emit 的顺序与最终 job.status 一致。
 
 ## 常见问题 (FAQ)
 
@@ -196,6 +198,7 @@ src/server/services/
 | 2026-06-23 | 删除 `merge-service`（任务类型 `'merge'`）与 `split-service`（任务类型 `'split'`）；merge/split 执行逻辑内化至 `wiki/page-ops.ts`；新增 `curate-service`（任务类型 `'curate'`：triage→confirm→execute，seed 护栏，caps merge≤5/split≤5）；ingest finalize 在 `agentAutoCurate=true` 时自动入队 curate（scope:'pages', touchedSlugs）|
 | 2026-06-23 | 新增 `reenrich-service`（任务类型 `'re-enrich'`）：手动重新增益，复用 ingest 增益流水线（enricher→verify），跳过 writer，commitPending 收口；P4 增益强度（`subjects.augmentation_level`）贯穿服务层（off→standard 降级） |
 | 2026-06-24 | 新增 `fix-service`（任务类型 `'fix'`）：两阶段修复 lint findings——阶段1 确定性补 frontmatter（`fix-deterministic.ts` 纯函数，1 commit）；阶段2 按页 `generateStructuredOutput('fix')` 逐页修复（`proceed` 自我门控 + `validateChangeset` 拦坏链，每页 1 commit）；orphan/stale-source/coverage-gap 不修；完成后 UI 自动重跑 lint |
+| 2026-06-24 | 性能：`lint-deterministic` 确定性检查一次性取数（`getAllPages` 3→1、跨主题 meta 扫描 2→1，行为不变）；落地 `lint-deterministic` 单测 |
 
 ---
 
