@@ -203,11 +203,12 @@ export function HealthView() {
             </button>
           </div>
           <Button intent="primary" onClick={runLint} loading={running}>
-            <RefreshCw className="h-3.5 w-3.5" />
+            {/* loading 时 Button 自带 spinner，隐藏本图标避免双图标 */}
+            {!running && <RefreshCw className="h-3.5 w-3.5" />}
             {neverRun ? 'Run health check' : 'Re-run'}
           </Button>
           <Button intent="secondary" onClick={runCurate} loading={curating} disabled={allSubjects}>
-            <Wand2 className="h-3.5 w-3.5" />
+            {!curating && <Wand2 className="h-3.5 w-3.5" />}
             Tidy structure
           </Button>
           <Button
@@ -216,7 +217,7 @@ export function HealthView() {
             loading={fixing}
             disabled={allSubjects || neverRun || fixableCount === 0 || running || curating}
           >
-            <Wrench className="h-3.5 w-3.5" />
+            {!fixing && <Wrench className="h-3.5 w-3.5" />}
             Fix issues
           </Button>
         </div>
