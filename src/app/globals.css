@@ -582,3 +582,32 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* ---------------------------------------------------------------------------
+   在线 Markdown 编辑器（@uiw/react-md-editor）样式增强
+   作用域限定 .wiki-md-editor，避免影响 hover peek 等其他用到该库的场景。
+   --------------------------------------------------------------------------- */
+.wiki-md-editor .w-md-editor-toolbar {
+  padding: 8px 10px;
+}
+
+.wiki-md-editor .w-md-editor-toolbar ul > li > button {
+  height: 32px;
+  min-width: 32px;
+  padding: 0 6px;
+  border-radius: 6px;
+}
+
+.wiki-md-editor .w-md-editor-toolbar ul > li > button svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* 编辑区字号：textarea（输入层）与 pre（高亮覆盖层）必须同步，否则光标错位 */
+.wiki-md-editor .w-md-editor-text-input,
+.wiki-md-editor .w-md-editor-text-pre,
+.wiki-md-editor .w-md-editor-text-pre > code,
+.wiki-md-editor .w-md-editor-text {
+  font-size: 15px !important;
+  line-height: 1.7 !important;
+}
