@@ -13,11 +13,23 @@ import { readPageInSubject } from '../wiki/wiki-store';
 import {
   generateStructuredOutput,
   streamTextResponse,
+  streamTextWithTools,
+  generateTextWithTools,
 } from '../llm/provider-registry';
+import type { CoreMessage } from 'ai';
+import {
+  buildQueryTools,
+  createAccessedPages,
+  accessedToContext,
+  subjectHasContent,
+} from './query-tools';
+import type { AccessedPages, QueryContextPage } from './query-tools';
 import {
   QueryResponseSchema,
   QUERY_SYSTEM_PROMPT,
+  QUERY_AGENTIC_SYSTEM_PROMPT,
   buildQueryUserPrompt,
+  buildAgenticUserContent,
 } from '../llm/prompts/query-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { PromptContext } from '../llm/prompts/prompt-context';
@@ -45,12 +57,12 @@ export const QUERY_STREAM_SYSTEM_PROMPT = `${QUERY_SYSTEM_PROMPT}
 
 const QueryCitationsSchema = QueryResponseSchema.pick({ citations: true });
 
-export interface QueryContextPage {
-  slug: string;
-  title: string;
-  content: string;
-  isCurrent?: boolean;
-}
+// QueryContextPage 类型已迁至 query-tools，此处再导出保持向后兼容
+export type { QueryContextPage, AccessedPages } from './query-tools';
+export { accessedToContext, subjectHasContent, createAccessedPages } from './query-tools';
+
+/** 工具循环单 query 的最大步数（防 runaway）。 */
+export const QUERY_MAX_STEPS = 6;
 
 export async function prepareQueryContext(
   question: string,
@@ -151,36 +163,74 @@ Return only the structured citations for the draft answer above. Do not rewrite 
   });
 }
 
+/**
+ * Agentic 流式问答：构造 subject-scoped 工具 + 访问页收集器，
+ * 用 streamTextWithTools 驱动工具循环；返回 stream 与 accessed（供事后引用）。
+ */
+export function streamAgenticQuery(opts: {
+  question: string;
+  subject: Subject;
+  history?: { role: 'user' | 'assistant'; content: string }[];
+  currentPageSlug?: string;
+  abortSignal?: AbortSignal;
+}): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
+  const accessed = createAccessedPages();
+  const tools = buildQueryTools(opts.subject, accessed);
+  const promptCtx: PromptContext = {
+    language: getWikiLanguage(),
+    subject: subjectCtxFrom(opts.subject),
+  };
+  const userContent = buildAgenticUserContent(opts.question, promptCtx, {
+    currentPageSlug: opts.currentPageSlug,
+  });
+  const messages: CoreMessage[] = [
+    ...(opts.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+    { role: 'user', content: userContent },
+  ];
+  const stream = streamTextWithTools('query', {
+    system: QUERY_AGENTIC_SYSTEM_PROMPT,
+    messages,
+    tools,
+    maxSteps: QUERY_MAX_STEPS,
+    abortSignal: opts.abortSignal,
+  });
+  return { stream, accessed };
+}
+
 export async function runQuery(
   question: string,
   subject: Subject,
   currentPageSlug?: string,
 ): Promise<QueryResult> {
-  const context = await prepareQueryContext(question, subject.id, currentPageSlug);
-
-  if (context.length === 0) {
-    return {
-      answer: NO_QUERY_CONTEXT_ANSWER,
-      citations: [],
-      savedAsPage: null,
-    };
+  if (!subjectHasContent(subject.id)) {
+    return { answer: NO_QUERY_CONTEXT_ANSWER, citations: [], savedAsPage: null };
   }
 
-  const answerStream = streamQueryAnswer(
-    QUERY_STREAM_SYSTEM_PROMPT,
-    question,
-    context,
-    subject,
-  );
+  const accessed = createAccessedPages();
+  const tools = buildQueryTools(subject, accessed);
+  const promptCtx: PromptContext = {
+    language: getWikiLanguage(),
+    subject: subjectCtxFrom(subject),
+  };
+  const userContent = buildAgenticUserContent(question, promptCtx, { currentPageSlug });
 
-  let answer = '';
-  for await (const delta of answerStream.textStream) {
-    answer += delta;
-  }
+  const { text } = await generateTextWithTools('query', {
+    system: QUERY_AGENTIC_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userContent }],
+    tools,
+    maxSteps: QUERY_MAX_STEPS,
+  });
+
+  const answer = text.trim().length > 0 ? text : NO_QUERY_CONTEXT_ANSWER;
 
   let citations: { pageSlug: string; excerpt: string }[] = [];
   try {
-    citations = await generateQueryCitations(question, answer, context, subject);
+    citations = await generateQueryCitations(
+      question,
+      answer,
+      accessedToContext(subject, accessed),
+      subject,
+    );
   } catch {
     citations = [];
   }
