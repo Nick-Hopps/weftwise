@@ -63,6 +63,23 @@ describe('maturity-repo', () => {
     expect(slugs[0]).toBe('due-high'); // 高 priority 排前
   });
 
+  it('countDue 统计到期且未毕业页数（跨主题全量）', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const maturityRepo = await import('../maturity-repo');
+
+    const now = new Date();
+    const s1 = subjectsRepo.create({ slug: `s-cd-1`, name: 'S1' }).id;
+    const s2 = subjectsRepo.create({ slug: `s-cd-2`, name: 'S2' }).id;
+    maturityRepo.ensureRow(s1, 'a', ISO(days(-5)), 1); // 到期
+    maturityRepo.ensureRow(s1, 'b', ISO(days(-5)), 1); // 到期
+    maturityRepo.ensureRow(s2, 'c', ISO(days(-5)), 1); // 到期（另一主题，全量计入）
+    maturityRepo.ensureRow(s1, 'future', ISO(now), 30); // 未到期
+    maturityRepo.ensureRow(s1, 'grad', ISO(days(-5)), 1);
+    maturityRepo.applyAfterEnrich(s1, 'grad', { passes: 3, intervalDays: 0, state: 'graduated', nextDueAt: ISO(days(3650)) }, ISO(now));
+
+    expect(maturityRepo.countDue(ISO(now))).toBe(3); // a,b,c；排除 future 与 grad
+  });
+
   it('bumpNeighbor 复活 dormant 并提前到期', async () => {
     const subjectsRepo = await import('../subjects-repo');
     const maturityRepo = await import('../maturity-repo');
