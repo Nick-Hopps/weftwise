@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
@@ -59,13 +60,20 @@ export function ReenrichDialog({
 
   const running = jobId !== null && status !== 'failed';
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={running ? undefined : onClose}>
+  // 阅读页 <article> 的 wp-rise 动画残留 identity transform，会为 position:fixed
+  // 创建包含块，把弹窗困在文章盒子里而非视口居中。Portal 到 body 逃出该子树。
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-command flex items-center justify-center bg-overlay/40 backdrop-blur-sm p-4 animate-fade-in"
+      onClick={running ? undefined : onClose}
+    >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="reenrich-dialog-title"
-        className="w-full max-w-md rounded-lg border border-border bg-background p-5 shadow-xl"
+        className="w-full max-w-md rounded-lg border border-border bg-surface p-5 shadow-lg animate-slide-down"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="reenrich-dialog-title" className="text-sm font-semibold text-foreground">Re-enrich &ldquo;{title}&rdquo;</h2>
@@ -86,6 +94,7 @@ export function ReenrichDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
