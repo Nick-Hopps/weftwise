@@ -294,6 +294,16 @@ export const MaintenanceEnabledSchema = z.boolean();
 export const MaintenanceSweepIntervalHoursSchema = z.number().int().min(1).max(168);
 export const MaintenanceMaxPagesPerSweepSchema = z.number().int().min(1).max(50);
 
+/** 维护层只读运行态（`GET /api/maintenance/status`）；非设置，故不进 AppSettings。 */
+export interface MaintenanceStatus {
+  enabled: boolean;
+  /** 上次 sweep 时间（ISO）；从未扫描为 null。 */
+  lastSweepAt: string | null;
+  sweepIntervalHours: number;
+  /** 当前全量到期且未毕业的页数（跨主题，与 sweep 同口径）。 */
+  dueCount: number;
+}
+
 export interface AppSettings {
   wikiLanguage: string;
   agentMaxSteps: number;

@@ -8,10 +8,12 @@
  */
 
 import { Moon, Sun, RotateCcw } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { SIDEBAR_WIDTH_DEFAULT } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
-import type { AppSettings } from '@/lib/contracts';
+import { apiFetch } from '@/lib/api-fetch';
+import type { AppSettings, MaintenanceStatus } from '@/lib/contracts';
 import { SettingRow, NumberSettingRow, SelectSettingRow, TextSettingRow } from './settings-rows';
 import { SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
 
@@ -346,10 +348,33 @@ function WebSearchPanel({
   );
 }
 
+function formatSweepTime(iso: string | null): string {
+  if (!iso) return 'Never';
+  const then = new Date(iso).getTime();
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60_000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} h ago`;
+  return new Date(iso).toLocaleString();
+}
+
 function MaintenancePanel({
   settings,
   savePartial,
 }: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  // 只读运行态：上次 sweep + 当前到期页数（与设置分离，走 /api/maintenance/status）。
+  const statusQuery = useQuery<MaintenanceStatus>({
+    queryKey: ['maintenance-status'],
+    queryFn: async () => {
+      const res = await apiFetch('/api/maintenance/status');
+      if (!res.ok) throw new Error(`GET /api/maintenance/status → ${res.status}`);
+      return (await res.json()) as MaintenanceStatus;
+    },
+    staleTime: 10_000,
+  });
+  const status = statusQuery.data;
+
   return (
     <div className="space-y-4">
       <SelectSettingRow
@@ -362,6 +387,19 @@ function MaintenancePanel({
         onChange={(v) => savePartial.mutate({ maintenanceEnabled: v === 'on' })}
         pending={savePartial.isPending}
       />
+
+      <SettingRow label="Status" description="Read-only — refreshes when this panel opens">
+        <div className="text-xs text-foreground-secondary tabular-nums space-y-0.5 text-right">
+          {statusQuery.isError ? (
+            <span className="text-danger">unavailable</span>
+          ) : (
+            <>
+              <div>Last sweep: {status ? formatSweepTime(status.lastSweepAt) : '…'}</div>
+              <div>Pages due now: {status ? status.dueCount : '…'}</div>
+            </>
+          )}
+        </div>
+      </SettingRow>
       <NumberSettingRow
         label="Sweep interval (hours)"
         value={settings?.maintenanceSweepIntervalHours ?? 24}

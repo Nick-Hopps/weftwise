@@ -67,6 +67,17 @@ export function listDue(nowIso: string, limit: number): { subjectId: string; slu
   return rows.map((r) => ({ subjectId: r.subject_id, slug: r.slug }));
 }
 
+/** 全量统计到期且未毕业的页数（跨主题，与调度器 sweep 同口径）；供维护状态展示。 */
+export function countDue(nowIso: string): number {
+  const row = getRawDb()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM page_maturity
+       WHERE state != 'graduated' AND next_due_at <= ?`,
+    )
+    .get(nowIso) as { n: number };
+  return row.n;
+}
+
 /** re-enrich 跑完回写：推进 passes/interval/state/next_due，重置 priority=0，记 last_enriched_at。 */
 export function applyAfterEnrich(
   subjectId: string,
