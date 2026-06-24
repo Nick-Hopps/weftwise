@@ -99,6 +99,9 @@ function buildFactory(
         const p = createAnthropic({
           apiKey: requireApiKey(profileName, profile.apiKeyEnv),
           baseURL: profile.baseURL,
+          // 兼容代理（如 packyapi）的 Anthropic 端点：其 thinking 块缺 signature 字段，
+          // 会被 @ai-sdk/anthropic 响应 schema 拒绝；自定义 fetch 给缺失项补占位值。
+          fetch: createAnthropicSignatureRepairFetch(),
         });
         return (id) => p(id);
       }
@@ -184,6 +187,64 @@ function buildFactory(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * 修复 Anthropic 兼容代理（如 packyapi）的非流式响应：其 `thinking` 内容块缺少
+ * `signature` 字段，而 @ai-sdk/anthropic 的响应 schema 要求 `signature` 为必填 string，
+ * 否则整个响应在 SDK 校验层被拒（AI_APICallError: Invalid JSON response），工具调用
+ * 也随之失败。这里给缺失 signature 的 thinking 块补占位空串使响应过校验；仅在缺失时
+ * 改写（真 Anthropic 自带 signature → no-op）。流式响应（text/event-stream）原样透传。
+ */
+function createAnthropicSignatureRepairFetch(baseFetch: typeof fetch = fetch): typeof fetch {
+  return async (input, init) => {
+    const res = await baseFetch(input, init);
+    const contentType = res.headers.get('content-type') ?? '';
+    if (!contentType.includes('application/json')) return res; // SSE 流式透传
+
+    // 读副本探测，原 res 不消费——绝大多数响应（无 thinking 块）原样透传，零开销/零回归。
+    const raw = await res.clone().text();
+    if (!raw.includes('"thinking"')) return res;
+    let body: unknown;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return res;
+    }
+    if (!injectMissingThinkingSignatures(body)) return res;
+    return rebuildJsonResponse(JSON.stringify(body), res);
+  };
+}
+
+/** 给响应 body 里所有缺失 signature 的 thinking 块补空串；返回是否改动过。 */
+export function injectMissingThinkingSignatures(body: unknown): boolean {
+  if (!body || typeof body !== 'object') return false;
+  const content = (body as { content?: unknown }).content;
+  if (!Array.isArray(content)) return false;
+  let mutated = false;
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      (block as { type?: unknown }).type === 'thinking' &&
+      typeof (block as { signature?: unknown }).signature !== 'string'
+    ) {
+      (block as { signature: string }).signature = '';
+      mutated = true;
+    }
+  }
+  return mutated;
+}
+
+/** 用改写后的 body 文本重建 Response，保留状态码，去掉失真的 content-length。 */
+function rebuildJsonResponse(bodyText: string, original: Response): Response {
+  const headers = new Headers(original.headers);
+  headers.delete('content-length');
+  return new Response(bodyText, {
+    status: original.status,
+    statusText: original.statusText,
+    headers,
+  });
+}
 
 function requireApiKey(profileName: string, envName: string | undefined): string {
   if (!envName) {
