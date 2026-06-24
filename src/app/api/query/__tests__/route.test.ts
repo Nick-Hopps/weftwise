@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mockResolve = vi.fn();
-const mockPrepare = vi.fn();
-const mockStream = vi.fn();
+const mockHasContent = vi.fn();
+const mockAgentic = vi.fn();
+const mockAccessedToContext = vi.fn();
 const mockCitations = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
@@ -17,13 +18,12 @@ vi.mock('@/server/middleware/subject', () => ({
 }));
 vi.mock('@/server/jobs/queue', () => ({ enqueue: vi.fn(() => ({ id: 'job-x' })) }));
 vi.mock('@/server/services/query-service', () => ({
-  prepareQueryContext: (...a: unknown[]) => mockPrepare(...a),
-  streamQueryAnswer: (...a: unknown[]) => mockStream(...a),
+  streamAgenticQuery: (...a: unknown[]) => mockAgentic(...a),
+  subjectHasContent: (...a: unknown[]) => mockHasContent(...a),
+  accessedToContext: (...a: unknown[]) => mockAccessedToContext(...a),
   generateQueryCitations: (...a: unknown[]) => mockCitations(...a),
   runQuery: vi.fn(),
-  streamQueryAnswer_unused: undefined,
   NO_QUERY_CONTEXT_ANSWER: 'NO_CONTEXT',
-  QUERY_STREAM_SYSTEM_PROMPT: 'SYS',
 }));
 vi.mock('@/server/services/conversation-title', () => ({
   deriveConversationTitle: (q: string) => `T:${q.slice(0, 5)}`,
@@ -53,12 +53,19 @@ async function readSSE(res: Response): Promise<string> {
 beforeEach(() => {
   mockResolve.mockReset();
   mockResolve.mockReturnValue({ subject: { id: 's1', slug: 'general' }, error: null });
-  mockPrepare.mockReset();
-  mockPrepare.mockReturnValue([{ slug: 'p', title: 'P', content: 'c' }]);
-  mockStream.mockReset();
-  mockStream.mockReturnValue({
-    textStream: (async function* () { yield 'hello'; })(),
+  mockHasContent.mockReset();
+  mockHasContent.mockReturnValue(true);
+  mockAgentic.mockReset();
+  mockAgentic.mockReturnValue({
+    stream: {
+      fullStream: (async function* () {
+        yield { type: 'text-delta', textDelta: 'hello' } as const;
+      })(),
+    },
+    accessed: { meta: new Map(), bodies: new Map() },
   });
+  mockAccessedToContext.mockReset();
+  mockAccessedToContext.mockReturnValue([]);
   mockCitations.mockReset();
   mockCitations.mockResolvedValue([]);
   mockCreate.mockReset();
@@ -97,5 +104,23 @@ describe('POST /api/query 流式持久化', () => {
     expect(mockListMsgs).toHaveBeenCalledWith('c1');
     expect(sse).toContain('c1');
     expect(mockTouch).toHaveBeenCalledWith('c1');
+  });
+
+  it('空 subject → 直接 NO_CONTENT，不进工具循环', async () => {
+    mockHasContent.mockReturnValue(false);
+    const res = await call({ question: '随便问问', subjectId: 's1' });
+    const sse = await readSSE(res);
+    expect(mockAgentic).not.toHaveBeenCalled();
+    expect(sse).toContain('NO_CONTEXT');
+    expect(sse).toContain('event: done');
+    expect(mockAppend).toHaveBeenCalledTimes(2); // 仍落库一轮
+  });
+
+  it('工具循环路径 → 透传 answer-delta，最终 done', async () => {
+    const res = await call({ question: '你好', subjectId: 's1' });
+    const sse = await readSSE(res);
+    expect(mockAgentic).toHaveBeenCalledTimes(1);
+    expect(sse).toContain('hello');
+    expect(sse).toContain('event: done');
   });
 });
