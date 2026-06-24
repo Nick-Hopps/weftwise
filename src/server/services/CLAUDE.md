@@ -45,20 +45,30 @@ worker-entry.ts
 
 接入断点续传：启动时 `loadCheckpoint(job.id)` 载入检查点句柄并挂至 `AgentContext.checkpoint`；若 `ckpt.hasAny()` 则 emit `ingest:resuming`；steps 标注 `checkpointAs` 使 orchestrator 逐页续传；预算预检调 `reduceCostForResume(ingest-prep)` 按已写页比例折减估算值；pipeline 成功返回前 `checkpoint.clear()` 删除所有检查点行。
 
-### `query-service.ts` — 任务类型 `'save-to-wiki'` + 同步函数 + 多轮记忆 + 混合检索
+### `query-service.ts` — 任务类型 `'save-to-wiki'` + agentic 工具循环 + 多轮记忆
 
-- 同步函数 `prepareQueryContext(query, subjectId)`（⑧ 改 async）：
-  1. 若配置了 embedding 则 FTS5 + 向量语义两路（`hybridRankSlugs`，RRF 合并）；否则纯 FTS5。
-  2. 返回 top K 相关页面摘要。
-- 同步函数 `answerQuery(question, subjectId, currentPageSlug?, history?)`：
-  1. 调 `prepareQueryContext` 获取检索结果；
-  2. 组装上下文 + 可选历史记录 → `generateStructuredOutput('query', QueryResponseSchema, ...)`，prompt 注入 SubjectContext；
-  3. 返回 `QueryResult { answer, citations, savedAsPage: null }`。
-  - `history` 可选参数：`{ role: 'user'|'assistant', content }[]`，非空时注入 buildQueryUserPrompt 的 transcript 段。
+问答检索改为**模型自驱工具循环**（取代旧的预先 top-5 检索喂模型方案）：
+
+- `streamAgenticQuery(opts)` — 流式 agentic 问答：
+  1. 调 `createAccessedPages()` 创建访问页收集器；
+  2. 调 `buildQueryTools(subject, accessed)` 获取 subject-scoped 三工具（`list_pages` / `search_wiki` / `read_page`，来自 `query-tools.ts`）；
+  3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
+  4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
+- `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
+  1. 调 `subjectHasContent(subject.id)` 空 subject 短路守卫；空库直接返回 `NO_QUERY_CONTEXT_ANSWER`；
+  2. 同样走 `generateTextWithTools` 工具循环；
+  3. 引用由 `generateQueryCitations` 从 `accessedToContext(subject, accessed)` 取页生成。
+- `generateQueryCitations(question, fullAnswer, context, subject)` — 对已有答案与访问页上下文做二次结构化输出，产出 `{ pageSlug, excerpt }[]` 引用列表；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue），走 changeset 写入对应 subject。
-- 流式分支 `streamQueryAnswer(...)` 新增 `history` 可选参透传。
 
-`NO_QUERY_CONTEXT_ANSWER` 常量 —— 该 subject 知识库为空时的兜底回答。
+`NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答。
+`QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
+
+**`query-tools.ts`**（新增）— subject-scoped 工具定义：
+- `buildQueryTools(subject, accessed)` — 构造三工具：`list_pages`（枚举本 subject 全部页标题/slug）、`search_wiki`（FTS5 全文检索）、`read_page`（读单页正文，命中则写入 `accessed`）；工具 execute 失败返回 `{ error }` 字符串而非抛出，防止中断循环。
+- `createAccessedPages()` — 创建 `AccessedPages` 收集器（`add`/`getAll`）。
+- `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
+- `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.countPages(subjectId) > 0`；空 subject 时短路，消灭"宏观问题报不存在文档"误报。
 
 ### `lint-service.ts` — 任务类型 `'lint'`
 
@@ -146,11 +156,11 @@ emit `reenrich:start` 后进入 pipeline；流水线完成后 `checkpoint.clear(
 
 ## 测试与质量
 
-已覆盖（`__tests__/`，vitest，以纯函数与编排为主）：`lint-deterministic`（broken-link/orphan 取数收敛后行为不变）、`maintenance-policy` / `maintenance-scheduler`、`ingest-prep` / `ingest-service` / `ingest-finalize-sources` / `ingest-augmentation-steps`、`embedding-service`、`fix-deterministic`、`lint-latest`、`reenrich-input` / `reenrich-maturity`、`conversation-title`。ingest pipeline 另见 `src/server/agents/runtime/__tests__/`。
+已覆盖（`__tests__/`，vitest，以纯函数与编排为主）：`lint-deterministic`（broken-link/orphan 取数收敛后行为不变）、`maintenance-policy` / `maintenance-scheduler`、`ingest-prep` / `ingest-service` / `ingest-finalize-sources` / `ingest-augmentation-steps`、`embedding-service`、`fix-deterministic`、`lint-latest`、`reenrich-input` / `reenrich-maturity`、`conversation-title`、`query-tools`（subjectHasContent / buildQueryTools / accessedToContext / 工具 execute 路径）、`query-service-agentic`（streamAgenticQuery / runQuery 空库守卫 / generateQueryCitations 引用验证）。ingest pipeline 另见 `src/server/agents/runtime/__tests__/`。
 
 仍待补充：
 
-- `query-service.answerQuery` 在"库为空 / 命中 0 条 / 命中多条"的不同分支；
+- `query-service` agentic 分支在"库为空 / 工具调用失败 / 空答案回落"的不同路径；
 - Saga 失败时 emit 的顺序与最终 job.status 一致。
 
 ## 常见问题 (FAQ)
@@ -170,7 +180,8 @@ emit `reenrich:start` 后进入 pipeline；流水线完成后 `checkpoint.clear(
 src/server/services/
 ├── ingest-service.ts    # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts       # 预检/预算/常量纯函数
-├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆 + 混合检索（⑧）
+├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆（agentic 工具循环）
+├── query-tools.ts       # 🆕 subject-scoped 三工具（list_pages/search_wiki/read_page）+ AccessedPages + subjectHasContent
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
@@ -199,6 +210,7 @@ src/server/services/
 | 2026-06-23 | 新增 `reenrich-service`（任务类型 `'re-enrich'`）：手动重新增益，复用 ingest 增益流水线（enricher→verify），跳过 writer，commitPending 收口；P4 增益强度（`subjects.augmentation_level`）贯穿服务层（off→standard 降级） |
 | 2026-06-24 | 新增 `fix-service`（任务类型 `'fix'`）：两阶段修复 lint findings——阶段1 确定性补 frontmatter（`fix-deterministic.ts` 纯函数，1 commit）；阶段2 按页 `generateStructuredOutput('fix')` 逐页修复（`proceed` 自我门控 + `validateChangeset` 拦坏链，每页 1 commit）；orphan/stale-source/coverage-gap 不修；完成后 UI 自动重跑 lint |
 | 2026-06-24 | 性能：`lint-deterministic` 确定性检查一次性取数（`getAllPages` 3→1、跨主题 meta 扫描 2→1，行为不变）；落地 `lint-deterministic` 单测 |
+| 2026-06-25 | Ask AI 问答从预先 top-5 检索改为 agentic 工具循环：新增 `query-tools.ts`（`list_pages`/`search_wiki`/`read_page` subject-scoped 三工具 + `AccessedPages` + `subjectHasContent` 空库守卫）；`query-service` 重构为 `streamAgenticQuery`/`runQuery`（均走 `streamTextWithTools`/`generateTextWithTools`）；引用来自 `accessedToContext` 实际访问页；删除旧死代码 `prepareQueryContext`/`streamQueryAnswer`/`QUERY_STREAM_SYSTEM_PROMPT`；新增 `query-tools.test.ts` + `query-service-agentic.test.ts` |
 
 ---
 
