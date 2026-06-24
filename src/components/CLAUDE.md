@@ -48,8 +48,9 @@
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
 - `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行支持可选 `editHref` 渲染 Edit 按钮（Merge/Split 按钮已移除，策展入口移至 Health 页）
 - `page-skeleton.tsx` —— loading skeleton
-- `page-editor.tsx` —— 🆕 在线编辑容器：拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；错误内联、dirty 守卫
-- `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装，data-color-mode 跟随 darkMode
+- `page-editor.tsx` —— 🆕 在线编辑容器：根/loading/error **全高 flex 布局**（`flex flex-col h-full`，去掉旧 `max-w-content` 居中收窄）；拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；额外拉 `['pages',subjectId]` 经 `buildTitleSlugMap` 构建 titleSlugMap 传入预览；错误内联、dirty 守卫
+- `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装；`height="100%"` 撑满父高，`components.preview` 接 `previewRenderer` 自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
+- `editor-preview.tsx` —— 🆕 编辑器实时预览：复用 `PageRenderer`（**不传 title**→跳过 FrontmatterDisplay、仅正文），与阅读页同管线（wikilink/callout/mermaid/数学公式一致），`renderMarkdown` 的 `remarkFrontmatter` 自动剥离 `---` 块
 - `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
 
 ### `chat/`
@@ -168,6 +169,7 @@ src/components/
 | 2026-06-22 | `layout/settings-rows.tsx` 加 `TextSettingRow`（password/允许空）；`settings-content.tsx` 加 "Web search" section（provider/apiKey/maxResults，走 /api/settings 不写 Zustand）；供 ⑨ verifier 联网核查搜索后端配置 |
 | 2026-06-23 | Settings 弹窗改两栏式：新增 `settings-categories.ts`（5 类元数据单源）+ `settings-nav.tsx`（左导航）；`settings-dialog` 加宽 `max-w-3xl`+固定高度+`active` 分类 state；`settings-content` 拆为 5 个 panel 按分类切换；行级原语与 `/api/settings` 数据流不变；spec 见 docs/superpowers/specs/2026-06-23-settings-two-column-layout-design.md |
 | 2026-06-23 | 删除 `wiki/{merge,split}-{button,dialog}.tsx`（4 个文件）；`frontmatter-display` 不再渲染 Merge/Split 按钮；新增 `health/health-view.tsx` 的 "Tidy structure" 入口（`POST /api/curate` + `useJobStream` 追踪 `curate:*`）；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-23-agent-driven-page-curation* |
+| 2026-06-24 | 在线 Markdown 编辑器重做：`page-editor` 改全高 flex + 拉 titleSlugMap；`md-editor` 加 `previewRenderer`(`components.preview`)/`height="100%"`/`wiki-md-editor` 类名；新增 `wiki/editor-preview.tsx`（复用 PageRenderer 仅正文预览）；`globals.css` 加 `.wiki-md-editor` 工具栏/字号增强；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-24-markdown-editor-rework* |
 
 ---
 
