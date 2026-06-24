@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, RefreshCw, Wand2 } from 'lucide-react';
+import { Activity, RefreshCw, Wand2, Wrench } from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useJobStream } from '@/hooks/use-job-stream';
@@ -66,6 +66,12 @@ export function HealthView() {
   const { status: curateStatus, latestMessage: curateMessage } = useJobStream(curateJobId);
   const curating = curateStarting || (curateJobId !== null && curateStatus !== 'completed' && curateStatus !== 'failed');
 
+  const [fixJobId, setFixJobId] = useState<string | null>(null);
+  const [fixStarting, setFixStarting] = useState(false);
+  const [fixSummary, setFixSummary] = useState<{ fixed: number; skipped: number; failed: number } | null>(null);
+  const { status: fixStatus, events: fixEvents, latestMessage: fixMessage } = useJobStream(fixJobId);
+  const fixing = fixStarting || (fixJobId !== null && fixStatus !== 'completed' && fixStatus !== 'failed');
+
   useEffect(() => {
     if (curateStatus === 'completed') {
       queryClient.invalidateQueries({ queryKey: ['pages'] });
@@ -75,6 +81,21 @@ export function HealthView() {
       setCurateJobId(null);
     }
   }, [curateStatus, queryClient, allSubjects, subjectId]);
+
+  useEffect(() => {
+    if (fixStatus === 'completed') {
+      const done = [...fixEvents].reverse().find((e) => e.type === 'fix:complete');
+      const d = done?.data as { fixed?: number; skipped?: number; failed?: number } | undefined;
+      setFixSummary({ fixed: d?.fixed ?? 0, skipped: d?.skipped ?? 0, failed: d?.failed ?? 0 });
+      queryClient.invalidateQueries({ queryKey: ['pages'] });
+      setFixJobId(null);
+      // 闭环：修复后自动重跑体检刷新 findings
+      void runLint();
+    } else if (fixStatus === 'failed') {
+      setFixJobId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fixStatus, fixEvents]);
 
   async function runCurate() {
     setCurateStarting(true);
@@ -93,11 +114,31 @@ export function HealthView() {
     }
   }
 
+  async function runFix() {
+    setFixStarting(true);
+    setFixSummary(null);
+    try {
+      const res = await apiFetch('/api/fix', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId }),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { jobId: string };
+        setFixJobId(json.jobId);
+      }
+    } finally {
+      setFixStarting(false);
+    }
+  }
+
   function switchScope(next: Scope) {
     setScope(next);
     setJobId(null);
     setSemanticErrored(false);
     setCurateJobId(null);
+    setFixJobId(null);
+    setFixSummary(null);
   }
 
   const [typeFilter, setTypeFilter] = useState<LintFinding['type'] | null>(null);
@@ -165,6 +206,15 @@ export function HealthView() {
             <Wand2 className="h-3.5 w-3.5" />
             Tidy structure
           </Button>
+          <Button
+            intent="secondary"
+            onClick={runFix}
+            loading={fixing}
+            disabled={allSubjects || neverRun || total === 0 || running || curating}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+            Fix issues
+          </Button>
         </div>
       </header>
 
@@ -176,9 +226,20 @@ export function HealthView() {
         <p className="text-sm text-foreground-secondary">{curateMessage || 'Curating structure…'}</p>
       )}
 
+      {fixing && (
+        <p className="text-sm text-foreground-secondary">{fixMessage || 'Fixing issues…'}</p>
+      )}
+
       {semanticErrored && (
         <div className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
           Semantic checks did not complete — only deterministic findings are shown.
+        </div>
+      )}
+
+      {fixSummary && (
+        <div className="rounded-md border border-accent/40 bg-accent-subtle px-3 py-2 text-sm text-accent-strong">
+          Fixed {fixSummary.fixed} · skipped {fixSummary.skipped} (needs manual review)
+          {fixSummary.failed > 0 ? ` · failed ${fixSummary.failed}` : ''}. Re-running health check…
         </div>
       )}
 
