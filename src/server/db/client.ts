@@ -456,6 +456,24 @@ function ensurePagesFts(): void {
   }
 }
 
+// 热路径二级索引（除各表已声明的 PK / UNIQUE 外）。
+// 必须建在所有表迁移（含 legacyMigrateTable 的 DROP+RENAME 重建）之后，
+// 否则会随表重建被丢弃。CREATE INDEX IF NOT EXISTS 幂等。
+// 注：page_sources(subject_id, page_slug) 不建——复合 PK (subject_id, page_slug, source_id) 前缀已覆盖。
+function ensureIndexes(): void {
+  const sqlite = rawSqlite!;
+  sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS wiki_links_target_idx
+      ON wiki_links(target_subject_id, target_slug);
+    CREATE INDEX IF NOT EXISTS wiki_links_source_idx
+      ON wiki_links(subject_id, source_slug);
+    CREATE INDEX IF NOT EXISTS job_events_job_idx
+      ON job_events(job_id, created_at, id);
+    CREATE INDEX IF NOT EXISTS jobs_status_type_created_idx
+      ON jobs(status, type, created_at);
+  `);
+}
+
 function ensureTables() {
   if (!rawSqlite) return;
 
@@ -477,6 +495,7 @@ function ensureTables() {
     migratePageEmbeddings();
     migratePageMaturity();
     ensurePagesFts();
+    ensureIndexes();
   } finally {
     rawSqlite.pragma('foreign_keys = ON');
   }

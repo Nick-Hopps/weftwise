@@ -79,20 +79,25 @@ export function getSourcesForPage(
   pageSlug: string
 ): Source[] {
   const db = getDb();
-  const links = db
-    .select()
+  // 单条 JOIN 取本页关联的所有源（替代逐条 getSource 的 N+1）；
+  // 悬空链接（source 已删）经 innerJoin 自然剔除，与旧实现的 if (source) 跳过一致。
+  const rows = db
+    .select({
+      id: sources.id,
+      subjectId: sources.subjectId,
+      filename: sources.filename,
+      contentHash: sources.contentHash,
+      parsedAt: sources.parsedAt,
+      metadataJson: sources.metadataJson,
+    })
     .from(pageSources)
+    .innerJoin(sources, eq(sources.id, pageSources.sourceId))
     .where(
       and(eq(pageSources.subjectId, subjectId), eq(pageSources.pageSlug, pageSlug))
     )
     .all();
 
-  const result: Source[] = [];
-  for (const link of links) {
-    const source = getSource(link.sourceId);
-    if (source) result.push(source);
-  }
-  return result;
+  return rows.map(rowToSource);
 }
 
 export function linkPageSource(
