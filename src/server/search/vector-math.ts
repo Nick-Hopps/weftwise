@@ -6,9 +6,15 @@ export function encodeVector(v: number[]): Buffer {
 }
 
 export function decodeVector(buf: Buffer): Float32Array {
-  // 复制到对齐的 ArrayBuffer，避免共享底层 buffer 的偏移问题
+  const count = Math.floor(buf.byteLength / 4);
+  // Float32Array 视图要求 byteOffset 4 字节对齐；better-sqlite3 返回的 BLOB Buffer
+  // 通常落在 8 字节对齐的共享池上（命中快路径 → 零拷贝直接视图，省掉每页每次查询的整段内存拷贝）；
+  // 仅当偶发未对齐时才复制到对齐的 ArrayBuffer，保证不抛异常。
+  if (buf.byteOffset % 4 === 0) {
+    return new Float32Array(buf.buffer, buf.byteOffset, count);
+  }
   const copy = Buffer.from(buf);
-  return new Float32Array(copy.buffer, copy.byteOffset, Math.floor(copy.byteLength / 4));
+  return new Float32Array(copy.buffer, copy.byteOffset, count);
 }
 
 export function cosineSimilarity(a: ArrayLike<number>, b: ArrayLike<number>): number {
