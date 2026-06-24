@@ -14,7 +14,7 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { enqueueEmbedIndex } from './embedding-service';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { selectLatestFindings } from './lint-latest';
-import { fixMissingFrontmatter, partitionFindings, buildFixWorklist } from './fix-deterministic';
+import { fixMissingFrontmatter, partitionFindings, buildFixWorklist, bodyShrankTooMuch } from './fix-deterministic';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { buildWikiPath } from '../wiki/page-identity';
 import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
@@ -85,6 +85,7 @@ async function runFixJob(
       if (validation.valid) {
         await applyChangeset(changeset);
         fixed += entries.length;
+        // missing-frontmatter は目前 DETERMINISTIC_FIX_TYPES 的唯一成员，故可直接 bump；若该集合扩展，应改为按 finding.type 逐条 bump
         bump('missing-frontmatter', entries.length);
         emit('fix:deterministic', `Fixed ${entries.length} frontmatter issue(s).`, { fixed: entries.length });
       } else {
@@ -97,6 +98,8 @@ async function runFixJob(
   }
 
   // 3. 阶段2 LLM 逐页修复 — 按 pageSlug 分组，每页一个 commit
+  // 注意：contradiction findings 仅以 pageSlug 所在页的正文为上下文（冲突对方页不加载）；
+  // proceed 自我门控 + 逐页 revert 是安全网；完整双页矛盾消解超出 v1 范围。
   const byPage = new Map<string, LintFinding[]>();
   for (const finding of llm) {
     const arr = byPage.get(finding.pageSlug) ?? [];
@@ -143,6 +146,13 @@ async function runFixJob(
       continue;
     }
 
+    // 忠实度护栏：修复后正文塌缩超过 50% 视为 LLM 丢内容，拒绝提交
+    if (bodyShrankTooMuch(doc.body, result.body)) {
+      failed += findingsOnPage.length;
+      emit('fix:warn', `Failed "${slug}": repair dropped too much content`, { slug });
+      continue;
+    }
+
     const now = new Date().toISOString();
     const frontmatterData = {
       ...doc.frontmatter,
@@ -159,9 +169,18 @@ async function runFixJob(
     const validation = validateChangeset(changeset);
     if (!validation.valid) {
       failed += findingsOnPage.length;
-      emit('fix:warn', `Skip "${slug}": fix introduced invalid links — ${validation.errors.join('; ')}`, {
+      emit('fix:warn', `Failed "${slug}": fix introduced invalid links — ${validation.errors.join('; ')}`, {
         slug,
         errors: validation.errors,
+      });
+      continue;
+    }
+    // 拦截 LLM 修复后仍残留同主题坏链（同主题未解析 wikilink 为 warning，valid 仍为 true）
+    if (validation.warnings.some((w) => w.includes('Unresolved wikilink:'))) {
+      failed += findingsOnPage.length;
+      emit('fix:warn', `Failed "${slug}": fix left an unresolved wikilink`, {
+        slug,
+        warnings: validation.warnings.filter((w) => w.includes('Unresolved wikilink:')),
       });
       continue;
     }

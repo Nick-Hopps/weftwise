@@ -173,6 +173,7 @@ const FixPageSchema = z.object({
 - **LLM 引入坏链**：`validateChangeset` 拦截 → `fix:warn` 跳过该页，vault 不被污染。
 - **并发**：worker 单实例串行 + `vault-mutex` 双保险（与所有写任务一致）。
 - **历史/回滚**：每个 commit 进 `operations`，⑥ 历史按 job type `fix` 展示，可逐条 revert。
+- **已知限制 — contradiction 单页上下文**：contradiction findings 提交给 LLM 时，上下文仅包含 `pageSlug` 所在页的正文；冲突对方页不加载。`proceed` 自我门控（LLM 拿不准时返回 `false`）与逐页 revert 是当前的安全网。完整的双页矛盾消解（同时加载两页、双向重写）超出 v1 范围，留作后续设计。
 
 ---
 

@@ -159,6 +159,9 @@ export function HealthView() {
   const total = allFindings.length;
   const neverRun = data?.jobId == null;
 
+  const FIXABLE_TYPES: LintFinding['type'][] = ['missing-frontmatter', 'broken-link', 'missing-crossref', 'contradiction'];
+  const fixableCount = allFindings.filter((f) => FIXABLE_TYPES.includes(f.type)).length;
+
   return (
     <div className="max-w-content mx-auto px-6 py-8 w-full space-y-6">
       <header className="flex items-start justify-between gap-4 flex-wrap">
@@ -211,7 +214,7 @@ export function HealthView() {
             intent="secondary"
             onClick={runFix}
             loading={fixing}
-            disabled={allSubjects || neverRun || total === 0 || running || curating}
+            disabled={allSubjects || neverRun || fixableCount === 0 || running || curating}
           >
             <Wrench className="h-3.5 w-3.5" />
             Fix issues

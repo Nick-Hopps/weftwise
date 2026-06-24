@@ -103,7 +103,7 @@ Agent 驱动的 subject 结构策展（merge/split 内化）。`params { subject
    - 修复结果经 `validateChangeset` 校验（拦截新引入的坏链），校验失败发 `fix:warn` 跳过该页。
    - 每页成功修复独立 1 commit（粒度可回滚）。
 
-**事件**：`fix:start` / `fix:phase1` / `fix:phase2` / `fix:page`（每页开始）/ `fix:skip`（proceed=false 或 validate 失败）/ `fix:warn`（错误继续）/ `fix:complete`。
+**事件**：`fix:start` / `fix:deterministic` / `fix:page`（单页 LLM 修复成功）/ `fix:skip`（页面不存在 / LLM no-go / LLM 错误）/ `fix:warn`（校验失败或护栏拦截，计入 failed）/ `fix:complete`。
 
 完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发）。
 

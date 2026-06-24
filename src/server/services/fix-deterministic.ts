@@ -5,7 +5,7 @@
  *   - broken-link / missing-crossref / contradiction → 交给 LLM 逐页修复（本文件只做分桶）。
  *   - orphan / stale-source / coverage-gap → 不修（ignored）。
  */
-import { parseFrontmatter, serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
+import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
 import type { LintFinding, WikiDocument, WikiFrontmatter } from '@/lib/contracts';
 
 export const DETERMINISTIC_FIX_TYPES: ReadonlySet<LintFinding['type']> = new Set(['missing-frontmatter']);
@@ -48,6 +48,13 @@ export function partitionFindings(findings: LintFinding[]): {
     else ignored.push(finding);
   }
   return { frontmatter, llm, ignored };
+}
+
+/** 忠实度护栏：修复后正文相对原文塌缩超过阈值（默认 >50%）视为 LLM 丢内容，应拒绝。 */
+export function bodyShrankTooMuch(originalBody: string, newBody: string, floor = 0.5): boolean {
+  const before = originalBody.trim().length;
+  if (before === 0) return false;
+  return newBody.trim().length < before * floor;
 }
 
 /**
