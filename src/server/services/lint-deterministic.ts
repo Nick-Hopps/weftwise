@@ -13,23 +13,33 @@ import * as subjectsRepo from '../db/repos/subjects-repo';
 import { scanWikiPages } from '../wiki/wiki-store';
 import { vaultPath } from '../config/env';
 import { parseFrontmatter, validateFrontmatter } from '../wiki/frontmatter';
-import type { LintFinding, Subject } from '@/lib/contracts';
+import type { LintFinding, Subject, WikiPage, WikiLink } from '@/lib/contracts';
 
 const ORPHAN_EXCLUDE_SLUGS = new Set(['index', 'log']);
 
 export function runDeterministicChecksForSubject(subject: Subject): LintFinding[] {
+  // 一次性取数后传给各 check，避免重复全表扫描：
+  // getAllPages 原本被 3 个 check 各取一次；getMetaPageKeys（跨主题扫描）原本被两次
+  // getAllLinks 各算一次——这里都收敛为一次。
+  const allPages = pagesRepo.getAllPages(subject.id);
+  const metaKeys = pagesRepo.getMetaPageKeys();
+  const subjectLinks = pagesRepo.getAllLinks(subject.id, metaKeys); // 本主题出链（broken-link 用）
+  const allLinks = pagesRepo.getAllLinks(undefined, metaKeys); // 跨主题全量（orphan 入链统计用）
+
   const findings: LintFinding[] = [];
-  findings.push(...checkBrokenLinks(subject));
-  findings.push(...checkOrphanPages(subject));
+  findings.push(...checkBrokenLinks(subject, allPages, subjectLinks));
+  findings.push(...checkOrphanPages(subject, allPages, allLinks));
   findings.push(...checkMissingFrontmatter(subject));
-  findings.push(...checkStaleSources(subject));
+  findings.push(...checkStaleSources(subject, allPages));
   return findings;
 }
 
-function checkBrokenLinks(subject: Subject): LintFinding[] {
+function checkBrokenLinks(
+  subject: Subject,
+  allPages: WikiPage[],
+  allLinks: WikiLink[]
+): LintFinding[] {
   const findings: LintFinding[] = [];
-  const allLinks = pagesRepo.getAllLinks(subject.id);
-  const allPages = pagesRepo.getAllPages(subject.id);
   const slugSet = new Set(allPages.map((p) => p.slug));
 
   for (const link of allLinks) {
@@ -65,10 +75,13 @@ function checkBrokenLinks(subject: Subject): LintFinding[] {
   return findings;
 }
 
-function checkOrphanPages(subject: Subject): LintFinding[] {
+function checkOrphanPages(
+  subject: Subject,
+  allPages: WikiPage[],
+  allLinks: WikiLink[]
+): LintFinding[] {
   const findings: LintFinding[] = [];
-  const allPages = pagesRepo.getAllPages(subject.id);
-  const allLinks = pagesRepo.getAllLinks(); // cross-subject backlinks count as inbound
+  // allLinks 为跨主题全量：跨主题入链也算 inbound
   const inboundSlugs = new Set<string>();
   for (const link of allLinks) {
     if (link.targetSubjectId === subject.id) {
@@ -132,9 +145,8 @@ function rawSourcePathsToCheck(subjectSlug: string, filename: string): string[] 
   ];
 }
 
-function checkStaleSources(subject: Subject): LintFinding[] {
+function checkStaleSources(subject: Subject, allPages: WikiPage[]): LintFinding[] {
   const findings: LintFinding[] = [];
-  const allPages = pagesRepo.getAllPages(subject.id);
 
   for (const page of allPages) {
     const sources = sourcesRepo.getSourcesForPage(subject.id, page.slug);
