@@ -65,10 +65,10 @@ worker-entry.ts
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
 
 **`query-tools.ts`**（新增）— subject-scoped 工具定义：
-- `buildQueryTools(subject, accessed)` — 构造三工具：`list_pages`（枚举本 subject 全部页标题/slug）、`search_wiki`（FTS5 全文检索）、`read_page`（读单页正文，命中则写入 `accessed`）；工具 execute 失败返回 `{ error }` 字符串而非抛出，防止中断循环。
-- `createAccessedPages()` — 创建 `AccessedPages` 收集器（`add`/`getAll`）。
+- `buildQueryTools(subject, accessed)` — 构造三工具：`list_pages`（枚举本 subject 全部页标题/slug）、`search_wiki`（混合 FTS5+向量语义检索，RRF 合并；未配置 embedding 时降级纯 FTS）、`read_page`（读单页正文，命中则写入 `accessed`）；工具 execute 失败返回 `{ error }` 字符串而非抛出，防止中断循环。
+- `createAccessedPages()` — 创建 `AccessedPages` 对象（`{ meta: Map<slug, {title, summary}>, bodies: Map<slug, {title, body}> }`），调用方直接向两个 Map 中写入访问记录。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
-- `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.countPages(subjectId) > 0`；空 subject 时短路，消灭"宏观问题报不存在文档"误报。
+- `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.getAllPages(subjectId).some(p => !pagesRepo.isMetaPage(p))`；只计非 meta 页，空 subject 或仅含 meta 页时返 false，消灭"宏观问题报不存在文档"误报。
 
 ### `lint-service.ts` — 任务类型 `'lint'`
 
