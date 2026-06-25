@@ -43,4 +43,9 @@ describe('wiki.list', () => {
     const out = await wikiListTool.handler({}, fakeCtx());
     expect(out).toEqual({ pages: [{ slug: 'a', title: 'A', summary: 'sa', tags: ['t'] }], total: 1 });
   });
+  it('对每页触发 onAccess', async () => {
+    const onAccess = vi.fn();
+    await wikiListTool.handler({}, fakeCtx({ onAccess }));
+    expect(onAccess).toHaveBeenCalledWith({ slug: 'a', title: 'A' });
+  });
 });
