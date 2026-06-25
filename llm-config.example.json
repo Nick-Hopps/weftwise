@@ -34,9 +34,71 @@
       "maxTokens": 4096,
       "temperature": 0
     },
-    "embedding": { "profile": "openai-default", "model": "text-embedding-3-small" },
-    "skill:ingest-verifier-triage": { "profile": "default" },
-    "skill:ingest-verifier-apply": { "profile": "default" }
+    "merge": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192,
+      "temperature": 0.2
+    },
+    "split": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192,
+      "temperature": 0.2
+    },
+    "curate": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 4096,
+      "temperature": 0
+    },
+    "fix": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192,
+      "temperature": 0
+    },
+    "embedding": {
+      "profile": "openai-default",
+      "model": "text-embedding-3-small"
+    },
+    "skill:ingest-planner": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6"
+    },
+    "skill:ingest-chunk-summarizer": {
+      "profile": "openai-default",
+      "model": "gpt-4o-mini"
+    },
+    "skill:ingest-writer": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192
+    },
+    "skill:ingest-enricher": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "maxTokens": 8192
+    },
+    "skill:ingest-verifier": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "temperature": 0
+    },
+    "skill:ingest-verifier-triage": {
+      "profile": "openai-default",
+      "model": "gpt-4o-mini",
+      "temperature": 0
+    },
+    "skill:ingest-verifier-apply": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "temperature": 0
+    },
+    "skill:ingest-indexer": {
+      "profile": "openai-default",
+      "model": "gpt-4o-mini"
+    }
   },
   "providers": {
     "anthropic-default": {

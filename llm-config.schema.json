@@ -20,17 +20,22 @@
     },
     "tasks": {
       "type": "object",
-      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Keys may be built-in tasks (ingest/query/lint) or skill:<id> task routes.",
+      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Keys are either built-in tasks (ingest/query/lint/merge/split/curate/fix/embedding) or skill:<id> routes that override the model for a single ingest agent-pipeline stage. Known ingest stages: skill:ingest-planner, skill:ingest-chunk-summarizer, skill:ingest-writer, skill:ingest-enricher, skill:ingest-verifier, skill:ingest-verifier-triage, skill:ingest-verifier-apply, skill:ingest-indexer. A skill:<id> entry is optional — without it the stage inherits the 'defaults' route (skill frontmatter may further override).",
       "propertyNames": {
-        "pattern": "^(ingest|query|lint|skill:[a-z0-9][a-z0-9-]*)$"
+        "pattern": "^(ingest|query|lint|merge|split|curate|fix|embedding|skill:[a-z0-9][a-z0-9-]*)$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/taskRoute"
       },
       "properties": {
-        "ingest": { "$ref": "#/$defs/taskRoute" },
-        "query": { "$ref": "#/$defs/taskRoute" },
-        "lint": { "$ref": "#/$defs/taskRoute" }
+        "ingest": { "$ref": "#/$defs/taskRoute", "description": "Ingest pipeline: turn raw documents into wiki pages (multi-stage agent pipeline)." },
+        "query": { "$ref": "#/$defs/taskRoute", "description": "Ask AI: agentic tool-loop Q&A over the wiki with citations." },
+        "lint": { "$ref": "#/$defs/taskRoute", "description": "Health check: scan the wiki for findings (broken links, missing cross-refs, contradictions)." },
+        "merge": { "$ref": "#/$defs/taskRoute", "description": "Fuse two pages into one (invoked by page curation, not a standalone job)." },
+        "split": { "$ref": "#/$defs/taskRoute", "description": "Split one page into several (invoked by page curation, not a standalone job)." },
+        "curate": { "$ref": "#/$defs/taskRoute", "description": "Agent-driven page curation: triage then confirm merge/split candidates." },
+        "fix": { "$ref": "#/$defs/taskRoute", "description": "Health fix: repair lint findings page by page." },
+        "embedding": { "$ref": "#/$defs/taskRoute", "description": "Vector embeddings for semantic search. Only openai / openai-compatible / ollama providers are supported." }
       }
     },
     "providers": {
