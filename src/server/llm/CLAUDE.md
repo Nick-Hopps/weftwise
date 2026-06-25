@@ -10,6 +10,31 @@
 - 内置任务 —— `ingest` / `query` / `lint` / `merge` / `split` / `curate` / `fix` / `embedding` —— 每类可单独指定模型、温度、超时、provider options 等。
 - 结构化输出（`generateObject` + Zod schema）与流式文本（`streamText`）。
 
+### 全部已知 task（`llm-config.json::tasks` 可路由的 key）
+
+`tasks` 是扁平 `z.record`，key 分两类。`resolveTask` / `resolveSkillModel` 均**只读顶层 key**（`skill:<id>` 不嵌套在 `ingest` 内）。
+
+| 类别 | task key | 用途 |
+|------|----------|------|
+| 内置 | `ingest` | 原始文档 → wiki 页（多阶段 agent 流水线，下方 skill:* 是其子阶段） |
+| 内置 | `query` | Ask AI 工具循环问答 + 引用 |
+| 内置 | `lint` | 体检：扫全库 findings |
+| 内置 | `merge` | 融合两页（由 `wiki/page-ops.ts` 内部调用，非独立 job） |
+| 内置 | `split` | 拆一页为多页（由 `wiki/page-ops.ts` 内部调用，非独立 job） |
+| 内置 | `curate` | agent 策展：triage → confirm merge/split |
+| 内置 | `fix` | 体检修复：逐页修 lint findings |
+| 内置 | `embedding` | 向量嵌入（仅 openai / openai-compatible / ollama 供应商） |
+| skill | `skill:ingest-planner` | ingest：规划页面切分 |
+| skill | `skill:ingest-chunk-summarizer` | ingest：大文件分片摘要（map 阶段） |
+| skill | `skill:ingest-writer` | ingest：写/并入页面正文（fanout 阶段） |
+| skill | `skill:ingest-enricher` | ingest：叠加 callout 增益层 |
+| skill | `skill:ingest-verifier` | ingest：参数化自检（联网核查降级回落） |
+| skill | `skill:ingest-verifier-triage` | ingest：联网核查 triage（挑存疑断言+query） |
+| skill | `skill:ingest-verifier-apply` | ingest：联网核查 apply（证据驱动改 callout） |
+| skill | `skill:ingest-indexer` | ingest：生成 index/log（finalize 收口） |
+
+> `skill:<id>` 是**开放命名空间**（schema 允许任意 `skill:[a-z0-9-]+`），上表 8 个是 `examples/skills/` 的种子 skill。每个 `skill:*` 的 task 配置**可选**：缺省则继承 `defaults`，skill frontmatter 可再覆盖（合并序 `defaults < tasks['skill:<id>'] < frontmatter`）。`llm-config.example.json` 把 8 个种子 skill 全部列出作参考，并演示按阶段分层路由（机械阶段如 summarizer / triage / indexer 走便宜模型，重推理阶段走强模型）。
+
 ## 入口与启动
 
 - 配置加载：`config-loader.ts::getLLMConfig()`（读 `llm-config.json`，无则使用默认）。
