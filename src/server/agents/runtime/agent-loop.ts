@@ -6,6 +6,7 @@ import { resolveTask } from '../../llm/task-router';
 import { resolveModel } from '../../llm/provider-registry';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';
 import { createRunStepTracker } from './budget';
+import { agentToolContext } from '../tools/tool-context';
 
 export class AgentCancelled extends Error {
   constructor() { super('Agent cancelled'); this.name = 'AgentCancelled'; }
@@ -129,10 +130,11 @@ function compileToolSet(
   runSteps: RunStepTracker,
 ): ToolSet {
   const toolDefs = ctx.toolRegistry.resolve(skill.tools);
+  const toolCtx = agentToolContext(ctx);
   const toolSet: ToolSet = {};
   const usedToolNames = new Set<string>();
   for (const t of toolDefs) {
-    // 内部工具名用点号分命名空间（如 `vault.read`），
+    // 内部工具名用点号分命名空间（如 `wiki.read`），
     // 但 provider API 要求 ^[a-zA-Z0-9_-]{1,64}$ —— 在边界处转换。
     const providerName = toProviderToolName(t.name, usedToolNames);
     usedToolNames.add(providerName);
@@ -143,7 +145,7 @@ function compileToolSet(
         const stepStart = Date.now();
         runSteps.chargeStep();
         try {
-          const out = await t.handler(args, ctx);
+          const out = await t.handler(args, toolCtx);
           ctx.emit('agent:step', `${skill.name} called ${t.name}`, {
             runId,
             parentRunId: ctx.parentRunId,

@@ -1,5 +1,6 @@
 import type { ZodSchema } from 'zod';
 import type { Job, Subject, ChangesetEntry, CheckpointProgress } from '@/lib/contracts';
+import type { ToolContext } from './tools/tool-context';
 
 export interface AgentBudget {
   maxSteps: number;
@@ -38,7 +39,7 @@ export interface ToolDef<I = unknown, O = unknown> {
   inputSchema: ZodSchema<I>;
   outputSchema: ZodSchema<O>;
   sideEffect: ToolSideEffect;
-  handler: (input: I, ctx: AgentContext) => Promise<O>;
+  handler: (input: I, ctx: ToolContext) => Promise<O>;
 }
 
 export type AgentRunStatus = 'running' | 'completed' | 'failed' | 'budget-exceeded';
