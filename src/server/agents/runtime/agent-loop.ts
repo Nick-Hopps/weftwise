@@ -1,4 +1,4 @@
-import { generateObject, generateText, tool, InvalidToolArgumentsError, type ToolSet, type CoreMessage } from 'ai';
+import { generateObject, generateText, InvalidToolArgumentsError, type ToolSet, type CoreMessage } from 'ai';
 import { randomUUID } from 'node:crypto';
 import type { ZodSchema } from 'zod';
 import type { AgentContext, SkillTemplate } from '../types';
@@ -7,6 +7,7 @@ import { resolveModel } from '../../llm/provider-registry';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';
 import { createRunStepTracker } from './budget';
 import { agentToolContext } from '../tools/tool-context';
+import { compileToolSet, synthesizeFinishTool, FINISH_TOOL_NAME } from '../tools/compile';
 
 export class AgentCancelled extends Error {
   constructor() { super('Agent cancelled'); this.name = 'AgentCancelled'; }
@@ -42,18 +43,38 @@ export async function runAgentLoop(opts: {
   const runSteps = createRunStepTracker(ctx.budgetSnapshot.maxSteps);
 
   const { model, route } = resolveSkillModel(skill);
-  const toolSet = compileToolSet(skill, ctx, runId, runSteps);
+  const toolDefs = ctx.toolRegistry.resolve(skill.tools);
+  const toolCtx = agentToolContext(ctx);
+  const toolSet = compileToolSet(toolDefs, toolCtx, {
+    chargeStep: () => runSteps.chargeStep(),
+    onToolCall: (info) => ctx.emit('agent:step', `${skill.name} called ${info.tool}`, {
+      runId,
+      parentRunId: ctx.parentRunId,
+      skillId: skill.id,
+      stepIndex: runSteps.stepCount,
+      kind: 'tool-call',
+      tool: info.tool,
+      input: info.input,
+      outputPreview: info.output !== undefined ? previewOutput(info.output) : undefined,
+      error: info.error,
+      durationMs: info.durationMs,
+    }),
+  });
   const messages = buildMessages(skill, input);
 
   // LLM 调用前的取消闸门
   if (ctx.cancelled()) throw new AgentCancelled();
   ctx.budget.assertWithin();
 
+  const hasTools = skill.tools.length > 0;
   let generation: GenerationResult;
   try {
-    generation = skill.outputSchema
-      ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
-      : await generateTextResult(skill, ctx, runId, model, route, messages, toolSet);
+    generation =
+      skill.outputSchema && hasTools
+        ? await generateCombinedResult(skill, ctx, model, route, messages, toolSet, skill.outputSchema)
+        : skill.outputSchema
+          ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
+          : await generateTextResult(skill, ctx, runId, model, route, messages, toolSet);
   } catch (err) {
     // 结构化输出失败（解析失败 / 不符合 schema，恢复也补不了）：emit 富诊断（原始输出 + 问题路径），
     // 让"哪页/哪块、模型吐了什么、哪个字段错"在 job_events 与 UI 直接可见，再原样上抛。
@@ -120,62 +141,6 @@ function resolveSkillModel(skill: SkillTemplate): { model: ResolvedModel; route:
   const routerMode = getAgentTaskRouterMode();
   const route = resolveTask(taskKey, routerMode === 'frontmatter-override' ? skill.model : undefined);
   return { model: resolveModel(route), route };
-}
-
-/** 把 skill 声明的内部工具编译为 provider 可用的 ToolSet（带步数计费与 emit 遥测）。 */
-function compileToolSet(
-  skill: SkillTemplate,
-  ctx: AgentContext,
-  runId: string,
-  runSteps: RunStepTracker,
-): ToolSet {
-  const toolDefs = ctx.toolRegistry.resolve(skill.tools);
-  const toolCtx = agentToolContext(ctx);
-  const toolSet: ToolSet = {};
-  const usedToolNames = new Set<string>();
-  for (const t of toolDefs) {
-    // 内部工具名用点号分命名空间（如 `wiki.read`），
-    // 但 provider API 要求 ^[a-zA-Z0-9_-]{1,64}$ —— 在边界处转换。
-    const providerName = toProviderToolName(t.name, usedToolNames);
-    usedToolNames.add(providerName);
-    toolSet[providerName] = tool({
-      description: t.description,
-      parameters: t.inputSchema,
-      execute: async (args: unknown) => {
-        const stepStart = Date.now();
-        runSteps.chargeStep();
-        try {
-          const out = await t.handler(args, toolCtx);
-          ctx.emit('agent:step', `${skill.name} called ${t.name}`, {
-            runId,
-            parentRunId: ctx.parentRunId,
-            skillId: skill.id,
-            stepIndex: runSteps.stepCount,
-            kind: 'tool-call',
-            tool: t.name,
-            input: args,
-            outputPreview: previewOutput(out),
-            durationMs: Date.now() - stepStart,
-          });
-          return out;
-        } catch (err) {
-          ctx.emit('agent:step', `${skill.name} tool ${t.name} failed`, {
-            runId,
-            parentRunId: ctx.parentRunId,
-            skillId: skill.id,
-            stepIndex: runSteps.stepCount,
-            kind: 'tool-call',
-            tool: t.name,
-            input: args,
-            error: (err as Error).message,
-            durationMs: Date.now() - stepStart,
-          });
-          throw err;
-        }
-      },
-    });
-  }
-  return toolSet;
 }
 
 /** 构造 system + user 消息（非字符串 input 序列化为 JSON）。 */
@@ -278,25 +243,52 @@ async function generateTextResult(
 }
 
 /**
- * Map an internal tool name to a provider-safe function name.
- *
- * Provider APIs (OpenAI / DeepSeek / xAI / Mistral / …) require tool names to
- * match `^[a-zA-Z0-9_-]{1,64}$`. Our internal names use dots for namespacing
- * (`vault.read`, `dispatch.skill`), so any non-conforming
- * character becomes `_`, the result is capped at 64 chars, and collisions are
- * disambiguated with a numeric suffix.
+ * 组合路径：工具调用循环 + 合成 finish 工具产出结构化结果。
+ * 适用于 skill.outputSchema 非空且 skill.tools 非空时（如 ingest-planner / ingest-writer）。
+ * 末步强制 finish（experimental_prepareStep），杜绝"只读不交"。
  */
-function toProviderToolName(name: string, used: Set<string>): string {
-  let base = name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
-  if (base.length === 0) base = 'tool';
-
-  if (!used.has(base)) return base;
-
-  for (let i = 2; ; i += 1) {
-    const suffix = `_${i}`;
-    const candidate = base.slice(0, 64 - suffix.length) + suffix;
-    if (!used.has(candidate)) return candidate;
+async function generateCombinedResult(
+  skill: SkillTemplate,
+  ctx: AgentContext,
+  model: ResolvedModel,
+  route: TaskRoute,
+  messages: CoreMessage[],
+  toolSet: ToolSet,
+  schema: ZodSchema,
+): Promise<GenerationResult> {
+  let captured: unknown;
+  const finishSet = synthesizeFinishTool(schema, (v) => { captured = v; });
+  const tools = { ...toolSet, ...finishSet };
+  const result = await generateText({
+    model,
+    tools,
+    messages,
+    maxTokens: skill.model?.maxTokens ?? route.maxTokens,
+    temperature: skill.model?.temperature ?? route.temperature,
+    maxSteps: ctx.budgetSnapshot.maxSteps,
+    // 末步强制调 finish，杜绝"只读不交"：到达倒数第二步且尚未 finish 时锁定 toolChoice。
+    experimental_prepareStep: async ({ stepNumber, maxSteps }: { stepNumber: number; maxSteps: number }) =>
+      stepNumber >= maxSteps - 1 && captured === undefined
+        ? { toolChoice: { type: 'tool' as const, toolName: FINISH_TOOL_NAME } }
+        : {},
+    experimental_repairToolCall: async ({ toolCall, error }) => {
+      if (!InvalidToolArgumentsError.isInstance(error)) return null;
+      const repaired = repairToolCallArgs(toolCall.args);
+      return repaired ? { ...toolCall, args: repaired } : null;
+    },
+  });
+  if (captured === undefined) {
+    // 兜底：模型把结构化结果写进了文本而非 finish 调用——尝试从 result.text 恢复。
+    const recovered = recoverStructuredOutput({ text: result.text }, schema);
+    if (!recovered) throw new Error(`${skill.name} did not call finish and text is not valid structured output`);
+    captured = recovered.object;
   }
+  return {
+    output: captured,
+    inputTokens: result.usage?.promptTokens ?? 0,
+    outputTokens: result.usage?.completionTokens ?? 0,
+    cacheHitTokens: readCacheHitTokens(result.providerMetadata),
+  };
 }
 
 function previewOutput(out: unknown): string {
