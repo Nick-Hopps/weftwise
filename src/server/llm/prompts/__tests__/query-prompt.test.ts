@@ -56,3 +56,41 @@ describe2('buildQueryUserPrompt – conversation history', () => {
     expect2(out.indexOf('Conversation so far')).toBeLessThan(out.indexOf('User question'));
   });
 });
+
+import {
+  QUERY_AGENTIC_SYSTEM_PROMPT,
+  buildAgenticUserContent,
+} from '../query-prompt';
+
+describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
+  it('说明三工具与 subject 隔离', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('list_pages');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('search_wiki');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('read_page');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/other subject/i);
+  });
+});
+
+describe('buildAgenticUserContent', () => {
+  const ctx = {
+    language: 'English',
+    subject: { slug: 'general', name: 'General', description: '' },
+  };
+
+  it('含语言指令、subject 名、问题包在 <user_input>', () => {
+    const out = buildAgenticUserContent('什么是 X', ctx);
+    expect(out).toContain('General');
+    expect(out).toContain('<user_input>\n什么是 X\n</user_input>');
+  });
+
+  it('传 currentPageSlug 时含当前页 hint', () => {
+    const out = buildAgenticUserContent('总结这页', ctx, { currentPageSlug: 'foo' });
+    expect(out).toContain('`foo`');
+    expect(out).toMatch(/currently viewing/i);
+  });
+
+  it('不传 currentPageSlug 时不含 hint', () => {
+    const out = buildAgenticUserContent('问题', ctx);
+    expect(out).not.toMatch(/currently viewing/i);
+  });
+});
