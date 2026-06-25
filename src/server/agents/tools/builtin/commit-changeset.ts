@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ChangesetEntry, IngestResult } from '@/lib/contracts';
 import type { AgentContext, ToolDef } from '../../types';
+import type { ToolContext } from '../tool-context';
 import {
   createChangeset,
   validateChangeset,
@@ -167,7 +168,9 @@ export const commitChangesetTool: ToolDef<z.infer<typeof InputSchema>, z.infer<t
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'commit',
-  handler(input, ctx) {
-    return commitPending(ctx, input.entries ?? []);
+  handler(input, ctx: ToolContext) {
+    const agent = ctx.agent;
+    if (!agent) throw new Error('commit_changeset requires an ingest AgentContext');
+    return commitPending(agent, input.entries ?? []);
   },
 };

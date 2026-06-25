@@ -4,8 +4,8 @@ name: Ingest Writer
 description: Write the markdown body for a single planned wiki page.
 version: 5
 tools:
-  - vault.read
-  - vault.search
+  - wiki.read
+  - wiki.search
 canDispatch: []
 outputSchema: |
   {

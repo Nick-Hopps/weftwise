@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDef } from '../../types';
+import type { ToolContext } from '../tool-context';
 
 const InputSchema = z.object({
   skillId: z.string(),
@@ -21,8 +22,10 @@ export const dispatchSkillTool: ToolDef<z.infer<typeof InputSchema>, z.infer<typ
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'none',
-  async handler(input, ctx) {
-    if (!ctx.skillRegistry.get(input.skillId)) {
+  async handler(input, ctx: ToolContext) {
+    const agent = ctx.agent;
+    if (!agent) throw new Error('dispatch.skill requires an ingest AgentContext');
+    if (!agent.skillRegistry.get(input.skillId)) {
       throw new Error(`Unknown skill: ${input.skillId}`);
     }
     // Real implementation lands in orchestrator.runSingle; for Phase 1, callers

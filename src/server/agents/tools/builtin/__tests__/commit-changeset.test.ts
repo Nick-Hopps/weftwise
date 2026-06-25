@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentContext } from '../../../types';
+import type { ToolContext } from '../../tool-context';
 
 const txMocks = vi.hoisted(() => ({
   createChangeset: vi.fn((_jobId: string, subject: { id: string; slug: string }, entries: unknown[]) => ({
@@ -61,6 +62,15 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   } as AgentContext;
 }
 
+/** commitChangesetTool.handler 需要 ToolContext；将 AgentContext 包装为带 agent 字段的 ToolContext。 */
+const asToolCtx = (agent: AgentContext): ToolContext => ({
+  subject: agent.subject,
+  readPage: async () => null,
+  search: async () => [],
+  listPages: async () => [],
+  agent,
+});
+
 describe('commit-changeset', () => {
   it('commits once, derives commitSha from postHead, classifies pages by action, flips ctx.committed', async () => {
     const ctx = makeCtx();
@@ -70,7 +80,7 @@ describe('commit-changeset', () => {
         { action: 'update', path: 'wiki/general/b.md', content: '---\ntitle: B\n---\n' },
       ],
       summary: 'add a, update b',
-    }, ctx);
+    }, asToolCtx(ctx));
     expect(result.commitSha).toBe('sha-1');
     expect(result.pagesCreated).toEqual(['a']);
     expect(result.pagesUpdated).toEqual(['b']);
@@ -83,7 +93,7 @@ describe('commit-changeset', () => {
     await expect(commitChangesetTool.handler({
       entries: [{ action: 'create', path: 'wiki/general/a.md', content: 'x' }],
       summary: 'a',
-    }, ctx)).rejects.toThrow(/already invoked/);
+    }, asToolCtx(ctx))).rejects.toThrow(/already invoked/);
   });
 
   it('stamps system-owned created/updated frontmatter before building the changeset', async () => {
@@ -95,7 +105,7 @@ describe('commit-changeset', () => {
         { action: 'create', path: 'wiki/general/c.md', content: '---\ntitle: C\ntags:\n  - t\n---\n\n## Body\n' },
       ],
       summary: 'add c',
-    }, ctx);
+    }, asToolCtx(ctx));
 
     const passedEntries = txMocks.createChangeset.mock.calls[0][2] as { content: string }[];
     const { data } = parseFrontmatter(passedEntries[0].content);
@@ -110,7 +120,7 @@ describe('commit-changeset', () => {
     await commitChangesetTool.handler({
       entries: [{ action: 'create', path: 'wiki/general/x.md', content: 'x' }],
       summary: 's',
-    }, ctx);
+    }, asToolCtx(ctx));
     expect(emit).toHaveBeenCalledWith('ingest:committing', expect.any(String), expect.objectContaining({
       commitSha: 'sha-1',
       pagesCreated: ['x'],
@@ -129,7 +139,7 @@ describe('commit-changeset', () => {
     const result = await commitChangesetTool.handler({
       entries: [{ action: 'create', path: 'wiki/general/index.md', content: '---\ntitle: Index\n---\n' }],
       summary: 's',
-    }, ctx);
+    }, asToolCtx(ctx));
     const passed = txMocks.createChangeset.mock.calls[0][2] as { path: string }[];
     expect(passed.map((e) => e.path).sort()).toEqual([
       'wiki/general/index.md', 'wiki/general/page-a.md', 'wiki/general/page-b.md',
@@ -148,7 +158,7 @@ describe('commit-changeset', () => {
     await commitChangesetTool.handler({
       entries: [{ action: 'create', path: 'wiki/general/a.md', content: '---\ntitle: A\n---\n修正正文' }],
       summary: 's',
-    }, ctx);
+    }, asToolCtx(ctx));
     const passed = txMocks.createChangeset.mock.calls[0][2] as { path: string; content: string }[];
     const a = passed.filter((e) => e.path === 'wiki/general/a.md');
     expect(a).toHaveLength(1);
@@ -161,14 +171,14 @@ describe('commit-changeset', () => {
         { action: 'create', path: 'wiki/general/only.md', content: '---\ntitle: Only\n---\n' },
       ] },
     });
-    const result = await commitChangesetTool.handler({ summary: 's' }, ctx);
+    const result = await commitChangesetTool.handler({ summary: 's' }, asToolCtx(ctx));
     expect(result.pagesCreated).toEqual(['only']);
     expect(ctx.committed.value).toBe(true);
   });
 
   it('pending 与 input 都为空时报错 nothing to commit', async () => {
     const ctx = makeCtx();
-    await expect(commitChangesetTool.handler({ summary: 's' }, ctx))
+    await expect(commitChangesetTool.handler({ summary: 's' }, asToolCtx(ctx)))
       .rejects.toThrow(/nothing to commit/i);
   });
 });

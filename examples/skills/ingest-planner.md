@@ -4,8 +4,8 @@ name: Ingest Planner
 description: Plan which wiki pages to create or update from raw source documents.
 version: 3
 tools:
-  - vault.read
-  - vault.search
+  - wiki.read
+  - wiki.search
 canDispatch: []
 outputSchema: |
   {

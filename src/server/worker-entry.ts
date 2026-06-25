@@ -19,12 +19,7 @@ import type { Changeset } from '@/lib/contracts';
 import { join } from 'node:path';
 import { vaultPath } from './config/env';
 import { buildSkillRegistry } from './agents/skills/registry';
-import { createToolRegistry } from './agents/tools/registry';
-import type { ToolDef } from './agents/types';
-import { vaultReadTool } from './agents/tools/builtin/vault-read';
-import { vaultSearchTool } from './agents/tools/builtin/vault-search';
-import { commitChangesetTool } from './agents/tools/builtin/commit-changeset';
-import { dispatchSkillTool } from './agents/tools/builtin/dispatch-skill';
+import { createBuiltinToolRegistry } from './agents/tools/builtin';
 import { setRuntimeRegistries } from './worker-runtime';
 import { createLogger } from './logging';
 
@@ -51,11 +46,7 @@ async function bootRuntime(): Promise<void> {
     log.info(`loaded ${skillRegistry.list().length} skill(s)`);
   }
 
-  const toolRegistry = createToolRegistry();
-  toolRegistry.register(vaultReadTool as ToolDef);
-  toolRegistry.register(vaultSearchTool as ToolDef);
-  toolRegistry.register(commitChangesetTool as ToolDef);
-  toolRegistry.register(dispatchSkillTool as ToolDef);
+  const toolRegistry = createBuiltinToolRegistry();
 
   setRuntimeRegistries({ skillRegistry, toolRegistry });
 }
