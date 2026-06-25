@@ -1,5 +1,5 @@
-import { embedMany, generateObject, streamText } from 'ai';
-import type { LanguageModel } from 'ai';
+import { embedMany, generateObject, generateText, streamText } from 'ai';
+import type { CoreMessage, CoreTool, LanguageModel } from 'ai';
 import type { ZodType } from 'zod';
 import type { LLMRouteOverride, LLMTask, ResolvedTaskRoute } from './config-schema';
 import { getLLMConfig } from './config-loader';
@@ -126,6 +126,107 @@ export function streamTextResponse(
     providerOptions: route.providerOptions,
     abortSignal: mergedSignal,
   });
+}
+
+/**
+ * 工具循环版流式响应：传入 messages + tools + maxSteps，AI SDK 自动驱动
+ * 「模型 call 工具 → 执行 execute → 结果回灌 → 重复」直至产出最终文本。
+ * 复用 'query' 等任务路由的采样参数与超时/abort 合并逻辑。
+ */
+export function streamTextWithTools(
+  task: LLMTask,
+  opts: {
+    system: string;
+    messages: CoreMessage[];
+    tools: Record<string, CoreTool>;
+    maxSteps: number;
+    abortSignal?: AbortSignal;
+    overrides?: LLMRouteOverride;
+  },
+): ReturnType<typeof streamText> {
+  const route = resolveTask(task, opts.overrides ?? {});
+  const prefix = `[LLM][Task: ${route.task}][Model: ${route.logLabel}]`;
+  console.log(`${prefix} streamText (tools) started, maxSteps=${opts.maxSteps}`);
+
+  const timeoutSignal = AbortSignal.timeout(route.timeoutMs);
+  let mergedSignal: AbortSignal;
+  if (opts.abortSignal) {
+    mergedSignal =
+      typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([opts.abortSignal, timeoutSignal])
+        : opts.abortSignal;
+  } else {
+    mergedSignal = timeoutSignal;
+  }
+
+  return streamText({
+    model: getLanguageModel(route),
+    system: opts.system,
+    messages: opts.messages,
+    tools: opts.tools,
+    toolChoice: 'auto',
+    maxSteps: opts.maxSteps,
+    maxTokens: route.maxTokens,
+    temperature: route.temperature,
+    topP: route.topP,
+    topK: route.topK,
+    presencePenalty: route.presencePenalty,
+    frequencyPenalty: route.frequencyPenalty,
+    stopSequences: route.stopSequences,
+    seed: route.seed,
+    maxRetries: route.maxRetries,
+    headers: route.headers,
+    providerOptions: route.providerOptions,
+    abortSignal: mergedSignal,
+  });
+}
+
+/**
+ * 工具循环版一次性（非流式）文本生成，供 save-as-page 一次性模式复用。
+ */
+export async function generateTextWithTools(
+  task: LLMTask,
+  opts: {
+    system: string;
+    messages: CoreMessage[];
+    tools: Record<string, CoreTool>;
+    maxSteps: number;
+    overrides?: LLMRouteOverride;
+  },
+): Promise<{ text: string }> {
+  const route = resolveTask(task, opts.overrides ?? {});
+  const prefix = `[LLM][Task: ${route.task}][Model: ${route.logLabel}]`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    console.error(`${prefix} abort: timeout reached after ${route.timeoutMs}ms`);
+    controller.abort();
+  }, route.timeoutMs);
+
+  try {
+    const result = await generateText({
+      model: getLanguageModel(route),
+      system: opts.system,
+      messages: opts.messages,
+      tools: opts.tools,
+      toolChoice: 'auto',
+      maxSteps: opts.maxSteps,
+      maxTokens: route.maxTokens,
+      temperature: route.temperature,
+      topP: route.topP,
+      topK: route.topK,
+      presencePenalty: route.presencePenalty,
+      frequencyPenalty: route.frequencyPenalty,
+      seed: route.seed,
+      maxRetries: route.maxRetries,
+      headers: route.headers,
+      providerOptions: route.providerOptions,
+      abortSignal: controller.signal,
+    });
+    return { text: result.text };
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // ---------------------------------------------------------------------------

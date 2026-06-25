@@ -3,10 +3,10 @@ import { z } from 'zod';
 import {
   generateQueryCitations,
   NO_QUERY_CONTEXT_ANSWER,
-  prepareQueryContext,
-  QUERY_STREAM_SYSTEM_PROMPT,
   runQuery,
-  streamQueryAnswer,
+  streamAgenticQuery,
+  subjectHasContent,
+  accessedToContext,
 } from '@/server/services/query-service';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
@@ -172,9 +172,7 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        const context = await prepareQueryContext(trimmedQuestion, subject.id, pageSlug);
-
-        if (context.length === 0) {
+        if (!subjectHasContent(subject.id)) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
           emit('citations', { citations: [] });
           persistTurn(NO_QUERY_CONTEXT_ANSWER, []);
@@ -183,20 +181,34 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const answerStream = streamQueryAnswer(
-          QUERY_STREAM_SYSTEM_PROMPT,
-          trimmedQuestion,
-          context,
+        const { stream: answerStream, accessed } = streamAgenticQuery({
+          question: trimmedQuestion,
           subject,
-          request.signal,
           history,
-        );
+          currentPageSlug: pageSlug,
+          abortSignal: request.signal,
+        });
 
         let fullAnswer = '';
-        for await (const delta of answerStream.textStream) {
+        for await (const part of answerStream.fullStream) {
           if (request.signal.aborted) return;
-          fullAnswer += delta;
-          emit('answer-delta', { delta });
+          if (part.type === 'text-delta') {
+            fullAnswer += part.textDelta;
+            emit('answer-delta', { delta: part.textDelta });
+          } else if (part.type === 'tool-call') {
+            emit('tool-call', {
+              toolName: part.toolName,
+              args: summarizeToolArgs(part.toolName, part.args),
+            });
+          } else if (part.type === 'error') {
+            const message = part.error instanceof Error ? part.error.message : String(part.error);
+            emit('error', { error: message });
+          }
+        }
+
+        if (fullAnswer.trim().length === 0) {
+          fullAnswer = NO_QUERY_CONTEXT_ANSWER;
+          emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
         }
 
         let streamedCitations: { pageSlug: string; excerpt: string }[] = [];
@@ -204,7 +216,7 @@ export async function POST(request: NextRequest) {
           streamedCitations = await generateQueryCitations(
             trimmedQuestion,
             fullAnswer,
-            context,
+            accessedToContext(subject, accessed),
             subject,
           );
         } catch {
@@ -233,4 +245,12 @@ export async function POST(request: NextRequest) {
       Connection: 'keep-alive',
     },
   });
+}
+
+/** 把工具调用入参压成一行给前端展示（不外发完整 result，避免泄漏正文）。 */
+function summarizeToolArgs(toolName: string, args: unknown): string {
+  const a = (args ?? {}) as Record<string, unknown>;
+  if (toolName === 'search_wiki') return typeof a.query === 'string' ? a.query : '';
+  if (toolName === 'read_page') return typeof a.slug === 'string' ? a.slug : '';
+  return '';
 }

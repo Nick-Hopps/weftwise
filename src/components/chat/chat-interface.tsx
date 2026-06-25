@@ -384,6 +384,12 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               const delta = (data as { delta: string }).delta;
               fullContent += delta;
               updateLastAssistant((msg) => ({ ...msg, content: fullContent }));
+            } else if (event === 'tool-call') {
+              const { toolName, args } = data as { toolName: string; args: string };
+              updateLastAssistant((msg) => ({
+                ...msg,
+                activity: [...(msg.activity ?? []), { tool: toolName, label: args }],
+              }));
             } else if (event === 'citations') {
               const citations = (data as { citations: Citation[] }).citations;
               updateLastAssistant((msg) => ({ ...msg, citations }));
