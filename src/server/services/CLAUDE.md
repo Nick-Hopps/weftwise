@@ -51,7 +51,7 @@ worker-entry.ts
 
 - `streamAgenticQuery(opts)` — 流式 agentic 问答：
   1. 调 `createAccessedPages()` 创建访问页收集器；
-  2. 调 `buildQueryTools(subject, accessed)` 获取 subject-scoped 三工具（`list_pages` / `search_wiki` / `read_page`，来自 `query-tools.ts`）；
+  2. 调 `buildQueryToolContext(subject, accessed)` 构造 query 侧 `ToolContext`，经 `createBuiltinToolRegistry().resolve(['wiki.read','wiki.search','wiki.list'])` + `compileToolSet` 编译为工具集（来自共享 registry 的 wiki.read/search/list）；
   3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
   4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
@@ -65,8 +65,7 @@ worker-entry.ts
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
 
 **`query-tools.ts`**（新增）— subject-scoped 工具定义，经共享 registry 的 `wiki.read/search/list`：
-- `buildQueryToolContext(subject, accessed)` — 构造 `ToolContext`（`readPage / search / listPages / onAccess`），供 `createBuiltinToolRegistry(ctx)` 工厂注入；工具 execute 失败返回 `{ error }` 字符串而非抛出，防止中断循环。
-- `buildQueryTools(subject, accessed)` — 调用 `createBuiltinToolRegistry(buildQueryToolContext(...))` 得到共享 registry，再把 `wiki.read / wiki.search / wiki.list` 三工具编译为 AI SDK 工具对象返回；混合 FTS5+向量语义检索（RRF 合并，未配置 embedding 时降级纯 FTS）。
+- `buildQueryToolContext(subject, accessed)` — 构造 query 侧 `ToolContext`（`readPage`=读已提交正文 / `search`=`hybridRankSlugs` 混合 FTS5+向量，未配置 embedding 降级纯 FTS / `listPages`=过滤 meta / `onAccess`=累积访问页供引用）；交给 `compileToolSet(queryToolDefs, ...)` 注入（`queryToolDefs` 来自共享 `createBuiltinToolRegistry().resolve([...])`）。三工具定义 `wiki.read/search/list` 单一源在 `agents/tools/builtin/`。
 - `createAccessedPages()` — 创建 `AccessedPages` 对象（`{ meta: Map<slug, {title, summary}>, bodies: Map<slug, {title, body}> }`），调用方直接向两个 Map 中写入访问记录。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
 - `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.getAllPages(subjectId).some(p => !pagesRepo.isMetaPage(p))`；只计非 meta 页，空 subject 或仅含 meta 页时返 false，消灭"宏观问题报不存在文档"误报。
@@ -157,7 +156,7 @@ emit `reenrich:start` 后进入 pipeline；流水线完成后 `checkpoint.clear(
 
 ## 测试与质量
 
-已覆盖（`__tests__/`，vitest，以纯函数与编排为主）：`lint-deterministic`（broken-link/orphan 取数收敛后行为不变）、`maintenance-policy` / `maintenance-scheduler`、`ingest-prep` / `ingest-service` / `ingest-finalize-sources` / `ingest-augmentation-steps`、`embedding-service`、`fix-deterministic`、`lint-latest`、`reenrich-input` / `reenrich-maturity`、`conversation-title`、`query-tools`（subjectHasContent / buildQueryTools / accessedToContext / 工具 execute 路径）、`query-service-agentic`（streamAgenticQuery / runQuery 空库守卫 / generateQueryCitations 引用验证）。ingest pipeline 另见 `src/server/agents/runtime/__tests__/`。
+已覆盖（`__tests__/`，vitest，以纯函数与编排为主）：`lint-deterministic`（broken-link/orphan 取数收敛后行为不变）、`maintenance-policy` / `maintenance-scheduler`、`ingest-prep` / `ingest-service` / `ingest-finalize-sources` / `ingest-augmentation-steps`、`embedding-service`、`fix-deterministic`、`lint-latest`、`reenrich-input` / `reenrich-maturity`、`conversation-title`、`query-tools`（subjectHasContent / buildQueryToolContext / accessedToContext / 工具 execute 路径）、`query-service-agentic`（streamAgenticQuery / runQuery 空库守卫 / generateQueryCitations 引用验证）。ingest pipeline 另见 `src/server/agents/runtime/__tests__/`。
 
 仍待补充：
 

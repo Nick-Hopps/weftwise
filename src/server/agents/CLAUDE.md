@@ -72,7 +72,7 @@ ingest-service.ts
 **执行路径分支**（`compile.ts` + `agent-loop.ts`）：
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
 - **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier / indexer 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。
-- **`createBuiltinToolRegistry(ctx)` 进程无关**：ingest worker 与 query runner 各自独立构造 registry，无全局单例，ctx 差异由调用方注入。
+- **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
 
 **暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。indexer 只产出 `index.md` / `log.md`（meta 页），所有内容页随 `pending` 自动提交——索引/日志 LLM 调用不接触页正文，从根本上杜绝巨量工具参数与工具循环。
 
@@ -125,7 +125,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 
 | 文件 | 职责 |
 |------|------|
-| `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry(ctx)` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
+| `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
 | `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`）；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现 |
 | `compile.ts` | `compileToolSet(toolDefs, ctx, opts?)` — 把 `ToolDef[]` + `ToolContext` 编译为 AI SDK 可用的工具对象；`synthesizeFinishTool(schema, capture)` — 合成 `finish` 收尾工具，使 planner/writer 能在工具循环末步产出结构化输出（组合路径收口）；`FINISH_TOOL_NAME` 常量 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
@@ -250,7 +250,7 @@ src/server/agents/
 │   ├── registry.ts                 # SkillRegistry
 │   └── __tests__/
 └── tools/
-    ├── registry.ts                 # ToolRegistry + createBuiltinToolRegistry(ctx)
+    ├── registry.ts                 # ToolRegistry + createBuiltinToolRegistry()
     ├── tool-context.ts             # ToolContext 接口（readPage/search/listPages/onAccess/emit/agent）
     ├── compile.ts                  # compileToolSet / synthesizeFinishTool / FINISH_TOOL_NAME
     └── builtin/
@@ -276,7 +276,7 @@ src/server/agents/
 | 2026-06-22 | P3 联网核查（⑨）：verifier 阶段由 fanout 'ingest-verifier' 改为 `verify` step kind → 新 `runtime/verify-page.ts::runPageVerification` 逐页两段式（triage `ingest-verifier-triage` → 编排层 Tavily 搜索 → apply `ingest-verifier-apply`），全程 generateObject 无 tools（绕开 packyapi 工具死循环）；未配置/零证据降级既有 `ingest-verifier`(v2) 自检；新增 `CitedSource` 类型 + `AgentContext.citedSources`；`commit_changeset`/`commitPending` 接受第三参 webSources（network 引用源 links+extraStagePaths）|
 | 2026-06-22 | ⑨ fast-follow（闭合终审 I-1）：`IngestCheckpoint` 加 `getCitedSources/putCitedSources`（checkpoint kind `'cited-sources'` 单 blob）；`verify-page` record 后同步 persist、`ingest-service` pipeline 前 rehydrate `ctx.citedSources`——崩溃续传命中 verifier-page 检查点跳过 verify 的页，其网页 source 仍被完整导入 |
 | 2026-06-24 | 移除 MCP 功能（冗余死代码）：删除 `tools/mcp/`（config/transport/client-pool/tool-bridge）+ `mcp-config.json` + `@modelcontextprotocol/sdk` 依赖 + `agentMcpLifecycle` 设置（contracts/settings-repo/API/UI）。判定依据：agent-loop 仅解析 skill 显式声明的工具，而所有内置 skill 都不声明 `mcp.*`；且项目已主动放弃 tool-using agent（packyapi openai-compatible 工具死循环），MCP 工具永不可被调用。`ToolSource` union 去掉 `'mcp'` |
-| 2026-06-25 | 工具体系收敛：新增 `tool-context.ts`（`ToolContext` 接口）+ `compile.ts`（`compileToolSet`/`synthesizeFinishTool`/`FINISH_TOOL_NAME`）；`vault-read/vault-search` 重命名为 `wiki-read/wiki-search`，新增 `wiki-list`；`ToolDef` 统一吃 `ToolContext`；`createBuiltinToolRegistry(ctx)` 工厂进程无关化；组合路径（有 tools+有 schema→`finish` 收尾）/纯结构化路径（无 tools+有 schema→`generateObject`）分支明确 |
+| 2026-06-25 | 工具体系收敛：新增 `tool-context.ts`（`ToolContext` 接口）+ `compile.ts`（`compileToolSet`/`synthesizeFinishTool`/`FINISH_TOOL_NAME`）；`vault-read/vault-search` 重命名为 `wiki-read/wiki-search`，新增 `wiki-list`；`ToolDef` 统一吃 `ToolContext`；`createBuiltinToolRegistry()` 工厂进程无关化；组合路径（有 tools+有 schema→`finish` 收尾）/纯结构化路径（无 tools+有 schema→`generateObject`）分支明确 |
 
 ---
 
