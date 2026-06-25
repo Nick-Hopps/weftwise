@@ -4,13 +4,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const {
   mockGenerateTools,
   mockSubjectHasContent,
-  mockBuildTools,
+  mockBuildToolContext,
   mockAccessedToContext,
+  mockCompileToolSet,
 } = vi.hoisted(() => ({
   mockGenerateTools: vi.fn(),
   mockSubjectHasContent: vi.fn(),
-  mockBuildTools: vi.fn(() => ({})),
+  mockBuildToolContext: vi.fn(() => ({})),
   mockAccessedToContext: vi.fn(() => [] as unknown[]),
+  mockCompileToolSet: vi.fn(() => ({})),
 }));
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
@@ -22,10 +24,18 @@ vi.mock('@/server/llm/provider-registry', () => ({
   generateTextWithTools: mockGenerateTools,
 }));
 vi.mock('../query-tools', () => ({
-  buildQueryTools: mockBuildTools,
+  buildQueryToolContext: mockBuildToolContext,
   createAccessedPages: () => ({ meta: new Map(), bodies: new Map() }),
   accessedToContext: mockAccessedToContext,
   subjectHasContent: mockSubjectHasContent,
+}));
+vi.mock('@/server/agents/tools/builtin', () => ({
+  createBuiltinToolRegistry: () => ({
+    resolve: () => [],
+  }),
+}));
+vi.mock('@/server/agents/tools/compile', () => ({
+  compileToolSet: mockCompileToolSet,
 }));
 
 import { runQuery, NO_QUERY_CONTEXT_ANSWER } from '../query-service';

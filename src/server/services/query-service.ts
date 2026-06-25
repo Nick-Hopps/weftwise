@@ -15,12 +15,14 @@ import {
 } from '../llm/provider-registry';
 import type { CoreMessage } from 'ai';
 import {
-  buildQueryTools,
+  buildQueryToolContext,
   createAccessedPages,
   accessedToContext,
   subjectHasContent,
 } from './query-tools';
 import type { AccessedPages, QueryContextPage } from './query-tools';
+import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
+import { compileToolSet } from '@/server/agents/tools/compile';
 import {
   QueryResponseSchema,
   QUERY_SYSTEM_PROMPT,
@@ -42,6 +44,9 @@ import type { QueryResult, Job, Subject } from '@/lib/contracts';
 
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
+
+// 模块级：ToolDef 无状态纯对象，构造一次即可复用
+const queryToolDefs = createBuiltinToolRegistry().resolve(['wiki.read', 'wiki.search', 'wiki.list']);
 
 const QueryCitationsSchema = QueryResponseSchema.pick({ citations: true });
 
@@ -107,7 +112,7 @@ export function streamAgenticQuery(opts: {
   abortSignal?: AbortSignal;
 }): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
   const accessed = createAccessedPages();
-  const tools = buildQueryTools(opts.subject, accessed);
+  const tools = compileToolSet(queryToolDefs, buildQueryToolContext(opts.subject, accessed));
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(opts.subject),
@@ -139,7 +144,7 @@ export async function runQuery(
   }
 
   const accessed = createAccessedPages();
-  const tools = buildQueryTools(subject, accessed);
+  const tools = compileToolSet(queryToolDefs, buildQueryToolContext(subject, accessed));
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(subject),
