@@ -24,10 +24,10 @@ ingest-service.ts
         │     └── 逐块定位性摘要，全文从 ctx.chunkStore 注入，summary 写回 chunkRefs
         │
         ├── step 1: skill 'ingest-planner'  (sequence)
-        │     └── tools: vault.read, vault.search
+        │     └── tools: wiki.read, wiki.search
         │
         ├── step 2: fanout skill 'ingest-writer' × N pages  (fanout)
-        │     └── tools: vault.read, vault.search
+        │     └── tools: wiki.read, wiki.search
         │       每个 writer entry 暂存进 ctx.pending（+overlay 读隔离）
         │       忠实层散文：只产出与原文忠实对应的 markdown 正文，不含 callout
         │       checkpointAs: 'writer-page'
