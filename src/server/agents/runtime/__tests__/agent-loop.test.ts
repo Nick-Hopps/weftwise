@@ -333,3 +333,26 @@ describe('runAgentLoop budget propagation', () => {
     })).rejects.toMatchObject({ name: 'BudgetExceededError' });
   });
 });
+
+describe('runAgentLoop 组合路径（tools + outputSchema）', () => {
+  it('模型调 finish 即返回其入参为结构化输出', async () => {
+    mocks.generateText.mockReset();
+    mocks.generateObject.mockReset();
+    // 模拟 AI SDK：调用注入的 finish.execute 后返回文本/usage
+    mocks.generateText.mockImplementationOnce(async (opts: Record<string, unknown>) => {
+      const tools = opts.tools as Record<string, { execute: (args: unknown) => Promise<unknown> }>;
+      await tools.finish.execute({ title: 'Page', body: 'B' });
+      return { text: '', usage: { promptTokens: 5, completionTokens: 7 }, providerMetadata: {} };
+    });
+    const skill: SkillTemplate = {
+      id: 'writer', name: 'Writer', description: '', version: 1,
+      tools: ['wiki.read'], canDispatch: [], systemPrompt: 'sys',
+      outputSchema: z.object({ title: z.string(), body: z.string() }),
+    };
+    const ctx = ctxStub();
+    (ctx.toolRegistry.resolve as ReturnType<typeof vi.fn>).mockReturnValue([toolDefStub('wiki.read')]);
+    const res = await runAgentLoop({ skill, ctx, input: { slug: 'page' } });
+    expect(res.output).toEqual({ title: 'Page', body: 'B' });
+    expect(mocks.generateObject).not.toHaveBeenCalled();
+  });
+});
