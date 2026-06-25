@@ -64,8 +64,9 @@ worker-entry.ts
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答。
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
 
-**`query-tools.ts`**（新增）— subject-scoped 工具定义：
-- `buildQueryTools(subject, accessed)` — 构造三工具：`list_pages`（枚举本 subject 全部页标题/slug）、`search_wiki`（混合 FTS5+向量语义检索，RRF 合并；未配置 embedding 时降级纯 FTS）、`read_page`（读单页正文，命中则写入 `accessed`）；工具 execute 失败返回 `{ error }` 字符串而非抛出，防止中断循环。
+**`query-tools.ts`**（新增）— subject-scoped 工具定义，经共享 registry 的 `wiki.read/search/list`：
+- `buildQueryToolContext(subject, accessed)` — 构造 `ToolContext`（`readPage / search / listPages / onAccess`），供 `createBuiltinToolRegistry(ctx)` 工厂注入；工具 execute 失败返回 `{ error }` 字符串而非抛出，防止中断循环。
+- `buildQueryTools(subject, accessed)` — 调用 `createBuiltinToolRegistry(buildQueryToolContext(...))` 得到共享 registry，再把 `wiki.read / wiki.search / wiki.list` 三工具编译为 AI SDK 工具对象返回；混合 FTS5+向量语义检索（RRF 合并，未配置 embedding 时降级纯 FTS）。
 - `createAccessedPages()` — 创建 `AccessedPages` 对象（`{ meta: Map<slug, {title, summary}>, bodies: Map<slug, {title, body}> }`），调用方直接向两个 Map 中写入访问记录。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
 - `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.getAllPages(subjectId).some(p => !pagesRepo.isMetaPage(p))`；只计非 meta 页，空 subject 或仅含 meta 页时返 false，消灭"宏观问题报不存在文档"误报。
@@ -211,6 +212,7 @@ src/server/services/
 | 2026-06-24 | 新增 `fix-service`（任务类型 `'fix'`）：两阶段修复 lint findings——阶段1 确定性补 frontmatter（`fix-deterministic.ts` 纯函数，1 commit）；阶段2 按页 `generateStructuredOutput('fix')` 逐页修复（`proceed` 自我门控 + `validateChangeset` 拦坏链，每页 1 commit）；orphan/stale-source/coverage-gap 不修；完成后 UI 自动重跑 lint |
 | 2026-06-24 | 性能：`lint-deterministic` 确定性检查一次性取数（`getAllPages` 3→1、跨主题 meta 扫描 2→1，行为不变）；落地 `lint-deterministic` 单测 |
 | 2026-06-25 | Ask AI 问答从预先 top-5 检索改为 agentic 工具循环：新增 `query-tools.ts`（`list_pages`/`search_wiki`/`read_page` subject-scoped 三工具 + `AccessedPages` + `subjectHasContent` 空库守卫）；`query-service` 重构为 `streamAgenticQuery`/`runQuery`（均走 `streamTextWithTools`/`generateTextWithTools`）；引用来自 `accessedToContext` 实际访问页；删除旧死代码 `prepareQueryContext`/`streamQueryAnswer`/`QUERY_STREAM_SYSTEM_PROMPT`；新增 `query-tools.test.ts` + `query-service-agentic.test.ts` |
+| 2026-06-25 | 工具体系收敛：`query-tools.ts` 改用共享 `createBuiltinToolRegistry`（`agents/tools/registry.ts`），删内联 `tool()` 孤岛；新增 `buildQueryToolContext(subject, accessed)` 构造 `ToolContext`；`wiki.read/search/list` 工具定义来自 `agents/tools/builtin/wiki-*.ts` 单一源；双 runner（`streamTextWithTools`/`generateTextWithTools`）保留 |
 
 ---
 
