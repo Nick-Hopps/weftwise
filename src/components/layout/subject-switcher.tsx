@@ -20,6 +20,7 @@ const INVALIDATE_KEYS = [
   'backlinks',
   'context',
   'frontmatter',
+  'lens',
 ] as const;
 
 async function fetchSubjects(): Promise<SubjectListEntry[]> {

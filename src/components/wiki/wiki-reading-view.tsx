@@ -112,7 +112,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   }, [showSplit, docs, slug]);
 
   // 读时透镜：默认显示按画像重塑的正文，canonical 即时可切。
-  const lens = useLens(slug, true);
+  const lens = useLens(props.subjectSlug, slug, true);
   const reshaped = lens.data?.renderedMd;
   const usingReshaped =
     !showOriginal &&
