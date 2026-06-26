@@ -7,13 +7,15 @@
  * 本文件只负责渲染与本地交互。服务端 app_settings 表是唯一真实源，不写 Zustand。
  */
 
+import { useEffect, useState } from 'react';
 import { Moon, Sun, RotateCcw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { SIDEBAR_WIDTH_DEFAULT } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 import { apiFetch } from '@/lib/api-fetch';
-import type { AppSettings, MaintenanceStatus } from '@/lib/contracts';
+import type { AppSettings, MaintenanceStatus, StylePrefs } from '@/lib/contracts';
+import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
 import { SettingRow, NumberSettingRow, SelectSettingRow, TextSettingRow } from './settings-rows';
 import { SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
 
@@ -87,6 +89,8 @@ export function SettingsContent(props: SettingsContentProps) {
           />
         )}
 
+        {props.active === 'cognitive-lens' && <CognitiveLensPanel />}
+
         {props.active === 'agents' && (
           <AgentsPanel settings={props.settings} savePartial={props.savePartial} />
         )}
@@ -144,6 +148,115 @@ function AppearancePanel({
           Reset
         </Button>
       </SettingRow>
+    </div>
+  );
+}
+
+const LENS_LABELS: Record<keyof StylePrefs, string> = {
+  readingLevel: '阅读难度基线',
+  verbosity: '详尽度',
+  exampleDensity: '举例/类比密度',
+  formality: '语气',
+};
+
+const LENS_OPTIONS: Record<keyof StylePrefs, [string, string][]> = {
+  readingLevel: [
+    ['beginner', '入门'],
+    ['intermediate', '进阶'],
+    ['advanced', '专家'],
+  ],
+  verbosity: [
+    ['terse', '精简'],
+    ['balanced', '适中'],
+    ['thorough', '详尽'],
+  ],
+  exampleDensity: [
+    ['few', '少'],
+    ['some', '适量'],
+    ['many', '多'],
+  ],
+  formality: [
+    ['casual', '口语'],
+    ['neutral', '中性'],
+    ['formal', '正式'],
+  ],
+};
+
+const LENS_KEYS: (keyof StylePrefs)[] = ['readingLevel', 'verbosity', 'exampleDensity', 'formality'];
+
+// 认知画像设置：走 /api/profile（独立 user_profiles 表，非 app_settings），不写 Zustand。
+function CognitiveLensPanel() {
+  const { data, isLoading } = useProfile();
+  const update = useUpdateProfile();
+  const [bg, setBg] = useState('');
+  const [prefs, setPrefs] = useState<StylePrefs | null>(null);
+
+  useEffect(() => {
+    if (data && prefs === null) {
+      setPrefs(data.profile.stylePrefs);
+      setBg(data.profile.backgroundSummary);
+    }
+  }, [data, prefs]);
+
+  if (isLoading || !data || prefs === null) {
+    return <p className="text-xs text-foreground-tertiary">Loading…</p>;
+  }
+  const current = prefs;
+
+  const dirty =
+    bg !== data.profile.backgroundSummary ||
+    JSON.stringify(current) !== JSON.stringify(data.profile.stylePrefs);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-foreground-tertiary">
+        阅读时按你的背景与喜好调整每页讲法（只换讲法不换事实，随时可看原文；也会随你的「太难/太浅」反馈自动微调）。
+      </p>
+
+      {LENS_KEYS.map((key) => (
+        <SettingRow key={key} label={LENS_LABELS[key]}>
+          <select
+            value={current[key]}
+            onChange={(e) =>
+              setPrefs((p) => (p ? ({ ...p, [key]: e.target.value } as StylePrefs) : p))
+            }
+            aria-label={LENS_LABELS[key]}
+            className="rounded-md border border-border bg-canvas px-2 py-1 text-sm"
+          >
+            {LENS_OPTIONS[key].map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </SettingRow>
+      ))}
+
+      <SettingRow label="Background" description="你的背景与目标（自由文本）" className="items-start">
+        <textarea
+          value={bg}
+          onChange={(e) => setBg(e.target.value)}
+          rows={3}
+          placeholder="例如：后端工程师，懂分布式，但机器学习是新手"
+          className="w-60 rounded-md border border-border bg-canvas p-2 text-sm"
+        />
+      </SettingRow>
+
+      <div className="flex items-center justify-end gap-2">
+        {update.isError && (
+          <span role="alert" className="mr-auto text-xs text-danger">
+            Failed to save
+          </span>
+        )}
+        <Button
+          intent="outline"
+          size="sm"
+          disabled={!dirty || update.isPending}
+          onClick={() => update.mutate({ backgroundSummary: bg, stylePrefs: current })}
+        >
+          {update.isPending ? 'Saving…' : 'Save'}
+        </Button>
+      </div>
     </div>
   );
 }
