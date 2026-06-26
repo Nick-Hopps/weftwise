@@ -15,9 +15,11 @@ import {
 } from 'lucide-react';
 import PageRenderer from './page-renderer';
 import { HtmlSourceFrame } from './html-source-frame';
+import { LensFeedback } from './lens-feedback';
 import { Button } from '@/components/ui/button';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
+import { useLens } from '@/hooks/use-lens';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import type { PageSourceDoc, PageSourceFormat } from '@/lib/contracts';
@@ -56,6 +58,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const [docs, setDocs] = useState<PageSourceDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showOriginal, setShowOriginal] = useState(false);
 
   const canSplit = sourceCount > 0;
   const showSplit = split && canSplit;
@@ -108,10 +111,27 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSplit, docs, slug]);
 
+  // 读时透镜：默认显示按画像重塑的正文，canonical 即时可切。
+  const lens = useLens(slug, true);
+  const reshaped = lens.data?.renderedMd;
+  const usingReshaped =
+    !showOriginal &&
+    reshaped != null &&
+    lens.data?.source !== 'canonical' &&
+    lens.data?.source !== 'fallback';
+  const displayContent = showOriginal ? props.content : (reshaped ?? props.content);
+
   const article = (
     <>
-      <PageRenderer {...rendererProps} />
+      <LensBar
+        loading={lens.isLoading}
+        usingReshaped={usingReshaped}
+        showOriginal={showOriginal}
+        onToggle={() => setShowOriginal((v) => !v)}
+      />
+      <PageRenderer {...rendererProps} content={displayContent} />
       <Backlinks backlinks={backlinks} />
+      <LensFeedback slug={slug} />
     </>
   );
 
@@ -161,6 +181,37 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     <div className="flex min-h-full flex-col">
       {toolbar}
       {article}
+    </div>
+  );
+}
+
+function LensBar({
+  loading,
+  usingReshaped,
+  showOriginal,
+  onToggle,
+}: {
+  loading: boolean;
+  usingReshaped: boolean;
+  showOriginal: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="mx-auto flex w-full items-center gap-2 px-6 pt-4 max-w-[var(--reading-max-width)] text-xs text-foreground-tertiary">
+      {loading && !showOriginal ? (
+        <span className="inline-flex items-center gap-1.5">
+          <Loader2 className="h-3 w-3 animate-spin" /> 正在按你的画像调整…
+        </span>
+      ) : usingReshaped && !showOriginal ? (
+        <span className="inline-flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3 text-accent" /> 已按你的画像调整
+        </span>
+      ) : (
+        <span>原文</span>
+      )}
+      <Button intent="outline" size="sm" className="ml-auto" onClick={onToggle}>
+        {showOriginal ? '看重塑版' : '看原文'}
+      </Button>
     </div>
   );
 }
