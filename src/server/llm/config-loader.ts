@@ -86,7 +86,7 @@ function resolveTaskLabel(
 }
 
 function logRouteTable(config: LLMConfigFile): void {
-  const tasks: LLMTask[] = ['ingest', 'query', 'lint'];
+  const tasks: LLMTask[] = Object.keys(config.tasks) as LLMTask[];
   const defaultProfile = config.providers[config.defaults.profile];
   const defaultProvider =
     defaultProfile?.provider === 'openai-compatible'
@@ -95,16 +95,16 @@ function logRouteTable(config: LLMConfigFile): void {
 
   console.log('[LLM Router] Configuration loaded from llm-config.json.');
   console.log('[LLM Router] -------------------------------------------------------');
-  console.log('[LLM Router] Task       | Provider          | Model');
+  console.log(`[LLM Router] ${'Task'.padEnd(22)} | Provider          | Model`);
   console.log('[LLM Router] -------------------------------------------------------');
   console.log(
-    `[LLM Router] default    | ${defaultProvider.padEnd(17)} | ${config.defaults.model}`,
+    `[LLM Router] ${'default'.padEnd(22)} | ${defaultProvider.padEnd(17)} | ${config.defaults.model}`,
   );
 
   for (const task of tasks) {
     const { provider, model } = resolveTaskLabel(config, task);
     console.log(
-      `[LLM Router] ${task.padEnd(10)} | ${provider.padEnd(17)} | ${model}`,
+      `[LLM Router] ${task.padEnd(22)} | ${provider.padEnd(17)} | ${model}`,
     );
   }
 
@@ -116,7 +116,7 @@ function logRouteTable(config: LLMConfigFile): void {
 // ---------------------------------------------------------------------------
 
 function validateApiKeysAtBoot(config: LLMConfigFile): void {
-  const tasks: LLMTask[] = ['ingest', 'query', 'lint'];
+  const tasks: LLMTask[] = Object.keys(config.tasks) as LLMTask[];
   const checkedProfiles = new Set<string>();
   const missing: string[] = [];
 
