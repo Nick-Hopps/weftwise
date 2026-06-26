@@ -349,3 +349,25 @@ export interface PageMaturity {
   priority: number;
   updatedAt: string;
 }
+
+// ── Cognitive Lens（读时内容重塑）─────────────────────────────────
+// 读者表达偏好（client 侧纯类型；server 侧 zod 真源在 server/profile/style.ts，
+// 两处枚举字面量必须一致，由 style.ts 的编译期断言守卫防漂移）。
+export type LensReadingLevel = 'beginner' | 'intermediate' | 'advanced';
+export type LensVerbosity = 'terse' | 'balanced' | 'thorough';
+export type LensExampleDensity = 'few' | 'some' | 'many';
+export type LensFormality = 'casual' | 'neutral' | 'formal';
+
+export interface StylePrefs {
+  readingLevel: LensReadingLevel;
+  verbosity: LensVerbosity;
+  exampleDensity: LensExampleDensity;
+  formality: LensFormality;
+}
+
+export interface UserProfileDTO {
+  backgroundSummary: string;
+  stylePrefs: StylePrefs;
+  version: number;
+  onboardedAt: string | null;
+}

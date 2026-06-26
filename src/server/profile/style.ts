@@ -14,6 +14,12 @@ export const StylePrefsSchema = z.object({
 
 export type StylePrefs = z.infer<typeof StylePrefsSchema>;
 
+// 编译期守卫：本模块（zod 真源）与 contracts.ts（client 纯类型）的 StylePrefs
+// 必须双向结构等价；任一处枚举漂移都会在此报类型错误。
+type _AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
+const _styleMatchesContract: _AssertExact<StylePrefs, import('@/lib/contracts').StylePrefs> = true;
+void _styleMatchesContract;
+
 export const DEFAULT_STYLE_PREFS: StylePrefs = {
   readingLevel: 'intermediate',
   verbosity: 'balanced',
