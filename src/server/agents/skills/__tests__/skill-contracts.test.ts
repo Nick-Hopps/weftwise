@@ -25,4 +25,10 @@ describe('ingest-writer skill 契约（v6 讲解者）', () => {
     expect(src).not.toContain('Do not invent facts not present in the chunks');
     expect(src).not.toContain('plain encyclopedic prose only');
   });
+  it('保留 no-callout 指令（[!type] 禁令，避免与 enricher 冲突）', () => {
+    expect(src).toContain('[!type]');
+  });
+  it('保留 no-translate 规则', () => {
+    expect(src).toContain('Do NOT translate');
+  });
 });

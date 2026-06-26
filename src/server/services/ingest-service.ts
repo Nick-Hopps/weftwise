@@ -143,6 +143,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   // Skill 契约版本守卫：planner v2 起产 sourceRefs / writer 收 relevantChunks；
   // writer v3 起 outputSchema 扁平化（去掉 entry 包装——单键包装会被 DeepSeek 等拍平致
   // 结构化输出失败），与 orchestrator 扁平消费强绑定。
+  // writer v6 起：复述者→讲解者契约 + 新增 expositionDirective 输入。
   // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
   const MIN_SKILL_VERSIONS: Record<string, number> = {
     'ingest-planner': 2, 'ingest-writer': 6, 'ingest-indexer': 1,
