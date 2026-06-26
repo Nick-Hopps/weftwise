@@ -8,6 +8,13 @@
       "when": 1777153071239,
       "tag": "0000_thin_marvel_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1782489996486,
+      "tag": "0001_swift_stellaris",
+      "breakpoints": true
     }
   ]
 }

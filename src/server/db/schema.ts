@@ -205,3 +205,41 @@ export const pageMaturity = sqliteTable(
   },
   (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
 );
+
+// ── Cognitive Lens（读时内容重塑）─────────────────────────────────
+// 画像挂账户层（今天单例 userId='local'，未来多租户已 user-keyed）。
+export const userProfiles = sqliteTable('user_profiles', {
+  userId: text('user_id').primaryKey(),
+  backgroundSummary: text('background_summary').notNull().default(''),
+  stylePrefs: text('style_prefs').notNull(), // JSON: StylePrefs
+  version: integer('version').notNull().default(1),
+  onboardedAt: text('onboarded_at'),
+  updatedAt: text('updated_at').notNull(),
+});
+
+// 重塑缓存：一页一行，按 (canonical_hash, profile_version) 惰性失效。
+// 故意不挂 subjects FK —— 这是可随时丢弃重建的读侧派生缓存，
+// 由 renditions-repo.deleteBySubject + 命中校验自洽。
+export const pageRenditions = sqliteTable(
+  'page_renditions',
+  {
+    subjectId: text('subject_id').notNull(),
+    slug: text('slug').notNull(),
+    canonicalHash: text('canonical_hash').notNull(),
+    profileVersion: integer('profile_version').notNull(),
+    renderedMd: text('rendered_md').notNull(),
+    model: text('model'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
+);
+
+// 反馈信号（append-only，喂确定性 reducer）。
+export const profileSignals = sqliteTable('profile_signals', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: text('user_id').notNull(),
+  type: text('type').notNull(),
+  subjectId: text('subject_id'),
+  slug: text('slug'),
+  createdAt: text('created_at').notNull(),
+});

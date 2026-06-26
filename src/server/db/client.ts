@@ -432,6 +432,55 @@ function migratePageMaturity(): void {
   `);
 }
 
+// ── Cognitive Lens（读时内容重塑）三表 ───────────────────────────
+function migrateUserProfiles(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('user_profiles')) return;
+  sqlite.exec(`
+    CREATE TABLE user_profiles (
+      user_id TEXT PRIMARY KEY,
+      background_summary TEXT NOT NULL DEFAULT '',
+      style_prefs TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1,
+      onboarded_at TEXT,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+// 故意不挂 subjects FK：可丢弃重建的读侧缓存，由 deleteBySubject + 命中校验自洽。
+function migratePageRenditions(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('page_renditions')) return;
+  sqlite.exec(`
+    CREATE TABLE page_renditions (
+      subject_id TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      canonical_hash TEXT NOT NULL,
+      profile_version INTEGER NOT NULL,
+      rendered_md TEXT NOT NULL,
+      model TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (subject_id, slug)
+    );
+  `);
+}
+
+function migrateProfileSignals(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('profile_signals')) return;
+  sqlite.exec(`
+    CREATE TABLE profile_signals (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      subject_id TEXT,
+      slug TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
 // 特例：FTS5 虚拟表不支持 _new + INSERT FROM 重建（索引可由 pages 重建），缺列时直接 DROP 重建
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
@@ -494,6 +543,9 @@ function ensureTables() {
     migrateMessages();
     migratePageEmbeddings();
     migratePageMaturity();
+    migrateUserProfiles();
+    migratePageRenditions();
+    migrateProfileSignals();
     ensurePagesFts();
     ensureIndexes();
   } finally {
