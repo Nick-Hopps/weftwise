@@ -10,6 +10,9 @@ export const runtime = 'nodejs';
 const Body = z.object({
   type: z.enum(['too_hard', 'too_easy', 'simplify_click', 'deepen_click', 'view_original']),
   slug: z.string().optional(),
+  // 供 resolveSubjectFromRequest 的 body 路径读取（zod 会剥掉未声明字段，故必须显式列出）。
+  subjectId: z.string().optional(),
+  subjectSlug: z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
