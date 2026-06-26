@@ -214,7 +214,7 @@ function readPath(obj: unknown, path: string): unknown {
   }, obj);
 }
 
-async function buildFanoutInput(
+export async function buildFanoutInput(
   carry: unknown,
   item: unknown,
   ctx: AgentContext,
@@ -238,6 +238,7 @@ async function buildFanoutInput(
     plan: carry.plan,
     languageDirective: carry.languageDirective,
     augmentationDirective: carry.augmentationDirective,
+    expositionDirective: carry.expositionDirective,
     ...item,
     relevantChunks,
   };
