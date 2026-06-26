@@ -32,3 +32,20 @@ describe('ingest-writer skill 契约（v6 讲解者）', () => {
     expect(src).toContain('Do NOT translate');
   });
 });
+
+describe('ingest-enricher skill 契约（v3 学习脚手架）', () => {
+  const src = readSkill('ingest-enricher');
+  it('版本抬到 3', () => {
+    expect(versionOf(src)).toBe(3);
+  });
+  it('移除 intuition / example 两类（已属 writer 正文）', () => {
+    expect(src).not.toContain('[!intuition]');
+    expect(src).not.toContain('[!example]');
+  });
+  it('保留 quiz / pitfall / diagram / background 四类脚手架', () => {
+    expect(src).toContain('[!quiz]');
+    expect(src).toContain('[!pitfall]');
+    expect(src).toContain('[!diagram]');
+    expect(src).toContain('[!background]');
+  });
+});

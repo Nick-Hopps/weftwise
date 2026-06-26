@@ -53,16 +53,16 @@ export function renderLanguageDirective(language: string): string {
 export function renderAugmentationDirective(level: 'light' | 'standard' | 'deep'): string {
   const guidance: Record<typeof level, string> = {
     light:
-      'Add ONLY the 1–2 highest-value callouts per major section — prioritise one [!intuition] and at most one [!example]. Keep it sparse; most sections get no callout.',
+      'Add ONLY the 1–2 highest-value study-aid callouts per major section — prioritise a [!quiz] self-test or a [!pitfall]. Keep it sparse; most sections get none.',
     standard:
-      'Add callouts at genuine points of difficulty — typically an [!intuition] plus an occasional [!example]/[!quiz]/[!pitfall] per major section. Aim for balanced, non-repetitive coverage.',
+      'Add study-aid callouts where they genuinely help: a [!quiz], a [!pitfall], a [!background] prerequisite, or a [!diagram] at points of difficulty. Balanced, non-repetitive coverage.',
     deep:
-      'Be generous: layer [!intuition], worked [!example]s, [!quiz] self-tests, [!background] prerequisites, [!diagram]s, and [!pitfall]s throughout. Maximise learning scaffolding while staying correct and on-topic.',
+      'Be generous with study aids: [!quiz] self-tests, [!pitfall] warnings, [!background] prerequisites, and [!diagram]s throughout. Maximise scaffolding while staying correct and on-topic.',
   };
   return [
     '=== AUGMENTATION LEVEL ===',
     guidance[level],
-    'Regardless of level: never pad with low-confidence claims (a verifier stage scrutinises every callout), and never alter the faithful prose.',
+    "Regardless of level: never pad with low-confidence claims (a verifier stage scrutinises every callout), and never alter the article's prose.",
     '=== END AUGMENTATION LEVEL ===',
   ].join('\n');
 }
