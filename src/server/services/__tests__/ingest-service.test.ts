@@ -99,7 +99,7 @@ vi.mock('../../agents/runtime/checkpoint', () => ({
   }),
 }));
 
-let mockSkillVersion = 4;
+let mockSkillVersion = 6;
 vi.mock('../../worker-runtime', () => ({
   getRuntimeRegistries: () => ({
     skillRegistry: { get: (id: string) => ({ id, name: id, description: '', version: mockSkillVersion, tools: [], canDispatch: [], systemPrompt: '' }), list: () => [], degraded: () => [] },
@@ -253,11 +253,11 @@ describe('ingest-service', () => {
     const handler = handlers.get('ingest')!;
     await expect(handler(makeJob(), vi.fn())).rejects.toThrow(/requires v2/);
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    mockSkillVersion = 4; // 恢复
+    mockSkillVersion = 6; // 恢复
   });
 
   it('initialInput 包含非空 languageDirective', async () => {
-    mockSkillVersion = 4;
+    mockSkillVersion = 6;
     mockCleanText = '短内容。';
     mockMaxTokens = 100_000;
     mockRunPipeline.mockClear();
