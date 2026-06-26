@@ -135,9 +135,19 @@ interface GenerationResult {
   cacheHitTokens: number;
 }
 
-/** 解析 LLM 模型：task-router defaults < tasks['skill:<id>'] < frontmatter（视 mode 而定）。 */
+/**
+ * skill id → LLM 路由 task key：把 `<pipeline>-<stage>` 形式 id 的**首个**连字符换成冒号，
+ * 得到 `<pipeline>:<stage>`（`ingest-planner` → `ingest:planner`、
+ * `ingest-verifier-triage` → `ingest:verifier-triage`）。无连字符的 id 原样返回。
+ * 冒号只存在于路由 key——id/文件名仍用连字符（文件名不能含冒号）。
+ */
+export function skillTaskKey(id: string): string {
+  return id.replace('-', ':');
+}
+
+/** 解析 LLM 模型：task-router defaults < tasks['<pipeline>:<stage>'] < frontmatter（视 mode 而定）。 */
 function resolveSkillModel(skill: SkillTemplate): { model: ResolvedModel; route: TaskRoute } {
-  const taskKey = `skill:${skill.id}`;
+  const taskKey = skillTaskKey(skill.id);
   const routerMode = getAgentTaskRouterMode();
   const route = resolveTask(taskKey, routerMode === 'frontmatter-override' ? skill.model : undefined);
   return { model: resolveModel(route), route };

@@ -10,11 +10,6 @@
     "maxRetries": 2
   },
   "tasks": {
-    "ingest": {
-      "profile": "anthropic-default",
-      "model": "claude-sonnet-4-6",
-      "maxTokens": 8192
-    },
     "query": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
@@ -62,40 +57,40 @@
       "profile": "openai-default",
       "model": "text-embedding-3-small"
     },
-    "skill:ingest-planner": {
+    "ingest:planner": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6"
     },
-    "skill:ingest-chunk-summarizer": {
+    "ingest:chunk-summarizer": {
       "profile": "openai-default",
       "model": "gpt-4o-mini"
     },
-    "skill:ingest-writer": {
+    "ingest:writer": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
       "maxTokens": 8192
     },
-    "skill:ingest-enricher": {
+    "ingest:enricher": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
       "maxTokens": 8192
     },
-    "skill:ingest-verifier": {
+    "ingest:verifier": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
       "temperature": 0
     },
-    "skill:ingest-verifier-triage": {
+    "ingest:verifier-triage": {
       "profile": "openai-default",
       "model": "gpt-4o-mini",
       "temperature": 0
     },
-    "skill:ingest-verifier-apply": {
+    "ingest:verifier-apply": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
       "temperature": 0
     },
-    "skill:ingest-indexer": {
+    "ingest:indexer": {
       "profile": "openai-default",
       "model": "gpt-4o-mini"
     }

@@ -117,7 +117,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 
 | 文件 | 职责 |
 |------|------|
-| `schema.ts` | `SkillSchema`（zod）：定义 skill YAML 的合法结构（id / system_prompt / tools / llm_override?）|
+| `schema.ts` | `SkillFrontmatterSchema`（zod，`.strict()`）：定义 skill YAML frontmatter 合法结构（id / name / description / version / tools / canDispatch / model? / outputSchema? / budget?；system prompt 是 markdown 正文，非 frontmatter 字段）|
 | `loader.ts` | `loadSkill(id)` — 从 `vault/.llm-wiki/skills/<id>.yaml` 读取并 parse；`seedSkillFiles()` — worker 启动时从 `examples/skills/` 播种，不覆盖已有文件 |
 | `registry.ts` | `SkillRegistry` — 内存缓存 + `get(id)` / `list()` / `register(def)`；agent-loop 通过 registry 拿到 skill 配置 |
 
@@ -167,7 +167,7 @@ export function createRunStepTracker(maxSteps: number): RunStepTracker    // 单
 | `agentMaxSteps` | `25` | **单个 agent 实例**内的最大 tool-call 轮次（2026-06 起从 job 级改为实例级；job 级总量防线由 token 预算承担） |
 | `agentMaxTokensPerJob` | `1200000` | 单个 job 的 token 总预算（in + out）；P2 三轮内容阶段后默认预算由 500k 提升至 1.2M |
 | `agentMaxParallelSubAgents` | `3` | fanout writer step 的最大并发数 |
-| `agentTaskRouterMode` | `'frontmatter-override'` | skill LLM 选择策略（`frontmatter-override` = skill YAML 中的 `llm_override` 优先；`config-only` = 仅用 `llm-config.json`）|
+| `agentTaskRouterMode` | `'frontmatter-override'` | skill LLM 选择策略（`frontmatter-override` = skill YAML 的 `model:` 块优先；`task-router-only` = 仅用 `llm-config.json`）|
 
 ---
 
@@ -182,7 +182,7 @@ system_prompt: |
 tools:
   - wiki.read
   - wiki.search
-llm_override:          # 可选；对应 llm-config.json::tasks."skill:ingest-planner"
+model:                 # 可选；frontmatter 模型覆盖，对应 llm-config.json::tasks."ingest:planner"
   temperature: 0.1
 ```
 
@@ -193,7 +193,7 @@ llm_override:          # 可选；对应 llm-config.json::tasks."skill:ingest-pl
 ## 扩展指南
 
 - **新增 builtin tool**：在 `tools/builtin/` 新建文件，实现 `ToolDef` interface，在 `tools/registry.ts` 注册为内置工具；按需在 skill YAML 的 `tools:` 列表中声明。
-- **新增 skill**：在 `examples/skills/` 添加 YAML 文件（会随 worker 启动播种到 vault）；需要自定义 LLM 时在 `llm-config.json::tasks` 添加 `"skill:<id>": { ... }` 节。
+- **新增 skill**：在 `examples/skills/` 添加 YAML 文件（会随 worker 启动播种到 vault）；需要自定义 LLM 时在 `llm-config.json::tasks` 添加 `"<pipeline>:<stage>": { ... }` 节（如 `"ingest:planner"`）。
 - **新增 pipeline**：在 `orchestrator.ts` 添加新的 step 序列；目前 `runPipeline` 的 step 顺序硬编码在 orchestrator，未来可抽为配置（Phase 2 考虑）。
 - **接入新任务类型（如 query / lint）**：在对应 service 文件末尾调用 `runPipeline` 替换直接 LLM 调用；需要创建对应 skill YAML 文件。
 
@@ -228,7 +228,7 @@ src/server/agents/tools/builtin/__tests__/
   不需要。`loadSkill(id)` 在每次 `runPipeline` 调用时重新读文件（无进程级缓存，文件修改即时生效）。
 
 - **如何在 llm-config.json 中为特定 skill 指定模型？**
-  在 `tasks` 节中添加 `"skill:ingest-planner": { "model": "...", "temperature": 0.1 }`。`resolveTask` 识别 `skill:` 前缀并与 skill YAML 中的 `llm_override` 合并（config < frontmatter-override 顺序）。
+  在 `tasks` 节中添加 `"ingest:planner": { "model": "...", "temperature": 0.1 }`（key 由 `agent-loop::skillTaskKey` 从 skill id `ingest-planner` 派生）。`resolveTask` 与 skill YAML 的 `model:` 块合并（config < frontmatter-override 顺序）。
 
 ---
 
@@ -277,6 +277,7 @@ src/server/agents/
 | 2026-06-22 | ⑨ fast-follow（闭合终审 I-1）：`IngestCheckpoint` 加 `getCitedSources/putCitedSources`（checkpoint kind `'cited-sources'` 单 blob）；`verify-page` record 后同步 persist、`ingest-service` pipeline 前 rehydrate `ctx.citedSources`——崩溃续传命中 verifier-page 检查点跳过 verify 的页，其网页 source 仍被完整导入 |
 | 2026-06-24 | 移除 MCP 功能（冗余死代码）：删除 `tools/mcp/`（config/transport/client-pool/tool-bridge）+ `mcp-config.json` + `@modelcontextprotocol/sdk` 依赖 + `agentMcpLifecycle` 设置（contracts/settings-repo/API/UI）。判定依据：agent-loop 仅解析 skill 显式声明的工具，而所有内置 skill 都不声明 `mcp.*`；且项目已主动放弃 tool-using agent（packyapi openai-compatible 工具死循环），MCP 工具永不可被调用。`ToolSource` union 去掉 `'mcp'` |
 | 2026-06-25 | 工具体系收敛：新增 `tool-context.ts`（`ToolContext` 接口）+ `compile.ts`（`compileToolSet`/`synthesizeFinishTool`/`FINISH_TOOL_NAME`）；`vault-read/vault-search` 重命名为 `wiki-read/wiki-search`，新增 `wiki-list`；`ToolDef` 统一吃 `ToolContext`；`createBuiltinToolRegistry()` 工厂进程无关化；组合路径（有 tools+有 schema→`finish` 收尾）/纯结构化路径（无 tools+有 schema→`generateObject`）分支明确 |
+| 2026-06-26 | 路由 key 统一：新增 `agent-loop::skillTaskKey(id)`（`ingest-planner`→`ingest:planner`），`resolveSkillModel` 改用之，task key 由 `skill:ingest-xxx` 改为 `ingest:xxx`（id/文件名不变）；配合移除内置 `ingest` task。文档修正：skill frontmatter 字段是 `model:`（非 `llm_override:`，schema `.strict()` 拒未知键）、router mode 值 `task-router-only`（非 `config-only`）|
 
 ---
 

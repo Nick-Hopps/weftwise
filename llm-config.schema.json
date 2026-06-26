@@ -20,15 +20,14 @@
     },
     "tasks": {
       "type": "object",
-      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Keys are either built-in tasks (ingest/query/lint/merge/split/curate/fix/embedding) or skill:<id> routes that override the model for a single ingest agent-pipeline stage. Known ingest stages: skill:ingest-planner, skill:ingest-chunk-summarizer, skill:ingest-writer, skill:ingest-enricher, skill:ingest-verifier, skill:ingest-verifier-triage, skill:ingest-verifier-apply, skill:ingest-indexer. A skill:<id> entry is optional — without it the stage inherits the 'defaults' route (skill frontmatter may further override).",
+      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Keys are either built-in tasks (query/lint/merge/split/curate/fix/embedding) or '<pipeline>:<stage>' routes that override the model for a single agent-pipeline stage. Known ingest stages: ingest:planner, ingest:chunk-summarizer, ingest:writer, ingest:enricher, ingest:verifier, ingest:verifier-triage, ingest:verifier-apply, ingest:indexer. A stage entry is optional — without it the stage inherits the 'defaults' route (skill frontmatter may further override). Note: there is no standalone 'ingest' task; the pipeline routes per stage via 'ingest:<stage>'.",
       "propertyNames": {
-        "pattern": "^(ingest|query|lint|merge|split|curate|fix|embedding|skill:[a-z0-9][a-z0-9-]*)$"
+        "pattern": "^(query|lint|merge|split|curate|fix|embedding|[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*)$"
       },
       "additionalProperties": {
         "$ref": "#/$defs/taskRoute"
       },
       "properties": {
-        "ingest": { "$ref": "#/$defs/taskRoute", "description": "Ingest pipeline: turn raw documents into wiki pages (multi-stage agent pipeline)." },
         "query": { "$ref": "#/$defs/taskRoute", "description": "Ask AI: agentic tool-loop Q&A over the wiki with citations." },
         "lint": { "$ref": "#/$defs/taskRoute", "description": "Health check: scan the wiki for findings (broken links, missing cross-refs, contradictions)." },
         "merge": { "$ref": "#/$defs/taskRoute", "description": "Fuse two pages into one (invoked by page curation, not a standalone job)." },

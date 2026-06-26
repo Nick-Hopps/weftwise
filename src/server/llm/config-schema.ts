@@ -5,10 +5,12 @@ import { z } from 'zod';
 // Enums
 // ---------------------------------------------------------------------------
 
-const BUILTIN_LLM_TASKS = ['ingest', 'query', 'lint', 'merge', 'split', 'embedding', 'curate', 'fix'] as const;
+const BUILTIN_LLM_TASKS = ['query', 'lint', 'merge', 'split', 'embedding', 'curate', 'fix'] as const;
+// 多阶段流水线的某一阶段用 `<pipeline>:<stage>` 形式的 task key（如 `ingest:planner`），
+// 由 agent-loop 从 skill id（`ingest-planner`）派生（见 skillTaskKey）。开放命名空间。
 export const LLMTaskSchema = z.string().refine(
-  (s) => (BUILTIN_LLM_TASKS as readonly string[]).includes(s) || /^skill:[a-z0-9][a-z0-9-]*$/.test(s),
-  { message: "Task must be 'ingest', 'query', 'lint', 'merge', 'split', 'curate', 'fix', 'embedding', or 'skill:<id>'" },
+  (s) => (BUILTIN_LLM_TASKS as readonly string[]).includes(s) || /^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$/.test(s),
+  { message: "Task must be 'query', 'lint', 'merge', 'split', 'curate', 'fix', 'embedding', or a pipeline stage '<pipeline>:<stage>' (e.g. 'ingest:planner')" },
 );
 
 export const LLMProviderKindSchema = z.enum([
