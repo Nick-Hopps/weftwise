@@ -207,6 +207,7 @@ src/server/db/
 | 2026-06-23 | settings-repo 新增 `agentAutoCurate` key（boolean，默认 true）+ `getAgentAutoCurate` / `setAgentAutoCurate`；UI 通过 `PUT /api/settings` 写入，Agents settings panel 展示；ingest finalize 读取决定是否自动入队 curate |
 | 2026-06-24 | 移除 `agentMcpLifecycle` 设置 key + `getAgentMcpLifecycle` / `setAgentMcpLifecycle`（MCP 功能整体移除，详见根 Changelog）；agent 配置 key 由 5 降为 4 |
 | 2026-06-24 | 性能：补热路径索引（`ensureIndexes`：wiki_links target/source + job_events + jobs）；`getBacklinks`/`getSourcesForPage` 改 JOIN 消除 N+1；`getAllLinks` 加可选 `metaKeys` 参；新增 `pruneJobEvents`；落地 pages/sources/jobs-repo + indexes 单测 |
+| 2026-06-27 | Cognitive Lens：新增 `user_profiles`（账户层画像，单例 user_id='local'）/ `page_renditions`（重塑缓存，一页一行，**故意不挂 subjects FK**，由 deleteBySubject+命中校验自洽）/ `profile_signals`（append-only 反馈）三表（`ensureTables` 加 3 个 `migrateXxx`）；新增 `profiles-repo`(getProfile/getProfileOrDefault/upsertProfile 自增 version) / `renditions-repo`(getRendition 按 hash+version 命中 / upsertRendition / deleteBySubject) / `signals-repo`(appendSignal/recentSignals) |
 
 ---
 

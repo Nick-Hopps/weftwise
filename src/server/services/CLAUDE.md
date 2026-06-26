@@ -212,6 +212,7 @@ src/server/services/
 | 2026-06-24 | 性能：`lint-deterministic` 确定性检查一次性取数（`getAllPages` 3→1、跨主题 meta 扫描 2→1，行为不变）；落地 `lint-deterministic` 单测 |
 | 2026-06-25 | Ask AI 问答从预先 top-5 检索改为 agentic 工具循环：新增 `query-tools.ts`（`list_pages`/`search_wiki`/`read_page` subject-scoped 三工具 + `AccessedPages` + `subjectHasContent` 空库守卫）；`query-service` 重构为 `streamAgenticQuery`/`runQuery`（均走 `streamTextWithTools`/`generateTextWithTools`）；引用来自 `accessedToContext` 实际访问页；删除旧死代码 `prepareQueryContext`/`streamQueryAnswer`/`QUERY_STREAM_SYSTEM_PROMPT`；新增 `query-tools.test.ts` + `query-service-agentic.test.ts` |
 | 2026-06-25 | 工具体系收敛：`query-tools.ts` 改用共享 `createBuiltinToolRegistry`（`agents/tools/registry.ts`），删内联 `tool()` 孤岛；新增 `buildQueryToolContext(subject, accessed)` 构造 `ToolContext`；`wiki.read/search/list` 工具定义来自 `agents/tools/builtin/wiki-*.ts` 单一源；双 runner（`streamTextWithTools`/`generateTextWithTools`）保留 |
+| 2026-06-27 | Cognitive Lens：新增 `reshape-service.ts`（`reshapePageBody` 整页重塑——`streamTextResponse` 收全文→`checkLinkSubset` 保真→失败重写一次→二次失败回落 canonical；`reshapeSection` 段级）+ `apply-signal.ts`（信号→最近窗口→`applySignalsToStyle` reducer→达阈值才 upsert 画像并自增 version）。均为读侧，不写 vault/不经 Saga |
 
 ---
 
