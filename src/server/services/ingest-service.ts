@@ -12,7 +12,7 @@ import {
   getAgentAutoCurate,
 } from '../db/repos/settings-repo';
 import * as queue from '../jobs/queue';
-import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
+import { renderLanguageDirective, renderAugmentationDirective, renderExpositionDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, runSingle, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
@@ -196,9 +196,10 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   const augmentationLevel = subject.augmentationLevel;
   const augmentationDirective =
     augmentationLevel === 'off' ? '' : renderAugmentationDirective(augmentationLevel);
+  const expositionDirective = renderExpositionDirective(augmentationLevel);
 
   // carry 透传 key：让 planner 输出后 fanout/reviewer 仍能读到上下文（planner outputSchema 只有 plan）
-  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective', 'augmentationDirective'];
+  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective', 'augmentationDirective', 'expositionDirective'];
   const steps = buildIngestSteps({ inline, level: augmentationLevel, carryKeys });
 
   emit('ingest:planning', `Planning source: ${filename}`, { path: inline ? 'inline' : 'map-reduce' });
@@ -221,6 +222,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       outline: prep.outline,
       languageDirective,
       augmentationDirective,
+      expositionDirective,
     },
   }) as {
     plan?: { pages?: Array<{ slug: string; title: string; summary?: string }> };
