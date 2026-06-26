@@ -39,7 +39,7 @@ vi.mock('../../../db/repos/settings-repo', () => ({
   getAgentTaskRouterMode: mocks.getAgentTaskRouterMode,
 }));
 
-import { runAgentLoop, readCacheHitTokens, inputLabel, summarizeGenerationError, repairToolCallArgs } from '../agent-loop';
+import { runAgentLoop, readCacheHitTokens, inputLabel, summarizeGenerationError, repairToolCallArgs, skillTaskKey } from '../agent-loop';
 import { BudgetExceededError } from '../budget';
 
 describe('repairToolCallArgs', () => {
@@ -59,6 +59,18 @@ describe('repairToolCallArgs', () => {
   });
   it('提取出的第一个配平块本身非合法 JSON 时返回 null', () => {
     expect(repairToolCallArgs('{not json}')).toBeNull();
+  });
+});
+
+describe('skillTaskKey', () => {
+  it('把 skill id 首个连字符换成冒号得到 <pipeline>:<stage>', () => {
+    expect(skillTaskKey('ingest-planner')).toBe('ingest:planner');
+    expect(skillTaskKey('ingest-writer')).toBe('ingest:writer');
+    expect(skillTaskKey('ingest-verifier-triage')).toBe('ingest:verifier-triage');
+    expect(skillTaskKey('ingest-chunk-summarizer')).toBe('ingest:chunk-summarizer');
+  });
+  it('无连字符 id 原样返回', () => {
+    expect(skillTaskKey('planner')).toBe('planner');
   });
 });
 

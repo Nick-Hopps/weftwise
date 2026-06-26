@@ -6,6 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LLMConfigFile } from '../config-schema';
+import { LLMTaskSchema } from '../config-schema';
 
 const loaderMocks = vi.hoisted(() => ({
   getLLMConfig: vi.fn(),
@@ -26,8 +27,8 @@ function makeConfig(overrides: Partial<LLMConfigFile> = {}): LLMConfigFile {
       timeoutMs: 60_000,
     },
     tasks: {
-      ingest: { temperature: 0.2, model: 'ingest-model' },
-      'skill:ingest-planner': { profile: 'cheap', model: 'planner-model', temperature: 0.1 },
+      'ingest:writer': { temperature: 0.2, model: 'ingest-model' },
+      'ingest:planner': { profile: 'cheap', model: 'planner-model', temperature: 0.1 },
     },
     providers: {
       primary: { provider: 'anthropic' },
@@ -55,7 +56,7 @@ describe('resolveTask 三层合并', () => {
   });
 
   it('task 配置覆盖 defaults，未指定字段沿用 defaults', () => {
-    const route = resolveTask('ingest');
+    const route = resolveTask('ingest:writer');
     expect(route.model).toBe('ingest-model'); // task 覆盖
     expect(route.temperature).toBe(0.2); // task 覆盖
     expect(route.profileName).toBe('primary'); // 沿用 defaults
@@ -63,7 +64,7 @@ describe('resolveTask 三层合并', () => {
   });
 
   it('调用点 override 优先级最高（defaults < task < override）', () => {
-    const route = resolveTask('ingest', {
+    const route = resolveTask('ingest:writer', {
       model: 'override-model',
       temperature: 0.9,
       profile: 'cheap',
@@ -75,31 +76,31 @@ describe('resolveTask 三层合并', () => {
   });
 
   it('override 中显式 undefined 的字段不会 clobber 下层值', () => {
-    const route = resolveTask('ingest', { model: undefined, temperature: undefined });
+    const route = resolveTask('ingest:writer', { model: undefined, temperature: undefined });
     expect(route.model).toBe('ingest-model');
     expect(route.temperature).toBe(0.2);
   });
 
   it('task 配置中显式 undefined 的字段同样不会 clobber defaults', () => {
     loaderMocks.getLLMConfig.mockReturnValue(
-      makeConfig({ tasks: { ingest: { model: undefined } } as LLMConfigFile['tasks'] })
+      makeConfig({ tasks: { 'ingest:writer': { model: undefined } } as LLMConfigFile['tasks'] })
     );
-    const route = resolveTask('ingest');
+    const route = resolveTask('ingest:writer');
     expect(route.model).toBe('default-model');
   });
 });
 
-describe('resolveTask skill: 前缀任务', () => {
-  it('skill:<id> 命中 tasks 节中的同名 key', () => {
-    const route = resolveTask('skill:ingest-planner');
-    expect(route.task).toBe('skill:ingest-planner');
+describe('resolveTask <pipeline>:<stage> 任务', () => {
+  it('<pipeline>:<stage> 命中 tasks 节中的同名 key', () => {
+    const route = resolveTask('ingest:planner');
+    expect(route.task).toBe('ingest:planner');
     expect(route.profileName).toBe('cheap');
     expect(route.model).toBe('planner-model');
     expect(route.temperature).toBe(0.1);
   });
 
-  it('未配置的 skill:<id> 回退 defaults（config.tasks[task] ?? {}）', () => {
-    const route = resolveTask('skill:not-configured');
+  it('未配置的 <pipeline>:<stage> 回退 defaults（config.tasks[task] ?? {}）', () => {
+    const route = resolveTask('ingest:not-configured');
     expect(route.profileName).toBe('primary');
     expect(route.model).toBe('default-model');
   });
@@ -147,5 +148,16 @@ describe('resolveTask 错误与缺省值', () => {
   it('openai-compatible 的 logLabel 使用自定义 name', () => {
     const route = resolveTask('query', { profile: 'compat', model: 'm-x' });
     expect(route.logLabel).toBe('my-gateway:m-x');
+  });
+});
+
+describe('LLMTaskSchema', () => {
+  it('接受 builtin 与 <pipeline>:<stage>', () => {
+    for (const t of ['query', 'lint', 'embedding', 'ingest:planner', 'ingest:verifier-triage']) {
+      expect(LLMTaskSchema.safeParse(t).success).toBe(true);
+    }
+  });
+  it('拒绝已移除的 ingest（无冒号、非 builtin）', () => {
+    expect(LLMTaskSchema.safeParse('ingest').success).toBe(false);
   });
 });
