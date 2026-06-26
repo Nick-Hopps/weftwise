@@ -21,11 +21,12 @@ const PER_CHUNK_OVERHEAD_TOKENS = 1_500;
 /** planner / writers / reviewer 的预留 token */
 const PIPELINE_RESERVE_TOKENS = 60_000;
 /**
- * 内容阶段倍率：双层增益后每页要经 writer（产忠实草稿）→ enricher（读草稿+产增益页）
- * → verifier（读增益页+产核查页）三次"读全文+产全文"。每页正文被读写约 3 遍，
- * 故 inline 路径按 3× 内容计；大路径在 MAP_REDUCE_TOKEN_FACTOR 之上再叠加内容阶段。
+ * 内容阶段倍率：讲解模式下每页要经 writer（产讲解长文）→ enricher（读全文+叠脚手架）
+ * → verifier（读全文+核查改写）三次"读全文+产全文"，且每页正文显著长于旧忠实模式
+ *（writer 引入自有知识讲解）。每页正文被读写约 3 遍、每遍体量更大，故按 5× 内容计；
+ * inline 路径直接 ×5，大路径在 MAP_REDUCE_TOKEN_FACTOR 之上再叠加内容阶段。
  */
-const CONTENT_STAGE_FACTOR = 3;
+const CONTENT_STAGE_FACTOR = 5;
 
 export interface PreparedSourceInput {
   sourceId: string;
