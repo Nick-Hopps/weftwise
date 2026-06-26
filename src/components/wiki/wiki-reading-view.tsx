@@ -119,6 +119,8 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     reshaped != null &&
     lens.data?.source !== 'canonical' &&
     lens.data?.source !== 'fallback';
+  // source 为 canonical/fallback 时 reshaped 即服务端回显的原文，与 props.content 等价；
+  // 此时 usingReshaped=false（不显示"已调整"角标），仍渲染同一份原文。
   const displayContent = showOriginal ? props.content : (reshaped ?? props.content);
 
   const article = (
