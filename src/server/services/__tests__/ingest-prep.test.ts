@@ -103,6 +103,12 @@ describe('estimateIngestCost — 计入 enricher/verifier 两阶段', () => {
     // 旧公式 = 100000 + 60000 = 160000；新公式应 >= 3× 内容（writer+enricher+verifier）
     expect(cost).toBeGreaterThanOrEqual(tokens * 3);
   });
+
+  it('讲解模式每页变厚：inline 内容倍率 >= 5×', () => {
+    const tokens = 100_000;
+    const cost = estimateIngestCost(tokens, 5, true);
+    expect(cost).toBeGreaterThanOrEqual(tokens * 5);
+  });
 });
 
 describe('reduceCostForResume', () => {

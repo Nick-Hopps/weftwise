@@ -1,3 +1,5 @@
+import type { AugmentationLevel } from '@/lib/contracts';
+
 /**
  * Per-call context shared by every wiki-generation prompt builder.
  *
@@ -51,16 +53,45 @@ export function renderLanguageDirective(language: string): string {
 export function renderAugmentationDirective(level: 'light' | 'standard' | 'deep'): string {
   const guidance: Record<typeof level, string> = {
     light:
-      'Add ONLY the 1–2 highest-value callouts per major section — prioritise one [!intuition] and at most one [!example]. Keep it sparse; most sections get no callout.',
+      'Add ONLY the 1–2 highest-value study-aid callouts per major section — prioritise a [!quiz] self-test or a [!pitfall]. Keep it sparse; most sections get none.',
     standard:
-      'Add callouts at genuine points of difficulty — typically an [!intuition] plus an occasional [!example]/[!quiz]/[!pitfall] per major section. Aim for balanced, non-repetitive coverage.',
+      'Add study-aid callouts where they genuinely help: a [!quiz], a [!pitfall], a [!background] prerequisite, or a [!diagram] at points of difficulty. Balanced, non-repetitive coverage.',
     deep:
-      'Be generous: layer [!intuition], worked [!example]s, [!quiz] self-tests, [!background] prerequisites, [!diagram]s, and [!pitfall]s throughout. Maximise learning scaffolding while staying correct and on-topic.',
+      'Be generous with study aids: [!quiz] self-tests, [!pitfall] warnings, [!background] prerequisites, and [!diagram]s throughout. Maximise scaffolding while staying correct and on-topic.',
   };
   return [
     '=== AUGMENTATION LEVEL ===',
     guidance[level],
-    'Regardless of level: never pad with low-confidence claims (a verifier stage scrutinises every callout), and never alter the faithful prose.',
+    "Regardless of level: never pad with low-confidence claims (a verifier stage scrutinises every callout), and never alter the article's prose.",
     '=== END AUGMENTATION LEVEL ===',
+  ].join('\n');
+}
+
+/**
+ * 渲染「EXPOSITION DEPTH」块，注入 writer user prompt，决定讲解深度。
+ * 与 renderAugmentationDirective 对称，但接收全部四档：`off` 退回纯忠实渲染
+ *（writer 不引入来源外知识、不加 callout，等价旧 v5 行为），其余档递增讲解力度。
+ */
+export function renderExpositionDirective(level: AugmentationLevel): string {
+  if (level === 'off') {
+    return [
+      '=== EXPOSITION DEPTH ===',
+      'FAITHFUL MODE: render ONLY what the source chunks contain. Do NOT add background, analogies, derivations, examples, or any knowledge not present in the chunks. Write plain, accurate, well-structured encyclopedic prose. No callouts.',
+      '=== END EXPOSITION DEPTH ===',
+    ].join('\n');
+  }
+  const guidance: Record<'light' | 'standard' | 'deep', string> = {
+    light:
+      'Explain for understanding but stay concise: a clear definition, the core "why", and one intuition where a reader would otherwise be lost. Add outside knowledge sparingly and only when it removes a real obstacle.',
+    standard:
+      'Write a self-contained teaching article. Beyond faithfully covering the source, weave into the prose: motivation (why this exists / why it is defined this way), needed prerequisites, the underlying mechanism, an analogy or intuition, at least one worked example built from simple to harder, contrasts with adjacent concepts, and common pitfalls. Draw on your own knowledge to fill gaps the source leaves, staying correct and on-topic.',
+    deep:
+      'Write an exhaustive, deeply explanatory article a motivated learner could internalise the topic from alone: definition, motivation, history/context, prerequisites, mechanism, multiple analogies, several worked examples of increasing difficulty, edge cases, contrasts with related ideas, common misconceptions, and applications — all woven into the prose, generously drawing on your own knowledge while staying correct.',
+  };
+  return [
+    '=== EXPOSITION DEPTH ===',
+    guidance[level],
+    'All added explanation must be correct and on-topic; a later verifier stage fact-checks the prose, so never assert low-confidence claims as fact. Never translate slugs, [[wikilink]] targets, frontmatter keys, or code.',
+    '=== END EXPOSITION DEPTH ===',
   ].join('\n');
 }
