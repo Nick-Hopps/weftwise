@@ -238,6 +238,19 @@ export function isEmbeddingConfigured(): boolean {
   return !!getLLMConfig().tasks?.embedding?.model;
 }
 
+/**
+ * 读时重塑是否可用：reshape:page 能解析出 model 即视为已配置。
+ * 走 resolveTask（含 defaults 兜底）——只要配了任意默认模型，重塑即可工作；
+ * 无任何配置时回落 false，lens 端点据此优雅降级为直显 canonical。
+ */
+export function isReshapeConfigured(): boolean {
+  try {
+    return !!resolveTask('reshape:page').model;
+  } catch {
+    return false;
+  }
+}
+
 /** 返回 embedding 任务解析后的 modelId（tasks.embedding.model 或 defaults.model 兜底）。 */
 export function embeddingModelId(): string {
   if (!isEmbeddingConfigured()) {
