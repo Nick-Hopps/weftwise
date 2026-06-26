@@ -12,7 +12,7 @@ import {
   getAgentAutoCurate,
 } from '../db/repos/settings-repo';
 import * as queue from '../jobs/queue';
-import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
+import { renderLanguageDirective, renderAugmentationDirective, renderExpositionDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, runSingle, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
@@ -143,11 +143,12 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   // Skill 契约版本守卫：planner v2 起产 sourceRefs / writer 收 relevantChunks；
   // writer v3 起 outputSchema 扁平化（去掉 entry 包装——单键包装会被 DeepSeek 等拍平致
   // 结构化输出失败），与 orchestrator 扁平消费强绑定。
+  // writer v6 起：复述者→讲解者契约 + 新增 expositionDirective 输入。
   // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
   const MIN_SKILL_VERSIONS: Record<string, number> = {
-    'ingest-planner': 2, 'ingest-writer': 4, 'ingest-indexer': 1,
-    'ingest-enricher': 2, 'ingest-verifier': 2,
-    'ingest-verifier-triage': 1, 'ingest-verifier-apply': 1,
+    'ingest-planner': 2, 'ingest-writer': 6, 'ingest-indexer': 1,
+    'ingest-enricher': 3, 'ingest-verifier': 2,
+    'ingest-verifier-triage': 2, 'ingest-verifier-apply': 2,
   };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
     const s = skillRegistry.get(skillId);
@@ -196,9 +197,10 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   const augmentationLevel = subject.augmentationLevel;
   const augmentationDirective =
     augmentationLevel === 'off' ? '' : renderAugmentationDirective(augmentationLevel);
+  const expositionDirective = renderExpositionDirective(augmentationLevel);
 
   // carry 透传 key：让 planner 输出后 fanout/reviewer 仍能读到上下文（planner outputSchema 只有 plan）
-  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective', 'augmentationDirective'];
+  const carryKeys = ['chunkRefs', 'sources', 'subjectSlug', 'existingPages', 'outline', 'languageDirective', 'augmentationDirective', 'expositionDirective'];
   const steps = buildIngestSteps({ inline, level: augmentationLevel, carryKeys });
 
   emit('ingest:planning', `Planning source: ${filename}`, { path: inline ? 'inline' : 'map-reduce' });
@@ -221,6 +223,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       outline: prep.outline,
       languageDirective,
       augmentationDirective,
+      expositionDirective,
     },
   }) as {
     plan?: { pages?: Array<{ slug: string; title: string; summary?: string }> };
