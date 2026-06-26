@@ -101,7 +101,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
 
   const { skillRegistry, toolRegistry } = getRuntimeRegistries();
   const MIN_SKILL_VERSIONS: Record<string, number> = {
-    'ingest-enricher': 2, 'ingest-verifier': 2,
+    'ingest-enricher': 3, 'ingest-verifier': 2,
     'ingest-verifier-triage': 1, 'ingest-verifier-apply': 1,
   };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {
