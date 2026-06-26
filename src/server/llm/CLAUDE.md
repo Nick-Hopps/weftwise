@@ -232,6 +232,7 @@ src/server/llm/
 | 2026-06-24 | 新增内置 task `fix`（`LLMTaskSchema` 加 `'fix'`）+ `prompts/fix-prompt.ts`（`FixPageSchema`：`proceed`/`reason`/`body`/`summary?` + `buildFixPageUserPrompt(page, findings, roster, ctx)`）；供 `fix-service` 逐页修复 lint findings |
 | 2026-06-25 | `provider-registry` 新增 `streamTextWithTools` / `generateTextWithTools`（工具循环版 stream/generate，底层 AI SDK `streamText`/`generateText` with tools+maxSteps）；`query-prompt.ts` 新增 `QUERY_AGENTIC_SYSTEM_PROMPT` + `buildAgenticUserContent`（agentic 工具循环问答用），供 `query-service` agentic 重构使用 |
 | 2026-06-26 | 路由命名空间统一：skill 阶段 task key `skill:ingest-xxx` → `ingest:xxx`（`agent-loop::skillTaskKey` 把 id 首个连字符换冒号派生）；移除已无用的内置 `ingest` task（生产零引用，仅旧测试用过）；`LLMTaskSchema` 正则 `^skill:…` → 通用 `^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$`；`llm-config.example.json` 同步改 `ingest:*`；顺修文档：skill frontmatter 模型覆盖字段实为 `model:`（非 `llm_override:`），router mode 值为 `task-router-only`（非 `config-only`）|
+| 2026-06-27 | Cognitive Lens：新增 `prompts/reshape-prompt.ts`（`RESHAPE_PAGE/SECTION_SYSTEM_PROMPT` 纯呈现硬约束=不改事实/不新增 wikilink/新增脚手架包 callout + `buildReshape{Page,Section}UserPrompt` 注入双维画像与语言指令）；`provider-registry` 加 `isReshapeConfigured()`（`resolveTask('reshape:page').model` 含 defaults 兜底，未配置 false 供优雅降级）；`reshape:page`/`reshape:section` 走开放 `<pipeline>:<stage>` 路由（无需改 schema），`llm-config.example.json` 加两条参考配置 |
 
 ---
 

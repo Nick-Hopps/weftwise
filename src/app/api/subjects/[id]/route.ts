@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import { SubjectError } from '@/server/db/repos/subjects-repo';
+import { deleteBySubject as deleteRenditionsBySubject } from '@/server/db/repos/renditions-repo';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { AugmentationLevelSchema } from '@/lib/contracts';
 
@@ -85,6 +86,8 @@ export async function DELETE(request: NextRequest, { params }: SubjectRouteConte
   const { id } = await params;
   try {
     subjectsRepo.deleteIfEmpty(id);
+    // 清理该 subject 残留的重塑缓存（含已删页遗留的孤儿 rendition）。
+    deleteRenditionsBySubject(id);
     return NextResponse.json({ ok: true });
   } catch (err) {
     if (err instanceof SubjectError) {
