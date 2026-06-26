@@ -14,6 +14,7 @@ import { ScrollbarAutohide } from '@/components/shared/scrollbar-autohide';
 import { CommandPalette } from '@/components/search/command-palette';
 import { ContextPanelSheet } from '@/components/layout/context-panel-sheet';
 import { SettingsDialog } from '@/components/layout/settings-dialog';
+import { CognitiveLensOnboarding } from '@/components/layout/cognitive-lens-onboarding';
 
 // Create QueryClient inside component to avoid cross-request sharing in SSR.
 function makeQueryClient() {
@@ -145,6 +146,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <CommandPalette />
       <ContextPanelSheet />
       <SettingsDialog />
+      <CognitiveLensOnboarding />
       <GlobalJobTracker />
     </QueryClientProvider>
   );

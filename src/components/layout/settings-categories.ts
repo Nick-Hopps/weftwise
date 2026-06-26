@@ -4,9 +4,16 @@
  * settings-content（分类标题）共用，避免三者循环依赖与漂移。
  */
 
-import { Palette, Languages, Bot, Globe, Info, RefreshCw, type LucideIcon } from 'lucide-react';
+import { Palette, Languages, Bot, Globe, Info, RefreshCw, Brain, type LucideIcon } from 'lucide-react';
 
-export type CategoryId = 'appearance' | 'language' | 'agents' | 'web-search' | 'maintenance' | 'about';
+export type CategoryId =
+  | 'appearance'
+  | 'language'
+  | 'cognitive-lens'
+  | 'agents'
+  | 'web-search'
+  | 'maintenance'
+  | 'about';
 
 export interface SettingsCategory {
   id: CategoryId;
@@ -17,6 +24,7 @@ export interface SettingsCategory {
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'language', label: 'Language', icon: Languages },
+  { id: 'cognitive-lens', label: 'Cognitive Lens', icon: Brain },
   { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'web-search', label: 'Web search', icon: Globe },
   { id: 'maintenance', label: 'Maintenance', icon: RefreshCw },
