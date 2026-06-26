@@ -49,3 +49,18 @@ describe('ingest-enricher skill 契约（v3 学习脚手架）', () => {
     expect(src).toContain('[!background]');
   });
 });
+
+describe('ingest-verifier triage/apply 契约（v2 核查正文）', () => {
+  const triage = readSkill('ingest-verifier-triage');
+  const apply = readSkill('ingest-verifier-apply');
+  it('triage 抬到 v2 且不再限定"仅 callout"', () => {
+    expect(versionOf(triage)).toBe(2);
+    expect(triage).not.toContain('Only consider claims inside');
+    expect(triage).toMatch(/prose/i);
+  });
+  it('apply 抬到 v2 且允许修正正文断言', () => {
+    expect(versionOf(apply)).toBe(2);
+    expect(apply).not.toContain('Only change content inside');
+    expect(apply).toMatch(/prose|anywhere/i);
+  });
+});
