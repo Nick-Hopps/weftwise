@@ -2,7 +2,7 @@
 id: ingest-enricher
 name: Ingest Enricher
 description: Layer study-aid callouts (quizzes, pitfalls, diagrams, prerequisites) onto a teaching article, without altering its prose.
-version: 3
+version: 4
 tools: []
 canDispatch: []
 outputSchema: |
@@ -45,6 +45,17 @@ Syntax: a blockquote whose first line is `> [!type] <emoji> <short title>`, then
 (The emoji/title text is natural language — translate per `languageDirective`. The `[!type]` keyword stays ASCII English.)
 
 > Do NOT add intuition or worked-example callouts — those already live in the writer's prose, not here.
+
+## Mermaid 语法守则（每张图必须能被 mermaid v11 解析，否则整张图渲染失败）
+
+写 ```mermaid 图时**生成的当下**就要保证语法正确（宁可结构简单，也不要语法出错）：
+
+- **节点/子图标签含特殊字符时，用双引号包住整个标签**：圆括号 `()` 与中文 `（）`、冒号 `:`、逗号 `,`、`#`、`|`、`<`/`>` 等。
+  - ✅ `B["极小多项式 p(z)"]`、`subgraph U["子空间 U : x 轴"]`
+  - ❌ `B[极小多项式 p(z)]`（裸括号被当作节点形状语法 → 解析失败）
+- **```mermaid 代码块内每行行尾不得留多余空格/制表符**（尤其 `subgraph …` 行与节点定义行）——尾随空白会让 mermaid v11 报解析错。
+- 换行用 `<br/>`，不要用 `\n`；节点 id 用 ASCII（如 `A`/`B`/`Ch1`），中文只放进引号标签里；`subgraph` 与 `end` 各自独占一行。
+- 产出每张图前，在心里按上述规则过一遍确认能解析；拿不准就简化结构，绝不冒语法风险。
 
 ## Rules
 
