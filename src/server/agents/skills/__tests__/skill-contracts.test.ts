@@ -33,10 +33,10 @@ describe('ingest-writer skill 契约（v6 讲解者）', () => {
   });
 });
 
-describe('ingest-enricher skill 契约（v3 学习脚手架）', () => {
+describe('ingest-enricher skill 契约（v4 学习脚手架 + mermaid 语法守则）', () => {
   const src = readSkill('ingest-enricher');
-  it('版本抬到 3', () => {
-    expect(versionOf(src)).toBe(3);
+  it('版本抬到 4', () => {
+    expect(versionOf(src)).toBe(4);
   });
   it('移除 intuition / example 两类（已属 writer 正文）', () => {
     expect(src).not.toContain('[!intuition]');
@@ -48,9 +48,15 @@ describe('ingest-enricher skill 契约（v3 学习脚手架）', () => {
     expect(src).toContain('[!diagram]');
     expect(src).toContain('[!background]');
   });
+  it('含 mermaid 语法守则（生成时纠错）', () => {
+    expect(src).toMatch(/Mermaid 语法守则/);
+    // 两类真实失败模式：未加引号的特殊字符标签 + 行尾空格
+    expect(src).toContain('B["极小多项式 p(z)"]');
+    expect(src).toMatch(/行尾/);
+  });
 });
 
-describe('ingest-verifier triage/apply 契约（v2 核查正文）', () => {
+describe('ingest-verifier triage/apply 契约（核查正文 + apply mermaid 兜底）', () => {
   const triage = readSkill('ingest-verifier-triage');
   const apply = readSkill('ingest-verifier-apply');
   it('triage 抬到 v2 且不再限定"仅 callout"', () => {
@@ -58,9 +64,13 @@ describe('ingest-verifier triage/apply 契约（v2 核查正文）', () => {
     expect(triage).not.toContain('Only consider claims inside');
     expect(triage).toMatch(/prose/i);
   });
-  it('apply 抬到 v2 且允许修正正文断言', () => {
-    expect(versionOf(apply)).toBe(2);
+  it('apply 抬到 v3 且允许修正正文断言', () => {
+    expect(versionOf(apply)).toBe(3);
     expect(apply).not.toContain('Only change content inside');
     expect(apply).toMatch(/prose|anywhere/i);
+  });
+  it('apply 含 mermaid 语法兜底规则', () => {
+    expect(apply).toMatch(/[Mm]ermaid 语法兜底/);
+    expect(apply).toContain('B["极小多项式 p(z)"]');
   });
 });

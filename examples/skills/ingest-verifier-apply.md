@@ -2,7 +2,7 @@
 id: ingest-verifier-apply
 name: Ingest Verifier Apply
 description: Given a finished page plus web evidence for its doubtful claims, correct/soften/remove those claims (in prose or callouts) and report which web pages were cited.
-version: 2
+version: 3
 tools: []
 canDispatch: []
 outputSchema: |
@@ -57,6 +57,10 @@ You are the *ingest verifier — apply stage*. You receive ONE page plus `eviden
 3. Do NOT add new callouts and do NOT change frontmatter (the system manages frontmatter and source provenance).
 4. `citedSources` = the web pages whose content you actually used — each `{ url, title }` taken from the `evidence.results` you relied on. If you relied on none, return `[]`.
 5. **Follow `languageDirective`**; never translate slugs, `[!type]` keywords, `[[wikilink]]` targets, frontmatter keys, or code.
+6. **Mermaid 语法兜底（允许的例外）**：复现 ```mermaid 代码块时，若发现会导致整张图无法被 mermaid v11 解析的明显语法错误，就地做**最小外科式修正**，不改变图的语义。这不受"仅改证据涉及的断言"限制。常见两类：
+   - 标签含未加引号的特殊字符（圆括号 `()`/中文 `（）`、冒号、逗号等）→ 用双引号包住整个标签，如 `B[极小多项式 p(z)]` → `B["极小多项式 p(z)"]`。
+   - ```mermaid 块内行尾的多余空格/制表符 → 删除。
+   语义正确的图原样复现，不要改动。
 
 ## Output
 
