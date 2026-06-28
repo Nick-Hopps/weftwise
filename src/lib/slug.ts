@@ -27,6 +27,21 @@ export function normalizeSubjectSlug(input: string): string {
     .slice(0, MAX_SUBJECT_SLUG_LENGTH);
 }
 
+/**
+ * 输入态宽松规范化：用于 slug 输入框 onChange。
+ * 与 normalizeSubjectSlug 的关键区别——**保留末尾连字符**，否则用户每打一个
+ * `-` 都会被立刻剥掉，无法输入 `frontend-architecture` 这类带横杠的 slug。
+ * 仍即时转小写、把非法字符换成连字符、剥前导连字符（满足 `^[a-z0-9]`）、限长；
+ * 提交时再走 normalizeSubjectSlug 收口为最终规范形态。
+ */
+export function sanitizeSubjectSlugInput(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+/, '')
+    .slice(0, MAX_SUBJECT_SLUG_LENGTH);
+}
+
 export function normalizeSlug(input: string): string {
   return input
     .trim()

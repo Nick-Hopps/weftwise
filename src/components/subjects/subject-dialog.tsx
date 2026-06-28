@@ -10,7 +10,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Trash2, ChevronRight } from 'lucide-react';
-import { normalizeSubjectSlug } from '@/lib/slug';
+import { normalizeSubjectSlug, sanitizeSubjectSlugInput } from '@/lib/slug';
 import { DEFAULT_AUGMENTATION_LEVEL, type AugmentationLevel, type SubjectListEntry } from '@/lib/contracts';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
@@ -112,7 +112,8 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
   const [augmentation, setAugmentation] = useState<AugmentationLevel>(DEFAULT_AUGMENTATION_LEVEL);
   const [error, setError] = useState<string | null>(null);
 
-  const effectiveSlug = slug || normalizeSubjectSlug(name);
+  // 提交/预览口径：把宽松输入态（可能带末尾连字符）收口为最终规范 slug。
+  const effectiveSlug = normalizeSubjectSlug(slug || name);
 
   const mutation = useMutation({
     mutationFn: createSubject,
@@ -187,7 +188,8 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
               <Input
                 value={slug}
                 onChange={(e) => {
-                  setSlug(normalizeSubjectSlug(e.target.value));
+                  // 宽松规范化保留末尾连字符，用户才能继续输入下一段（横杠可正常输入）。
+                  setSlug(sanitizeSubjectSlugInput(e.target.value));
                   setSlugTouched(true);
                 }}
                 placeholder="frontend-architecture"

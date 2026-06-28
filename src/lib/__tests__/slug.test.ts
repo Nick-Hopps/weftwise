@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeSlug,
   normalizeSubjectSlug,
+  sanitizeSubjectSlugInput,
   SUBJECT_SLUG_RE,
   MAX_SUBJECT_SLUG_LENGTH,
 } from '../slug';
@@ -51,6 +52,36 @@ describe('normalizeSubjectSlug（主题 slug，强制 ASCII）', () => {
 
   it('修剪首尾连字符', () => {
     expect(normalizeSubjectSlug('--hello--')).toBe('hello');
+  });
+});
+
+describe('sanitizeSubjectSlugInput（输入态宽松规范化）', () => {
+  it('保留末尾连字符以便用户继续输入', () => {
+    // 这是本次修复的核心：normalizeSubjectSlug 会把末尾 `-` 吃掉导致无法输入横杠。
+    expect(sanitizeSubjectSlugInput('frontend-')).toBe('frontend-');
+  });
+
+  it('允许在词中输入连字符', () => {
+    expect(sanitizeSubjectSlugInput('frontend-architecture')).toBe('frontend-architecture');
+  });
+
+  it('转小写并把非法字符（空格/符号）换成连字符', () => {
+    expect(sanitizeSubjectSlugInput('Foo Bar!')).toBe('foo-bar-');
+  });
+
+  it('剥离前导连字符（满足 SUBJECT_SLUG_RE 的 ^[a-z0-9]）', () => {
+    expect(sanitizeSubjectSlugInput('-abc')).toBe('abc');
+  });
+
+  it('截断到最大长度', () => {
+    expect(sanitizeSubjectSlugInput('a'.repeat(100)).length).toBe(MAX_SUBJECT_SLUG_LENGTH);
+  });
+
+  it('其产物经 normalizeSubjectSlug 收口后总是合法（或为空）', () => {
+    for (const input of ['frontend-', 'Foo Bar!', 'a--b', '-x-', '中文-en']) {
+      const finalized = normalizeSubjectSlug(sanitizeSubjectSlugInput(input));
+      expect(finalized === '' || SUBJECT_SLUG_RE.test(finalized)).toBe(true);
+    }
   });
 });
 
