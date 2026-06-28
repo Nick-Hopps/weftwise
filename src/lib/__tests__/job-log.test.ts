@@ -1,0 +1,79 @@
+import { describe, it, expect } from 'vitest';
+import { eventLogLine, parseJobError } from '../job-log';
+
+describe('eventLogLine', () => {
+  it('prefers message over step/description', () => {
+    const line = eventLogLine({ type: 'ingest:llm', data: { message: 'A', step: 'B', description: 'C' } });
+    expect(line.text).toBe('A');
+  });
+
+  it('falls back step → description → type', () => {
+    expect(eventLogLine({ type: 't', data: { step: 'S' } }).text).toBe('S');
+    expect(eventLogLine({ type: 't', data: { description: 'D' } }).text).toBe('D');
+    expect(eventLogLine({ type: 'ingest:start', data: {} }).text).toBe('ingest:start');
+  });
+
+  it('treats empty-string fields as absent', () => {
+    expect(eventLogLine({ type: 't', data: { message: '', step: 'S' } }).text).toBe('S');
+  });
+
+  it('flags error events', () => {
+    expect(eventLogLine({ type: 'job:failed', data: {} }).isError).toBe(true);
+    expect(eventLogLine({ type: 'lint:semantic:error', data: {} }).isError).toBe(true);
+    expect(eventLogLine({ type: 'ingest:start', data: {} }).isError).toBe(false);
+  });
+
+  it('formats createdAt as HH:mm:ss and tolerates missing/invalid', () => {
+    const iso = '2026-06-28T12:03:45.000Z';
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    expect(eventLogLine({ type: 't', data: { createdAt: iso } }).time)
+      .toBe(`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`);
+    expect(eventLogLine({ type: 't', data: {} }).time).toBe('');
+    expect(eventLogLine({ type: 't', data: { createdAt: 'nonsense' } }).time).toBe('');
+  });
+});
+
+describe('parseJobError', () => {
+  it('returns null for empty/invalid input', () => {
+    expect(parseJobError(null)).toBeNull();
+    expect(parseJobError(undefined)).toBeNull();
+    expect(parseJobError('')).toBeNull();
+    expect(parseJobError('{not json')).toBeNull();
+  });
+
+  it('returns null when no error field', () => {
+    expect(parseJobError(JSON.stringify({ pagesCreated: [] }))).toBeNull();
+  });
+
+  it('extracts message and optional technical fields', () => {
+    const json = JSON.stringify({
+      error: {
+        message: 'boom',
+        stack: 'Error: boom\n  at x',
+        cause: 'root cause',
+        responseText: 'raw',
+        finishReason: 'length',
+        usage: { totalTokens: 9 },
+      },
+    });
+    const e = parseJobError(json);
+    expect(e).not.toBeNull();
+    expect(e!.message).toBe('boom');
+    expect(e!.stack).toContain('at x');
+    expect(e!.cause).toBe('root cause');
+    expect(e!.responseText).toBe('raw');
+    expect(e!.finishReason).toBe('length');
+    expect(e!.usage).toEqual({ totalTokens: 9 });
+  });
+
+  it('falls back message when missing', () => {
+    const e = parseJobError(JSON.stringify({ error: { stack: 's' } }));
+    expect(e!.message).toBe('Job failed');
+  });
+
+  it('stringifies non-string cause', () => {
+    const e = parseJobError(JSON.stringify({ error: { message: 'm', cause: { code: 'E' } } }));
+    expect(e!.cause).toBe(JSON.stringify({ code: 'E' }));
+  });
+});
