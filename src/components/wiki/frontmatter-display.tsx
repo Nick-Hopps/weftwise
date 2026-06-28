@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { Pencil } from 'lucide-react';
 import { Tag } from '@/components/ui/tag';
 import { TagLink } from '@/components/wiki/tag-link';
-import { ReenrichButton } from './reenrich-button';
-
 interface FrontmatterDisplayProps {
   title: string;
   tags: string[];
@@ -14,7 +12,6 @@ interface FrontmatterDisplayProps {
   updated: string;
   editHref?: string;
   subjectSlug?: string;
-  slug?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -44,7 +41,6 @@ export default function FrontmatterDisplay({
   updated,
   editHref,
   subjectSlug,
-  slug,
 }: FrontmatterDisplayProps) {
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
@@ -55,7 +51,6 @@ export default function FrontmatterDisplay({
           {title}
         </h1>
         <div className="flex items-center gap-2 shrink-0">
-          {slug && <ReenrichButton slug={slug} title={title} />}
           {editHref && (
             <Link
               href={editHref}
