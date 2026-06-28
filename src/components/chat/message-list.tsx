@@ -4,6 +4,7 @@ import { useEffect, useRef, memo, useMemo } from 'react';
 import { MessageCircleQuestion } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
+import { toolActivityIcon, toolActivityVerb } from '@/lib/tool-activity';
 
 export interface Citation {
   pageSlug: string;
@@ -15,22 +16,6 @@ export interface ChatMessage {
   content: string;
   citations?: Citation[];
   activity?: { tool: string; label: string }[];
-}
-
-// 工具活动标记映射
-function toolActivityIcon(tool: string): string {
-  if (tool === 'search_wiki') return '🔍';
-  if (tool === 'read_page') return '📄';
-  if (tool === 'list_pages') return '🗂';
-  return '•';
-}
-
-// 工具活动动词映射
-function toolActivityVerb(tool: string): string {
-  if (tool === 'search_wiki') return 'Searching';
-  if (tool === 'read_page') return 'Reading';
-  if (tool === 'list_pages') return 'Listing pages';
-  return tool;
 }
 
 interface MessageListProps {
