@@ -16,11 +16,8 @@ export interface JobError {
 }
 
 function pickText(data: Record<string, unknown>): string {
-  for (const key of ['message', 'step', 'description'] as const) {
-    const v = data[key];
-    if (typeof v === 'string' && v.length > 0) return v;
-  }
-  return '';
+  const v = data.message;
+  return typeof v === 'string' && v.length > 0 ? v : '';
 }
 
 function formatLogTime(iso: string): string {

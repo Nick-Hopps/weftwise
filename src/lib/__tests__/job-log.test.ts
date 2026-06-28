@@ -2,19 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { eventLogLine, parseJobError } from '../job-log';
 
 describe('eventLogLine', () => {
-  it('prefers message over step/description', () => {
-    const line = eventLogLine({ type: 'ingest:llm', data: { message: 'A', step: 'B', description: 'C' } });
-    expect(line.text).toBe('A');
+  it('uses top-level message as the text', () => {
+    expect(eventLogLine({ type: 'ingest:llm', data: { message: 'A' } }).text).toBe('A');
   });
 
-  it('falls back step → description → type', () => {
-    expect(eventLogLine({ type: 't', data: { step: 'S' } }).text).toBe('S');
-    expect(eventLogLine({ type: 't', data: { description: 'D' } }).text).toBe('D');
+  it('falls back to event.type when message is absent or empty', () => {
     expect(eventLogLine({ type: 'ingest:start', data: {} }).text).toBe('ingest:start');
-  });
-
-  it('treats empty-string fields as absent', () => {
-    expect(eventLogLine({ type: 't', data: { message: '', step: 'S' } }).text).toBe('S');
+    expect(eventLogLine({ type: 'job:failed', data: { message: '' } }).text).toBe('job:failed');
   });
 
   it('flags error events', () => {
