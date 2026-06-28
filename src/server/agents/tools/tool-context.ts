@@ -16,6 +16,8 @@ export interface ToolContext {
   onAccess?(page: { slug: string; title: string; body?: string }): void;
   /** 可选 job 事件（ingest 经 agentCtx.emit）；query 不传（工具活动由流式响应携带）。 */
   emit?(type: string, message: string, data?: Record<string, unknown>): void;
+  /** query 侧触发 re-enrich 任务（入队）；ingest 不传 → 工具在 ingest 中调用会优雅报错。 */
+  reenrich?(slug: string): Promise<{ jobId: string }>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
   agent?: AgentContext;
 }
