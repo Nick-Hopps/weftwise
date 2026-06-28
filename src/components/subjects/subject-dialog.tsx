@@ -301,7 +301,8 @@ function EditSubjectBody({
   }
 
   const isActive = subject.id === currentSubjectId;
-  const canDelete = subject.pageCount === 0 && !isActive;
+  // 允许删除非空 subject（级联清理由后端处理）；仅 active 与 general 仍禁删。
+  const canDelete = !isActive && subject.slug !== 'general';
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -364,29 +365,35 @@ function EditSubjectBody({
           Danger zone
         </p>
         {canDelete ? (
-          <Button
-            intent={confirmArmed ? 'danger' : 'outline'}
-            size="sm"
-            type="button"
-            loading={deleteMutation.isPending}
-            onClick={() => {
-              if (!confirmArmed) {
-                setConfirmArmed(true);
-                return;
-              }
-              deleteMutation.mutate(subject.id);
-            }}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            {confirmArmed ? 'Click again to confirm' : 'Delete subject'}
-          </Button>
+          <>
+            {confirmArmed && (
+              <p className="mb-2 text-xs text-danger">
+                This permanently deletes &ldquo;{subject.name}&rdquo; and its {subject.pageCount}{' '}
+                {subject.pageCount === 1 ? 'page' : 'pages'} and all sources. This can&apos;t be undone.
+              </p>
+            )}
+            <Button
+              intent={confirmArmed ? 'danger' : 'outline'}
+              size="sm"
+              type="button"
+              loading={deleteMutation.isPending}
+              onClick={() => {
+                if (!confirmArmed) {
+                  setConfirmArmed(true);
+                  return;
+                }
+                deleteMutation.mutate(subject.id);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {confirmArmed ? 'Click again to confirm' : 'Delete subject'}
+            </Button>
+          </>
         ) : (
           <p className="text-xs text-foreground-tertiary">
-            {isActive
-              ? 'This subject is currently active. Switch to another subject before deleting.'
-              : `This subject has ${subject.pageCount} ${
-                  subject.pageCount === 1 ? 'page' : 'pages'
-                }. Empty it first.`}
+            {subject.slug === 'general'
+              ? "The general subject can't be deleted."
+              : 'This subject is currently active. Switch to another subject before deleting.'}
           </p>
         )}
       </div>
