@@ -25,7 +25,6 @@ import { AugmentationField } from '@/components/subjects/augmentation-field';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { IconButton } from '@/components/ui/icon-button';
-import { cn } from '@/lib/cn';
 
 const SUBJECTS_QUERY_KEY = ['subjects'] as const;
 
