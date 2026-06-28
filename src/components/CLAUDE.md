@@ -42,11 +42,12 @@
 
 ### `wiki/` — wiki 页面渲染
 
-- `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）
+- `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）；标题行 `actions` 插槽（透传给 FrontmatterDisplay）+ `headerExtra` 插槽（渲染在 frontmatter 之后、正文之前，复用 article reading 宽度）
+- `page-actions.tsx` —— 🆕 阅读页标题行右侧统一功能动作条 `PageActions`（Edit / Sources(N) toggle / Reshape 触发并排）+ `ReshapeStatus`（正文上方细状态行：Reshaping… / Adapted for you＋Show original 切换 / Couldn't reshape）；纯展示，状态由 `wiki-reading-view` 持有并下传
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
-- `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行支持可选 `editHref` 渲染 Edit 按钮（Merge/Split 按钮已移除，策展入口移至 Health 页）
+- `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行右侧 `actions` 插槽渲染统一动作条（Edit 已移入 `PageActions`，不再有内置 `editHref`/Edit 按钮）
 - `page-skeleton.tsx` —— loading skeleton
 - `page-editor.tsx` —— 🆕 在线编辑容器：根/loading/error **全高 flex 布局**（`flex flex-col h-full`，去掉旧 `max-w-content` 居中收窄）；拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；额外拉 `['pages',subjectId]` 经 `buildTitleSlugMap` 构建 titleSlugMap 传入预览；错误内联、dirty 守卫
 - `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装；`height="100%"` 撑满父高，`components.preview` 接 `previewRenderer` 自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
@@ -146,7 +147,7 @@ src/components/
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
-├── wiki/         {page-renderer, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice}
+├── wiki/         {page-renderer, page-actions, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── tags/         {tags-index-view, tag-pages-view}
@@ -175,6 +176,7 @@ src/components/
 | 2026-06-28 | 对话触发 Re-enrich：删除 `wiki/reenrich-button.tsx` 与 `wiki/reenrich-dialog.tsx`；`frontmatter-display` 不再渲染 Re-enrich 按钮；`chat/message-list.tsx` 导入 `toolActivityIcon/toolActivityVerb/summarizeToolArgs` 从 `@/lib/tool-activity`（不再内联）；chat UI 展示 `wiki.reenrich`（✨）工具活动 |
 | 2026-06-27 | Cognitive Lens：`wiki/wiki-reading-view.tsx` 接入 `useLens`——**默认显示原文，`LensBar` 给「按画像重塑」按钮手动触发**（`lensRequested` 门控 enabled，不自动调 LLM；换页重置回原文）+ 重塑/原文切换 + 末尾 `LensFeedback`（太难/太浅→信号）；新增 `wiki/lens-feedback.tsx`；`layout/cognitive-lens-onboarding.tsx`（首次画像向导，挂在 `providers.tsx`）；`layout/settings-content.tsx` 加 `CognitiveLensPanel` + `settings-categories.ts` 加 `cognitive-lens` 分类；画像走 `/api/profile`、**不**写 Zustand。相关 hooks 见 `src/hooks/use-profile.ts`/`use-lens.ts` |
 | 2026-06-28 | Job 详情弹窗：`shared/progress-toast.tsx` 加「查看详情/查看错误」入口（失败时红色）+ return 包 Fragment 渲染弹窗（透传 `events/status`，**不**新建第二条 SSE）；新增 `shared/job-detail-dialog.tsx`（全事件日志时间线 + 失败时 `GET /api/jobs/[id]` 取 `resultJson.error` 展全栈 + 一键复制；React Query `enabled: open && failed` + `staleTime:Infinity`；aria-id 按 jobId 派生）；消费 `lib/job-log.ts`（`eventLogLine`/`parseJobError`）纯函数。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-28-job-detail-dialog* |
+| 2026-06-28 | 统一阅读页功能菜单 + 英文化：新增 `wiki/page-actions.tsx`（`PageActions` 动作条 + `ReshapeStatus` 状态行）；`frontmatter-display`/`page-renderer` 改用 `actions`/`headerExtra` 插槽并移除 `editHref`；`wiki-reading-view` 删除旧顶部 Sources toolbar 与 LensBar，三控件（Edit/Sources/Reshape）并排进标题行；`lens-feedback`/`html-source-frame`/`page-editor`(retitle banner) 文案英文化。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-28-unify-page-actions-i18n* |
 
 ---
 
