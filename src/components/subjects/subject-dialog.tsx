@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Trash2, ChevronRight } from 'lucide-react';
 import { normalizeSubjectSlug } from '@/lib/slug';
-import { DEFAULT_AUGMENTATION_LEVEL, type AugmentationLevel } from '@/lib/contracts';
+import { DEFAULT_AUGMENTATION_LEVEL, type AugmentationLevel, type SubjectListEntry } from '@/lib/contracts';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useSwitchSubject } from '@/hooks/use-switch-subject';
@@ -117,6 +117,14 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
   const mutation = useMutation({
     mutationFn: createSubject,
     onSuccess: (subject) => {
+      // 乐观写入 ['subjects'] 缓存：确保切到新 subject 时 SubjectsBootstrap 能在列表里找到它，
+      // 否则后台 refetch 未回来前 bootstrap 会把它当"悬空选择"强制重置回 general。
+      queryClient.setQueryData<SubjectListEntry[]>(SUBJECTS_QUERY_KEY, (old) => {
+        const list = old ?? [];
+        return list.some((s) => s.id === subject.id)
+          ? list
+          : [...list, { ...subject, pageCount: 0 }];
+      });
       queryClient.invalidateQueries({ queryKey: SUBJECTS_QUERY_KEY });
       onClose();
       // 创建后自动切入新 subject 并落到仪表盘（空态 ingest hero 引导加内容）。
