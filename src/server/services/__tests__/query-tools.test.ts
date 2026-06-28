@@ -17,6 +17,11 @@ vi.mock('@/server/wiki/wiki-store', () => ({
   readPageInSubject: (...a: unknown[]) => mockReadPage(...a),
 }));
 
+const mockEnqueue = vi.fn();
+vi.mock('@/server/jobs/queue', () => ({
+  enqueue: (...a: unknown[]) => mockEnqueue(...a),
+}));
+
 import {
   buildQueryToolContext,
   createAccessedPages,
@@ -54,6 +59,7 @@ beforeEach(() => {
   mockGetPageBySlug.mockReset();
   mockHybrid.mockReset();
   mockReadPage.mockReset();
+  mockEnqueue.mockReset();
 });
 
 describe('buildQueryToolContext - listPages', () => {
@@ -171,5 +177,21 @@ describe('buildQueryToolContext - onAccess 路由', () => {
     const ctx = buildQueryToolContext(SUBJECT, accessed);
     ctx.onAccess?.({ slug: 'd', title: 'D' }); // 无 body，但 bodies 已有
     expect(accessed.meta.has('d')).toBe(false); // 不应降级写 meta
+  });
+});
+
+describe('buildQueryToolContext - reenrich', () => {
+  it('校验通过 → enqueue re-enrich 并返回 jobId', async () => {
+    mockGetPageBySlug.mockReturnValue(page('eigen'));
+    mockEnqueue.mockReturnValue({ id: 'job-7' });
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    const out = await ctx.reenrich!('eigen');
+    expect(out).toEqual({ jobId: 'job-7' });
+    expect(mockEnqueue).toHaveBeenCalledWith('re-enrich', { slug: 'eigen', subjectId: 's1' }, 's1');
+  });
+  it('meta 页 → 抛错（不 enqueue）', async () => {
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    await expect(ctx.reenrich!('index')).rejects.toThrow(/meta/);
+    expect(mockEnqueue).not.toHaveBeenCalled();
   });
 });
