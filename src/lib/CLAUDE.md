@@ -101,6 +101,7 @@ src/lib/
 ├── slug.ts                 # URL-safe slug
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
+├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨）
 └── theme/
     └── read-theme-vars.ts  # 读取 CSS 变量
 ```
@@ -115,6 +116,7 @@ src/lib/
 | 2026-06-22 | contracts 新增 `Conversation` / `ConversationMessage` 类型（⑦ 对话持久化 + 多轮记忆）|
 | 2026-06-22 | contracts 加 `WebSearchProviderSchema/WebSearchApiKeySchema/WebSearchMaxResultsSchema` + 默认值 + `WebSearchProvider` 类型；`AppSettings`/`AppSettingsSchema` 加 `webSearchProvider/webSearchApiKey/webSearchMaxResults`（⑨ verifier 联网核查搜索后端配置）|
 | 2026-06-23 | `Job.type` 移除 `'merge'|'split'`，新增 `'curate'`（merge/split 内化为 curate 子步骤，不再是独立 job 类型）；`AppSettings` 加 `agentAutoCurate: boolean`（默认 true，控制 ingest finalize 后是否自动入队 curate scope:'pages'）|
+| 2026-06-28 | 对话触发 Re-enrich：新增 `tool-activity.ts`（`toolActivityIcon/toolActivityVerb/summarizeToolArgs` 纯函数，client + query route 共用单一源，支持 `wiki.reenrich` 映射 ✨/Re-enriching）|
 | 2026-06-27 | Cognitive Lens：contracts 加 `StylePrefs`（+ 4 个枚举别名 Lens{ReadingLevel,Verbosity,ExampleDensity,Formality}）与 `UserProfileDTO`（client 侧纯类型；server zod 真源在 `server/profile/style.ts`，由该处编译期双向断言守卫两者一致）|
 
 ---

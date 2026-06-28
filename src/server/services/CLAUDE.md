@@ -187,6 +187,7 @@ src/server/services/
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
 ├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2）
 ├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / partitionFindings
+├── reenrich-enqueue.ts  # 🆕 纯函数 validateReenrichTarget + enqueueReenrich 入队 helper（供对话工具触发）
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
 ├── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
 ├── maintenance-policy.ts # 🆕 纯函数：递减回报间隔策略（SPACING_LADDER / countCallouts / nextMaturity，P5）
@@ -212,6 +213,7 @@ src/server/services/
 | 2026-06-24 | 性能：`lint-deterministic` 确定性检查一次性取数（`getAllPages` 3→1、跨主题 meta 扫描 2→1，行为不变）；落地 `lint-deterministic` 单测 |
 | 2026-06-25 | Ask AI 问答从预先 top-5 检索改为 agentic 工具循环：新增 `query-tools.ts`（`list_pages`/`search_wiki`/`read_page` subject-scoped 三工具 + `AccessedPages` + `subjectHasContent` 空库守卫）；`query-service` 重构为 `streamAgenticQuery`/`runQuery`（均走 `streamTextWithTools`/`generateTextWithTools`）；引用来自 `accessedToContext` 实际访问页；删除旧死代码 `prepareQueryContext`/`streamQueryAnswer`/`QUERY_STREAM_SYSTEM_PROMPT`；新增 `query-tools.test.ts` + `query-service-agentic.test.ts` |
 | 2026-06-25 | 工具体系收敛：`query-tools.ts` 改用共享 `createBuiltinToolRegistry`（`agents/tools/registry.ts`），删内联 `tool()` 孤岛；新增 `buildQueryToolContext(subject, accessed)` 构造 `ToolContext`；`wiki.read/search/list` 工具定义来自 `agents/tools/builtin/wiki-*.ts` 单一源；双 runner（`streamTextWithTools`/`generateTextWithTools`）保留 |
+| 2026-06-28 | 对话触发 Re-enrich：新增 `reenrich-enqueue.ts`（纯函数 `validateReenrichTarget` + `enqueueReenrich` 入队 helper，供 `wiki.reenrich` 对话工具触发）；`query-tools.ts::buildQueryToolContext` 新增 `reenrich` 能力（注入来自 `enqueueReenrich`）；删除 `/api/re-enrich` 路由（入口改为对话工具） |
 | 2026-06-27 | Cognitive Lens：新增 `reshape-service.ts`（`reshapePageBody` 整页重塑——`streamTextResponse` 收全文→`checkLinkSubset` 保真→失败重写一次→二次失败回落 canonical；`reshapeSection` 段级）+ `apply-signal.ts`（信号→最近窗口→`applySignalsToStyle` reducer→达阈值才 upsert 画像并自增 version）。均为读侧，不写 vault/不经 Saga |
 
 ---
