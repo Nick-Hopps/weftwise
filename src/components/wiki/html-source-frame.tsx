@@ -37,7 +37,7 @@ export function HtmlSourceFrame({ src, title, safety, className }: HtmlSourceFra
         <div className="shrink-0 border-b border-danger-border bg-danger-bg px-4 py-3 text-xs text-danger">
           <div className="flex items-center gap-2 font-semibold">
             <ShieldAlert className="h-4 w-4 shrink-0" />
-            检测到潜在危险脚本，已禁用页面交互
+            Potentially unsafe scripts detected — interactivity disabled
           </div>
           {safety && safety.signals.length > 0 && (
             <ul className="mt-1.5 ml-6 list-disc space-y-0.5 text-danger/90">
@@ -51,7 +51,7 @@ export function HtmlSourceFrame({ src, title, safety, className }: HtmlSourceFra
             onClick={() => setForceRun(true)}
             className="mt-2 inline-flex h-7 items-center rounded-md border border-danger/40 px-2.5 font-medium text-danger transition-colors hover:bg-danger/12 focus-ring"
           >
-            我了解风险，仍然运行脚本
+            I understand the risk — run scripts anyway
           </button>
         </div>
       )}
