@@ -11,20 +11,20 @@ export function LensFeedback({ slug }: { slug: string }) {
 
   const fire = (type: 'too_hard' | 'too_easy') => {
     send.mutate({ type, slug });
-    setSent(type === 'too_hard' ? '太难' : '太浅');
+    setSent(type === 'too_hard' ? 'too hard' : 'too easy');
   };
 
   return (
     <div className="mx-auto w-full px-6 pb-12 max-w-[var(--reading-max-width)]">
       <div className="flex items-center gap-3 border-t border-border pt-6 text-xs text-foreground-tertiary">
-        <span>这页的讲法对你合适吗？</span>
+        <span>Is this explanation a good fit?</span>
         <Button intent="outline" size="sm" onClick={() => fire('too_hard')} disabled={send.isPending}>
-          <ThumbsDown className="h-3.5 w-3.5" /> 太难
+          <ThumbsDown className="h-3.5 w-3.5" /> Too hard
         </Button>
         <Button intent="outline" size="sm" onClick={() => fire('too_easy')} disabled={send.isPending}>
-          <ThumbsUp className="h-3.5 w-3.5" /> 太浅
+          <ThumbsUp className="h-3.5 w-3.5" /> Too easy
         </Button>
-        {sent && <span className="text-accent-strong">已记录「{sent}」，将调整后续呈现</span>}
+        {sent && <span className="text-accent-strong">Logged “{sent}” — we&apos;ll tune future pages</span>}
       </div>
     </div>
   );

@@ -70,7 +70,7 @@ export function PageEditor({ slug }: { slug: string }) {
       await Promise.all(INVALIDATE_KEYS.map((k) => queryClient.invalidateQueries({ queryKey: [k] })));
       if (referencesUpdated > 0) {
         // 跳转前用 sessionStorage 把提示带到阅读页（push 后本组件即卸载）。
-        sessionStorage.setItem('wiki:retitle-notice', `已同步更新 ${referencesUpdated} 处引用到新标题`);
+        sessionStorage.setItem('wiki:retitle-notice', `Updated ${referencesUpdated} reference(s) to the new title`);
       }
       router.push(readHref);
       router.refresh();
