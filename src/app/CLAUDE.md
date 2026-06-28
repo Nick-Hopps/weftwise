@@ -30,7 +30,7 @@
 | 路由 | 方法 | 说明 |
 |------|------|------|
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
-| `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（pageCount>0 → 409） |
+| `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/`，入队 `ingest` 任务；返回 `{ jobId, sourceId }` |
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
@@ -136,6 +136,7 @@ src/app/
 | 2026-06-28 | 对话触发 Re-enrich：删除 `/api/re-enrich` 路由（`src/app/api/re-enrich/route.ts`）；触发入口改为 Ask AI 对话中的 `wiki.reenrich` 写工具；`POST /api/query` route 导入 `summarizeToolArgs` 从 `@/lib/tool-activity` 共用工具名摘要 |
 | 2026-06-27 | Cognitive Lens：新增 `GET /api/lens/[...slug]`（独立顶层路由——catch-all 不能内嵌；JSON 一次性响应，缓存优先，未配置/异常优雅回落 canonical，四态 source=cache/generated/canonical/fallback）+ `GET/PUT /api/profile`（画像读写，PUT 走 auth+csrf）+ `POST /api/profile/signals`（反馈信号，body 显式带 subjectId）；`DELETE /api/subjects/[id]` 删 subject 后清理其重塑缓存（`renditions-repo.deleteBySubject`）；新增 `middleware/user.ts::resolveUserId`（单租户占位，恒返回 'local'）|
 | 2026-06-28 | Subject 体验重做：`(app)/subjects/page.tsx` 改可点卡片+gear+空态；创建/编辑/删除迁到全局 `SubjectDialog`（`src/components/subjects/`），切换器 "New subject…" 改唤起弹窗（删 `?new=1`）。零 API 改动 |
+| 2026-06-29 | Subject 级联删除：`DELETE /api/subjects/[id]` 改为级联删除——`subjectsRepo.deleteWithContents(id)` 单事务清全部 subject-scoped 行 + `fs.rmSync` 删 vault `wiki\|raw\|.llm-wiki/sources/<slug>` + `commitVaultChanges`；守卫 `general`→409 `protected`、有入站跨主题引用→409 `has-inbound-refs`、不存在→404；移除旧 `deleteIfEmpty`/`renditions-repo` 调用。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 
 ---
 

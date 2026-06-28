@@ -179,6 +179,7 @@ src/components/
 | 2026-06-28 | Job 详情弹窗：`shared/progress-toast.tsx` 加「查看详情/查看错误」入口（失败时红色）+ return 包 Fragment 渲染弹窗（透传 `events/status`，**不**新建第二条 SSE）；新增 `shared/job-detail-dialog.tsx`（全事件日志时间线 + 失败时 `GET /api/jobs/[id]` 取 `resultJson.error` 展全栈 + 一键复制；React Query `enabled: open && failed` + `staleTime:Infinity`；aria-id 按 jobId 派生）；消费 `lib/job-log.ts`（`eventLogLine`/`parseJobError`）纯函数。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-28-job-detail-dialog* |
 | 2026-06-28 | 统一阅读页功能菜单 + 英文化：新增 `wiki/page-actions.tsx`（`PageActions` 动作条 + `ReshapeStatus` 状态行）；`frontmatter-display`/`page-renderer` 改用 `actions`/`headerExtra` 插槽并移除 `editHref`；`wiki-reading-view` 删除旧顶部 Sources toolbar 与 LensBar，三控件（Edit/Sources/Reshape）并排进标题行；`lens-feedback`/`html-source-frame`/`page-editor`(retitle banner) 文案英文化。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-28-unify-page-actions-i18n* |
 | 2026-06-28 | Subject 体验重做：新增 `subjects/`（`subject-dialog` 统一创建/编辑/删除弹窗 + `augmentation-field` 英文分段控件 + `subjects-api` 共用 fetch）；新增 hook `use-switch-subject`（切换器+管理页卡片复用）；`providers.tsx` 挂载 `<SubjectDialog />`；ui-store 加瞬态 `subjectDialog`。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-28-subject-ux-improvement* |
+| 2026-06-29 | Subject 级联删除：`subjects/subject-dialog.tsx` 的 `EditSubjectBody` 危险区改 `canDelete = !isActive && slug !== 'general'`（允许删非空 subject，级联清理由后端处理）；两步确认 armed 态加页数警告；禁删态区分 `general`（"can't be deleted"）/active（"switch first"）；409 入站引用经既有 `error` 行呈现。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 
 ---
 
