@@ -25,6 +25,8 @@ interface UIState {
   commandPaletteOpen: boolean;
   darkMode: boolean;
   settingsDialogOpen: boolean;
+  /** 创建/编辑 subject 弹窗的瞬态状态（不持久化）。*/
+  subjectDialog: { open: boolean; mode: 'create' | 'edit'; subjectId: string | null };
 
   /**
    * Currently selected subject. `null` until a subject is chosen or rehydrated;
@@ -53,6 +55,8 @@ interface UIState {
   toggleDarkMode: () => void;
   openSettingsDialog: () => void;
   closeSettingsDialog: () => void;
+  openSubjectDialog: (args: { mode: 'create' } | { mode: 'edit'; subjectId: string }) => void;
+  closeSubjectDialog: () => void;
 
   setCurrentSubject: (subject: { id: string; slug: string }) => void;
 }
@@ -166,6 +170,7 @@ export const useUIStore = create<UIState>()(
       commandPaletteOpen: false,
       darkMode: false,
       settingsDialogOpen: false,
+      subjectDialog: { open: false, mode: 'create', subjectId: null },
       currentSubjectId: null,
       currentSubjectSlug: GENERAL_SUBJECT_SLUG,
       currentConversationId: null,
@@ -193,6 +198,16 @@ export const useUIStore = create<UIState>()(
         }),
       openSettingsDialog: () => set({ settingsDialogOpen: true }),
       closeSettingsDialog: () => set({ settingsDialogOpen: false }),
+      openSubjectDialog: (args) =>
+        set({
+          subjectDialog: {
+            open: true,
+            mode: args.mode,
+            subjectId: args.mode === 'edit' ? args.subjectId : null,
+          },
+        }),
+      closeSubjectDialog: () =>
+        set((s) => ({ subjectDialog: { ...s.subjectDialog, open: false } })),
 
       setCurrentConversation: (id) => set({ currentConversationId: id }),
 
