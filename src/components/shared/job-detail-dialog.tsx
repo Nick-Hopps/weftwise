@@ -69,9 +69,10 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
 
   // 新日志到达时自动滚到底（仅当用户当前已在底部，避免打断手动上滚）
   useEffect(() => {
+    if (!open) return;
     const el = logRef.current;
     if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
-  }, [lines.length]);
+  }, [lines.length, open]);
 
   if (!open) return null;
 
@@ -105,11 +106,11 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="job-detail-title"
+        aria-labelledby={`job-detail-title-${jobId}`}
         className="flex h-[70vh] max-h-[640px] w-full max-w-2xl mx-4 flex-col bg-surface rounded-lg shadow-lg border border-border overflow-hidden animate-slide-down"
       >
         <div className="flex items-center justify-between h-12 shrink-0 px-4 border-b border-border">
-          <h2 id="job-detail-title" className="text-sm font-semibold text-foreground">
+          <h2 id={`job-detail-title-${jobId}`} className="text-sm font-semibold text-foreground">
             {title}
             {status === 'completed' && ' — Done'}
             {status === 'failed' && ' — Failed'}
