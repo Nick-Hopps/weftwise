@@ -37,6 +37,14 @@ export function reclaimExpired(): number {
   return jobsRepo.reclaimExpiredJobs();
 }
 
+export function requestCancel(jobId: string): jobsRepo.CancelResult {
+  return jobsRepo.requestCancel(jobId);
+}
+
+export function isCancelRequested(jobId: string): boolean {
+  return jobsRepo.isCancelRequested(jobId);
+}
+
 export function updateHeartbeat(jobId: string): void {
   jobsRepo.updateHeartbeat(jobId);
 }

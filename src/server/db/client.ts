@@ -269,7 +269,8 @@ function migrateJobs(): void {
         completed_at TEXT,
         lease_expires_at TEXT,
         heartbeat_at TEXT,
-        attempt_count INTEGER DEFAULT 0
+        attempt_count INTEGER DEFAULT 0,
+        cancel_requested INTEGER DEFAULT 0
       );
     `);
     return;
@@ -281,6 +282,7 @@ function migrateJobs(): void {
     ['lease_expires_at', 'TEXT'],
     ['heartbeat_at', 'TEXT'],
     ['attempt_count', 'INTEGER DEFAULT 0'],
+    ['cancel_requested', 'INTEGER DEFAULT 0'],
   ] as const) {
     const cols = tableColumns('jobs');
     if (!cols.includes(col)) {

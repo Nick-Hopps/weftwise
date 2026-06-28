@@ -174,7 +174,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     skillRegistry,
     rootRunId: randomUUID(),
     parentRunId: null,
-    cancelled: () => false,
+    cancelled: () => queue.isCancelRequested(job.id),
     committed: { value: false },
     pending: { entries: [] },
     chunkStore: prep.chunkStore,

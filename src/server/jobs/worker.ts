@@ -98,6 +98,24 @@ function isRetryableError(error: unknown): boolean {
   );
 }
 
+export type JobFailureAction = 'cancelled' | 'retry' | 'fail';
+
+/**
+ * 处理器抛错后的归类（纯函数，便于测试）：
+ *  - 用户取消（AgentCancelled）优先：即便仍有重试额度也不重试；
+ *  - 可识别的临时错误且未超次数 → retry；
+ *  - 其余（业务错误 / 不可识别 / 已达上限）→ fail。
+ */
+export function decideJobFailureAction(
+  error: unknown,
+  attempt: number,
+  maxRetries: number,
+): JobFailureAction {
+  if (error instanceof Error && error.name === 'AgentCancelled') return 'cancelled';
+  if (attempt <= maxRetries && isRetryableError(error)) return 'retry';
+  return 'fail';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -161,7 +179,13 @@ export function startWorker(pollIntervalMs = 2000): () => void {
         if (e.usage) errorData.usage = e.usage;
       }
 
-      if (attempt <= MAX_RETRIES && isRetryableError(error)) {
+      const action = decideJobFailureAction(error, attempt, MAX_RETRIES);
+      if (action === 'cancelled') {
+        // 用户取消：cancel 路由通常已把 job 落终态(failed)+清检查点；这里幂等兜底
+        // （若仍为 running 则 requestCancel 会落终态），并补发 job:cancelled 区别于失败。
+        queue.requestCancel(job.id);
+        events.emit(job.id, 'job:cancelled', 'Job cancelled by user', { manual: true });
+      } else if (action === 'retry') {
         // Retry: requeue the SAME job (preserves job ID for SSE tracking)
         const delay = RETRY_DELAY_MS * attempt;
         events.emit(
