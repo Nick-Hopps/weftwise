@@ -21,7 +21,7 @@ export interface PatchSubjectPayload {
 
 export async function fetchSubjects(): Promise<SubjectListEntry[]> {
   const res = await apiFetch('/api/subjects');
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) throw new Error(await readError(res));
   return res.json();
 }
 
