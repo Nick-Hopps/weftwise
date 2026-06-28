@@ -2,26 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Command } from 'cmdk';
 import { Check, Layers, Plus, Settings } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
 import type { SubjectListEntry } from '@/lib/contracts';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
+import { useSwitchSubject } from '@/hooks/use-switch-subject';
+import { useUIStore } from '@/stores/ui-store';
 import { Kbd } from '@/components/ui/kbd';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/cn';
-
-const INVALIDATE_KEYS = [
-  'pages',
-  'search',
-  'graph',
-  'jobs',
-  'backlinks',
-  'context',
-  'frontmatter',
-  'lens',
-] as const;
 
 async function fetchSubjects(): Promise<SubjectListEntry[]> {
   const res = await apiFetch('/api/subjects');
@@ -31,9 +22,9 @@ async function fetchSubjects(): Promise<SubjectListEntry[]> {
 
 export function SubjectSwitcher() {
   const router = useRouter();
-  const queryClient = useQueryClient();
-  const { id: currentSubjectId, slug: currentSubjectSlug, setCurrentSubject } =
-    useCurrentSubject();
+  const switchSubject = useSwitchSubject();
+  const openSubjectDialog = useUIStore((s) => s.openSubjectDialog);
+  const { id: currentSubjectId, slug: currentSubjectSlug } = useCurrentSubject();
 
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -83,17 +74,10 @@ export function SubjectSwitcher() {
 
   const handleSelect = useCallback(
     (subject: SubjectListEntry) => {
-      setCurrentSubject({ id: subject.id, slug: subject.slug });
       setOpen(false);
-      for (const key of INVALIDATE_KEYS) {
-        queryClient.invalidateQueries({ queryKey: [key] });
-      }
-      // Server components (Dashboard, Wiki page) read the active subject from
-      // the `wiki_subject` cookie and `?s=` param at request time. Refresh the
-      // current route so they pick up the new selection.
-      router.refresh();
+      switchSubject({ id: subject.id, slug: subject.slug });
     },
-    [queryClient, router, setCurrentSubject],
+    [switchSubject],
   );
 
   return (
@@ -165,7 +149,7 @@ export function SubjectSwitcher() {
                 value="action-new-subject"
                 onSelect={() => {
                   setOpen(false);
-                  router.push('/subjects?new=1');
+                  openSubjectDialog({ mode: 'create' });
                 }}
                 className="flex items-center gap-2 px-3 h-9 mx-1 rounded-md cursor-pointer aria-selected:bg-subtle text-sm text-foreground-secondary"
               >
