@@ -53,6 +53,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
       return (await res.json()) as Job;
     },
     enabled: open && status === 'failed',
+    staleTime: Infinity,
   });
 
   const jobError = parseJobError(jobQuery.data?.resultJson);
