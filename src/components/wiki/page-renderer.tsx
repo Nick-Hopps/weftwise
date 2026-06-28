@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import FrontmatterDisplay from './frontmatter-display';
 import { renderMarkdown } from '@/lib/markdown-client';
 
@@ -16,7 +16,10 @@ interface PageRendererProps {
   created?: string;
   updated?: string;
   titleSlugMap?: Record<string, string>;
-  editHref?: string;
+  /** 标题行右侧动作条节点（透传给 FrontmatterDisplay）。 */
+  actions?: ReactNode;
+  /** 渲染在 FrontmatterDisplay 之后、正文之前（复用 article 的 reading 宽度）。 */
+  headerExtra?: ReactNode;
   subjectSlug?: string;
   /**
    * 保留以兼容调用方；正文统一用 `max-w-reading` 宽测度，分栏时由窄栏自然收窄，
@@ -65,7 +68,8 @@ export default function PageRenderer({
   created = '',
   updated = '',
   titleSlugMap,
-  editHref,
+  actions,
+  headerExtra,
   subjectSlug,
 }: PageRendererProps) {
   const rendered = useMemo(() => renderMarkdown(content, titleSlugMap, { math: true }), [content, titleSlugMap]);
@@ -79,10 +83,11 @@ export default function PageRenderer({
           sources={sources}
           created={created}
           updated={updated}
-          editHref={editHref}
+          actions={actions}
           subjectSlug={subjectSlug}
         />
       )}
+      {headerExtra}
       <div className={proseClassName}>{rendered}</div>
     </article>
   );
