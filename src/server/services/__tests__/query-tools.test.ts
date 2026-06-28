@@ -190,6 +190,7 @@ describe('buildQueryToolContext - reenrich', () => {
     expect(mockEnqueue).toHaveBeenCalledWith('re-enrich', { slug: 'eigen', subjectId: 's1' }, 's1');
   });
   it('meta 页 → 抛错（不 enqueue）', async () => {
+    mockGetPageBySlug.mockReturnValue(null);
     const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
     await expect(ctx.reenrich!('index')).rejects.toThrow(/meta/);
     expect(mockEnqueue).not.toHaveBeenCalled();
