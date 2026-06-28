@@ -10,6 +10,7 @@ import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
 import type { Subject, SubjectId } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
+import { enqueueReenrich } from './reenrich-enqueue';
 
 /** list_pages 单次返回的页数上限（超大 subject 截断）。 */
 const LIST_PAGES_CAP = 200;
@@ -83,6 +84,9 @@ export function buildQueryToolContext(subject: Subject, accessed: AccessedPages)
       } else if (!accessed.bodies.has(slug)) {
         accessed.meta.set(slug, { title, summary: '' });
       }
+    },
+    async reenrich(slug) {
+      return enqueueReenrich(subject.id, slug);
     },
   };
 }

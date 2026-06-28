@@ -8,6 +8,7 @@ interface PageRendererProps {
   content: string;
   /** Kept in props for compatibility with call-sites; unused in read-only mode. */
   rawContent?: string;
+  /** Kept in props for call-site compatibility; the re-enrich button that consumed it was removed — do not re-add a usage here. */
   slug: string;
   title?: string;
   tags?: string[];
@@ -80,7 +81,6 @@ export default function PageRenderer({
           updated={updated}
           editHref={editHref}
           subjectSlug={subjectSlug}
-          slug={slug}
         />
       )}
       <div className={proseClassName}>{rendered}</div>
