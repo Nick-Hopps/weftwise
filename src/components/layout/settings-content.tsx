@@ -153,32 +153,32 @@ function AppearancePanel({
 }
 
 const LENS_LABELS: Record<keyof StylePrefs, string> = {
-  readingLevel: '阅读难度基线',
-  verbosity: '详尽度',
-  exampleDensity: '举例/类比密度',
-  formality: '语气',
+  readingLevel: 'Reading level',
+  verbosity: 'Verbosity',
+  exampleDensity: 'Examples & analogies',
+  formality: 'Tone',
 };
 
 const LENS_OPTIONS: Record<keyof StylePrefs, [string, string][]> = {
   readingLevel: [
-    ['beginner', '入门'],
-    ['intermediate', '进阶'],
-    ['advanced', '专家'],
+    ['beginner', 'Beginner'],
+    ['intermediate', 'Intermediate'],
+    ['advanced', 'Advanced'],
   ],
   verbosity: [
-    ['terse', '精简'],
-    ['balanced', '适中'],
-    ['thorough', '详尽'],
+    ['terse', 'Terse'],
+    ['balanced', 'Balanced'],
+    ['thorough', 'Thorough'],
   ],
   exampleDensity: [
-    ['few', '少'],
-    ['some', '适量'],
-    ['many', '多'],
+    ['few', 'Few'],
+    ['some', 'Some'],
+    ['many', 'Many'],
   ],
   formality: [
-    ['casual', '口语'],
-    ['neutral', '中性'],
-    ['formal', '正式'],
+    ['casual', 'Casual'],
+    ['neutral', 'Neutral'],
+    ['formal', 'Formal'],
   ],
 };
 
@@ -210,7 +210,9 @@ function CognitiveLensPanel() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-foreground-tertiary">
-        阅读时按你的背景与喜好调整每页讲法（只换讲法不换事实，随时可看原文；也会随你的「太难/太浅」反馈自动微调）。
+        Adapts how each page is explained to your background and preferences (rephrasing only — facts
+        never change, and the original is always one click away; it also fine-tunes itself from your
+        “too hard / too shallow” feedback).
       </p>
 
       {LENS_KEYS.map((key) => (
@@ -232,12 +234,16 @@ function CognitiveLensPanel() {
         </SettingRow>
       ))}
 
-      <SettingRow label="Background" description="你的背景与目标（自由文本）" className="items-start">
+      <SettingRow
+        label="Background"
+        description="Your background and goals (free text)"
+        className="items-start"
+      >
         <textarea
           value={bg}
           onChange={(e) => setBg(e.target.value)}
           rows={3}
-          placeholder="例如：后端工程师，懂分布式，但机器学习是新手"
+          placeholder="e.g. Backend engineer, comfortable with distributed systems but new to machine learning"
           className="w-60 rounded-md border border-border bg-canvas p-2 text-sm"
         />
       </SettingRow>
@@ -382,7 +388,7 @@ function AgentsPanel({
         pending={savePartial.isPending}
       />
       <SelectSettingRow
-        label="Auto-curate after ingest（摄入后自动整理结构）"
+        label="Auto-curate after ingest"
         value={(settings?.agentAutoCurate ?? true) ? 'on' : 'off'}
         options={[
           { value: 'on', label: 'On' },
