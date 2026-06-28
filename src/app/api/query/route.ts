@@ -13,6 +13,7 @@ import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
+import { summarizeToolArgs } from '@/lib/tool-activity';
 
 export const runtime = 'nodejs';
 
@@ -247,10 +248,3 @@ export async function POST(request: NextRequest) {
   });
 }
 
-/** 把工具调用入参压成一行给前端展示（不外发完整 result，避免泄漏正文）。 */
-function summarizeToolArgs(toolName: string, args: unknown): string {
-  const a = (args ?? {}) as Record<string, unknown>;
-  if (toolName === 'search_wiki') return typeof a.query === 'string' ? a.query : '';
-  if (toolName === 'read_page') return typeof a.slug === 'string' ? a.slug : '';
-  return '';
-}

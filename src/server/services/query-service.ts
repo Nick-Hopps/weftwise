@@ -46,7 +46,7 @@ export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
 // 模块级：ToolDef 无状态纯对象，构造一次即可复用
-const queryToolDefs = createBuiltinToolRegistry().resolve(['wiki.read', 'wiki.search', 'wiki.list']);
+const queryToolDefs = createBuiltinToolRegistry().resolve(['wiki.read', 'wiki.search', 'wiki.list', 'wiki.reenrich']);
 
 const QueryCitationsSchema = QueryResponseSchema.pick({ citations: true });
 

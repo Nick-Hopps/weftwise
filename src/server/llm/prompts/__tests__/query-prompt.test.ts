@@ -63,11 +63,13 @@ import {
 } from '../query-prompt';
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
-  it('说明三工具与 subject 隔离', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('list_pages');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('search_wiki');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('read_page');
+  it('说明四工具、subject 隔离与 re-enrich 确认守则', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_list');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_search');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_read');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_reenrich');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/other subject/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/confirm before triggering/i);
   });
 });
 
