@@ -30,7 +30,7 @@ export const wikiReenrichTool: ToolDef<z.infer<typeof InputSchema>, z.infer<type
         message: `Re-enrich started for "${slug}". It runs in the background; refresh the page shortly to see the result.`,
       };
     } catch (err) {
-      return { ok: false, jobId: null, message: (err as Error).message };
+      return { ok: false, jobId: null, message: err instanceof Error ? err.message : String(err) };
     }
   },
 };

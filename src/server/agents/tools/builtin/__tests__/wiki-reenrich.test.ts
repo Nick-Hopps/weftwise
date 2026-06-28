@@ -10,6 +10,7 @@ describe('wiki.reenrich tool', () => {
     const out = await wikiReenrichTool.handler({ slug: 'eigenvalues' }, { ...baseCtx, reenrich });
     expect(reenrich).toHaveBeenCalledWith('eigenvalues');
     expect(out).toEqual(expect.objectContaining({ ok: true, jobId: 'job-1' }));
+    expect(out.message).toContain('eigenvalues');
   });
   it('能力缺失 → ok:false，不抛', async () => {
     const out = await wikiReenrichTool.handler({ slug: 'x' }, baseCtx);
@@ -21,5 +22,6 @@ describe('wiki.reenrich tool', () => {
     const out = await wikiReenrichTool.handler({ slug: 'x' }, { ...baseCtx, reenrich });
     expect(out.ok).toBe(false);
     expect(out.message).toContain('not found');
+    expect(out.jobId).toBeNull();
   });
 });
