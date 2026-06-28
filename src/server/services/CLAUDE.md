@@ -181,7 +181,7 @@ src/server/services/
 ├── ingest-service.ts    # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts       # 预检/预算/常量纯函数
 ├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆（agentic 工具循环）
-├── query-tools.ts       # 🆕 subject-scoped 三工具（list_pages/search_wiki/read_page）+ AccessedPages + subjectHasContent
+├── query-tools.ts       # 🆕 subject-scoped 工具 ToolContext（wiki.read/search/list + wiki.reenrich 触发能力）+ AccessedPages + subjectHasContent
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
