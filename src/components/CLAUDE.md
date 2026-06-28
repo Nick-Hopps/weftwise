@@ -174,6 +174,7 @@ src/components/
 | 2026-06-24 | `settings-content.tsx` 的 "Agents" panel 移除 "MCP connection mode" 控件（MCP 功能整体移除，详见根 Changelog）；agent 配置控件由 5 个降为 4 个 |
 | 2026-06-28 | 对话触发 Re-enrich：删除 `wiki/reenrich-button.tsx` 与 `wiki/reenrich-dialog.tsx`；`frontmatter-display` 不再渲染 Re-enrich 按钮；`chat/message-list.tsx` 导入 `toolActivityIcon/toolActivityVerb/summarizeToolArgs` 从 `@/lib/tool-activity`（不再内联）；chat UI 展示 `wiki.reenrich`（✨）工具活动 |
 | 2026-06-27 | Cognitive Lens：`wiki/wiki-reading-view.tsx` 接入 `useLens`——默认显示按画像重塑的正文（`LensBar` 角标）+「看原文」即时开关 + 末尾 `LensFeedback`（太难/太浅→信号）；新增 `wiki/lens-feedback.tsx`；`layout/cognitive-lens-onboarding.tsx`（首次画像向导，挂在 `providers.tsx`）；`layout/settings-content.tsx` 加 `CognitiveLensPanel` + `settings-categories.ts` 加 `cognitive-lens` 分类；画像走 `/api/profile`、**不**写 Zustand。相关 hooks 见 `src/hooks/use-profile.ts`/`use-lens.ts` |
+| 2026-06-28 | Job 详情弹窗：`shared/progress-toast.tsx` 加「查看详情/查看错误」入口（失败时红色）+ return 包 Fragment 渲染弹窗（透传 `events/status`，**不**新建第二条 SSE）；新增 `shared/job-detail-dialog.tsx`（全事件日志时间线 + 失败时 `GET /api/jobs/[id]` 取 `resultJson.error` 展全栈 + 一键复制；React Query `enabled: open && failed` + `staleTime:Infinity`；aria-id 按 jobId 派生）；消费 `lib/job-log.ts`（`eventLogLine`/`parseJobError`）纯函数。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-28-job-detail-dialog* |
 
 ---
 
