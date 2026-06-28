@@ -1,12 +1,12 @@
 import { randomUUID } from 'crypto';
 import { eq, asc, sql } from 'drizzle-orm';
-import { getDb } from '../client';
+import { getDb, getRawDb } from '../client';
 import { subjects, pages } from '../schema';
 import type { Subject } from '@/lib/contracts';
 import { SUBJECT_SLUG_RE } from '@/lib/slug';
 
 export class SubjectError extends Error {
-  constructor(public code: 'invalid-slug' | 'slug-conflict' | 'not-empty' | 'not-found', message: string) {
+  constructor(public code: 'invalid-slug' | 'slug-conflict' | 'not-empty' | 'not-found' | 'protected' | 'has-inbound-refs', message: string) {
     super(message);
     this.name = 'SubjectError';
   }
@@ -141,4 +141,67 @@ export function setAugmentationLevel(id: string, level: Subject['augmentationLev
     .where(eq(subjects.id, id))
     .run();
   return { ...subject, augmentationLevel: level, updatedAt };
+}
+
+/**
+ * 列出"其他 subject 指向本 subject"的去重 referencing subject（用于删除前的入站引用守卫）。
+ * 仅计 subject_id ≠ id 的 wiki_links（排除本 subject 自指链接）。
+ */
+export function listInboundReferences(id: string): { id: string; slug: string }[] {
+  const sqlite = getRawDb();
+  return sqlite
+    .prepare(
+      `SELECT DISTINCT s.id AS id, s.slug AS slug
+         FROM wiki_links wl
+         JOIN subjects s ON s.id = wl.subject_id
+        WHERE wl.target_subject_id = ? AND wl.subject_id != ?`
+    )
+    .all(id, id) as { id: string; slug: string }[];
+}
+
+/**
+ * 级联删除 subject 及其全部关联数据（单事务，按子→父顺序原生删除）。
+ * 守卫：subject 不存在→not-found；general→protected；有入站跨主题引用→has-inbound-refs。
+ * 仅清理 DB 行；vault 目录与 git commit 由路由层负责。
+ */
+export function deleteWithContents(id: string): void {
+  const subject = getById(id);
+  if (!subject) {
+    throw new SubjectError('not-found', `Subject ${id} not found`);
+  }
+  if (subject.slug === 'general') {
+    throw new SubjectError('protected', `The general subject can't be deleted`);
+  }
+  const inbound = listInboundReferences(id);
+  if (inbound.length > 0) {
+    const names = inbound.map((s) => s.slug);
+    const shown = names.slice(0, 5).join(', ');
+    const suffix = names.length > 5 ? ', …' : '';
+    throw new SubjectError(
+      'has-inbound-refs',
+      `This subject is referenced by other subjects (${shown}${suffix}). Remove those cross-subject links first.`
+    );
+  }
+
+  const sqlite = getRawDb();
+  const purge = sqlite.transaction(() => {
+    sqlite.prepare(`DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE subject_id = ?)`).run(id);
+    sqlite.prepare(`DELETE FROM conversations WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM page_renditions WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM page_maturity WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM page_embeddings WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM page_sources WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM pages_fts WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM wiki_links WHERE subject_id = ? OR target_subject_id = ?`).run(id, id);
+    sqlite.prepare(`DELETE FROM page_aliases WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM pages WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM sources WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM profile_signals WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id IN (SELECT id FROM jobs WHERE subject_id = ?)`).run(id);
+    sqlite.prepare(`DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE subject_id = ?)`).run(id);
+    sqlite.prepare(`DELETE FROM operations WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM jobs WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM subjects WHERE id = ?`).run(id);
+  });
+  purge();
 }
