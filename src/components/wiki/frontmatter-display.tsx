@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { Pencil } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Tag } from '@/components/ui/tag';
 import { TagLink } from '@/components/wiki/tag-link';
 interface FrontmatterDisplayProps {
@@ -10,7 +9,7 @@ interface FrontmatterDisplayProps {
   sources: string[];
   created: string;
   updated: string;
-  editHref?: string;
+  actions?: ReactNode;
   subjectSlug?: string;
 }
 
@@ -39,7 +38,7 @@ export default function FrontmatterDisplay({
   sources,
   created,
   updated,
-  editHref,
+  actions,
   subjectSlug,
 }: FrontmatterDisplayProps) {
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
@@ -50,18 +49,7 @@ export default function FrontmatterDisplay({
         <h1 className="text-2xl font-semibold tracking-tight text-prose-heading leading-tight">
           {title}
         </h1>
-        <div className="flex items-center gap-2 shrink-0">
-          {editHref && (
-            <Link
-              href={editHref}
-              data-tip="Edit this page"
-              className="tip tip-b shrink-0 inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
-            >
-              <Pencil className="h-3.5 w-3.5" />
-              Edit
-            </Link>
-          )}
-        </div>
+        {actions}
       </div>
 
       {hasProps && (

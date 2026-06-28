@@ -4,9 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   FileCode2,
-  FileStack,
   FileText,
-  GitCompareArrows,
   Globe,
   Link2,
   Loader2,
@@ -16,7 +14,7 @@ import {
 import PageRenderer from './page-renderer';
 import { HtmlSourceFrame } from './html-source-frame';
 import { LensFeedback } from './lens-feedback';
-import { Button } from '@/components/ui/button';
+import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useLens } from '@/hooks/use-lens';
@@ -50,7 +48,7 @@ interface WikiReadingViewProps {
 const SPLIT_KEY = 'wiki:split';
 
 export default function WikiReadingView(props: WikiReadingViewProps) {
-  const { backlinks, sourceCount, ...rendererProps } = props;
+  const { backlinks, sourceCount, editHref, ...rendererProps } = props;
   const { slug } = rendererProps;
   const apiFetch = useApiFetch();
 
@@ -125,57 +123,54 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const usingReshaped = lensRequested && reshapeUsable && !showOriginal;
   const displayContent = usingReshaped ? reshaped : props.content;
 
-  const article = (
-    <>
-      <LensBar
-        requested={lensRequested}
-        loading={lens.isLoading}
-        reshapeUsable={reshapeUsable}
+  // reshape 四态：未触发 / 加载中 / 已重塑可用 / 已触发但不可用（canonical|fallback|error）。
+  const reshapeState: ReshapeState = !lensRequested
+    ? 'idle'
+    : lens.isLoading
+      ? 'loading'
+      : reshapeUsable
+        ? 'reshaped'
+        : 'unavailable';
+
+  const actions = (
+    <PageActions
+      editHref={editHref}
+      sourceCount={sourceCount}
+      splitOn={showSplit}
+      onToggleSplit={() => setSplit((s) => !s)}
+      reshapeState={reshapeState}
+      onRequestReshape={() => {
+        setShowOriginal(false);
+        setLensRequested(true);
+      }}
+    />
+  );
+
+  const headerExtra =
+    reshapeState === 'idle' ? null : (
+      <ReshapeStatus
+        state={reshapeState}
         showOriginal={showOriginal}
-        onRequest={() => {
-          setShowOriginal(false);
-          setLensRequested(true);
-        }}
         onToggle={() => setShowOriginal((v) => !v)}
       />
-      <PageRenderer {...rendererProps} content={displayContent} />
+    );
+
+  const article = (
+    <>
+      <PageRenderer
+        {...rendererProps}
+        content={displayContent}
+        actions={actions}
+        headerExtra={headerExtra}
+      />
       <Backlinks backlinks={backlinks} />
       <LensFeedback slug={slug} />
     </>
   );
 
-  const toolbar = canSplit ? (
-    <div
-      className={cn(
-        'flex shrink-0 items-center justify-end gap-2 h-11 px-4',
-        showSplit ? 'border-b border-border bg-surface' : 'border-b border-transparent',
-      )}
-    >
-      {showSplit && (
-        <span className="mr-auto flex items-center gap-2 text-xs text-foreground-tertiary">
-          <GitCompareArrows className="h-3.5 w-3.5" />
-          <span className="font-medium text-foreground-secondary">Distilled page</span>
-          <span className="opacity-50">·</span>
-          <span className="font-medium text-foreground-secondary">Ingested sources</span>
-        </span>
-      )}
-      <Button
-        intent={showSplit ? 'primary' : 'outline'}
-        size="sm"
-        onClick={() => setSplit((s) => !s)}
-        data-tip="Show the documents this page was written from"
-        className="tip tip-l"
-      >
-        <FileStack className="h-3.5 w-3.5" />
-        {showSplit ? 'Hide sources' : `Sources (${sourceCount})`}
-      </Button>
-    </div>
-  ) : null;
-
   if (showSplit) {
     return (
       <div className="flex flex-col lg:h-[calc(100vh-var(--header-height))]">
-        {toolbar}
         <div className="grid grid-cols-1 lg:grid-cols-2 lg:flex-1 lg:min-h-0">
           <div className="min-w-0 lg:overflow-y-auto">{article}</div>
           <div className="min-w-0 border-t border-border bg-canvas lg:border-l lg:border-t-0 lg:min-h-0 lg:overflow-hidden">
@@ -186,64 +181,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     );
   }
 
-  return (
-    <div className="flex min-h-full flex-col">
-      {toolbar}
-      {article}
-    </div>
-  );
-}
-
-function LensBar({
-  requested,
-  loading,
-  reshapeUsable,
-  showOriginal,
-  onRequest,
-  onToggle,
-}: {
-  requested: boolean;
-  loading: boolean;
-  reshapeUsable: boolean;
-  showOriginal: boolean;
-  onRequest: () => void;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="mx-auto flex w-full items-center gap-2 px-6 pt-4 max-w-[var(--reading-max-width)] text-xs text-foreground-tertiary">
-      {!requested ? (
-        // 默认：显示原文，提供手动触发按钮（不自动调 LLM）。
-        <>
-          <span>原文</span>
-          <Button intent="outline" size="sm" className="ml-auto" onClick={onRequest}>
-            <Sparkles className="h-3.5 w-3.5" /> 按画像重塑
-          </Button>
-        </>
-      ) : loading ? (
-        <span className="inline-flex items-center gap-1.5">
-          <Loader2 className="h-3 w-3 animate-spin" /> 正在按你的画像调整…
-        </span>
-      ) : reshapeUsable ? (
-        <>
-          {showOriginal ? (
-            <span>原文</span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 text-accent" /> 已按你的画像调整
-            </span>
-          )}
-          <Button intent="outline" size="sm" className="ml-auto" onClick={onToggle}>
-            {showOriginal ? '看重塑版' : '看原文'}
-          </Button>
-        </>
-      ) : (
-        // 已触发但拿到 canonical/fallback/出错 → 无可用重塑版，显示原文并告知。
-        <span className="inline-flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3 opacity-50" /> 暂时无法按画像调整，已显示原文
-        </span>
-      )}
-    </div>
-  );
+  return <div className="flex min-h-full flex-col">{article}</div>;
 }
 
 function Backlinks({ backlinks }: { backlinks: BacklinkItem[] }) {
