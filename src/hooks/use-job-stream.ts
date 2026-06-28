@@ -117,6 +117,11 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
           const errMsg = (parsed.error as string) || 'Job failed';
           setLatestMessage(errMsg);
           source?.close();
+        } else if (eventType === 'job:cancelled') {
+          // 取消即终态：复用 'failed' 通道（终态判定/重连守卫一致），由 latestMessage 区分语义
+          updateStatus('failed');
+          setLatestMessage('Job cancelled by user');
+          source?.close();
         } else if (eventType === 'job:retrying') {
           // 自动重试（worker）或手动重试后，流转回处理中
           updateStatus('streaming');
@@ -131,6 +136,7 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         // Job lifecycle (emitted by worker)
         'job:completed',
         'job:failed',
+        'job:cancelled',
         'job:retrying',
         // Ingest events
         'ingest:start',

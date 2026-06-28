@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Check, ChevronRight, Loader2, X } from 'lucide-react';
+import { Check, ChevronRight, Loader2, Square, X } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
+import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { JobDetailDialog } from './job-detail-dialog';
@@ -41,6 +42,19 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
   const [mounted, setMounted] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleCancel = async () => {
+    if (!jobId || cancelling) return;
+    setCancelling(true);
+    try {
+      await apiFetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    } catch {
+      // 结果由 SSE 终态事件反映；失败时任务可能仍在收尾，这里不阻断 UI
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   useEffect(() => {
     if (jobId) {
@@ -65,6 +79,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
   const jobType = detectJobType(events);
   const files = extractFiles(events);
   const isFinished = status === 'completed' || status === 'failed';
+  const wasCancelled = events.some((e) => e.type === 'job:cancelled');
 
   const progressValue = (() => {
     if (status === 'completed' || status === 'failed') return 100;
@@ -107,8 +122,19 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
             <span className="flex-1 text-sm font-medium text-foreground">
               {jobType}
               {status === 'completed' && ' — Done'}
-              {status === 'failed' && ' — Failed'}
+              {status === 'failed' && (wasCancelled ? ' — Cancelled' : ' — Failed')}
             </span>
+            {status === 'streaming' && (
+              <IconButton
+                size="sm"
+                onClick={handleCancel}
+                disabled={cancelling}
+                aria-label="Stop job"
+                data-tip="Stop job"
+              >
+                <Square />
+              </IconButton>
+            )}
             <IconButton size="sm" onClick={() => setCollapsed(true)} aria-label="Collapse progress">
               <ChevronRight />
             </IconButton>
@@ -166,7 +192,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
                 status === 'failed' ? 'text-danger' : 'text-accent',
               )}
             >
-              {status === 'failed' ? '查看错误 →' : '查看详情 →'}
+              {status === 'failed' && !wasCancelled ? '查看错误 →' : '查看详情 →'}
             </button>
           </div>
         </div>

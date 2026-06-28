@@ -13,6 +13,7 @@ import type { Job, PageMaturity } from '@/lib/contracts';
 import type { AgentContext } from '../agents/types';
 import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
 import { registerHandler } from '../jobs/worker';
+import * as queue from '../jobs/queue';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as maturityRepo from '../db/repos/maturity-repo';
@@ -137,7 +138,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
     skillRegistry,
     rootRunId: randomUUID(),
     parentRunId: null,
-    cancelled: () => false,
+    cancelled: () => queue.isCancelRequested(job.id),
     committed: { value: false },
     pending: { entries: [] },
     chunkStore: new Map(),

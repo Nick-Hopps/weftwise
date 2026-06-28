@@ -59,7 +59,8 @@ export function claimNextJob(type?: Job['type']): Job | null {
   const stmt = type
     ? sqlite.prepare(`
         UPDATE jobs SET status = 'running', started_at = ?, heartbeat_at = ?,
-          lease_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1
+          lease_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1,
+          cancel_requested = 0
         WHERE id = (
           SELECT id FROM jobs
           WHERE (status = 'pending' AND type = ?)
@@ -70,7 +71,8 @@ export function claimNextJob(type?: Job['type']): Job | null {
       `)
     : sqlite.prepare(`
         UPDATE jobs SET status = 'running', started_at = ?, heartbeat_at = ?,
-          lease_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1
+          lease_expires_at = ?, attempt_count = COALESCE(attempt_count, 0) + 1,
+          cancel_requested = 0
         WHERE id = (
           SELECT id FROM jobs
           WHERE status = 'pending'
@@ -92,9 +94,57 @@ export function claimNextJob(type?: Job['type']): Job | null {
 export function requeueJob(jobId: string): void {
   const sqlite = getRawDb();
   sqlite.prepare(`
-    UPDATE jobs SET status = 'pending', lease_expires_at = NULL, heartbeat_at = NULL
+    UPDATE jobs SET status = 'pending', lease_expires_at = NULL, heartbeat_at = NULL,
+      cancel_requested = 0
     WHERE id = ?
   `).run(jobId);
+}
+
+export type CancelResult = 'cancelled' | 'already-terminal' | 'not-found';
+
+/**
+ * 取消任务（用户主动终止）。原子事务内：
+ *  - 不存在 → 'not-found'；已 completed/failed → 'already-terminal'（不覆盖原结果）；
+ *  - 否则（pending / running）→ 落终态 failed + 置 cancel_requested=1 + 清租约/心跳
+ *    + 写 cancelled 标记结果 + 删该 job 全部 ingest 检查点（断续传，防"死而复生"）。
+ * 终态复用 'failed'（避免新增 status 字面量引发 SSE/前端终态判定的静默遗漏），
+ * 由 result_json.cancelled / job:cancelled 事件区分"取消"与"失败"。
+ * running 任务的在途 LLM 调用由 worker 侧 ctx.cancelled() 轮询 cancel_requested 后中止。
+ */
+export function requestCancel(jobId: string): CancelResult {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): CancelResult => {
+    const row = sqlite
+      .prepare(`SELECT status FROM jobs WHERE id = ?`)
+      .get(jobId) as { status: string } | undefined;
+    if (!row) return 'not-found';
+    if (row.status === 'completed' || row.status === 'failed') return 'already-terminal';
+
+    const resultJson = JSON.stringify({
+      error: { message: 'Cancelled by user' },
+      cancelled: true,
+    });
+    sqlite
+      .prepare(`
+        UPDATE jobs SET status = 'failed', cancel_requested = 1,
+          lease_expires_at = NULL, heartbeat_at = NULL,
+          completed_at = ?, result_json = ?
+        WHERE id = ?
+      `)
+      .run(new Date().toISOString(), resultJson, jobId);
+    sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id = ?`).run(jobId);
+    return 'cancelled';
+  });
+  return tx();
+}
+
+/** worker 侧轮询：该 job 是否被请求取消（ctx.cancelled() 的真实来源）。 */
+export function isCancelRequested(jobId: string): boolean {
+  const sqlite = getRawDb();
+  const row = sqlite
+    .prepare(`SELECT cancel_requested FROM jobs WHERE id = ?`)
+    .get(jobId) as { cancel_requested: number | null } | undefined;
+  return !!row && row.cancel_requested === 1;
 }
 
 export function reclaimExpiredJobs(): number {
