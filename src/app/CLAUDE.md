@@ -17,7 +17,7 @@
 | `(app)/layout.tsx` | 带 `Shell` + `ErrorBoundary` 的主应用布局 |
 | `(app)/page.tsx` | Dashboard 首页（按 `currentSubject` 过滤，空态 / 有内容两种布局） |
 | `(app)/wiki/[...slug]/page.tsx` | 动态 wiki 页面（SSR）：`?s=<slug>` 优先于 cookie；找不到页时通过 `findPageInOtherSubjects` 渲染"是否在其他 subject"提示 |
-| `(app)/subjects/page.tsx` | 🆕 Subject 管理页：卡片网格 + 创建 / 重命名 / 删除（当前激活 + 非空 subject 都禁用删除并 hover 提示原因；slug 通过 `?new=1` 自动展开创建表单） |
+| `(app)/subjects/page.tsx` | 🔀 Subject 管理页：可点卡片网格（点主体=切换并进入工作区，右上 gear=打开统一编辑弹窗）+ 友好空态；创建/编辑/删除收敛到全局 `SubjectDialog`（不再有内联表单/`window.confirm`/`?new=1`）|
 | `(app)/health/page.tsx` | 🆕 知识库体检中心：触发 lint（当前 subject / 全量）+ 按严重度分组展示 findings + 跳转到对应页（含 "Fix issues" 一键修复入口）|
 | `(app)/history/page.tsx` | 🆕 操作时间线：当前 subject 写操作倒序（类型/受影响页/时间戳，仿 /health /tags），单次操作可展开查看 unified diff + 回滚按钮（前向 Saga 还原） |
 | `(app)/wiki/[...slug]/edit/page.tsx` | 🆕 页面在线编辑：`@uiw/react-md-editor` 编辑整文件 markdown，保存走 `PUT /api/pages`（Saga 重索引）后跳回读页 |
@@ -135,6 +135,7 @@ src/app/
 | 2026-06-24 | 新增 `POST /api/fix`（入队 fix 任务，一键修复 lint findings）；`(app)/health/page.tsx` 加 "Fix issues" 入口 |
 | 2026-06-28 | 对话触发 Re-enrich：删除 `/api/re-enrich` 路由（`src/app/api/re-enrich/route.ts`）；触发入口改为 Ask AI 对话中的 `wiki.reenrich` 写工具；`POST /api/query` route 导入 `summarizeToolArgs` 从 `@/lib/tool-activity` 共用工具名摘要 |
 | 2026-06-27 | Cognitive Lens：新增 `GET /api/lens/[...slug]`（独立顶层路由——catch-all 不能内嵌；JSON 一次性响应，缓存优先，未配置/异常优雅回落 canonical，四态 source=cache/generated/canonical/fallback）+ `GET/PUT /api/profile`（画像读写，PUT 走 auth+csrf）+ `POST /api/profile/signals`（反馈信号，body 显式带 subjectId）；`DELETE /api/subjects/[id]` 删 subject 后清理其重塑缓存（`renditions-repo.deleteBySubject`）；新增 `middleware/user.ts::resolveUserId`（单租户占位，恒返回 'local'）|
+| 2026-06-28 | Subject 体验重做：`(app)/subjects/page.tsx` 改可点卡片+gear+空态；创建/编辑/删除迁到全局 `SubjectDialog`（`src/components/subjects/`），切换器 "New subject…" 改唤起弹窗（删 `?new=1`）。零 API 改动 |
 
 ---
 
