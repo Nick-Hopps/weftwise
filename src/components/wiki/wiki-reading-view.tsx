@@ -59,6 +59,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [lensRequested, setLensRequested] = useState(false);
 
   const canSplit = sourceCount > 0;
   const showSplit = split && canSplit;
@@ -80,9 +81,12 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   }, [canSplit]);
 
   // Drop cached sources when navigating to a different page.
+  // 同时把透镜重置回"未触发/原文"——换页后默认仍显示 canonical，需重新点按钮。
   useEffect(() => {
     setDocs(null);
     setError(null);
+    setLensRequested(false);
+    setShowOriginal(false);
   }, [slug]);
 
   // Fetch source documents lazily, the first time the panel is opened.
@@ -111,24 +115,27 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSplit, docs, slug]);
 
-  // 读时透镜：默认显示按画像重塑的正文，canonical 即时可切。
-  const lens = useLens(props.subjectSlug, slug, true);
+  // 读时透镜：默认显示原文(canonical)，由用户点按钮（lensRequested）手动触发重塑。
+  // 未触发前 enabled=false → 不发请求、不调 LLM。
+  const lens = useLens(props.subjectSlug, slug, lensRequested);
   const reshaped = lens.data?.renderedMd;
-  const usingReshaped =
-    !showOriginal &&
-    reshaped != null &&
-    lens.data?.source !== 'canonical' &&
-    lens.data?.source !== 'fallback';
-  // source 为 canonical/fallback 时 reshaped 即服务端回显的原文，与 props.content 等价；
-  // 此时 usingReshaped=false（不显示"已调整"角标），仍渲染同一份原文。
-  const displayContent = showOriginal ? props.content : (reshaped ?? props.content);
+  // 重塑可用 = 已生成且非 canonical/fallback 回退（这两态服务端回显的就是原文）。
+  const reshapeUsable =
+    reshaped != null && lens.data?.source !== 'canonical' && lens.data?.source !== 'fallback';
+  const usingReshaped = lensRequested && reshapeUsable && !showOriginal;
+  const displayContent = usingReshaped ? reshaped : props.content;
 
   const article = (
     <>
       <LensBar
+        requested={lensRequested}
         loading={lens.isLoading}
-        usingReshaped={usingReshaped}
+        reshapeUsable={reshapeUsable}
         showOriginal={showOriginal}
+        onRequest={() => {
+          setShowOriginal(false);
+          setLensRequested(true);
+        }}
         onToggle={() => setShowOriginal((v) => !v)}
       />
       <PageRenderer {...rendererProps} content={displayContent} />
@@ -188,32 +195,53 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
 }
 
 function LensBar({
+  requested,
   loading,
-  usingReshaped,
+  reshapeUsable,
   showOriginal,
+  onRequest,
   onToggle,
 }: {
+  requested: boolean;
   loading: boolean;
-  usingReshaped: boolean;
+  reshapeUsable: boolean;
   showOriginal: boolean;
+  onRequest: () => void;
   onToggle: () => void;
 }) {
   return (
     <div className="mx-auto flex w-full items-center gap-2 px-6 pt-4 max-w-[var(--reading-max-width)] text-xs text-foreground-tertiary">
-      {loading && !showOriginal ? (
+      {!requested ? (
+        // 默认：显示原文，提供手动触发按钮（不自动调 LLM）。
+        <>
+          <span>原文</span>
+          <Button intent="outline" size="sm" className="ml-auto" onClick={onRequest}>
+            <Sparkles className="h-3.5 w-3.5" /> 按画像重塑
+          </Button>
+        </>
+      ) : loading ? (
         <span className="inline-flex items-center gap-1.5">
           <Loader2 className="h-3 w-3 animate-spin" /> 正在按你的画像调整…
         </span>
-      ) : usingReshaped && !showOriginal ? (
-        <span className="inline-flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3 text-accent" /> 已按你的画像调整
-        </span>
+      ) : reshapeUsable ? (
+        <>
+          {showOriginal ? (
+            <span>原文</span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5">
+              <Sparkles className="h-3 w-3 text-accent" /> 已按你的画像调整
+            </span>
+          )}
+          <Button intent="outline" size="sm" className="ml-auto" onClick={onToggle}>
+            {showOriginal ? '看重塑版' : '看原文'}
+          </Button>
+        </>
       ) : (
-        <span>原文</span>
+        // 已触发但拿到 canonical/fallback/出错 → 无可用重塑版，显示原文并告知。
+        <span className="inline-flex items-center gap-1.5">
+          <Sparkles className="h-3 w-3 opacity-50" /> 暂时无法按画像调整，已显示原文
+        </span>
       )}
-      <Button intent="outline" size="sm" className="ml-auto" onClick={onToggle}>
-        {showOriginal ? '看重塑版' : '看原文'}
-      </Button>
     </div>
   );
 }
