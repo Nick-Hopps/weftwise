@@ -6,7 +6,7 @@ import type { Subject } from '@/lib/contracts';
 import { SUBJECT_SLUG_RE } from '@/lib/slug';
 
 export class SubjectError extends Error {
-  constructor(public code: 'invalid-slug' | 'slug-conflict' | 'not-empty' | 'not-found' | 'protected' | 'has-inbound-refs', message: string) {
+  constructor(public code: 'invalid-slug' | 'slug-conflict' | 'not-found' | 'protected' | 'has-inbound-refs', message: string) {
     super(message);
     this.name = 'SubjectError';
   }
@@ -99,22 +99,6 @@ export function countPages(subjectId: string): number {
     .where(eq(pages.subjectId, subjectId))
     .get();
   return Number(result?.count ?? 0);
-}
-
-export function deleteIfEmpty(id: string): void {
-  const subject = getById(id);
-  if (!subject) {
-    throw new SubjectError('not-found', `Subject ${id} not found`);
-  }
-  const pageCount = countPages(id);
-  if (pageCount > 0) {
-    throw new SubjectError(
-      'not-empty',
-      `Subject "${subject.slug}" still contains ${pageCount} page(s)`
-    );
-  }
-  const db = getDb();
-  db.delete(subjects).where(eq(subjects.id, id)).run();
 }
 
 function rowToSubject(row: typeof subjects.$inferSelect): Subject {

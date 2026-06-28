@@ -1,9 +1,11 @@
+import fs from 'fs';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import { SubjectError } from '@/server/db/repos/subjects-repo';
-import { deleteBySubject as deleteRenditionsBySubject } from '@/server/db/repos/renditions-repo';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
+import { vaultPath } from '@/server/config/env';
+import { commitVaultChanges } from '@/server/git/git-service';
 import { AugmentationLevelSchema } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
@@ -84,17 +86,38 @@ export async function DELETE(request: NextRequest, { params }: SubjectRouteConte
   if (csrfError) return csrfError;
 
   const { id } = await params;
+  const subject = subjectsRepo.getById(id);
+  if (!subject) {
+    return NextResponse.json({ error: 'Subject not found' }, { status: 404 });
+  }
+
+  // 级联清理 DB（含守卫：general / 入站跨主题引用）。
   try {
-    subjectsRepo.deleteIfEmpty(id);
-    // 清理该 subject 残留的重塑缓存（含已删页遗留的孤儿 rendition）。
-    deleteRenditionsBySubject(id);
-    return NextResponse.json({ ok: true });
+    subjectsRepo.deleteWithContents(id);
   } catch (err) {
     if (err instanceof SubjectError) {
-      const status =
-        err.code === 'not-found' ? 404 : err.code === 'not-empty' ? 409 : 400;
+      const status = err.code === 'not-found' ? 404 : 409;
       return NextResponse.json({ error: err.message, code: err.code }, { status });
     }
     throw err;
   }
+
+  // 清理该 subject 的 vault 子目录。
+  for (const dir of [
+    vaultPath('wiki', subject.slug),
+    vaultPath('raw', subject.slug),
+    vaultPath('.llm-wiki', 'sources', subject.slug),
+  ]) {
+    if (fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  try {
+    await commitVaultChanges(`[subject:${subject.slug}] Delete subject and all contents`);
+  } catch {
+    // git failure is non-fatal
+  }
+
+  return NextResponse.json({ ok: true, subjectId: id });
 }
