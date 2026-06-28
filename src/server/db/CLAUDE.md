@@ -24,8 +24,9 @@
 - `create({ slug, name, description? }): Subject` —— slug 必须 `^[a-z0-9][a-z0-9-]*$`，冲突 throw `SubjectError('slug-conflict')`
 - `rename(id, { name?, description? })` —— 不允许改 slug
 - `countPages(subjectId): number`
-- `deleteIfEmpty(id): void` —— 非空抛 `SubjectError('not-empty')`，由 API 层转 409
-- 错误类：`SubjectError` 含 `code: 'invalid-slug' | 'slug-conflict' | 'not-empty' | 'not-found'`
+- `deleteWithContents(id): void` —— 级联删除：守卫（不存在→`not-found`；`general`→`protected`；有入站跨主题引用→`has-inbound-refs`）后单事务按子→父清全部 subject-scoped 行 + subject 行（原生 SQL，同 `/api/reset?subjectId` 风格）
+- `listInboundReferences(id): { id, slug }[]` —— 其他 subject 指向本 subject 的去重 referrer（删除前入站引用守卫用）
+- 错误类：`SubjectError` 含 `code: 'invalid-slug' | 'slug-conflict' | 'not-found' | 'protected' | 'has-inbound-refs'`
 
 ### `pages-repo.ts`
 
@@ -179,7 +180,7 @@ src/server/db/
 ├── client.ts          # 单例连接 + ensureTables + FTS + legacy 自迁移
 ├── schema.ts          # Drizzle schema（subjects / pages 复合 PK / target_subject_id）
 └── repos/
-    ├── subjects-repo.ts       # 主题 CRUD + countPages + deleteIfEmpty
+    ├── subjects-repo.ts       # 主题 CRUD + countPages + deleteWithContents/listInboundReferences
     ├── pages-repo.ts          # 全部强制 subjectId
     ├── jobs-repo.ts           # 写入/查询带 subject_id
     ├── sources-repo.ts        # subject-scoped
@@ -208,6 +209,7 @@ src/server/db/
 | 2026-06-24 | 移除 `agentMcpLifecycle` 设置 key + `getAgentMcpLifecycle` / `setAgentMcpLifecycle`（MCP 功能整体移除，详见根 Changelog）；agent 配置 key 由 5 降为 4 |
 | 2026-06-24 | 性能：补热路径索引（`ensureIndexes`：wiki_links target/source + job_events + jobs）；`getBacklinks`/`getSourcesForPage` 改 JOIN 消除 N+1；`getAllLinks` 加可选 `metaKeys` 参；新增 `pruneJobEvents`；落地 pages/sources/jobs-repo + indexes 单测 |
 | 2026-06-27 | Cognitive Lens：新增 `user_profiles`（账户层画像，单例 user_id='local'）/ `page_renditions`（重塑缓存，一页一行，**故意不挂 subjects FK**，由 deleteBySubject+命中校验自洽）/ `profile_signals`（append-only 反馈）三表（`ensureTables` 加 3 个 `migrateXxx`）；新增 `profiles-repo`(getProfile/getProfileOrDefault/upsertProfile 自增 version) / `renditions-repo`(getRendition 按 hash+version 命中 / upsertRendition / deleteBySubject) / `signals-repo`(appendSignal/recentSignals) |
+| 2026-06-29 | Subject 级联删除：subjects-repo 新增 `deleteWithContents(id)`（单事务按子→父清全部 subject-scoped 表 + subject 行，原生 SQL 同 reset 风格）与 `listInboundReferences(id)`（入站跨主题引用守卫）；`SubjectError` code 去 `not-empty`、加 `protected`/`has-inbound-refs`；删除旧 `deleteIfEmpty`。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 
 ---
 
