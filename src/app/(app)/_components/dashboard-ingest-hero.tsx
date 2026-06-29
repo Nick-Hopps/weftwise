@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   FileUp,
@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useJobStream, type JobStreamEvent } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
+import { setPendingIngestFile } from '@/lib/pending-ingest-file';
 import { useUIStore } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
@@ -32,6 +33,9 @@ const PHASES: ReadonlyArray<{ label: string; verb: string; Icon: LucideIcon }> =
   { label: 'Verify', verb: 'Verifying claims', Icon: ShieldCheck },
   { label: 'Commit', verb: 'Committing changeset', Icon: GitCommitHorizontal },
 ];
+
+/** Accepted source file types — mirrors the ingest workbench. */
+const ACCEPT = '.md,.mdx,.txt,.html,.htm,.pdf';
 
 function payloadOf(evt: JobStreamEvent): Record<string, unknown> {
   const inner = evt.data?.data;
@@ -89,6 +93,17 @@ export function DashboardIngestHero() {
   const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(null);
   const { events, status, latestMessage } = useJobStream(jobId);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // "Choose a file" → open the native picker, then hand the file off to the
+  // /ingest workspace, which starts the upload and shows it live.
+  const onPickFile = useCallback(
+    (file: File) => {
+      setPendingIngestFile(file);
+      router.push('/ingest');
+    },
+    [router],
+  );
 
   // Track a running background ingest (poll + the start event).
   const check = useCallback(async () => {
@@ -213,6 +228,22 @@ export function DashboardIngestHero() {
         'md:grid-cols-[minmax(0,1fr)_320px]',
       )}
     >
+      <input
+        ref={fileRef}
+        type="file"
+        accept={ACCEPT}
+        className="sr-only"
+        // The programmatic `fileRef.current.click()` dispatches a click that
+        // would otherwise bubble to the card's onClick and navigate to /ingest
+        // before a file is even picked. Stop it here (the file dialog still
+        // opens — that's the input's default action, not propagation).
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) onPickFile(file);
+        }}
+      />
+
       {/* invitation */}
       <div className="flex min-w-0 flex-col gap-3.5">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent-strong">
@@ -231,7 +262,7 @@ export function DashboardIngestHero() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button intent="primary" size="lg" onClick={(e) => { e.stopPropagation(); router.push('/ingest'); }}>
+          <Button intent="primary" size="lg" onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
             <FileUp className="h-[15px] w-[15px]" /> Choose a file
             <Kbd className="ml-1 border-transparent bg-accent-hover/40 text-accent-fg">⌘I</Kbd>
           </Button>
