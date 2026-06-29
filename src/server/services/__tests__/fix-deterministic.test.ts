@@ -171,8 +171,8 @@ describe('findRelatedPageSlugs', () => {
     const desc = big.map((r) => r.slug).join(' ');
     const findings = [f('contradiction', 'src', desc), f('broken-link', 'src', desc)];
     const out = findRelatedPageSlugs('src', findings, big);
-    expect(out).toHaveLength(4);
-    expect(new Set(out).size).toBe(4);
+    // 取前 4 个、按出现顺序、跨两条同 desc 的 finding 去重（toEqual 同时锁定 cap=4 + 顺序 + 无重复）
+    expect(out).toEqual(['p0', 'p1', 'p2', 'p3']);
   });
 });
 

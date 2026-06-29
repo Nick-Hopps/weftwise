@@ -87,6 +87,9 @@ ${ctx.subject.description?.trim() ? `- **Description**: ${ctx.subject.descriptio
       ? roster.map((p) => `- [[${p.title}]] (slug: \`${p.slug}\`)`).join('\n')
       : '(no other pages in this subject)';
 
+  // 两个可选只读上下文段：各自以 \n 起止；数据缺省/为空时整段为空串，模板中的
+  // `${issuesSection}\n${reportSection}${relatedSection}\n### Page roster` 因而退化为
+  // 原始的 `\n\n` 分隔——保证不传 extra 时输出与改动前逐字一致（基线测试守卫）。
   const reportSection =
     extra?.subjectReport && extra.subjectReport.length > 0
       ? `\n## Subject-wide health report (read-only context)\n` +
