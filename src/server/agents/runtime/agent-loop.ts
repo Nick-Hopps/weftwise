@@ -71,7 +71,7 @@ export async function runAgentLoop(opts: {
   try {
     generation =
       skill.outputSchema && hasTools
-        ? await generateCombinedResult(skill, ctx, model, route, messages, toolSet, skill.outputSchema)
+        ? await generateCombinedResult(skill, ctx, runId, model, route, messages, toolSet, skill.outputSchema)
         : skill.outputSchema
           ? await generateStructuredResult(skill, ctx, runId, runSteps, model, route, messages)
           : await generateTextResult(skill, ctx, runId, model, route, messages, toolSet);
@@ -252,12 +252,64 @@ async function generateTextResult(
   };
 }
 
+/** 组合路径下「未产出可用结构化结果」的可重试信号：模型既没调 finish，文本也无法恢复。 */
+class NoFinishOutputError extends Error {}
+
+/**
+ * 「finish 工具入参校验失败」判定：模型偶发以空/不合规入参调 finish（典型 packyapi+Claude：
+ * extended thinking 后函数调用参数串为空 → AI SDK 以 {} 校验 schema → InvalidToolArgumentsError）。
+ * 这类抖动靠重试恢复，而非补字段；普通工具（wiki.read/search）的入参错误不在此列。
+ */
+function isFinishArgsError(err: unknown): boolean {
+  return InvalidToolArgumentsError.isInstance(err)
+    && (err as { toolName?: unknown }).toolName === FINISH_TOOL_NAME;
+}
+
 /**
  * 组合路径：工具调用循环 + 合成 finish 工具产出结构化结果。
  * 适用于 skill.outputSchema 非空且 skill.tools 非空时（如 ingest-planner / ingest-writer）。
  * 末步强制 finish（experimental_prepareStep），杜绝"只读不交"。
+ *
+ * 重试：模型偶发以空入参调 finish（packyapi+Claude 间歇抖动，参数串为空 → schema 校验失败），
+ * 或干脆不调 finish 且文本不可恢复。这类失败是单页级偶发的（同 job 多数页正常产出），
+ * 故做有界重试再行上抛，避免单页抖动让整个 ingest job 硬失败。
  */
 async function generateCombinedResult(
+  skill: SkillTemplate,
+  ctx: AgentContext,
+  runId: string,
+  model: ResolvedModel,
+  route: TaskRoute,
+  messages: CoreMessage[],
+  toolSet: ToolSet,
+  schema: ZodSchema,
+): Promise<GenerationResult> {
+  const MAX_ATTEMPTS = 3;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await runCombinedAttempt(skill, ctx, model, route, messages, toolSet, schema);
+    } catch (err) {
+      lastError = err;
+      const retryable = isFinishArgsError(err) || err instanceof NoFinishOutputError;
+      if (attempt >= MAX_ATTEMPTS || !retryable) throw err;
+      ctx.emit('agent:step', `${skill.name} retrying structured output (attempt ${attempt}/${MAX_ATTEMPTS - 1})`, {
+        runId,
+        parentRunId: ctx.parentRunId,
+        skillId: skill.id,
+        kind: 'finish-retry',
+        attempt,
+        reason: isFinishArgsError(err) ? 'invalid-finish-args' : 'no-finish-output',
+      });
+    }
+  }
+  // 不可达：最后一次 attempt 必 return 或 throw；保留以满足类型完整性。
+  throw lastError ?? new Error(`${skill.name} combined generation failed`);
+}
+
+/** 组合路径单次尝试：一次 generateText，命中 finish 即捕获结构化结果；否则尝试从文本恢复。 */
+async function runCombinedAttempt(
   skill: SkillTemplate,
   ctx: AgentContext,
   model: ResolvedModel,
@@ -290,7 +342,7 @@ async function generateCombinedResult(
   if (captured === undefined) {
     // 兜底：模型把结构化结果写进了文本而非 finish 调用——尝试从 result.text 恢复。
     const recovered = recoverStructuredOutput({ text: result.text }, schema);
-    if (!recovered) throw new Error(`${skill.name} did not call finish and text is not valid structured output`);
+    if (!recovered) throw new NoFinishOutputError(`${skill.name} did not call finish and text is not valid structured output`);
     captured = recovered.object;
   }
   return {

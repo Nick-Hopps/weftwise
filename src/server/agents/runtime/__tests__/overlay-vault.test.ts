@@ -30,6 +30,27 @@ describe('OverlayVault', () => {
     expect(r2?.markdown).toContain('from overlay');
   });
 
+  // 真实复现：writer 偶发把 frontmatter key 的半角冒号打成全角「：」(tags：)，
+  // entryToOverlay 旧实现直接 matter(raw) 解析 → 抛 YAMLException，resume rehydrate
+  // 检查点时整个 job failed。overlay 必须经修复版 parseFrontmatter 容错，不能抛。
+  it('putEntries 容忍全角冒号 frontmatter（不抛错，正确取 title），可经 readPage 读回原文', async () => {
+    fakeFs.readFileSync.mockImplementation(() => {
+      const e = new Error('ENOENT') as NodeJS.ErrnoException;
+      e.code = 'ENOENT';
+      throw e;
+    });
+    fakeStore.scanWikiPages.mockReturnValue([]);
+    const raw = ['---', 'title: 算子范数', 'tags：', '  - 线性代数', '---', '', '正文'].join('\n');
+    const overlay = createOverlayVault({ subjectSlug: 'general' });
+    expect(() =>
+      overlay.putEntries([{ action: 'create', path: 'wiki/general/operator-norm.md', content: raw }] as ChangesetEntry[]),
+    ).not.toThrow();
+    const r = await overlay.readPage('general', 'operator-norm');
+    expect(r?.markdown).toBe(raw); // raw 原样保留
+    const results = await overlay.search('general', '算子范数');
+    expect(results.find((x) => x.slug === 'operator-norm')?.title).toBe('算子范数');
+  });
+
   it('readPage returns null when both overlay and fs miss', async () => {
     fakeFs.readFileSync.mockImplementation(() => {
       const e = new Error('ENOENT') as NodeJS.ErrnoException;
