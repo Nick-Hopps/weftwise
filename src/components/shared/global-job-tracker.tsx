@@ -13,8 +13,12 @@ import { apiFetch } from '@/lib/api-fetch';
  */
 export function GlobalJobTracker() {
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  // Bumped to force a re-subscribe when a job we already track restarts (e.g. a
+  // manual retry keeps the same id, so activeJobId alone wouldn't change and the
+  // stream would stay frozen on the failed snapshot).
+  const [reconnectKey, setReconnectKey] = useState(0);
   const queryClient = useQueryClient();
-  const { status } = useJobStream(activeJobId);
+  const { status } = useJobStream(activeJobId, reconnectKey);
 
   // Invalidate pages query when a job completes so sidebar/dashboard refresh
   useEffect(() => {
@@ -43,10 +47,13 @@ export function GlobalJobTracker() {
     return () => clearInterval(interval);
   }, [checkActiveJobs]);
 
-  // Listen for custom events dispatched by components that start jobs
+  // Listen for custom events dispatched by components that start (or retry) jobs.
+  // Bump reconnectKey unconditionally so a retry of the already-tracked job
+  // (same id) still re-subscribes instead of staying stuck on the failed stream.
   useEffect(() => {
     function onJobStarted(e: CustomEvent<{ jobId: string }>) {
       setActiveJobId(e.detail.jobId);
+      setReconnectKey((k) => k + 1);
     }
     window.addEventListener('wiki:job-started', onJobStarted as EventListener);
     return () => window.removeEventListener('wiki:job-started', onJobStarted as EventListener);

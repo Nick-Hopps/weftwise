@@ -115,6 +115,10 @@ export function IngestWorkbench() {
       }
       setCheckpointProgress(null);
       setReconnectKey((k) => k + 1);
+      // The job kept its id, so the global ProgressToast / IngestPill (which
+      // subscribe by id) are still pinned to the closed, failed stream. Tell
+      // them the job restarted so they re-subscribe and resume live progress.
+      window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

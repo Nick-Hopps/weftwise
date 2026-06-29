@@ -1,5 +1,13 @@
 'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  shouldResetRetryBudget,
+  shouldReconnect,
+  statusOnConnect,
+  terminalStatusForEvent,
+  isAuthoritativeTerminal,
+  type JobStreamStatus,
+} from './job-stream-logic';
 
 export interface JobStreamEvent {
   type: string;
@@ -7,7 +15,7 @@ export interface JobStreamEvent {
   id?: string;
 }
 
-export type JobStreamStatus = 'idle' | 'streaming' | 'completed' | 'failed';
+export type { JobStreamStatus };
 
 interface UseJobStreamResult {
   events: JobStreamEvent[];
@@ -29,6 +37,11 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
   const lastEventIdRef = useRef<string | undefined>(undefined);
   const reconnectAttemptsRef = useRef(0);
   const statusRef = useRef<JobStreamStatus>('idle');
+  // Latches true once we observe the job reach a terminal state. It survives
+  // auto-reconnects within a subscription (unlike statusRef, which connect()
+  // resets) so a finished job is never re-subscribed — only an explicit
+  // re-subscribe (jobId / reconnectKey change) clears it.
+  const terminalRef = useRef(false);
 
   function updateStatus(next: JobStreamStatus) {
     statusRef.current = next;
@@ -41,6 +54,7 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
     setLatestMessage('');
     lastEventIdRef.current = undefined;
     reconnectAttemptsRef.current = 0;
+    terminalRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -50,14 +64,20 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
       return;
     }
 
+    // A fresh (re)subscription: clear the terminal latch and retry budget so a
+    // retried job can stream again, but keep lastEventIdRef so we resume from
+    // the cursor (past the prior failure) rather than replaying stale history.
+    terminalRef.current = false;
+    reconnectAttemptsRef.current = 0;
+
     let source: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let closed = false;
 
-    function connect() {
+    function connect(isReconnect = false) {
       if (closed) return;
 
-      updateStatus('streaming');
+      updateStatus(statusOnConnect(statusRef.current, isReconnect));
 
       // EventSource uses Last-Event-ID header for resume on reconnect.
       // We also pass it as a query param for the initial connection with a known cursor.
@@ -75,8 +95,6 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
       source = new EventSource(url);
 
       const handleEvent = (event: MessageEvent, eventType: string) => {
-        reconnectAttemptsRef.current = 0;
-
         let parsed: Record<string, unknown> = {};
         try {
           parsed = JSON.parse(event.data) as Record<string, unknown>;
@@ -90,9 +108,15 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
           id: event.lastEventId || undefined,
         };
 
-        // 跳过 SSE 合成的终态事件 id（'final'，见 events.ts），否则重试重连游标失效会全量重放旧 job:failed
-        if (event.lastEventId && event.lastEventId !== 'final') {
+        // Advance the resume cursor only for genuinely new events, skipping the
+        // synthetic 'final' marker (see events.ts) — otherwise a stale cursor
+        // would replay the old job:failed on every reconnect. The retry budget
+        // resets on the SAME condition: only real forward progress earns a fresh
+        // budget, so a terminal job that re-sends only 'final' on each reconnect
+        // can't keep the counter pinned at 0 and loop forever.
+        if (shouldResetRetryBudget(event.lastEventId)) {
           lastEventIdRef.current = event.lastEventId;
+          reconnectAttemptsRef.current = 0;
         }
 
         setEvents((prev) => {
@@ -109,22 +133,31 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
           setLatestMessage(message);
         }
 
-        if (eventType === 'job:completed') {
-          updateStatus('completed');
-          source?.close();
-        } else if (eventType === 'job:failed') {
-          updateStatus('failed');
-          const errMsg = (parsed.error as string) || 'Job failed';
-          setLatestMessage(errMsg);
-          source?.close();
-        } else if (eventType === 'job:cancelled') {
-          // 取消即终态：复用 'failed' 通道（终态判定/重连守卫一致），由 latestMessage 区分语义
-          updateStatus('failed');
-          setLatestMessage('Job cancelled by user');
-          source?.close();
+        const terminalStatus = terminalStatusForEvent(eventType);
+        if (terminalStatus) {
+          // Reflect the terminal status for display. We do NOT close here on a
+          // real (replayed) terminal event — it may be stale history before a
+          // later job:retrying. Only the authoritative 'final' marker (below)
+          // latches the subscription closed.
+          updateStatus(terminalStatus);
+          if (eventType === 'job:failed') {
+            setLatestMessage((parsed.error as string) || 'Job failed');
+          } else if (eventType === 'job:cancelled') {
+            // Cancel reuses the 'failed' channel; latestMessage carries the nuance.
+            setLatestMessage('Job cancelled by user');
+          }
         } else if (eventType === 'job:retrying') {
-          // 自动重试（worker）或手动重试后，流转回处理中
+          // Auto-retry (worker) or manual retry: flow back into progress so a
+          // later authoritative terminal can latch.
           updateStatus('streaming');
+        }
+
+        if (isAuthoritativeTerminal(eventType, event.lastEventId)) {
+          // The server says the job is terminal right now and is closing the
+          // stream. Latch so the auto-reconnect can never re-subscribe to this
+          // finished job — this is what stops the flicker loop.
+          terminalRef.current = true;
+          source?.close();
         }
       };
 
@@ -207,13 +240,20 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         }
         source?.close();
 
-        // Auto-reconnect if not in terminal state (use ref to avoid stale closure)
+        // Auto-reconnect only for a transient drop of a live job — never once
+        // we've latched terminal, and never past the cap (refs avoid stale
+        // closures). The cap genuinely engages now that the retry budget only
+        // resets on real forward progress, so a terminal job can't loop.
         if (
-          reconnectAttemptsRef.current < MAX_RECONNECT_ATTEMPTS &&
-          statusRef.current !== 'completed' && statusRef.current !== 'failed'
+          shouldReconnect({
+            closed,
+            sawTerminal: terminalRef.current,
+            attempts: reconnectAttemptsRef.current,
+            maxAttempts: MAX_RECONNECT_ATTEMPTS,
+          })
         ) {
           reconnectAttemptsRef.current++;
-          reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+          reconnectTimer = setTimeout(() => connect(true), RECONNECT_DELAY_MS);
         } else {
           updateStatus(statusRef.current === 'completed' ? 'completed' : 'failed');
         }

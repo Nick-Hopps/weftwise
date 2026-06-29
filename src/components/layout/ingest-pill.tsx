@@ -47,7 +47,9 @@ function currentPhase(events: JobStreamEvent[]): number {
 export function IngestPill() {
   const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(null);
-  const { events, status } = useJobStream(jobId);
+  // Force a re-subscribe when a tracked job restarts (a retry keeps the same id).
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const { events, status } = useJobStream(jobId, reconnectKey);
 
   const check = useCallback(async () => {
     if (jobId) return; // already tracking one
@@ -72,7 +74,10 @@ export function IngestPill() {
   useEffect(() => {
     const onStarted = (e: Event) => {
       const detail = (e as CustomEvent<{ jobId: string }>).detail;
-      if (detail?.jobId) setJobId(detail.jobId);
+      if (detail?.jobId) {
+        setJobId(detail.jobId);
+        setReconnectKey((k) => k + 1);
+      }
     };
     window.addEventListener('wiki:job-started', onStarted);
     return () => window.removeEventListener('wiki:job-started', onStarted);
