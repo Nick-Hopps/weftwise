@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
+import { takePendingIngestFile } from '@/lib/pending-ingest-file';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
@@ -155,9 +156,27 @@ export function IngestWorkbench() {
     };
   }, [status, jobId]);
 
-  // On mount: reflect an in-progress background ingest, or restore the most
-  // recent resumable failed one for this subject.
+  // A file handed off from the dashboard "Choose a file" hero takes precedence:
+  // start its upload immediately and watch it live here. The ref guard keeps
+  // this idempotent under React StrictMode's double-invoked effects (dev), and
+  // signals the restore effect below to stand down so it can't clobber the new
+  // job's id with a previously failed one.
+  const handoffStarted = useRef(false);
   useEffect(() => {
+    if (handoffStarted.current) return;
+    const handoff = takePendingIngestFile();
+    if (!handoff) return;
+    handoffStarted.current = true;
+    setSelectedFile(handoff);
+    void startUpload(handoff);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // On mount: reflect an in-progress background ingest, or restore the most
+  // recent resumable failed one for this subject. Skipped when a dashboard
+  // handoff is already driving a fresh upload.
+  useEffect(() => {
+    if (handoffStarted.current) return;
     let cancelled = false;
     (async () => {
       const subjectId = useUIStore.getState().currentSubjectId;
