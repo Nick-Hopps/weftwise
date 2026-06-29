@@ -105,8 +105,9 @@ async function runFixJob(
   }
 
   // 3. 阶段2 LLM 逐页修复 — 按 pageSlug 分组，每页一个 commit
-  // 注意：contradiction findings 仅以 pageSlug 所在页的正文为上下文（冲突对方页不加载）；
-  // proceed 自我门控 + 逐页 revert 是安全网；完整双页矛盾消解超出 v1 范围。
+  // 注意：每页修复时注入「全局诊断报告 + 本页 findings 涉及的关联页正文」作只读上下文
+  //（contradiction 的对方页正文现已加载，供 LLM 参照和解）；但 LLM 仍只编辑当前页，
+  // proceed 自我门控 + 逐页 revert 是安全网；完整双页双向消解（同时改两页）仍超出本范围。
   const byPage = new Map<string, LintFinding[]>();
   for (const finding of llm) {
     const arr = byPage.get(finding.pageSlug) ?? [];
