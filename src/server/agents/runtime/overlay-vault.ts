@@ -1,8 +1,8 @@
 import fs from 'node:fs';
-import matter from 'gray-matter';
 import type { ChangesetEntry } from '@/lib/contracts';
 import type { OverlayVault } from '../types';
 import { scanWikiPages } from '../../wiki/wiki-store';
+import { parseFrontmatter } from '../../wiki/frontmatter';
 import { vaultPath } from '../../config/env';
 
 interface OverlayEntry {
@@ -28,12 +28,15 @@ function entryToOverlay(entry: ChangesetEntry): OverlayEntry | null {
     return { ...parts, title: '', summary: '', body: '', raw: '', deleted: true };
   }
   const raw = entry.content ?? '';
-  const parsed = matter(raw);
+  // 经修复版 parseFrontmatter 解析（容错 LLM 全角冒号 key + 绕过 gray-matter 缓存中毒），
+  // 不可直接 matter(raw)——否则非法 frontmatter 会在 putEntries 抛错，
+  // 令 resume rehydrate 检查点时整个 ingest job failed。
+  const { data, body } = parseFrontmatter(raw);
   return {
     ...parts,
-    title: typeof parsed.data.title === 'string' ? parsed.data.title : parts.slug,
-    summary: typeof parsed.data.summary === 'string' ? parsed.data.summary : '',
-    body: parsed.content,
+    title: data.title || parts.slug,
+    summary: data.summary ?? '',
+    body,
     raw,
     deleted: false,
   };
@@ -81,9 +84,9 @@ export function createOverlayVault(opts: { subjectSlug: string }): OverlayVault 
       for (const page of scanned) {
         // Skip pages already covered by overlay (overlay wins)
         if (entries.has(key(subjectSlug, page.slug))) continue;
-        const parsed = matter(page.content);
-        const title = typeof parsed.data.title === 'string' ? parsed.data.title : page.slug;
-        const summary = typeof parsed.data.summary === 'string' ? parsed.data.summary : '';
+        const { data } = parseFrontmatter(page.content);
+        const title = data.title || page.slug;
+        const summary = data.summary ?? '';
         // Include raw content (which contains frontmatter YAML) so keys like "summary:" are searchable
         const hay = `${page.slug} ${title} ${summary} ${page.content}`.toLowerCase();
         if (hay.includes(q)) {

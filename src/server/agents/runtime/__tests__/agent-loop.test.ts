@@ -6,6 +6,20 @@ const mocks = vi.hoisted(() => ({
   generateObject: vi.fn(),
   generateText: vi.fn(),
   tool: vi.fn((definition) => definition),
+  // 可实例化的 InvalidToolArgumentsError 替身：isInstance 走 instanceof，
+  // 让组合路径的「finish 入参校验失败」分支在测试里能被识别（带 toolName）。
+  InvalidToolArgumentsError: class extends Error {
+    toolName?: string;
+    toolArgs?: unknown;
+    constructor(opts: { toolName?: string; toolArgs?: unknown } = {}) {
+      super(`Invalid arguments for tool ${opts.toolName}`);
+      this.toolName = opts.toolName;
+      this.toolArgs = opts.toolArgs;
+    }
+    static isInstance(err: unknown): boolean {
+      return err instanceof this;
+    }
+  },
   resolveTask: vi.fn(() => ({
     task: 'skill:writer',
     profileName: 'test',
@@ -24,7 +38,7 @@ vi.mock('ai', () => ({
   generateObject: mocks.generateObject,
   generateText: mocks.generateText,
   tool: mocks.tool,
-  InvalidToolArgumentsError: class { static isInstance() { return false; } },
+  InvalidToolArgumentsError: mocks.InvalidToolArgumentsError,
 }));
 
 vi.mock('../../../llm/task-router', () => ({
@@ -366,5 +380,56 @@ describe('runAgentLoop 组合路径（tools + outputSchema）', () => {
     const res = await runAgentLoop({ skill, ctx, input: { slug: 'page' } });
     expect(res.output).toEqual({ title: 'Page', body: 'B' });
     expect(mocks.generateObject).not.toHaveBeenCalled();
+  });
+});
+
+describe('runAgentLoop 组合路径 finish 入参校验失败重试', () => {
+  // 真实复现：claude-opus 经 packyapi 偶发把 finish 工具调用的入参串吐成空，
+  // AI SDK 以 {} 校验 writer schema 失败抛 InvalidToolArgumentsError(toolName:'finish')。
+  // 该抖动是间歇性的（同 job 多数页正常产出），不应让整个 ingest job 硬失败。
+  const combinedWriter = (): SkillTemplate => ({
+    id: 'writer', name: 'Writer', description: '', version: 1,
+    tools: ['wiki.read'], canDispatch: [], systemPrompt: 'sys',
+    outputSchema: z.object({ title: z.string(), body: z.string() }),
+  });
+
+  it('finish 入参校验失败时有界重试，下一次成功产出结构化结果', async () => {
+    mocks.generateText.mockReset();
+    mocks.generateObject.mockReset();
+    mocks.generateText
+      .mockImplementationOnce(async () => {
+        throw new mocks.InvalidToolArgumentsError({ toolName: 'finish', toolArgs: '' });
+      })
+      .mockImplementationOnce(async (opts: Record<string, unknown>) => {
+        const tools = opts.tools as Record<string, { execute: (a: unknown) => Promise<unknown> }>;
+        await tools.finish.execute({ title: 'Page', body: 'B' });
+        return { text: '', usage: { promptTokens: 5, completionTokens: 7 }, providerMetadata: {} };
+      });
+
+    const ctx = ctxStub();
+    (ctx.toolRegistry.resolve as ReturnType<typeof vi.fn>).mockReturnValue([toolDefStub('wiki.read')]);
+
+    const res = await runAgentLoop({ skill: combinedWriter(), ctx, input: { slug: 'page' } });
+    expect(res.output).toEqual({ title: 'Page', body: 'B' });
+    expect(mocks.generateText).toHaveBeenCalledTimes(2);
+    expect(ctx.emit).toHaveBeenCalledWith(
+      'agent:step',
+      expect.stringContaining('retrying'),
+      expect.objectContaining({ kind: 'finish-retry', attempt: 1 }),
+    );
+  });
+
+  it('finish 入参持续校验失败时，重试耗尽（3 次）后上抛', async () => {
+    mocks.generateText.mockReset();
+    mocks.generateObject.mockReset();
+    mocks.generateText.mockImplementation(async () => {
+      throw new mocks.InvalidToolArgumentsError({ toolName: 'finish', toolArgs: '' });
+    });
+
+    const ctx = ctxStub();
+    (ctx.toolRegistry.resolve as ReturnType<typeof vi.fn>).mockReturnValue([toolDefStub('wiki.read')]);
+
+    await expect(runAgentLoop({ skill: combinedWriter(), ctx, input: { slug: 'page' } })).rejects.toThrow();
+    expect(mocks.generateText).toHaveBeenCalledTimes(3);
   });
 });
