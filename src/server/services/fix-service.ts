@@ -14,7 +14,14 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { enqueueEmbedIndex } from './embedding-service';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { selectLatestFindings } from './lint-latest';
-import { fixMissingFrontmatter, partitionFindings, buildFixWorklist, bodyShrankTooMuch } from './fix-deterministic';
+import {
+  fixMissingFrontmatter,
+  partitionFindings,
+  buildFixWorklist,
+  bodyShrankTooMuch,
+  findRelatedPageSlugs,
+  buildSubjectReportLines,
+} from './fix-deterministic';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { buildWikiPath } from '../wiki/page-identity';
 import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
@@ -113,6 +120,13 @@ async function runFixJob(
     subject: { slug: subject.slug, name: subject.name, description: subject.description },
   };
 
+  // 全局只读上下文（对每页调用复用，构建一次）
+  const RELATED_BODY_MAX = 8000;
+  const subjectReport = buildSubjectReportLines(worklist);
+  const contradictionPages = new Set(
+    worklist.filter((f) => f.type === 'contradiction').map((f) => f.pageSlug),
+  );
+
   for (const [slug, findingsOnPage] of byPage) {
     const doc = readPageInSubject(subject.slug, slug);
     if (!doc) {
@@ -120,6 +134,17 @@ async function runFixJob(
       emit('fix:skip', `Skip "${slug}": page not found.`, { slug });
       continue;
     }
+
+    // 关联页：从本页 findings 描述里启发式提取，实时读盘取最新内容（前面已 commit 的页可拿到修后正文）
+    const relatedSlugs = findRelatedPageSlugs(slug, findingsOnPage, roster, contradictionPages);
+    const relatedPages = relatedSlugs
+      .map((s) => {
+        const rdoc = readPageInSubject(subject.slug, s);
+        return rdoc
+          ? { title: rdoc.frontmatter.title || s, slug: s, body: rdoc.body.slice(0, RELATED_BODY_MAX) }
+          : null;
+      })
+      .filter((x): x is { title: string; slug: string; body: string } => x !== null);
 
     let result: FixPageResult;
     try {
@@ -132,6 +157,7 @@ async function runFixJob(
           findingsOnPage.map((f) => ({ type: f.type, description: f.description, suggestedFix: f.suggestedFix })),
           roster,
           promptCtx,
+          { subjectReport, relatedPages },
         ),
       );
     } catch (err) {
