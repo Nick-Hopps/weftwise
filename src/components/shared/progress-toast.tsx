@@ -131,16 +131,29 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
                 onClick={handleCancel}
                 disabled={cancelling}
                 aria-label={status === 'failed' ? 'End ingest' : 'Stop job'}
+                className="tip tip-l"
                 data-tip={status === 'failed' ? 'End ingest — clears checkpoints' : 'Stop job'}
               >
                 {status === 'failed' ? <Ban /> : <Square />}
               </IconButton>
             )}
-            <IconButton size="sm" onClick={() => setCollapsed(true)} aria-label="Collapse progress">
+            <IconButton
+              size="sm"
+              onClick={() => setCollapsed(true)}
+              aria-label="Collapse progress"
+              className="tip tip-l"
+              data-tip="Collapse progress"
+            >
               <ChevronRight />
             </IconButton>
             {isFinished && (
-              <IconButton size="sm" onClick={handleClose} aria-label="Close">
+              <IconButton
+                size="sm"
+                onClick={handleClose}
+                aria-label="Close"
+                className="tip tip-l"
+                data-tip="Close"
+              >
                 <X />
               </IconButton>
             )}
@@ -193,7 +206,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
                 status === 'failed' ? 'text-danger' : 'text-accent',
               )}
             >
-              {status === 'failed' && !wasCancelled ? '查看错误 →' : '查看详情 →'}
+              {status === 'failed' && !wasCancelled ? 'View error →' : 'View details →'}
             </button>
           </div>
         </div>
