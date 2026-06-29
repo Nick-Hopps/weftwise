@@ -82,11 +82,20 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** 词边界整词匹配（大小写不敏感）；连字符视为词内字符，避免 react-hooks 命中 react-hooks-x */
+/**
+ * 判断 haystack 是否提及 needle（大小写不敏感）。
+ * - 纯 ASCII（英文 slug/title）：词边界整词匹配，连字符视为词内字符，
+ *   避免 cat 命中 category、react 命中 react-hooks 内。
+ * - 含非 ASCII（如中文）：无空格分词，词边界不适用，退化为子串匹配——
+ *   关联页仅作只读上下文且 cap 到 MAX_RELATED_PAGES，子串误召无编辑副作用，可接受。
+ */
 function mentions(haystack: string, needle: string): boolean {
   const n = needle.trim();
   if (n.length === 0) return false;
-  const re = new RegExp(`(?:^|[^\\w-])${escapeRegExp(n)}(?:[^\\w-]|$)`, 'i');
+  const escaped = escapeRegExp(n);
+  const re = /^[\x00-\x7F]+$/.test(n)
+    ? new RegExp(`(?:^|[^\\w-])${escaped}(?:[^\\w-]|$)`, 'i')
+    : new RegExp(escaped, 'i');
   return re.test(haystack);
 }
 

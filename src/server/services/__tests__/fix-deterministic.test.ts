@@ -143,6 +143,18 @@ describe('findRelatedPageSlugs', () => {
     expect(findRelatedPageSlugs('p', findings, roster2)).toEqual([]);
   });
 
+  it('连字符边界：react 不命中 react-hooks 内的 react', () => {
+    const roster2 = [{ slug: 'react', title: 'React' }];
+    const findings = [f('broken-link', 'p', 'see react-hooks docs for details')];
+    expect(findRelatedPageSlugs('p', findings, roster2)).toEqual([]);
+  });
+
+  it('非 ASCII（中文）title 子串匹配——无词边界', () => {
+    const roster2 = [{ slug: 'shen-jing-wang-luo', title: '神经网络' }];
+    const findings = [f('missing-crossref', 'p', '本页讨论神经网络的反向传播')];
+    expect(findRelatedPageSlugs('p', findings, roster2)).toEqual(['shen-jing-wang-luo']);
+  });
+
   it('contradiction 兜底：描述无匹配但有其他 contradiction 页 → 召回（排除自身）', () => {
     const findings = [f('contradiction', 'react', 'states something is true')];
     const out = findRelatedPageSlugs('react', findings, roster, new Set(['vue', 'react']));
