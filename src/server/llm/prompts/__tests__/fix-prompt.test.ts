@@ -58,6 +58,11 @@ describe('buildFixPageUserPrompt — extra 只读上下文', () => {
     expect(out).not.toContain('Related pages');
   });
 
+  it('subjectReport 为空数组不渲染该段', () => {
+    const out = buildFixPageUserPrompt(page, findings, roster, ctx, { subjectReport: [] });
+    expect(out).not.toContain('Subject-wide health report');
+  });
+
   it('不传 extra（或空对象）与基线逐字一致', () => {
     const base = buildFixPageUserPrompt(page, findings, roster, ctx);
     const withEmpty = buildFixPageUserPrompt(page, findings, roster, ctx, {});

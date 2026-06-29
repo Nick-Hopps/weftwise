@@ -31,6 +31,9 @@ import { FixPageSchema, FIX_SYSTEM_PROMPT, buildFixPageUserPrompt, type FixPageR
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { ChangesetEntry, Job, LintFinding } from '@/lib/contracts';
 
+/** 关联页正文注入前的截断上限（字符），约束单页修复 prompt 的 token 体量。 */
+const RELATED_BODY_MAX = 8000;
+
 interface FixParams {
   subjectId?: string;
 }
@@ -122,7 +125,6 @@ async function runFixJob(
   };
 
   // 全局只读上下文（对每页调用复用，构建一次）
-  const RELATED_BODY_MAX = 8000;
   const subjectReport = buildSubjectReportLines(worklist);
   const contradictionPages = new Set(
     worklist.filter((f) => f.type === 'contradiction').map((f) => f.pageSlug),
