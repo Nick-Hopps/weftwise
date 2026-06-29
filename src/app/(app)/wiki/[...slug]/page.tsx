@@ -10,6 +10,7 @@ import { readPageInSubject } from '@/server/wiki/wiki-store';
 import { serializeWikiDocument } from '@/server/wiki/markdown';
 import WikiReadingView from '@/components/wiki/wiki-reading-view';
 import { RetitleNotice } from '@/components/wiki/retitle-notice';
+import { decodeRouteSegments } from '@/lib/route-params';
 import type { Subject } from '@/lib/contracts';
 
 const SUBJECT_COOKIE = 'wiki_subject';
@@ -34,7 +35,7 @@ async function resolveActiveSubject(searchSubjectSlug?: string): Promise<Subject
 
 export async function generateMetadata({ params, searchParams }: WikiPageProps): Promise<Metadata> {
   const { slug: slugParts } = await params;
-  const slug = slugParts.join('/');
+  const slug = decodeRouteSegments(slugParts);
   const sp = (await searchParams) ?? {};
   const subject = await resolveActiveSubject(sp.s);
   const page = pagesRepo.getPageBySlug(subject.id, slug);
@@ -49,7 +50,7 @@ export async function generateMetadata({ params, searchParams }: WikiPageProps):
 
 export default async function WikiPage({ params, searchParams }: WikiPageProps) {
   const { slug: slugParts } = await params;
-  const slug = slugParts.join('/');
+  const slug = decodeRouteSegments(slugParts);
   const sp = (await searchParams) ?? {};
   const subject = await resolveActiveSubject(sp.s);
 
