@@ -84,8 +84,7 @@ executePageCreate(jobId: string, subject: Subject, input: {
 
 - `brokenBacklinks`：本 subject 内指向被删页的入站链接数（`pagesRepo.getBacklinks(subject.id, slug)`，排除自引用），删后变坏链——供如实告知用户。
 - `executePageCreate`：
-  - slug 由 `slugFromTitle` / `normalizeSlug`（`page-identity.ts`）派生；
-  - slug 已存在于本 subject → 抛 Error（"a page with slug X already exists; use a different title"）。**不自动加后缀**（创建语义应明确，避免静默产生 `foo-2`）；
+  - slug 由 title **自动派生唯一值**：`deriveUniqueSlug(title, existingSlugs)`——`normalizeSlug(title) || 'page'` 为 base，冲突则追加 `-2`/`-3`…（`existingSlugs = pagesRepo.getAllPages(subject.id).map(slug)`）。该纯函数从 `planSplitPages` 内联逻辑**抽取为共享函数**（置于 `page-identity.ts`），split-plan 改为复用，杜绝两份派生逻辑漂移；
   - frontmatter 经 `serializeFrontmatter` + `stampSystemFrontmatter` 确定性拼装（title / created / updated / tags / sources=[] / summary）；
   - `validateChangeset` 自动拦坏链（body 里的 `[[Nonexistent]]`），失败抛 Error——模型在 tool-loop 里拿到错误可改了重试（自我修正）。
 
@@ -154,7 +153,7 @@ createPage?(input: { title: string; body: string; summary?: string; tags?: strin
 
 - **通用**：写操作前必须目标明确；歧义先问；只有用户**明确请求**写操作才执行。
 - **删除（最强纪律，沿用 reenrich 模式并加重）**：永久语义（虽 git 可回滚，对用户语义上是删除）；解析目标 slug（当前页 / `wiki_list`+`wiki_search` 定位）；歧义先问不猜；**ALWAYS 在删除前复述「将删除哪个页（标题+slug）」并请用户确认；禁止与提问同轮调用，只能在用户明确同意（"yes"/"go ahead"）后的后续轮调用**；删后如实告知坏链与可回滚。
-- **创建**：复述将创建的标题与正文要点请用户确认后再调；slug 自动派生；slug 冲突会报错（提示换标题）。
+- **创建**：复述将创建的标题与正文要点请用户确认后再调；slug 由标题自动派生唯一值（同名标题会得到 `-2` 后缀的 slug），创建后如实告知最终 slug。
 
 ### 决策 8：UI 工具活动映射
 
@@ -208,6 +207,8 @@ src/server/wiki/__tests__/page-ops-create-delete.test.ts  # executePageCreate/De
 **修改**：
 ```
 src/server/wiki/page-ops.ts                          # + executePageDelete / executePageCreate
+src/server/wiki/page-identity.ts                     # + deriveUniqueSlug（纯函数，create/split 共用）
+src/server/wiki/split-plan.ts                        # 改用 deriveUniqueSlug（行为不变）
 src/server/agents/tools/tool-context.ts              # ToolContext + deletePage?/createPage?
 src/server/agents/tools/builtin/index.ts             # 注册两工具
 src/server/agents/types.ts                           # ToolSideEffect 联合 + 'destructive'|'create'
@@ -226,7 +227,9 @@ docs/* CLAUDE.md（lib/agents/services/app + 根 changelog）
 
 - `validateDeleteTarget`：保护页（index/log/meta tag）→ 拒；page=null → 未找到；正常页 → null。
 - `executePageDelete`：删除生效（页消失）；`brokenBacklinks` 计数准确（构造 N 个指向页 + 自引用排除）。
-- `executePageCreate`：title→slug 派生正确；slug 冲突抛错；body 含坏链被 `validateChangeset` 拦截抛错；正常创建落盘 + frontmatter 完整。
+- `deriveUniqueSlug`：title→base 派生；冲突追加 `-2`/`-3`；空标题兜底 `page`。
+- `executePageCreate`：唯一 slug 派生正确（含同名冲突加后缀）；body 含坏链被 `validateChangeset` 拦截抛错；正常创建落盘 + frontmatter 完整。
+- `planSplitPages`：抽取 `deriveUniqueSlug` 后行为不变（回归）。
 - `query-tools`：`buildQueryToolContext` 注入 `deletePage`/`createPage`；工具 handler 在 ctx 无能力时优雅降级、有能力时透传消息。
 - 不为 LLM 调用本身写测试（沿用项目惯例，结构化/工具路径靠 schema 保证）。
 
