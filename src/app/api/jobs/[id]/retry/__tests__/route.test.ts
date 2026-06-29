@@ -55,6 +55,17 @@ describe('POST /api/jobs/[id]/retry', () => {
     expect(mockEmit).not.toHaveBeenCalled();
   });
 
+  it('409 当 job 已被用户手动终结（result.cancelled=true），不可重试', async () => {
+    mockGet.mockReturnValue({
+      id: 'j1', type: 'ingest', status: 'failed',
+      resultJson: JSON.stringify({ cancelled: true, error: { message: 'x' } }),
+    });
+    const res = await call();
+    expect(res.status).toBe(409);
+    expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockEmit).not.toHaveBeenCalled();
+  });
+
   it('202 + requeue + emit job:retrying 当 failed ingest', async () => {
     mockGet
       .mockReturnValueOnce({ id: 'j1', type: 'ingest', status: 'failed' })

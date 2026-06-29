@@ -52,6 +52,26 @@ describe('jobs-repo.requestCancel / isCancelRequested', () => {
     expect(jobsRepo.getJob(job.id)!.status).toBe('failed');
   });
 
+  it('终结已失败(failed)的 job：删检查点使其不可 resume + 标 cancelled + 保留原错误（status 仍 failed）', async () => {
+    const { jobsRepo, checkpointsRepo } = await repos();
+    const job = jobsRepo.enqueueJob('ingest', {}, null);
+    jobsRepo.claimNextJob();
+    jobsRepo.failJob(job.id, new Error('boom'));
+    checkpointsRepo.putCheckpoint(job.id, 'writer-page', 'p1', { content: 'x' });
+    expect(checkpointsRepo.getCheckpoints(job.id)).toHaveLength(1);
+
+    const result = jobsRepo.requestCancel(job.id);
+
+    expect(result).toBe('cancelled');
+    const after = jobsRepo.getJob(job.id)!;
+    expect(after.status).toBe('failed');
+    const r = JSON.parse(after.resultJson!);
+    expect(r.cancelled).toBe(true);
+    expect(r.error.message).toBe('boom'); // 原错误保留供查阅
+    expect(jobsRepo.isCancelRequested(job.id)).toBe(true);
+    expect(checkpointsRepo.getCheckpoints(job.id)).toHaveLength(0); // 不可 resume
+  });
+
   it('已终态(completed) → already-terminal，不覆盖原结果', async () => {
     const { jobsRepo } = await repos();
     const job = jobsRepo.enqueueJob('ingest', {}, null);

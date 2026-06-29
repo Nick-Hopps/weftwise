@@ -59,6 +59,7 @@ export function IngestWorkbench() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
   const [retrying, setRetrying] = useState(false);
+  const [terminating, setTerminating] = useState(false);
   const [checkpointProgress, setCheckpointProgress] = useState<CheckpointProgress | null>(null);
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -119,6 +120,21 @@ export function IngestWorkbench() {
       setRetrying(false);
     }
   }, [jobId]);
+
+  // 手动结束当前 ingest：停掉运行中的任务、或放弃已报错的任务（后端清检查点使其不可 resume），
+  // 然后清空工作台回到上传态。终态以 SSE/后端为准，这里失败也不阻断关闭。
+  const handleTerminate = useCallback(async () => {
+    if (!jobId || terminating) return;
+    setTerminating(true);
+    try {
+      await apiFetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+    } catch {
+      /* 忽略：即便请求失败也允许用户离开这个卡住的任务 */
+    } finally {
+      setTerminating(false);
+      reset();
+    }
+  }, [jobId, terminating, reset]);
 
   // After a failure, fetch the checkpoint progress for the resume label.
   useEffect(() => {
@@ -277,6 +293,8 @@ export function IngestWorkbench() {
             ? `Resume${checkpointProgress.totalPages ? ` · ${checkpointProgress.writerPages}/${checkpointProgress.totalPages} pages` : ''}`
             : 'Retry'
         }
+        onTerminate={handleTerminate}
+        terminating={terminating}
       />
     );
   }
