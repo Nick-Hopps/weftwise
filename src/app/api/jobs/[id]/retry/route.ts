@@ -29,6 +29,21 @@ export async function POST(
     );
   }
 
+  // 已被用户手动终结（result.cancelled=true）的 job 不可重试：它是被主动放弃的报错摄取，
+  // 检查点已清，重试只会从零重跑、复活用户已结束的任务。要再摄取请重新上传。
+  let cancelled = false;
+  try {
+    cancelled = !!(JSON.parse(job.resultJson ?? '{}') as { cancelled?: unknown }).cancelled;
+  } catch {
+    // result 不可解析 → 视为可重试
+  }
+  if (cancelled) {
+    return NextResponse.json(
+      { error: 'This ingest was terminated and can no longer be resumed. Start a new ingest instead.' },
+      { status: 409 },
+    );
+  }
+
   // 无条件 requeue（刻意绕过 worker 的 isRetryableError，让用户能手动重试业务失败）
   queue.requeue(id);
   events.emit(id, 'job:retrying', 'Manual retry — resuming from checkpoint', { manual: true });

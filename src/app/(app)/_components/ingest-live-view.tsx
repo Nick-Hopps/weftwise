@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
+  Ban,
   Check,
   CircleCheck,
   Clock,
@@ -16,6 +17,7 @@ import {
   ScanText,
   ShieldCheck,
   Sparkles,
+  Square,
   Wand2,
   X,
   type LucideIcon,
@@ -41,6 +43,10 @@ interface IngestLiveViewProps {
   onRetry?: () => void;
   retrying?: boolean;
   retryLabel?: string;
+  /** Manually terminate the job — stop a running ingest or abandon a failed one
+   *  (clears its checkpoints so it can't be resumed). */
+  onTerminate?: () => void;
+  terminating?: boolean;
 }
 
 interface Phase {
@@ -146,6 +152,8 @@ export function IngestLiveView({
   onRetry,
   retrying = false,
   retryLabel = 'Retry',
+  onTerminate,
+  terminating = false,
 }: IngestLiveViewProps) {
   const done = status === 'completed';
   const failed = status === 'failed';
@@ -267,6 +275,17 @@ export function IngestLiveView({
                     {retryLabel}
                   </Button>
                 )}
+                {failed && onTerminate && (
+                  <Button
+                    intent="ghost"
+                    onClick={onTerminate}
+                    loading={terminating}
+                    disabled={terminating}
+                    data-tip="Abandon this ingest and clear its checkpoints"
+                  >
+                    <Ban className="h-3.5 w-3.5" /> End ingest
+                  </Button>
+                )}
                 <Button intent="outline" onClick={onIngestAnother}>
                   <Plus className="h-3.5 w-3.5" /> Ingest another
                 </Button>
@@ -282,9 +301,21 @@ export function IngestLiveView({
                 )}
               </>
             ) : (
-              <Button intent="outline" onClick={onBackground}>
-                <Minimize2 className="h-3.5 w-3.5" /> Run in background
-              </Button>
+              <>
+                {onTerminate && (
+                  <Button
+                    intent="ghost"
+                    onClick={onTerminate}
+                    disabled={terminating}
+                    data-tip="Stop this ingest"
+                  >
+                    <Square className="h-3.5 w-3.5" /> Stop
+                  </Button>
+                )}
+                <Button intent="outline" onClick={onBackground}>
+                  <Minimize2 className="h-3.5 w-3.5" /> Run in background
+                </Button>
+              </>
             )}
           </div>
         </div>

@@ -103,10 +103,13 @@ export function requeueJob(jobId: string): void {
 export type CancelResult = 'cancelled' | 'already-terminal' | 'not-found';
 
 /**
- * 取消任务（用户主动终止）。原子事务内：
- *  - 不存在 → 'not-found'；已 completed/failed → 'already-terminal'（不覆盖原结果）；
- *  - 否则（pending / running）→ 落终态 failed + 置 cancel_requested=1 + 清租约/心跳
- *    + 写 cancelled 标记结果 + 删该 job 全部 ingest 检查点（断续传，防"死而复生"）。
+ * 取消 / 终结任务（用户主动终止）。原子事务内：
+ *  - 不存在 → 'not-found'；已 completed → 'already-terminal'（成功结果不动）；
+ *  - 已 failed → **终结**：保留原 result_json.error + 标 cancelled=true + 置 cancel_requested=1
+ *    + 删该 job 全部 ingest 检查点（status 仍 failed，但检查点已清 → 不再可 resume；
+ *    配合 retry 路由对 cancelled 的拦截，彻底放弃这次报错的摄取）；
+ *  - pending / running → 落终态 failed + 置 cancel_requested=1 + 清租约/心跳
+ *    + 写 cancelled 标记结果 + 删检查点（防断点续传"死而复生"）。
  * 终态复用 'failed'（避免新增 status 字面量引发 SSE/前端终态判定的静默遗漏），
  * 由 result_json.cancelled / job:cancelled 事件区分"取消"与"失败"。
  * running 任务的在途 LLM 调用由 worker 侧 ctx.cancelled() 轮询 cancel_requested 后中止。
@@ -115,10 +118,26 @@ export function requestCancel(jobId: string): CancelResult {
   const sqlite = getRawDb();
   const tx = sqlite.transaction((): CancelResult => {
     const row = sqlite
-      .prepare(`SELECT status FROM jobs WHERE id = ?`)
-      .get(jobId) as { status: string } | undefined;
+      .prepare(`SELECT status, result_json FROM jobs WHERE id = ?`)
+      .get(jobId) as { status: string; result_json: string | null } | undefined;
     if (!row) return 'not-found';
-    if (row.status === 'completed' || row.status === 'failed') return 'already-terminal';
+    if (row.status === 'completed') return 'already-terminal';
+
+    if (row.status === 'failed') {
+      // 终结一个已失败/报错的 ingest：清检查点使其不再可 resume，标 cancelled（保留原错误供查阅）。
+      let merged: Record<string, unknown> = { cancelled: true };
+      try {
+        const prev = row.result_json ? (JSON.parse(row.result_json) as Record<string, unknown>) : {};
+        merged = { ...prev, cancelled: true };
+      } catch {
+        // 原结果不可解析时仅写 cancelled 标记
+      }
+      sqlite
+        .prepare(`UPDATE jobs SET cancel_requested = 1, result_json = ? WHERE id = ?`)
+        .run(JSON.stringify(merged), jobId);
+      sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id = ?`).run(jobId);
+      return 'cancelled';
+    }
 
     const resultJson = JSON.stringify({
       error: { message: 'Cancelled by user' },

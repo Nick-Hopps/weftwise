@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { Check, ChevronRight, Loader2, Square, X } from 'lucide-react';
+import { Ban, Check, ChevronRight, Loader2, Square, X } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
@@ -124,15 +124,16 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
               {status === 'completed' && ' — Done'}
               {status === 'failed' && (wasCancelled ? ' — Cancelled' : ' — Failed')}
             </span>
-            {status === 'streaming' && (
+            {/* Stop a running job, or end a failed one (clears checkpoints so it can't resume). */}
+            {(status === 'streaming' || (status === 'failed' && !wasCancelled)) && (
               <IconButton
                 size="sm"
                 onClick={handleCancel}
                 disabled={cancelling}
-                aria-label="Stop job"
-                data-tip="Stop job"
+                aria-label={status === 'failed' ? 'End ingest' : 'Stop job'}
+                data-tip={status === 'failed' ? 'End ingest — clears checkpoints' : 'Stop job'}
               >
-                <Square />
+                {status === 'failed' ? <Ban /> : <Square />}
               </IconButton>
             )}
             <IconButton size="sm" onClick={() => setCollapsed(true)} aria-label="Collapse progress">
