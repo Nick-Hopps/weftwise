@@ -116,7 +116,13 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
             {status === 'completed' && ' — Done'}
             {status === 'failed' && ' — Failed'}
           </h2>
-          <IconButton size="sm" onClick={onClose} aria-label="Close">
+          <IconButton
+            size="sm"
+            onClick={onClose}
+            aria-label="Close"
+            className="tip tip-l"
+            data-tip="Close · Esc"
+          >
             <X />
           </IconButton>
         </div>
@@ -124,7 +130,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
         <div className="flex min-h-0 flex-1 flex-col">
           {/* 日志区 */}
           <div className="px-4 py-2 text-xs font-medium text-foreground-secondary border-b border-border">
-            日志 · {lines.length}
+            Log · {lines.length}
           </div>
           <div
             ref={logRef}
@@ -132,7 +138,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
             className="min-h-0 flex-1 overflow-y-auto px-4 py-2 space-y-0.5 font-mono text-xs"
           >
             {lines.length === 0 ? (
-              <p className="text-foreground-tertiary">暂无日志</p>
+              <p className="text-foreground-tertiary">No logs yet</p>
             ) : (
               lines.map((line, idx) => (
                 <div
@@ -155,15 +161,21 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
           {status === 'failed' && (
             <div className="shrink-0 border-t border-border bg-danger/5 max-h-[45%] overflow-y-auto">
               <div className="flex items-center justify-between px-4 py-2">
-                <span className="text-xs font-medium text-danger">错误</span>
+                <span className="text-xs font-medium text-danger">Error</span>
                 {jobError && (
-                  <IconButton size="sm" onClick={copyError} aria-label="复制错误">
+                  <IconButton
+                    size="sm"
+                    onClick={copyError}
+                    aria-label="Copy error"
+                    className="tip tip-l"
+                    data-tip={copied ? 'Copied' : 'Copy error details'}
+                  >
                     {copied ? <Check /> : <Copy />}
                   </IconButton>
                 )}
               </div>
               <div className="px-4 pb-3 space-y-2">
-                {jobQuery.isLoading && <p className="text-xs text-foreground-tertiary">加载错误详情…</p>}
+                {jobQuery.isLoading && <p className="text-xs text-foreground-tertiary">Loading error details…</p>}
                 {jobError ? (
                   <>
                     <p className="text-sm font-medium text-foreground whitespace-pre-wrap break-words">
@@ -172,14 +184,16 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
                     <button
                       type="button"
                       onClick={() => setErrorExpanded((v) => !v)}
-                      className="flex items-center gap-1 text-xs text-foreground-secondary focus-ring"
+                      aria-expanded={errorExpanded}
+                      data-tip={errorExpanded ? 'Hide technical details' : 'Show technical details'}
+                      className="tip tip-b flex items-center gap-1 text-xs text-foreground-secondary focus-ring"
                     >
                       {errorExpanded ? (
                         <ChevronDown className="h-3 w-3" />
                       ) : (
                         <ChevronRight className="h-3 w-3" />
                       )}
-                      技术细节
+                      Technical details
                     </button>
                     {errorExpanded && (
                       <div className="space-y-2 font-mono text-xs text-foreground-tertiary">
@@ -202,7 +216,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
                 ) : (
                   !jobQuery.isLoading && (
                     <p className="text-sm text-foreground-secondary whitespace-pre-wrap break-words">
-                      {lines.filter((l) => l.isError).slice(-1)[0]?.text ?? '任务失败，无更多错误信息。'}
+                      {lines.filter((l) => l.isError).slice(-1)[0]?.text ?? 'Job failed with no further details.'}
                     </p>
                   )
                 )}
