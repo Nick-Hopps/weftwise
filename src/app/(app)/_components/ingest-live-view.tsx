@@ -541,6 +541,7 @@ function IngestGraph({
 }) {
   const hub = { x: 50, y: 47 };
   const activeIdx = nodes.length - 1;
+  const running = !done && !failed;
 
   return (
     <div className="absolute inset-0 overflow-hidden">
@@ -583,19 +584,25 @@ function IngestGraph({
         className="absolute inset-0 h-full w-full"
         aria-hidden
       >
-        {nodes.map((n, i) => (
-          <line
-            key={n.label}
-            x1={hub.x}
-            y1={hub.y}
-            x2={n.x}
-            y2={n.y}
-            stroke={i === activeIdx && !done ? 'rgb(var(--color-accent-primary))' : 'rgb(var(--color-graph-edge))'}
-            strokeWidth={i === activeIdx && !done ? 2 : 1.5}
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
+        {nodes.map((n, i) => {
+          const isActive = i === activeIdx && running;
+          return (
+            <line
+              key={n.label}
+              x1={hub.x}
+              y1={hub.y}
+              x2={n.x}
+              y2={n.y}
+              // While running every edge marches a dashed flow outward
+              // (hub → page); on completion they settle into solid lines.
+              className={cn(running && 'ig-edge-flow')}
+              stroke={isActive ? 'rgb(var(--color-accent-primary))' : 'rgb(var(--color-graph-edge))'}
+              strokeWidth={isActive ? 2 : 1.5}
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          );
+        })}
       </svg>
 
       {/* hub (the source) */}
@@ -603,8 +610,26 @@ function IngestGraph({
         className="absolute z-[1] -translate-x-1/2 -translate-y-1/2"
         style={{ left: `${hub.x}%`, top: `${hub.y}%` }}
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-graph-node-border bg-graph-node text-accent-fg shadow-sm">
-          <Sparkles className="h-3.5 w-3.5" />
+        <span className="relative flex">
+          {/* sonar pulses behind the hub while working (centered via
+           *  inset-0 + m-auto so the scale animation can own `transform`). */}
+          {running && (
+            <>
+              <span className="ig-hub-pulse absolute inset-0 m-auto h-14 w-14 rounded-full bg-accent/25" />
+              <span
+                className="ig-hub-pulse absolute inset-0 m-auto h-14 w-14 rounded-full bg-accent/25"
+                style={{ animationDelay: '1s' }}
+              />
+            </>
+          )}
+          <span
+            className={cn(
+              'relative flex h-14 w-14 items-center justify-center rounded-full border-2 border-graph-node-border bg-graph-node text-accent-fg shadow-md',
+              running && 'ig-breathe',
+            )}
+          >
+            <Sparkles className="h-7 w-7" />
+          </span>
         </span>
       </div>
 
@@ -617,25 +642,26 @@ function IngestGraph({
             className="absolute z-[1] -translate-x-1/2 -translate-y-1/2"
             style={{ left: `${n.x}%`, top: `${n.y}%` }}
           >
-            <div className="ig-pop flex flex-col items-center gap-1">
-              <span className="relative inline-flex">
-                {active && (
-                  <span className="ig-ring absolute -inset-0.5 rounded-full border-2 border-accent/50" />
-                )}
-                <span
-                  className={cn(
-                    'relative h-3.5 w-3.5 rounded-full border-2 border-graph-node-border bg-graph-node',
-                    active && 'ring-4 ring-accent/20',
-                  )}
-                />
-              </span>
+            {/* 圆点本身作为居中锚点（与连线落在 n.x/n.y 的终点对齐）；
+             *  标签绝对定位浮在点正下方、脱离文档流，避免把圆点挤出连线
+             *  ——这正是 hub 能对齐的原因。*/}
+            <span className="ig-pop relative inline-flex">
+              {active && (
+                <span className="ig-ring absolute -inset-1.5 rounded-full border-2 border-accent/50" />
+              )}
               <span
-                className="max-w-[120px] truncate font-mono text-[10px] font-semibold text-graph-label"
+                className={cn(
+                  'relative h-7 w-7 rounded-full border-2 border-graph-node-border bg-graph-node shadow-sm',
+                  active && 'ring-4 ring-accent/20',
+                )}
+              />
+              <span
+                className="pointer-events-none absolute left-1/2 top-[calc(100%+6px)] max-w-[120px] -translate-x-1/2 truncate font-mono text-[11px] font-semibold text-graph-label"
                 style={{ textShadow: '0 1px 2px rgb(var(--color-graph-canvas)), 0 0 4px rgb(var(--color-graph-canvas))' }}
               >
                 {n.label}
               </span>
-            </div>
+            </span>
           </div>
         );
       })}

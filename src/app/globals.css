@@ -468,6 +468,31 @@
 }
 .ig-ring { animation: ig-ring 1.1s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
 
+/* "Alive while working" cues for the source hub + edges. The hub gently
+ * breathes and emits expanding sonar rings; every edge gets a dashed flow that
+ * marches outward (hub → page) signalling data streaming to the pages. All are
+ * gated on the running state so the graph settles into a calm static state on
+ * completion. */
+@keyframes ig-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+}
+.ig-breathe { animation: ig-breathe 2.2s ease-in-out infinite; }
+
+@keyframes ig-hub-pulse {
+  0% { transform: scale(0.8); opacity: 0.55; }
+  100% { transform: scale(2.7); opacity: 0; }
+}
+.ig-hub-pulse { animation: ig-hub-pulse 2s cubic-bezier(0.16, 1, 0.3, 1) infinite; }
+
+@keyframes ig-edge-flow {
+  to { stroke-dashoffset: -8; }
+}
+.ig-edge-flow {
+  stroke-dasharray: 2 6;
+  animation: ig-edge-flow 0.85s linear infinite;
+}
+
 /* A soft accent highlight that sweeps left→right across a card while a job is
  * running — the "still working" cue on the ingest hero's running strip. The
  * host must be `position: relative; overflow: hidden`, and its content should
@@ -491,7 +516,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ig-blink, .ig-caret, .ig-pop, .ig-ring { animation: none !important; }
+  .ig-blink, .ig-caret, .ig-pop, .ig-ring,
+  .ig-breathe, .ig-hub-pulse { animation: none !important; }
+  .ig-edge-flow { animation: none !important; stroke-dasharray: none !important; }
   .ig-sheen::after { animation: none !important; display: none; }
 }
 
