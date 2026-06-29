@@ -5,6 +5,7 @@ import { getById as getSubjectById } from '@/server/db/repos/subjects-repo';
 import { getRawSourceContent } from '@/server/sources/source-store';
 import { analyzeHtmlSafety } from '@/server/sources/html-safety';
 import { SourceViewer } from '../../_components/source-viewer';
+import { decodeRouteSegment } from '@/lib/route-params';
 import type { PageSourceFormat } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
@@ -18,7 +19,8 @@ function formatFor(filename: string): PageSourceFormat {
 }
 
 export default async function SourcePage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const { id: rawId } = await params;
+  const id = decodeRouteSegment(rawId);
   const source = getSource(id);
   const subject = source ? getSubjectById(source.subjectId) : null;
 
