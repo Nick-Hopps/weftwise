@@ -45,7 +45,11 @@ You are given ONE page and a list of issues detected on it. Repair ONLY those is
 - Faithful editing: do not rewrite, summarise, reorder, or "improve" prose beyond what the issues require.
 - Only emit [[wikilinks]] whose target appears in the page roster below. Do not translate slugs, titles, wikilink targets, or code blocks.
 - Do not touch frontmatter — return body only. The system owns title/timestamps.
-- If you cannot fix the issues without risky changes, set proceed=false with a clear reason.`;
+- If you cannot fix the issues without risky changes, set proceed=false with a clear reason.
+
+## Wider context (read-only)
+- You may also be shown a **subject-wide health report** (all outstanding issues, grouped by page) and the **current content of related pages**. These are READ-ONLY — they exist only to help you understand cross-page issues. Always return ONLY the corrected body of the page under repair; never edit, or describe edits to, any other page.
+- For **contradiction**: when related pages are shown, use them to make THIS page consistent with the rest of the subject and faithful to the source material. If you still cannot tell which side is correct, set proceed=false.`;
 
 // ── User prompt builder ───────────────────────────────────────────────────────
 
@@ -54,6 +58,10 @@ export function buildFixPageUserPrompt(
   findings: { type: string; description: string; suggestedFix: string | null }[],
   roster: { slug: string; title: string }[],
   ctx: PromptContext,
+  extra?: {
+    subjectReport?: { slug: string; lines: string[] }[];
+    relatedPages?: { title: string; slug: string; body: string }[];
+  },
 ): string {
   const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
 
@@ -79,6 +87,26 @@ ${ctx.subject.description?.trim() ? `- **Description**: ${ctx.subject.descriptio
       ? roster.map((p) => `- [[${p.title}]] (slug: \`${p.slug}\`)`).join('\n')
       : '(no other pages in this subject)';
 
+  const reportSection =
+    extra?.subjectReport && extra.subjectReport.length > 0
+      ? `\n## Subject-wide health report (read-only context)\n` +
+        `These are ALL outstanding issues across this subject, grouped by page. Use this only to understand the bigger picture (e.g. another page references this one). You may ONLY edit the page under repair below — do NOT attempt to edit other pages.\n\n` +
+        extra.subjectReport
+          .map((p) => `### \`${p.slug}\`\n${p.lines.map((l) => `- ${l}`).join('\n')}`)
+          .join('\n\n') +
+        `\n`
+      : '';
+
+  const relatedSection =
+    extra?.relatedPages && extra.relatedPages.length > 0
+      ? `\n## Related pages (read-only — current content of pages your findings reference)\n` +
+        `Provided so you can reconcile cross-page issues (especially contradictions). Treat as reference only; do not copy wholesale and do not edit them.\n\n` +
+        extra.relatedPages
+          .map((p) => `### [[${p.title}]] (slug: \`${p.slug}\`)\n${p.body}`)
+          .join('\n\n') +
+        `\n`
+      : '';
+
   return `${languageDirective}${subjectSection}## Page under repair: [[${page.title}]] (slug: \`${page.slug}\`)
 
 ### Current body
@@ -86,7 +114,7 @@ ${page.body}
 
 ### Issues to repair on this page
 ${issuesSection}
-
+${reportSection}${relatedSection}
 ### Page roster (the ONLY valid wikilink targets in this subject)
 ${rosterSection}
 
