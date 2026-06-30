@@ -124,7 +124,7 @@ src/server/wiki/
 ├── relink.ts             # 改标题/重指引用 重写（纯函数）
 ├── split-plan.ts         # 拆分页 slug 派生 + 恰一主页（纯函数）
 ├── page-ops.ts           # 🆕 merge/split 执行内核（无 emit/enqueue，供 curate 复用）
-├── curate-plan.ts        # 🆕 策展纯函数：scope 扩展 / caps 截断 / seed 护栏
+├── curate-plan.ts        # 策展纯函数：expandScopeWithNeighbors + createCurateGuard（caps+seed+auto禁create+保护页）
 ├── revert.ts             # 还原 changeset 条目派生（纯函数，⑥）
 ├── history.ts            # 合成 HistoryEntry 时间线（纯函数，⑥）
 └── rebuild.ts            # vault → DB 全量重建
