@@ -126,7 +126,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
-| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选 `reenrich?(slug): Promise<{jobId:string}>` / `deletePage?(slug): Promise<{brokenBacklinks:string[]}>` / `createPage?(title, body?, tags?): Promise<{slug:string}>` 写能力——三者仅 query runner 注入，ingest agent 不可用）；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现 |
+| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选 `reenrich?(slug): Promise<{jobId:string}>` / `deletePage?(slug): Promise<{deletedSlug:string;brokenBacklinks:number}>` / `createPage?(input:{title:string;body:string;summary?:string;tags?:string[]}): Promise<{createdSlug:string}>` 写能力——三者仅 query runner 注入，ingest agent 不可用）；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现 |
 | `compile.ts` | `compileToolSet(toolDefs, ctx, opts?)` — 把 `ToolDef[]` + `ToolContext` 编译为 AI SDK 可用的工具对象；`synthesizeFinishTool(schema, capture)` — 合成 `finish` 收尾工具，使 planner/writer 能在工具循环末步产出结构化输出（组合路径收口）；`FINISH_TOOL_NAME` 常量 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
 | `builtin/wiki-search.ts` | `wiki.search` — 通过 `ToolContext.search` 做 FTS5 搜索（取代旧 `vault-search.ts`） |
