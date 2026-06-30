@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildQueryUserPrompt } from '../query-prompt';
+import { buildQueryUserPrompt, QUERY_AGENTIC_SYSTEM_PROMPT } from '../query-prompt';
 import type { PromptContext } from '../prompt-context';
 
 const ctxChinese: PromptContext = {
@@ -58,7 +58,6 @@ describe2('buildQueryUserPrompt – conversation history', () => {
 });
 
 import {
-  QUERY_AGENTIC_SYSTEM_PROMPT,
   buildAgenticUserContent,
 } from '../query-prompt';
 
@@ -94,5 +93,20 @@ describe('buildAgenticUserContent', () => {
   it('不传 currentPageSlug 时不含 hint', () => {
     const out = buildAgenticUserContent('问题', ctx);
     expect(out).not.toMatch(/currently viewing/i);
+  });
+});
+
+describe('QUERY_AGENTIC_SYSTEM_PROMPT - 写工具纪律', () => {
+  it('工具清单含 wiki_create / wiki_delete', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_create');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_delete');
+  });
+  it('删除段要求后续轮确认、禁止同轮删除', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Deleting a page/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/confirm/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/LATER turn|later turn/);
+  });
+  it('创建段存在', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Creating a page/i);
   });
 });

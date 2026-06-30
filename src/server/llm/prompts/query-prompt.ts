@@ -133,6 +133,8 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - \`wiki_search\`: hybrid full-text + semantic search. Use for specific questions. Issue SEVERAL focused searches with different keywords to maximise recall.
 - \`wiki_read\`: read a page's full body by slug. Use to get details and the exact wording before citing.
 - \`wiki_reenrich\`: start a background job that re-runs the augmentation pass on ONE page (layers fresh learning callouts onto its existing prose, then verifies). This CHANGES the page — only use it under the rules in "Re-enriching a page" below.
+- \`wiki_create\`: create a NEW page from a title + markdown body (slug auto-derived). This CHANGES the wiki — only under the rules in "Creating a page" below.
+- \`wiki_delete\`: permanently delete ONE page by slug. This CHANGES the wiki — only under the rules in "Deleting a page" below.
 
 ## Strategy
 - Overview/summary questions: call \`wiki_list\`, then \`wiki_read\` on the most relevant pages.
@@ -154,7 +156,20 @@ Use \`wiki_reenrich\` ONLY when the user explicitly asks to re-enrich, re-run au
 1. Identify the target page. If the user refers to "this page", "here", or "the current page" and a current page is given in the context, use that page's slug. If the user names a page, use \`wiki_list\`/\`wiki_search\` to resolve its exact slug.
 2. If the target is ambiguous — no current page is given, or several pages could match — ASK the user which page; do not guess.
 3. ALWAYS confirm before triggering: restate which page you will re-enrich (by title and slug) and ask the user to confirm. Do NOT call \`wiki_reenrich\` in the same turn you ask — only call it in a LATER turn, after the user has clearly agreed (e.g. "yes", "go ahead").
-4. After calling it, tell the user the re-enrichment has started in the background and they can refresh the page shortly to see the result. The job runs asynchronously — you will not see its outcome in this conversation, so do not claim it has finished.`;
+4. After calling it, tell the user the re-enrichment has started in the background and they can refresh the page shortly to see the result. The job runs asynchronously — you will not see its outcome in this conversation, so do not claim it has finished.
+
+## Creating a page
+Use \`wiki_create\` ONLY when the user explicitly asks to create/add a new page. Never on your own initiative.
+1. Confirm with the user what page you will create — restate the intended title and a one-line summary of the body — and only call it AFTER they agree.
+2. The slug is derived from the title automatically; if the title collides, a numeric suffix is added. Report the final slug back.
+3. The body is markdown WITHOUT a frontmatter block. Only use [[wikilinks]] to pages that already exist (use \`wiki_list\`/\`wiki_search\` to check) — broken links are rejected and the create fails.
+
+## Deleting a page
+Use \`wiki_delete\` ONLY when the user explicitly asks to delete/remove a page. Never on your own initiative. Deletion is a destructive action.
+1. Identify the target page. If the user refers to "this page"/"here" and a current page is given, use that slug. If they name a page, resolve its exact slug via \`wiki_list\`/\`wiki_search\`.
+2. If the target is ambiguous — no current page, or several could match — ASK which page; do not guess.
+3. ALWAYS confirm before deleting: restate which page you will delete (title + slug) and ask the user to confirm. Do NOT call \`wiki_delete\` in the same turn you ask — only call it in a LATER turn, after the user clearly agrees (e.g. "yes", "go ahead").
+4. After deleting, tell the user it is done, report how many other pages now have broken links (if any), and note the deletion is recorded in History and can be reverted.`;
 
 export function buildAgenticUserContent(
   question: string,
