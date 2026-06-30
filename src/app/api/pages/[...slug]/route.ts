@@ -14,6 +14,8 @@ import { buildWikiPath } from '@/server/wiki/page-identity';
 import { parseFrontmatter } from '@/server/wiki/frontmatter';
 import { rewriteBacklinkText } from '@/server/wiki/relink';
 import { enqueueEmbedIndex } from '@/server/services/embedding-service';
+import { validateDeleteTarget } from '@/server/services/page-write';
+import { executePageDelete } from '@/server/wiki/page-ops';
 import type { ChangesetEntry } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
@@ -22,8 +24,6 @@ const UpdatePageSchema = z.object({
   content: z.string().min(1),
   refreshReferences: z.boolean().optional(),
 });
-
-const PROTECTED_SYSTEM_PAGES = new Set(['index', 'log']);
 
 /**
  * GET /api/pages/<...slug>
@@ -178,28 +178,14 @@ export async function DELETE(
   const { slug: slugParts } = await params;
   const slug = slugParts.join('/');
 
-  if (PROTECTED_SYSTEM_PAGES.has(slug)) {
-    return NextResponse.json(
-      { error: `Cannot delete protected system page "${slug}" in any subject` },
-      { status: 400 },
-    );
-  }
-
   const existing = pagesRepo.getPageBySlug(subject.id, slug);
-  if (!existing) {
-    return NextResponse.json({ error: 'Page not found' }, { status: 404 });
+  const validationError = validateDeleteTarget(slug, existing);
+  if (validationError) {
+    return NextResponse.json({ error: validationError }, { status: existing ? 400 : 404 });
   }
 
-  const changeset = createChangeset(crypto.randomUUID(), subject, [
-    {
-      action: 'delete',
-      path: buildWikiPath(subject.slug, slug),
-      content: null,
-    },
-  ]);
-
-  await applyChangeset(changeset);
+  const { brokenBacklinks } = await executePageDelete(crypto.randomUUID(), subject, slug);
   // 删除后触发向量回填（prune 孤儿；未配置 embedding 时 no-op）
   enqueueEmbedIndex(subject.id);
-  return NextResponse.json({ ok: true, slug, subjectId: subject.id });
+  return NextResponse.json({ ok: true, slug, subjectId: subject.id, brokenBacklinks });
 }
