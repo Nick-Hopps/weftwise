@@ -47,4 +47,15 @@ describe('runCurateJob (tool-loop)', () => {
     expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('curate:complete', expect.stringMatching(/Nothing to curate/), expect.any(Object));
   });
+  it('auto（scope:pages）：seed 驱动 → 用户消息为 AUTOMATIC 模式', async () => {
+    // 2 个 seed 页保证 scope>=2 触发 LLM；getAllLinks 返回 [] → scope=seed
+    const emit = vi.fn();
+    await runCurateJob(job({ scope: 'pages', slugs: ['a', 'b'], subjectId: 's1' }), emit);
+    expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
+    const opts = (genMock.generateTextWithTools.mock.calls[0] as any[])[1];
+    const userMsg = String(opts.messages[0].content);
+    expect(userMsg).toMatch(/AUTOMATIC/);        // 证明 {auto:true} 传入 → seedSet!==null
+    expect(userMsg).toMatch(/do NOT create/i);   // auto 禁建页提示
+    expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.objectContaining({ scope: 'pages' }));
+  });
 });
