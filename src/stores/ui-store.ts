@@ -16,7 +16,7 @@ export interface PendingChatReference {
 export const SIDEBAR_WIDTH_MIN = 200;
 export const SIDEBAR_WIDTH_MAX = 400;
 export const SIDEBAR_WIDTH_DEFAULT = 240;
-export const CONTEXT_PANEL_WIDTH = 360;
+export const CONTEXT_PANEL_WIDTH = 460;
 
 export const GENERAL_SUBJECT_SLUG = 'general';
 export const SUBJECT_COOKIE_NAME = 'wiki_subject';
