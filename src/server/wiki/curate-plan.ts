@@ -2,6 +2,8 @@
  * 页面策展纯逻辑：scope 邻居扩展 + tool-loop 硬护栏。无 I/O，便于单测。
  */
 
+import { META_PAGE_SLUGS } from './page-identity';
+
 /**
  * 把受影响页 slug 集合扩展到其「本-subject 邻居」：
  *  - 反链源：指向 seed 的页（link.targetSlug ∈ seed）→ 加 link.sourceSlug
@@ -12,7 +14,7 @@ export function expandScopeWithNeighbors(
   seedSlugs: string[],
   links: { sourceSlug: string; targetSlug: string; targetSubjectId: string }[],
   subjectId: string,
-  metaSlugs: Set<string>,
+  metaSlugs: ReadonlySet<string>,
 ): string[] {
   const seed = new Set(seedSlugs);
   const out = new Set(seedSlugs);
@@ -45,8 +47,6 @@ export interface CurateGuard {
   totals(): { merge: number; split: number; delete: number; create: number; writes: number };
 }
 
-const GUARD_META = new Set(['index', 'log']);
-
 /**
  * 工具层硬护栏：caps 计数器 + seed 强制（auto） + auto 禁 create + 保护页。
  * seedSet=null = 手动全库（不限 scope，仍受 caps/保护页约束）。纯工厂，便于单测。
@@ -58,19 +58,19 @@ export function createCurateGuard(opts: { seedSet: Set<string> | null; caps: Cur
   return {
     canMerge(a, b) {
       if (a === b) return { ok: false, reason: 'cannot merge a page with itself' };
-      if (GUARD_META.has(a) || GUARD_META.has(b)) return { ok: false, reason: 'cannot merge a protected page (index/log)' };
+      if (META_PAGE_SLUGS.has(a) || META_PAGE_SLUGS.has(b)) return { ok: false, reason: 'cannot merge a protected page (index/log)' };
       if (counts.merge >= caps.merge) return { ok: false, reason: `reached the limit of ${caps.merge} merges` };
       if (!seedOk(a) && !seedOk(b)) return { ok: false, reason: 'merge must involve a changed page in this run' };
       return { ok: true };
     },
     canSplit(slug) {
-      if (GUARD_META.has(slug)) return { ok: false, reason: 'cannot split a protected page (index/log)' };
+      if (META_PAGE_SLUGS.has(slug)) return { ok: false, reason: 'cannot split a protected page (index/log)' };
       if (counts.split >= caps.split) return { ok: false, reason: `reached the limit of ${caps.split} splits` };
       if (!seedOk(slug)) return { ok: false, reason: 'split must involve a changed page in this run' };
       return { ok: true };
     },
     canDelete(slug) {
-      if (GUARD_META.has(slug)) return { ok: false, reason: 'cannot delete a protected page (index/log)' };
+      if (META_PAGE_SLUGS.has(slug)) return { ok: false, reason: 'cannot delete a protected page (index/log)' };
       if (counts.delete >= caps.delete) return { ok: false, reason: `reached the limit of ${caps.delete} deletes` };
       if (!seedOk(slug)) return { ok: false, reason: 'delete must involve a changed page in this run' };
       return { ok: true };
