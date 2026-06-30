@@ -1,7 +1,7 @@
 /**
- * 页面结构操作执行层（merge / split）。
+ * 页面结构操作执行层（merge / split / delete / create）。
  * 把「LLM 生成内容 → 确定性拼装 frontmatter → relink 重链 → 单事务 Saga」抽成纯函数，
- * 供 merge/split 任务包装层与 curate（页面策展）service 复用。
+ * 供 merge/split/delete/create 任务包装层与 curate（页面策展）service、对话工具等复用。
  * 本层不 emit 事件、不触发向量回填——由调用方按各自语义处理。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
@@ -183,6 +183,7 @@ export async function executePageDelete(
   subject: Subject,
   slug: string,
 ): Promise<{ deletedSlug: string; brokenBacklinks: number }> {
+  // getBacklinks 已排除 meta 源页（pages-repo 内部过滤），故 brokenBacklinks 仅计内容页的入站链接。
   const brokenBacklinks = pagesRepo
     .getBacklinks(subject.id, slug)
     .filter((b) => b.slug !== slug).length;
