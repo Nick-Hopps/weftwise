@@ -36,3 +36,18 @@ describe('tool-activity - wiki_create/wiki_delete', () => {
     expect(summarizeToolArgs('wiki_delete', { slug: 'eigen' })).toBe('eigen');
   });
 });
+
+describe('tool-activity - wiki_merge/wiki_split', () => {
+  it('图标', () => {
+    expect(toolActivityIcon('wiki_merge')).toBe('🔗');
+    expect(toolActivityIcon('wiki_split')).toBe('✂️');
+  });
+  it('动词', () => {
+    expect(toolActivityVerb('wiki_merge')).toBe('Merging');
+    expect(toolActivityVerb('wiki_split')).toBe('Splitting');
+  });
+  it('参数摘要：merge=source→target，split=slug', () => {
+    expect(summarizeToolArgs('wiki_merge', { targetSlug: 'a', sourceSlug: 'b' })).toBe('b → a');
+    expect(summarizeToolArgs('wiki_split', { slug: 'a' })).toBe('a');
+  });
+});
