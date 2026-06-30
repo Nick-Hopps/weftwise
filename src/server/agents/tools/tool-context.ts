@@ -18,6 +18,11 @@ export interface ToolContext {
   emit?(type: string, message: string, data?: Record<string, unknown>): void;
   /** query 侧触发 re-enrich 任务（入队）；ingest 不传 → 工具在 ingest 中调用会优雅报错。 */
   reenrich?(slug: string): Promise<{ jobId: string }>;
+  /** query 侧同步删除一页（Saga）；ingest 不传 → 工具在 ingest 中调用会优雅报错。 */
+  deletePage?(slug: string): Promise<{ deletedSlug: string; brokenBacklinks: number }>;
+  /** query 侧同步新建一页（Saga）；ingest 不传。 */
+  createPage?(input: { title: string; body: string; summary?: string; tags?: string[] }):
+    Promise<{ createdSlug: string }>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
   agent?: AgentContext;
 }
