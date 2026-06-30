@@ -79,22 +79,26 @@ worker-entry.ts
 
 ### `curate-service.ts` 🆕 — 任务类型 `'curate'`
 
-Agent 驱动的 subject 结构策展（merge/split 内化）。`params { subjectId, scope: 'subject'|'pages', touchedSlugs? }`。
+**Tool-loop 驱动**的 subject 结构策展。`params { scope: 'pages'|'subject'; slugs?: string[]; subjectId }`。
 
-**流程（三阶段）**：
+**流程**：
 
-1. **triage**：读取本 subject 全量页面元数据（title/summary/tags/slug），单次 `generateStructuredOutput('curate', CurateTriageSchema)` 产出候选 merge 对（A+B）+ 候选 split 页清单，附理由。
-2. **confirm（逐候选）**：读取候选页完整正文，对 merge 候选调 `generateStructuredOutput('curate', CurateMergeConfirmSchema)`，对 split 候选调 `generateStructuredOutput('curate', CurateSplitConfirmSchema)`，产出 go/no-go 决策（no-go 发 `curate:skip` 带理由）。
-3. **execute（逐候选）**：go 的候选复用 `wiki/page-ops.ts::executePageMerge` / `executePageSplit`（不含 emit / embed enqueue —— curate-service 自持）；执行失败单候选发 `curate:warn` 并继续其余候选，不中止整体任务。
+1. 解析 scope + seedSet：`scope:'pages'`（auto）→ seed = params.slugs，再用 `expandScopeWithNeighbors` 扩展本-subject 邻居；`scope:'subject'`（manual）→ 全 subject 非 meta 页，seedSet=null（无 seed 过滤）。
+2. 读取 scope 内每页元数据（slug/title/summary/tags/bodyChars，不喂正文——模型用 `wiki.read` 自取）。
+3. 装配 `createCurateGuard`（硬护栏）+ `buildCurateToolContext(subject, { guard, jobId, emit })`（worker 侧读写 ToolContext）+ `compileToolSet(curateToolDefs, ctx)`（七工具：`wiki.read/search/list/merge/split/delete/create`）。
+4. 调 `generateTextWithTools('curate', { system: CURATE_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: 40 })` 驱动工具循环；模型自驱读页、自行决策并调写工具；每次写工具调用经 guard 鉴权后调 page-ops 内核 + emit 事件。
+5. guard.totals() 非零则 enqueue embed-index。
 
-**护栏**：
-- `applyDecisionCaps`：merge≤5 / split≤5，超出截断并警告。
-- `scope:'pages'`（auto，由 ingest finalize 在 `agentAutoCurate=true` 时自动入队）：执行阶段每个候选必须至少涉及一个 `touchedSlugs` 中的页（`restrictToSeed`），否则跳过；防止自动策展无边界扩散。
-- `scope:'subject'`（manual，Health 页 "Tidy structure" 按钮）：整个 subject 无 seed 过滤。
+**护栏（`createCurateGuard`，`wiki/curate-plan.ts`）**：
+- caps 计数器：merge≤5 / split≤5 / delete≤5 / create≤5；超限时工具返回 ok:false + reason，模型物理越不过。
+- seed 强制（auto）：merge/split/delete 必须涉及至少一个 seed 页；防止自动策展无边界扩散。
+- auto 禁 create：`seedSet !== null` 时 canCreate → ok:false（`wiki.create` 仅 manual 全库模式可用）。
+- 保护页：index/log 不可 merge/split/delete。
 
-**事件**：`curate:start` / `curate:plan`（triage 结果）/ `curate:merge`（merge 执行成功）/ `curate:split`（split 执行成功）/ `curate:skip`（confirm no-go）/ `curate:warn`（执行失败）/ `curate:complete`。
+**事件**：`curate:start` / `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
 
-> merge/split 的 LLM 调用与 Saga 执行已抽取至 `wiki/page-ops.ts`，curate-service 与未来其他调用方均可复用；curate-service 自己只负责编排与 emit。
+**`curate-tools.ts`**（新增）— worker 侧 `ToolContext` 构造：
+- `buildCurateToolContext(subject, { guard, jobId, emit })` — 只读走已提交 vault（`readPageInSubject`）+ 混合检索（`hybridRankSlugs`）+ 列举（过滤 meta，上限200）；写能力（merge/split/delete/create）各先过 `CurateGuard`，allow → 调 `page-ops` 内核 → `guard.record` → emit 事件；deny → emit `curate:skip` + 抛错（工具层 catch 成 ok:false，reason 透传模型）。
 
 ### `fix-service.ts` 🆕 — 任务类型 `'fix'`
 
@@ -184,7 +188,8 @@ src/server/services/
 ├── query-tools.ts       # 🆕 subject-scoped 工具 ToolContext（wiki.read/search/list + wiki.reenrich 触发能力）+ AccessedPages + subjectHasContent
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
-├── curate-service.ts    # 🆕 agent 策展（curate 任务：triage→confirm→execute，复用 page-ops）
+├── curate-service.ts    # 🆕 agent 策展（curate 任务：tool-loop 驱动，generateTextWithTools + buildCurateToolContext + CurateGuard）
+├── curate-tools.ts      # 🆕 worker 侧 ToolContext：buildCurateToolContext（只读 vault + 写能力经 guard 把守）
 ├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2）
 ├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / partitionFindings
 ├── reenrich-enqueue.ts  # 🆕 纯函数 validateReenrichTarget + enqueueReenrich 入队 helper（供对话工具触发）
@@ -217,6 +222,7 @@ src/server/services/
 | 2026-06-28 | 对话触发 Re-enrich：新增 `reenrich-enqueue.ts`（纯函数 `validateReenrichTarget` + `enqueueReenrich` 入队 helper，供 `wiki.reenrich` 对话工具触发）；`query-tools.ts::buildQueryToolContext` 新增 `reenrich` 能力（注入来自 `enqueueReenrich`）；删除 `/api/re-enrich` 路由（入口改为对话工具） |
 | 2026-06-27 | Cognitive Lens：新增 `reshape-service.ts`（`reshapePageBody` 整页重塑——`streamTextResponse` 收全文→`checkLinkSubset` 保真→失败重写一次→二次失败回落 canonical；`reshapeSection` 段级）+ `apply-signal.ts`（信号→最近窗口→`applySignalsToStyle` reducer→达阈值才 upsert 画像并自增 version）。均为读侧，不写 vault/不经 Saga |
 | 2026-06-30 | 新增 `page-write.ts`（`validateDeleteTarget` 删除守卫单一真实源 + `deletePageInSubject`/`createPageInSubject`，同步 Saga+embed 回填，供 DELETE 路由 DRY 复用与 `wiki.delete`/`wiki.create` 对话工具复用） |
+| 2026-06-30 | `curate-service` 由 triage→confirm→execute 结构化流水线改造为 tool-loop 驱动：`generateTextWithTools('curate')` + `buildCurateToolContext` + `createCurateGuard` 硬护栏；新增 `curate-tools.ts`（worker 侧 ToolContext，读已提交 vault + 写能力经 guard 鉴权后调 page-ops 内核 + emit 事件）；退休 triage/confirm 三套 schema+prompt |
 
 ---
 

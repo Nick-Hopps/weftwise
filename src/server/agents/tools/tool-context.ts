@@ -23,6 +23,12 @@ export interface ToolContext {
   /** query 侧同步新建一页（Saga）；ingest 不传。 */
   createPage?(input: { title: string; body: string; summary?: string; tags?: string[] }):
     Promise<{ createdSlug: string }>;
+  /** curate 侧合并两页（Saga）；仅 worker curate runner 注入。 */
+  mergePages?(targetSlug: string, sourceSlug: string):
+    Promise<{ mergedSlug: string; deletedSlug: string; referencesRepointed: number }>;
+  /** curate 侧拆分一页（Saga）；仅 worker curate runner 注入。 */
+  splitPage?(slug: string, hint?: string):
+    Promise<{ primarySlug: string; pageSlugs: string[]; referencesRepointed: number }>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
   agent?: AgentContext;
 }

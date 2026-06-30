@@ -30,7 +30,7 @@ export interface SkillTemplate {
 }
 
 export type ToolSource = 'builtin' | 'dispatch';
-export type ToolSideEffect = 'none' | 'commit' | 'enqueue' | 'destructive' | 'create';
+export type ToolSideEffect = 'none' | 'commit' | 'enqueue' | 'destructive' | 'create' | 'merge' | 'split';
 
 export interface ToolDef<I = unknown, O = unknown> {
   name: string;
