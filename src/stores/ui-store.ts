@@ -29,7 +29,6 @@ interface UIState {
   contextPanelOpen: boolean;
   contextPanelTab: ContextPanelTab;
 
-  activePageSlug: string | null;
   commandPaletteOpen: boolean;
   darkMode: boolean;
   settingsDialogOpen: boolean;
@@ -47,7 +46,8 @@ interface UIState {
   currentSubjectSlug: string;
 
   currentConversationId: string | null;
-  setCurrentConversation: (id: string | null) => void;
+  /** subjectId -> 该 subject 上次打开的可记忆路径（仅 pathname）。*/
+  lastPageBySubject: Record<string, string>;
 
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
@@ -60,13 +60,16 @@ interface UIState {
   closeContextPanel: () => void;
   setContextPanelTab: (tab: ContextPanelTab) => void;
 
-  setActivePageSlug: (slug: string | null) => void;
   toggleCommandPalette: () => void;
   toggleDarkMode: () => void;
   openSettingsDialog: () => void;
   closeSettingsDialog: () => void;
   openSubjectDialog: (args: { mode: 'create' } | { mode: 'edit'; subjectId: string }) => void;
   closeSubjectDialog: () => void;
+
+  setCurrentConversation: (id: string | null) => void;
+  /** 记录某 subject 的上次页面（调用方已用 isRememberablePath 判定）。*/
+  rememberPage: (subjectId: string, path: string) => void;
 
   /** 选中正文文本点「追问」：写入信箱并打开 chat tab。 */
   askAboutSelection: (payload: { section: string | null; text: string }) => void;
@@ -92,12 +95,13 @@ function syncSubjectCookie(slug: string): void {
   document.cookie = `${SUBJECT_COOKIE_NAME}=${encodeURIComponent(slug)}; path=/; SameSite=Lax; max-age=31536000`;
 }
 
-// Persist migration: v1 → v2 → v3 → v4 → v5.
+// Persist migration: v1 → v2 → v3 → v4 → v5 → v6.
 // v1: rightPanelOpen/chatOpen/rightPanelWidth
 // v2: contextPanelOpen/contextPanelTab/contextPanelWidth
 // v3: drops contextPanelWidth (right panel is now fixed), adds sidebarWidth.
 // v4: adds currentSubjectId/currentSubjectSlug for first-class subjects.
 // v5: adds currentConversationId (reset on subject change).
+// v6: adds lastPageBySubject (per-subject 上次打开的页面，跨刷新恢复)。
 interface LegacyPersistedState {
   darkMode?: boolean;
   rightPanelOpen?: boolean;
@@ -110,6 +114,7 @@ interface LegacyPersistedState {
   currentSubjectId?: string | null;
   currentSubjectSlug?: string;
   currentConversationId?: string | null;
+  lastPageBySubject?: Record<string, string>;
 }
 
 function migratePersisted(persisted: unknown, version: number) {
@@ -128,6 +133,7 @@ function migratePersisted(persisted: unknown, version: number) {
       currentSubjectId: prev.currentSubjectId ?? null,
       currentSubjectSlug: prev.currentSubjectSlug ?? GENERAL_SUBJECT_SLUG,
       currentConversationId: prev.currentConversationId ?? null,
+      lastPageBySubject: prev.lastPageBySubject ?? {},
     };
   }
 
@@ -181,7 +187,6 @@ export const useUIStore = create<UIState>()(
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       contextPanelOpen: false,
       contextPanelTab: 'context',
-      activePageSlug: null,
       commandPaletteOpen: false,
       darkMode: false,
       settingsDialogOpen: false,
@@ -190,6 +195,7 @@ export const useUIStore = create<UIState>()(
       currentSubjectId: null,
       currentSubjectSlug: GENERAL_SUBJECT_SLUG,
       currentConversationId: null,
+      lastPageBySubject: {},
 
       toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
       setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
@@ -204,7 +210,6 @@ export const useUIStore = create<UIState>()(
       closeContextPanel: () => set({ contextPanelOpen: false }),
       setContextPanelTab: (tab) => set({ contextPanelTab: tab }),
 
-      setActivePageSlug: (slug) => set({ activePageSlug: slug }),
       toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
       toggleDarkMode: () =>
         set((s) => {
@@ -242,6 +247,8 @@ export const useUIStore = create<UIState>()(
       },
 
       setCurrentConversation: (id) => set({ currentConversationId: id }),
+      rememberPage: (subjectId, path) =>
+        set((s) => ({ lastPageBySubject: { ...s.lastPageBySubject, [subjectId]: path } })),
 
       setCurrentSubject: (subject) => {
         set({
@@ -254,7 +261,7 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'ui-store',
-      version: 5,
+      version: 6,
       migrate: migratePersisted,
       partialize: (s) => ({
         darkMode: s.darkMode,
@@ -264,6 +271,7 @@ export const useUIStore = create<UIState>()(
         currentSubjectId: s.currentSubjectId,
         currentSubjectSlug: s.currentSubjectSlug,
         currentConversationId: s.currentConversationId,
+        lastPageBySubject: s.lastPageBySubject,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
