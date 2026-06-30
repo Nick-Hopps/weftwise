@@ -112,9 +112,9 @@ worker-entry.ts
 **流程（两阶段）**：
 
 1. **阶段1（确定性补 frontmatter）**：`fixMissingFrontmatter(slug, doc, now)` 纯函数批量填补缺失 frontmatter 字段（title/summary/tags/created），一次 Saga commit 提交所有受影响页（1 commit）。broken-link 在此阶段跳过（需 LLM 判断语义意图）。
-2. **阶段2（LLM 工具循环修复）**：对剩余 findings 按页分组→按 `buildSubjectReportLines` 格式组装诊断清单，调 `generateTextWithTools('fix', { system: FIX_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: 20 })`：
+2. **阶段2（LLM 工具循环修复）**：对剩余 findings 按页分组→按 `buildSubjectReportLines` 格式组装诊断清单，调 `generateTextWithTools('fix', { system: FIX_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: FIX_MAX_STEPS (60) })`：
    - 工具集（经 `createFixGuard` 把守）：`wiki.read` / `wiki.search` / `wiki.list`（读）+ `wiki.update` / `wiki.create`（写）。
-   - `createFixGuard({ caps: { writes: 10 } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `bodyShrankTooMuch`（需现有正文，护栏不读盘）。
+   - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `bodyShrankTooMuch`（需现有正文，护栏不读盘）。
    - 模型自驱读页后调 `wiki.update`（破损/缺引用）或 `wiki.create`（新页）；每次写操作一个 commit。
    - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
 

@@ -1,9 +1,12 @@
 /**
- * Fix service — 确定性修复纯函数 + findings 分桶。
- * 无 side effect（不触 DB / fs / LLM），便于单测。
- *   - missing-frontmatter → 确定性补齐必填字段。
- *   - broken-link / missing-crossref / contradiction → 交给 LLM 逐页修复（本文件只做分桶）。
- *   - orphan / stale-source / coverage-gap → 不修（ignored）。
+ * Fix service — fix 的纯函数（无 I/O）。
+ * - fixMissingFrontmatter() — 确定性补 frontmatter 必填字段。
+ * - partitionFindings() / buildFixWorklist() — findings 分桶/合并。
+ * - bodyShrankTooMuch() — 忠实度护栏。
+ * - buildSubjectReportLines() — 诊断清单渲染。
+ * - createFixGuard() — tool-loop 工具层硬护栏（写次数上限 + 保护页 + 忠实度门控）。
+ * broken-link / missing-crossref / contradiction 交给 **fix tool-loop** 修复（非逐页结构化输出）。
+ * orphan / stale-source / coverage-gap 不修。
  */
 import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
 import { META_PAGE_SLUGS } from '../wiki/page-identity';
