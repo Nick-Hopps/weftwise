@@ -192,7 +192,12 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const [pickerOpen, setPickerOpen] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   // Drop pinned references when navigating to a different page.
+  // 用 ref 守卫：仅在 slug 真正变化时清空，不在挂载时清——否则（含 React
+  // StrictMode dev 双挂载）会把刚通过选区信箱 pin 进来的引用误清掉。
+  const prevPageSlugRef = useRef(currentPageSlug);
   useEffect(() => {
+    if (prevPageSlugRef.current === currentPageSlug) return;
+    prevPageSlugRef.current = currentPageSlug;
     setRefs([]);
     setPickerOpen(false);
   }, [currentPageSlug]);
