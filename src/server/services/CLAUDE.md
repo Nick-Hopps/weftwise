@@ -85,15 +85,15 @@ worker-entry.ts
 
 1. 解析 scope + seedSet：`scope:'pages'`（auto）→ seed = params.slugs，再用 `expandScopeWithNeighbors` 扩展本-subject 邻居；`scope:'subject'`（manual）→ 全 subject 非 meta 页，seedSet=null（无 seed 过滤）。
 2. 读取 scope 内每页元数据（slug/title/summary/tags/bodyChars，不喂正文——模型用 `wiki.read` 自取）。
-3. 装配 `createCurateGuard`（硬护栏）+ `buildCurateToolContext(subject, { guard, jobId, emit })`（worker 侧读写 ToolContext）+ `compileToolSet(curateToolDefs, ctx)`（七工具：`wiki.read/search/list/merge/split/delete/create`）。
+3. 装配 `createCurateGuard`（硬护栏）+ `buildCurateToolContext(subject, { guard, jobId, emit })`（worker 侧读写 ToolContext）+ `compileToolSet(...)`：manual 七工具 `wiki.read/search/list/merge/split/delete/create`；**auto 仅六工具，不解析 `wiki.create`**（按 `seedSet===null` 条件化 `resolve`，省得模型反复试探一个永远 ok:false 的工具）。
 4. 调 `generateTextWithTools('curate', { system: CURATE_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: 40 })` 驱动工具循环；模型自驱读页、自行决策并调写工具；每次写工具调用经 guard 鉴权后调 page-ops 内核 + emit 事件。
 5. guard.totals() 非零则 enqueue embed-index。
 
 **护栏（`createCurateGuard`，`wiki/curate-plan.ts`）**：
 - caps 计数器：merge≤5 / split≤5 / delete≤5 / create≤5；超限时工具返回 ok:false + reason，模型物理越不过。
 - seed 强制（auto）：merge/split/delete 必须涉及至少一个 seed 页；防止自动策展无边界扩散。
-- auto 禁 create：`seedSet !== null` 时 canCreate → ok:false（`wiki.create` 仅 manual 全库模式可用）。
-- 保护页：index/log 不可 merge/split/delete。
+- auto 禁 create：auto 模式（`seedSet !== null`）直接不解析 `wiki.create` 工具（模型见不到）；即便绕过，`guard.canCreate` 仍 ok:false 兜底（`wiki.create` 仅 manual 全库模式可用）。
+- 保护页：index/log 不可 merge/split/delete（slug 集合 = `page-identity::META_PAGE_SLUGS` 单一源）。
 
 **事件**：`curate:start` / `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
 
@@ -223,6 +223,7 @@ src/server/services/
 | 2026-06-27 | Cognitive Lens：新增 `reshape-service.ts`（`reshapePageBody` 整页重塑——`streamTextResponse` 收全文→`checkLinkSubset` 保真→失败重写一次→二次失败回落 canonical；`reshapeSection` 段级）+ `apply-signal.ts`（信号→最近窗口→`applySignalsToStyle` reducer→达阈值才 upsert 画像并自增 version）。均为读侧，不写 vault/不经 Saga |
 | 2026-06-30 | 新增 `page-write.ts`（`validateDeleteTarget` 删除守卫单一真实源 + `deletePageInSubject`/`createPageInSubject`，同步 Saga+embed 回填，供 DELETE 路由 DRY 复用与 `wiki.delete`/`wiki.create` 对话工具复用） |
 | 2026-06-30 | `curate-service` 由 triage→confirm→execute 结构化流水线改造为 tool-loop 驱动：`generateTextWithTools('curate')` + `buildCurateToolContext` + `createCurateGuard` 硬护栏；新增 `curate-tools.ts`（worker 侧 ToolContext，读已提交 vault + 写能力经 guard 鉴权后调 page-ops 内核 + emit 事件）；退休 triage/confirm 三套 schema+prompt |
+| 2026-06-30 | curate follow-up：auto 模式不再解析 `wiki.create` 工具（按 `seedSet===null` 条件化 `resolve`，省模型试探步数；`guard.canCreate` 仍兜底）；`['index','log']` 保护页常量统一为 `wiki/page-identity::META_PAGE_SLUGS` 单一源（`curate-service`/`page-write`/`lint-deterministic`/`reenrich-enqueue` 不再各持副本）|
 
 ---
 

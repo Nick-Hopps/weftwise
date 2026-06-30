@@ -14,8 +14,7 @@ import { scanWikiPages } from '../wiki/wiki-store';
 import { vaultPath } from '../config/env';
 import { parseFrontmatter, validateFrontmatter } from '../wiki/frontmatter';
 import type { LintFinding, Subject, WikiPage, WikiLink } from '@/lib/contracts';
-
-const ORPHAN_EXCLUDE_SLUGS = new Set(['index', 'log']);
+import { META_PAGE_SLUGS } from '../wiki/page-identity';
 
 export function runDeterministicChecksForSubject(subject: Subject): LintFinding[] {
   // 一次性取数后传给各 check，避免重复全表扫描：
@@ -90,7 +89,7 @@ function checkOrphanPages(
   }
 
   for (const page of allPages) {
-    if (ORPHAN_EXCLUDE_SLUGS.has(page.slug)) continue;
+    if (META_PAGE_SLUGS.has(page.slug)) continue;
     if ((page.tags ?? []).includes('meta')) continue;
     if (!inboundSlugs.has(page.slug)) {
       findings.push({

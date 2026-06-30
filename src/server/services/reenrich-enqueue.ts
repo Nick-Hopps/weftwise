@@ -4,15 +4,14 @@
  */
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as queue from '../jobs/queue';
-
-const META_SLUGS = new Set(['index', 'log']);
+import { META_PAGE_SLUGS } from '../wiki/page-identity';
 
 /** 纯校验：可入队返回 null，否则返回面向用户的错误消息。page=null 表示该 subject 下未找到。 */
 export function validateReenrichTarget(
   slug: string,
   page: { tags: string[] } | null,
 ): string | null {
-  if (META_SLUGS.has(slug)) return 'Cannot re-enrich a meta page (index/log).';
+  if (META_PAGE_SLUGS.has(slug)) return 'Cannot re-enrich a meta page (index/log).';
   if (!page) return `Page "${slug}" not found in this subject.`;
   if (page.tags.includes('meta')) return 'Cannot re-enrich a meta page.';
   return null;
