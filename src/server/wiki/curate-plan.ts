@@ -68,3 +68,68 @@ export function applyDecisionCaps(
     droppedSplits: triage.splits.length - splits.length,
   };
 }
+
+export interface CurateCaps {
+  merge: number;
+  split: number;
+  delete: number;
+  create: number;
+}
+
+export interface GuardDecision {
+  ok: boolean;
+  reason?: string;
+}
+
+export interface CurateGuard {
+  canMerge(aSlug: string, bSlug: string): GuardDecision;
+  canSplit(slug: string): GuardDecision;
+  canDelete(slug: string): GuardDecision;
+  canCreate(): GuardDecision;
+  record(op: 'merge' | 'split' | 'delete' | 'create'): void;
+  totals(): { merge: number; split: number; delete: number; create: number; writes: number };
+}
+
+const GUARD_META = new Set(['index', 'log']);
+
+/**
+ * 工具层硬护栏：caps 计数器 + seed 强制（auto） + auto 禁 create + 保护页。
+ * seedSet=null = 手动全库（不限 scope，仍受 caps/保护页约束）。纯工厂，便于单测。
+ */
+export function createCurateGuard(opts: { seedSet: Set<string> | null; caps: CurateCaps }): CurateGuard {
+  const { seedSet, caps } = opts;
+  const counts = { merge: 0, split: 0, delete: 0, create: 0 };
+  const seedOk = (slug: string) => seedSet === null || seedSet.has(slug);
+  return {
+    canMerge(a, b) {
+      if (a === b) return { ok: false, reason: 'cannot merge a page with itself' };
+      if (GUARD_META.has(a) || GUARD_META.has(b)) return { ok: false, reason: 'cannot merge a protected page (index/log)' };
+      if (counts.merge >= caps.merge) return { ok: false, reason: `reached the limit of ${caps.merge} merges` };
+      if (!seedOk(a) && !seedOk(b)) return { ok: false, reason: 'merge must involve a changed page in this run' };
+      return { ok: true };
+    },
+    canSplit(slug) {
+      if (GUARD_META.has(slug)) return { ok: false, reason: 'cannot split a protected page (index/log)' };
+      if (counts.split >= caps.split) return { ok: false, reason: `reached the limit of ${caps.split} splits` };
+      if (!seedOk(slug)) return { ok: false, reason: 'split must involve a changed page in this run' };
+      return { ok: true };
+    },
+    canDelete(slug) {
+      if (GUARD_META.has(slug)) return { ok: false, reason: 'cannot delete a protected page (index/log)' };
+      if (counts.delete >= caps.delete) return { ok: false, reason: `reached the limit of ${caps.delete} deletes` };
+      if (!seedOk(slug)) return { ok: false, reason: 'delete must involve a changed page in this run' };
+      return { ok: true };
+    },
+    canCreate() {
+      if (seedSet !== null) return { ok: false, reason: 'creating new pages is only allowed in manual curation' };
+      if (counts.create >= caps.create) return { ok: false, reason: `reached the limit of ${caps.create} creates` };
+      return { ok: true };
+    },
+    record(op) {
+      counts[op] += 1;
+    },
+    totals() {
+      return { ...counts, writes: counts.merge + counts.split + counts.delete + counts.create };
+    },
+  };
+}
