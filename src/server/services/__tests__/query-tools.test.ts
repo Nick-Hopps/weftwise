@@ -22,6 +22,13 @@ vi.mock('@/server/jobs/queue', () => ({
   enqueue: (...a: unknown[]) => mockEnqueue(...a),
 }));
 
+const mockDeletePage = vi.fn();
+const mockCreatePage = vi.fn();
+vi.mock('../page-write', () => ({
+  deletePageInSubject: (...a: unknown[]) => mockDeletePage(...a),
+  createPageInSubject: (...a: unknown[]) => mockCreatePage(...a),
+}));
+
 import {
   buildQueryToolContext,
   createAccessedPages,
@@ -194,5 +201,27 @@ describe('buildQueryToolContext - reenrich', () => {
     const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
     await expect(ctx.reenrich!('index')).rejects.toThrow(/meta/);
     expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildQueryToolContext - delete/create', () => {
+  beforeEach(() => {
+    mockDeletePage.mockReset();
+    mockCreatePage.mockReset();
+  });
+  it('deletePage 委托 deletePageInSubject(subject, slug)', async () => {
+    mockDeletePage.mockResolvedValue({ deletedSlug: 'eigen', brokenBacklinks: 1 });
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    const out = await ctx.deletePage!('eigen');
+    expect(mockDeletePage).toHaveBeenCalledWith(SUBJECT, 'eigen');
+    expect(out).toEqual({ deletedSlug: 'eigen', brokenBacklinks: 1 });
+  });
+  it('createPage 委托 createPageInSubject(subject, input)', async () => {
+    mockCreatePage.mockResolvedValue({ createdSlug: 'foo' });
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    const input = { title: 'Foo', body: 'x' };
+    const out = await ctx.createPage!(input);
+    expect(mockCreatePage).toHaveBeenCalledWith(SUBJECT, input);
+    expect(out).toEqual({ createdSlug: 'foo' });
   });
 });
