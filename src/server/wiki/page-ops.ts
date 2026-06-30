@@ -8,7 +8,7 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { readPageInSubject } from './wiki-store';
 import { serializeWikiDocument } from './markdown';
 import { serializeFrontmatter, stampSystemFrontmatter } from './frontmatter';
-import { buildWikiPath } from './page-identity';
+import { buildWikiPath, deriveUniqueSlug } from './page-identity';
 import { repointLinksToPage } from './relink';
 import { planSplitPages } from './split-plan';
 import { createChangeset, validateChangeset, applyChangeset } from './wiki-transaction';
@@ -171,4 +171,64 @@ export async function executePageSplit(
   await applyChangeset(changeset);
 
   return { sourceSlug, pageSlugs: planned.map((p) => p.slug), primarySlug: primary.slug, referencesRepointed };
+}
+
+/**
+ * 删除一页：构造 delete changeset → validate → apply。
+ * 返回删除 slug + 删后变坏链的入站引用数（本 subject，排除自引用）。不 emit / 不 enqueue。
+ * 调用方需先校验目标合法（保护页/存在性，见 services/page-write.ts::validateDeleteTarget）。
+ */
+export async function executePageDelete(
+  jobId: string,
+  subject: Subject,
+  slug: string,
+): Promise<{ deletedSlug: string; brokenBacklinks: number }> {
+  const brokenBacklinks = pagesRepo
+    .getBacklinks(subject.id, slug)
+    .filter((b) => b.slug !== slug).length;
+
+  const entries: ChangesetEntry[] = [
+    { action: 'delete', path: buildWikiPath(subject.slug, slug), content: null },
+  ];
+  const changeset = createChangeset(jobId, subject, entries);
+  const validation = validateChangeset(changeset);
+  if (!validation.valid) throw new Error(`delete changeset invalid: ${validation.errors.join('; ')}`);
+  await applyChangeset(changeset);
+
+  return { deletedSlug: slug, brokenBacklinks };
+}
+
+/**
+ * 新建一页：title 派生唯一 slug（`deriveUniqueSlug`，排除本 subject 已有 slug）→ 确定性拼
+ * frontmatter（系统拥有 created/updated/sources）→ create changeset → validate（拦坏链）→ apply。
+ * 不 emit / 不 enqueue。
+ */
+export async function executePageCreate(
+  jobId: string,
+  subject: Subject,
+  input: { title: string; body: string; summary?: string; tags?: string[] },
+): Promise<{ createdSlug: string }> {
+  const existing = new Set(pagesRepo.getAllPages(subject.id).map((p) => p.slug));
+  const slug = deriveUniqueSlug(input.title, existing);
+
+  const now = new Date().toISOString();
+  const frontmatter: WikiFrontmatter = {
+    title: input.title,
+    created: now,
+    updated: now,
+    tags: input.tags ?? [],
+    sources: [],
+    ...(input.summary !== undefined ? { summary: input.summary } : {}),
+  };
+  const content = serializeFrontmatter(frontmatter, input.body);
+
+  const entries: ChangesetEntry[] = [
+    { action: 'create', path: buildWikiPath(subject.slug, slug), content },
+  ];
+  const changeset = createChangeset(jobId, subject, entries);
+  const validation = validateChangeset(changeset);
+  if (!validation.valid) throw new Error(`create changeset invalid: ${validation.errors.join('; ')}`);
+  await applyChangeset(changeset);
+
+  return { createdSlug: slug };
 }
