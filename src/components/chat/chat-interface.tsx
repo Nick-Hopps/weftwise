@@ -148,6 +148,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const queryClient = useQueryClient();
   const currentConversationId = useUIStore((s) => s.currentConversationId);
   const setCurrentConversation = useUIStore((s) => s.setCurrentConversation);
+  const pendingChatReference = useUIStore((s) => s.pendingChatReference);
+  const consumePendingChatReference = useUIStore((s) => s.consumePendingChatReference);
   const apiFetchClient = useApiFetch();
 
   // Derive the currently-open wiki page slug from the route so that questions
@@ -194,6 +196,21 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     setRefs([]);
     setPickerOpen(false);
   }, [currentPageSlug]);
+
+  // 选中正文文本点「Ask AI」→ ui-store 信箱 → 这里 pin 进引用并聚焦。
+  // 仅 embedded（右侧面板）变体消费，避免命令面板等其它实例抢占。
+  useEffect(() => {
+    if (variant !== 'embedded') return;
+    if (!pendingChatReference) return;
+    const ref = consumePendingChatReference();
+    if (!ref) return;
+    setRefs((prev) =>
+      prev.some((x) => x.id === ref.id)
+        ? prev
+        : [...prev, { id: ref.id, section: ref.section ?? 'Selection', text: ref.text }],
+    );
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [variant, pendingChatReference, consumePendingChatReference]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
