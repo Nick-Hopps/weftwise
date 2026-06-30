@@ -45,6 +45,7 @@
 | `/api/jobs/[id]/events` | GET (SSE) | Server-Sent Events 流，供前端实时追踪任务进度；支持 `Last-Event-Id` 续播 |
 | `/api/pages` | GET | 列出 wiki 页面（按 `?subjectId` 过滤，排除 `meta` tag） |
 | `/api/pages/[...slug]` | GET | 读取单个页面（含 frontmatter、body、backlinks）；404 时返回 `otherSubjects: [{subjectId, slug, title}]` 提示；响应含整文件 raw 字段（供编辑器加载）|
+| `/api/pages/[...slug]` | DELETE | 删除单个页面；DRY 复用 `services/page-write.ts::validateDeleteTarget`（守卫：`general`/`index`/`log` meta 页禁删，404 不存在）+ `executePageDelete`（Saga 事务 + embed 回填 enqueue）；响应附 `brokenBacklinks: string[]`（原来指向被删页的同-subject 链接，供调用方提示用户清理）|
 | `/api/pages/[...slug]` | PUT | 改整文件 markdown（Saga 重索引）。若 frontmatter 标题变化且 `refreshReferences`(默认 true)，同事务把本 subject 内以旧标题书写的 `[[Old Title]]` 引用重写为新标题（排除自引用页），返回 `referencesUpdated` 计数；slug/URL/文件不动 |
 | `/api/search` | GET | FTS5 全文搜索（`?q=...&subjectId=...`） |
 | `/api/graph` | GET | 返回图视图需要的节点 + 边数据（`?subjectId=...`） |
@@ -137,6 +138,7 @@ src/app/
 | 2026-06-27 | Cognitive Lens：新增 `GET /api/lens/[...slug]`（独立顶层路由——catch-all 不能内嵌；JSON 一次性响应，缓存优先，未配置/异常优雅回落 canonical，四态 source=cache/generated/canonical/fallback）+ `GET/PUT /api/profile`（画像读写，PUT 走 auth+csrf）+ `POST /api/profile/signals`（反馈信号，body 显式带 subjectId）；`DELETE /api/subjects/[id]` 删 subject 后清理其重塑缓存（`renditions-repo.deleteBySubject`）；新增 `middleware/user.ts::resolveUserId`（单租户占位，恒返回 'local'）|
 | 2026-06-28 | Subject 体验重做：`(app)/subjects/page.tsx` 改可点卡片+gear+空态；创建/编辑/删除迁到全局 `SubjectDialog`（`src/components/subjects/`），切换器 "New subject…" 改唤起弹窗（删 `?new=1`）。零 API 改动 |
 | 2026-06-29 | Subject 级联删除：`DELETE /api/subjects/[id]` 改为级联删除——`subjectsRepo.deleteWithContents(id)` 单事务清全部 subject-scoped 行 + `fs.rmSync` 删 vault `wiki\|raw\|.llm-wiki/sources/<slug>` + `commitVaultChanges`；守卫 `general`→409 `protected`、有入站跨主题引用→409 `has-inbound-refs`、不存在→404；移除旧 `deleteIfEmpty`/`renditions-repo` 调用。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
+| 2026-06-30 | `DELETE /api/pages/[...slug]` DRY 重构：改用 `services/page-write.ts::validateDeleteTarget`（守卫单一真实源）+ `executePageDelete`（Saga+embed 回填）；响应新增 `brokenBacklinks: string[]`（同-subject 内原指向被删页的链接，供 chat UI 提示清理）。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-agentic-wiki-write-tools* |
 
 ---
 

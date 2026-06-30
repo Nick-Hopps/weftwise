@@ -126,7 +126,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
-| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选 `reenrich?(slug): Promise<{jobId:string}>` 能力——仅 query runner 注入）；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现 |
+| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选 `reenrich?(slug): Promise<{jobId:string}>` / `deletePage?(slug): Promise<{brokenBacklinks:string[]}>` / `createPage?(title, body?, tags?): Promise<{slug:string}>` 写能力——三者仅 query runner 注入，ingest agent 不可用）；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现 |
 | `compile.ts` | `compileToolSet(toolDefs, ctx, opts?)` — 把 `ToolDef[]` + `ToolContext` 编译为 AI SDK 可用的工具对象；`synthesizeFinishTool(schema, capture)` — 合成 `finish` 收尾工具，使 planner/writer 能在工具循环末步产出结构化输出（组合路径收口）；`FINISH_TOOL_NAME` 常量 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
 | `builtin/wiki-search.ts` | `wiki.search` — 通过 `ToolContext.search` 做 FTS5 搜索（取代旧 `vault-search.ts`） |
@@ -260,6 +260,8 @@ src/server/agents/
         ├── commit-changeset.ts     # commit_changeset（薄包装 commitPending，已无 skill 引用）
         ├── dispatch-skill.ts       # dispatch_skill (fanout)
         ├── wiki-reenrich.ts        # wiki.reenrich（写动作工具，sideEffect:'enqueue'，仅对话循环调用）
+        ├── wiki-delete.ts          # 🆕 wiki.delete（写动作工具，sideEffect:'destructive'，需后续轮确认，仅 query runner）
+        ├── wiki-create.ts          # 🆕 wiki.create（写动作工具，sideEffect:'create'，仅 query runner）
         └── __tests__/
 ```
 
@@ -279,6 +281,7 @@ src/server/agents/
 | 2026-06-24 | 移除 MCP 功能（冗余死代码）：删除 `tools/mcp/`（config/transport/client-pool/tool-bridge）+ `mcp-config.json` + `@modelcontextprotocol/sdk` 依赖 + `agentMcpLifecycle` 设置（contracts/settings-repo/API/UI）。判定依据：agent-loop 仅解析 skill 显式声明的工具，而所有内置 skill 都不声明 `mcp.*`；且项目已主动放弃 tool-using agent（packyapi openai-compatible 工具死循环），MCP 工具永不可被调用。`ToolSource` union 去掉 `'mcp'` |
 | 2026-06-25 | 工具体系收敛：新增 `tool-context.ts`（`ToolContext` 接口）+ `compile.ts`（`compileToolSet`/`synthesizeFinishTool`/`FINISH_TOOL_NAME`）；`vault-read/vault-search` 重命名为 `wiki-read/wiki-search`，新增 `wiki-list`；`ToolDef` 统一吃 `ToolContext`；`createBuiltinToolRegistry()` 工厂进程无关化；组合路径（有 tools+有 schema→`finish` 收尾）/纯结构化路径（无 tools+有 schema→`generateObject`）分支明确 |
 | 2026-06-28 | 对话触发 Re-enrich：新增 `tools/builtin/wiki-reenrich.ts`（`wiki.reenrich` 写动作工具，`sideEffect:'enqueue'`，先确认后执行、fire-and-forget）；`tool-context.ts` 的 `ToolContext` 接口新增可选 `reenrich?(slug): Promise<{jobId:string}>` 能力（仅 query runner 注入，ingest agent 不可用）；`ToolDef.sideEffect` 联合类型扩展 `'enqueue'`；`builtin/` 文件清单补 `wiki-reenrich.ts` |
+| 2026-06-30 | 对话创建/删除：新增 `tools/builtin/wiki-delete.ts`（`wiki.delete`，`sideEffect:'destructive'`，系统提示规定须后续轮确认、禁同轮执行）+ `tools/builtin/wiki-create.ts`（`wiki.create`，`sideEffect:'create'`）；`ToolContext` 新增 `deletePage?`/`createPage?` 写能力（仅 query runner 注入）；`ToolDef.sideEffect` 联合类型扩展 `'destructive'`/`'create'`；query runner 解析并注入两工具 + 系统提示加写动作确认纪律 |
 | 2026-06-26 | 路由 key 统一：新增 `agent-loop::skillTaskKey(id)`（`ingest-planner`→`ingest:planner`），`resolveSkillModel` 改用之，task key 由 `skill:ingest-xxx` 改为 `ingest:xxx`（id/文件名不变）；配合移除内置 `ingest` task。文档修正：skill frontmatter 字段是 `model:`（非 `llm_override:`，schema `.strict()` 拒未知键）、router mode 值 `task-router-only`（非 `config-only`）|
 
 ---
