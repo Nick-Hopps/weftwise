@@ -74,68 +74,9 @@ export function buildFixWorklist(deterministic: LintFinding[], semantic: LintFin
   return out;
 }
 
-// ── 全局上下文：关联页提取 + 诊断报告分组（纯函数）────────────────────────────
+// ── 诊断报告分组（纯函数）────────────────────────────────────────────────────
 
-export const MAX_RELATED_PAGES = 4;
 export const REPORT_DESC_MAX = 200;
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-/**
- * 判断 haystack 是否提及 needle（大小写不敏感）。
- * - 纯 ASCII（英文 slug/title）：词边界整词匹配，连字符视为词内字符，
- *   避免 cat 命中 category、react 命中 react-hooks 内。
- * - 含非 ASCII（如中文）：无空格分词，词边界不适用，退化为子串匹配——
- *   关联页仅作只读上下文且 cap 到 MAX_RELATED_PAGES，子串误召无编辑副作用，可接受。
- */
-function mentions(haystack: string, needle: string): boolean {
-  const n = needle.trim();
-  if (n.length === 0) return false;
-  const escaped = escapeRegExp(n);
-  const re = /^[\x00-\x7F]+$/.test(n)
-    ? new RegExp(`(?:^|[^\\w-])${escaped}(?:[^\\w-]|$)`, 'i')
-    : new RegExp(escaped, 'i');
-  return re.test(haystack);
-}
-
-/**
- * 从本页各 finding 的描述文本里启发式提取"关联页"slug（用于注入对方页正文）。
- * 匹配 roster 中任一页的 slug 或 title（词边界、大小写不敏感），排除自身。
- * contradiction 兜底：本页有 contradiction 却没匹到任何关联页时，纳入 contradictionPageSlugs
- * （service 从整个 worklist 预计算的"带 contradiction finding 的全部页"集合，仍排除自身）。
- * 去重、按出现顺序稳定，最多 MAX_RELATED_PAGES 个。
- */
-export function findRelatedPageSlugs(
-  pageSlug: string,
-  findingsOnPage: { type: string; description: string; suggestedFix: string | null }[],
-  roster: { slug: string; title: string }[],
-  contradictionPageSlugs?: ReadonlySet<string>,
-): string[] {
-  const related: string[] = [];
-  const seen = new Set<string>();
-  const add = (slug: string) => {
-    if (slug === pageSlug || seen.has(slug)) return;
-    seen.add(slug);
-    related.push(slug);
-  };
-
-  for (const finding of findingsOnPage) {
-    const haystack = `${finding.description} ${finding.suggestedFix ?? ''}`;
-    for (const r of roster) {
-      if (r.slug === pageSlug) continue;
-      if (mentions(haystack, r.slug) || mentions(haystack, r.title)) add(r.slug);
-    }
-  }
-
-  const hasContradiction = findingsOnPage.some((f) => f.type === 'contradiction');
-  if (hasContradiction && related.length === 0 && contradictionPageSlugs) {
-    for (const slug of contradictionPageSlugs) add(slug);
-  }
-
-  return related.slice(0, MAX_RELATED_PAGES);
-}
 
 /**
  * 把整个工作清单按 pageSlug 分组成紧凑诊断报告数据（字符串渲染在 fix-prompt 层）。
