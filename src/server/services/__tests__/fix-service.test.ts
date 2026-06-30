@@ -14,7 +14,8 @@ vi.mock('@/server/wiki/wiki-store', () => ({
   readPageInSubject: vi.fn(() => ({ frontmatter: { title: 'A', created: '', updated: '', tags: [], sources: [] }, body: 'body' })),
 }));
 vi.mock('@/server/db/repos/settings-repo', () => ({ getWikiLanguage: vi.fn(() => 'English') }));
-vi.mock('@/server/services/embedding-service', () => ({ enqueueEmbedIndex: vi.fn() }));
+const embedMock = vi.hoisted(() => ({ enqueueEmbedIndex: vi.fn() }));
+vi.mock('@/server/services/embedding-service', () => embedMock);
 vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
 vi.mock('@/server/wiki/page-ops', () => ({ executePageUpdate: vi.fn(async () => ({ updatedSlug: 'a' })), executePageCreate: vi.fn(async () => ({ createdSlug: 'x' })) }));
 const txMock = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ function job() {
 describe('runFixJob (tool-loop)', () => {
   beforeEach(() => {
     genMock.generateTextWithTools.mockClear();
+    embedMock.enqueueEmbedIndex.mockClear();
     txMock.applyChangeset.mockClear();
     lintMock.runDeterministicChecksForSubject.mockReturnValue([]);
     latestMock.selectLatestFindings.mockReturnValue({ findings: [] });
@@ -49,7 +51,9 @@ describe('runFixJob (tool-loop)', () => {
     const res = await runFixJob(job(), emit);
     expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const opts = (genMock.generateTextWithTools.mock.calls[0] as any[])[1];
+    const calls = (genMock.generateTextWithTools.mock.calls as any[]);
+    expect(calls[0][0]).toBe('fix');
+    const opts = calls[0][1];
     const toolKeys = Object.keys(opts.tools);
     expect(toolKeys).toEqual(expect.arrayContaining(['wiki_read', 'wiki_search', 'wiki_list', 'wiki_update', 'wiki_create']));
     expect(emit).toHaveBeenCalledWith('fix:start', expect.any(String), expect.any(Object));
@@ -65,6 +69,7 @@ describe('runFixJob (tool-loop)', () => {
     expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('fix:deterministic', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('fix:complete', expect.any(String), expect.any(Object));
+    expect(embedMock.enqueueEmbedIndex).toHaveBeenCalled();
   });
 
   it('worklist 空 → 不调 LLM、不 commit，仍 emit complete', async () => {
@@ -73,5 +78,6 @@ describe('runFixJob (tool-loop)', () => {
     expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
     expect(txMock.applyChangeset).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('fix:complete', expect.any(String), expect.any(Object));
+    expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
   });
 });
