@@ -104,7 +104,7 @@ src/lib/
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
-├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨，`wiki.create` 映射 ➕，`wiki.delete` 映射 🗑，`wiki.merge` 映射 🔗，`wiki.split` 映射 ✂️）
+├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨，`wiki.create` 映射 ➕，`wiki.update` 映射 ✏️，`wiki.delete` 映射 🗑，`wiki.merge` 映射 🔗，`wiki.split` 映射 ✂️）
 └── theme/
     └── read-theme-vars.ts  # 读取 CSS 变量
 ```
@@ -124,6 +124,7 @@ src/lib/
 | 2026-06-30 | `tool-activity.ts` 补 `wiki_create`(➕)/`wiki_delete`(🗑) 工具名→图标/动词映射，供对话创建/删除页面工具的 chat UI 活动展示 |
 | 2026-06-30 | 新增 `selection-text.ts`（选区文本归一化/截断/id 派生/最近标题提取纯函数 + `HeadingScanNode`），供选中正文文本悬浮追问按钮使用；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-selection-ask-floating-button* |
 | 2026-06-30 | `tool-activity.ts` 补 `wiki_merge`(🔗)/`wiki_split`(✂️) 映射，供 curate tool-loop 工具活动的 chat UI 展示 |
+| 2026-06-30 | `tool-activity.ts` 补 `wiki_update`(✏️) 映射，供 fix tool-loop 工具活动展示 |
 
 ---
 
