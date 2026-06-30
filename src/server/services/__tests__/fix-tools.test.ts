@@ -62,6 +62,16 @@ describe('buildFixToolContext', () => {
     const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
     await expect(ctx.updatePage!({ slug: 'eigen', body: `${LONG}, edited` })).rejects.toThrow(/limit of 1 edits/);
     expect(opsMocks.executePageUpdate).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('fix:skip', expect.any(String), expect.objectContaining({ slug: 'eigen' }));
+  });
+
+  it('update：目标页不存在 → fix:skip + 抛错，不调内核', async () => {
+    const emit = vi.fn();
+    storeMocks.readPageInSubject.mockReturnValueOnce(null as never);
+    const ctx = buildFixToolContext(subject, { guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit });
+    await expect(ctx.updatePage!({ slug: 'ghost', body: `${LONG}, edited` })).rejects.toThrow(/not found/);
+    expect(opsMocks.executePageUpdate).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('fix:skip', expect.any(String), expect.objectContaining({ slug: 'ghost' }));
   });
 
   it('create：成功调内核 + record + emit fix:create', async () => {
