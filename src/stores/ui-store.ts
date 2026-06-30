@@ -2,8 +2,16 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { selectionRefId } from '@/lib/selection-text';
 
 export type ContextPanelTab = 'context' | 'chat';
+
+/** 选中正文文本「追问」时，按钮 → chat 之间传递的引用片段。 */
+export interface PendingChatReference {
+  id: string;
+  section: string | null;
+  text: string;
+}
 
 export const SIDEBAR_WIDTH_MIN = 200;
 export const SIDEBAR_WIDTH_MAX = 400;
@@ -27,6 +35,8 @@ interface UIState {
   settingsDialogOpen: boolean;
   /** 创建/编辑 subject 弹窗的瞬态状态（不持久化）。*/
   subjectDialog: { open: boolean; mode: 'create' | 'edit'; subjectId: string | null };
+  /** 选中正文文本后「追问」的瞬态信箱（不持久化）。*/
+  pendingChatReference: PendingChatReference | null;
 
   /**
    * Currently selected subject. `null` until a subject is chosen or rehydrated;
@@ -57,6 +67,11 @@ interface UIState {
   closeSettingsDialog: () => void;
   openSubjectDialog: (args: { mode: 'create' } | { mode: 'edit'; subjectId: string }) => void;
   closeSubjectDialog: () => void;
+
+  /** 选中正文文本点「追问」：写入信箱并打开 chat tab。 */
+  askAboutSelection: (payload: { section: string | null; text: string }) => void;
+  /** 读出并清空信箱（chat 挂载后消费一次）。 */
+  consumePendingChatReference: () => PendingChatReference | null;
 
   setCurrentSubject: (subject: { id: string; slug: string }) => void;
 }
@@ -161,7 +176,7 @@ function migratePersisted(persisted: unknown, version: number) {
 
 export const useUIStore = create<UIState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       sidebarOpen: true,
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       contextPanelOpen: false,
@@ -171,6 +186,7 @@ export const useUIStore = create<UIState>()(
       darkMode: false,
       settingsDialogOpen: false,
       subjectDialog: { open: false, mode: 'create', subjectId: null },
+      pendingChatReference: null,
       currentSubjectId: null,
       currentSubjectSlug: GENERAL_SUBJECT_SLUG,
       currentConversationId: null,
@@ -208,6 +224,22 @@ export const useUIStore = create<UIState>()(
         }),
       closeSubjectDialog: () =>
         set((s) => ({ subjectDialog: { ...s.subjectDialog, open: false } })),
+
+      askAboutSelection: (payload) =>
+        set({
+          pendingChatReference: {
+            id: selectionRefId(payload.text),
+            section: payload.section,
+            text: payload.text,
+          },
+          contextPanelOpen: true,
+          contextPanelTab: 'chat',
+        }),
+      consumePendingChatReference: () => {
+        const current = get().pendingChatReference;
+        if (current) set({ pendingChatReference: null });
+        return current;
+      },
 
       setCurrentConversation: (id) => set({ currentConversationId: id }),
 
