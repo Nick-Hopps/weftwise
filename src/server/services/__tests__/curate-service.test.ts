@@ -53,6 +53,10 @@ describe('runCurateJob (tool-loop)', () => {
     await runCurateJob(job({ scope: 'pages', slugs: ['a', 'b'], subjectId: 's1' }), emit);
     expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
     const opts = (genMock.generateTextWithTools.mock.calls[0] as any[])[1];
+    // auto 模式不解析 wiki.create 工具（follow-up A）：仍有结构工具，但无 create
+    const toolKeys = Object.keys(opts.tools);
+    expect(toolKeys).toEqual(expect.arrayContaining(['wiki_merge', 'wiki_split', 'wiki_delete']));
+    expect(toolKeys).not.toContain('wiki_create');
     const userMsg = String(opts.messages[0].content);
     expect(userMsg).toMatch(/AUTOMATIC/);        // 证明 {auto:true} 传入 → seedSet!==null
     expect(userMsg).toMatch(/do NOT create/i);   // auto 禁建页提示

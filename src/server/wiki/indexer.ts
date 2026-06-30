@@ -5,7 +5,7 @@
 
 import { createHash } from 'crypto';
 import { readPageInSubject, scanWikiPages } from './wiki-store';
-import { buildWikiPath } from './page-identity';
+import { buildWikiPath, META_PAGE_SLUGS } from './page-identity';
 import { parseFrontmatter } from './frontmatter';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
@@ -13,9 +13,6 @@ import * as maturityRepo from '../db/repos/maturity-repo';
 import { getRawDb } from '../db/client';
 import type { WikiPage, SubjectId, Subject } from '@/lib/contracts';
 import type { TitleResolver, ExtractedLink } from './wikilinks';
-
-/** 由系统自动生成、不参与成熟度维护的 meta 页 slug 集合。 */
-const META_SLUGS = new Set(['index', 'log']);
 
 export function contentHash(content: string): string {
   return createHash('sha256').update(content).digest('hex').slice(0, 16);
@@ -158,7 +155,7 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
   const MAINTENANCE_INITIAL_INTERVAL_DAYS = 1;
   const now = new Date().toISOString();
   for (const slug of presentSlugs) {
-    if (META_SLUGS.has(slug)) continue;
+    if (META_PAGE_SLUGS.has(slug)) continue;
     maturityRepo.ensureRow(subjectId, slug, now, MAINTENANCE_INITIAL_INTERVAL_DAYS);
     for (const nb of collectNeighborSlugs(subjectId, slug)) {
       maturityRepo.bumpNeighbor(nb.subjectId, nb.slug, now);

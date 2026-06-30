@@ -14,6 +14,14 @@ export { normalizeSlug };
 
 export const GENERAL_SUBJECT_SLUG = 'general';
 
+/**
+ * Wiki 内置系统页（meta 页）的 slug 集合：`index` / `log`。由系统维护、非用户内容，
+ * 在多处被排除或保护：成熟度初始化 / 邻居唤醒（indexer）、re-enrich 入队（reenrich-enqueue）、
+ * 孤儿检测（lint-deterministic）、策展 scope 与 merge/split/delete 护栏（curate-plan/curate-service）、
+ * 删除守卫（page-write）。单一真实源，杜绝多处副本各自漂移。
+ */
+export const META_PAGE_SLUGS: ReadonlySet<string> = new Set(['index', 'log']);
+
 const WIKI_DIR_PREFIX = 'wiki/';
 const MD_SUFFIX = '.md';
 

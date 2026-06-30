@@ -11,6 +11,7 @@ import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { expandScopeWithNeighbors, createCurateGuard } from '../wiki/curate-plan';
+import { META_PAGE_SLUGS } from '../wiki/page-identity';
 import { buildCurateToolContext } from './curate-tools';
 import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
 import { compileToolSet } from '@/server/agents/tools/compile';
@@ -19,14 +20,9 @@ import { CURATE_AGENTIC_SYSTEM_PROMPT, buildCurateAgenticUserPrompt } from '../l
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { Job } from '@/lib/contracts';
 
-const PROTECTED_SYSTEM_PAGES = new Set(['index', 'log']);
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
 export const CURATE_MAX_STEPS = 40;
 const CURATE_CAPS = { merge: 5, split: 5, delete: 5, create: 5 };
-
-const curateToolDefs = createBuiltinToolRegistry().resolve([
-  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.merge', 'wiki.split', 'wiki.delete', 'wiki.create',
-]);
 
 export async function runCurateJob(
   job: Job,
@@ -42,13 +38,13 @@ export async function runCurateJob(
   let scopeSlugs: string[];
   let seedSet: Set<string> | null;
   if (params.scope === 'pages' && Array.isArray(params.slugs)) {
-    const seed = params.slugs.filter((s) => !PROTECTED_SYSTEM_PAGES.has(s));
+    const seed = params.slugs.filter((s) => !META_PAGE_SLUGS.has(s));
     seedSet = new Set(seed);
     const links = pagesRepo.getAllLinks(subject.id);
-    scopeSlugs = expandScopeWithNeighbors(seed, links, subject.id, PROTECTED_SYSTEM_PAGES);
+    scopeSlugs = expandScopeWithNeighbors(seed, links, subject.id, META_PAGE_SLUGS);
   } else {
     seedSet = null;
-    scopeSlugs = pagesRepo.getAllPages(subject.id).map((p) => p.slug).filter((s) => !PROTECTED_SYSTEM_PAGES.has(s));
+    scopeSlugs = pagesRepo.getAllPages(subject.id).map((p) => p.slug).filter((s) => !META_PAGE_SLUGS.has(s));
   }
 
   emit('curate:start', `Curating ${scopeSlugs.length} page(s) in "${subject.slug}"…`, {
@@ -78,7 +74,11 @@ export async function runCurateJob(
   // 3. 装配 guard + worker ToolContext + 工具集
   const guard = createCurateGuard({ seedSet, caps: CURATE_CAPS });
   const ctx = buildCurateToolContext(subject, { guard, jobId: job.id, emit });
-  const tools = compileToolSet(curateToolDefs, ctx);
+  // wiki.create 仅手动全库模式（seedSet===null）可用：auto 模式不解析它，
+  // 省得模型反复试探一个永远 ok:false 的工具浪费步数（guard.canCreate 仍兜底）。
+  const toolNames = ['wiki.read', 'wiki.search', 'wiki.list', 'wiki.merge', 'wiki.split', 'wiki.delete'];
+  if (seedSet === null) toolNames.push('wiki.create');
+  const tools = compileToolSet(createBuiltinToolRegistry().resolve(toolNames), ctx);
 
   const promptCtx = {
     language: getWikiLanguage(),
