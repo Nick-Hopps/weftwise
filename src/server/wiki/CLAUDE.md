@@ -51,7 +51,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
 | `page-ops.ts` | `executePageMerge(jobId, subject, {targetSlug, sourceSlug})` / `executePageSplit(jobId, subject, {sourceSlug, hint?})` / `executePageDelete(jobId, subject, slug)` / `executePageCreate(jobId, subject, {title, body?, tags?})` | merge/split/delete/create 执行内核（LLM 调用 + Saga 事务）；无 emit / 无 embed enqueue —— 调用方自持；供 `curate-service` 与 query 工具复用 |
-| `curate-plan.ts` | `expandScopeWithNeighbors(slugs, links)` / `applyDecisionCaps(plan, caps)` / `restrictToSeed(candidates, seedSlugs)` | 纯函数：scope 扩展（含邻居）、候选数量截断（merge≤5/split≤5）、seed 护栏过滤（auto 策展专用） |
+| `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, caps })` | 纯函数：scope 扩展（含邻居）；`createCurateGuard` 工具层硬护栏——caps 计数器（merge/split/delete/create 各≤5）+ seed 强制（auto，seedSet≠null 时 merge/split/delete 必须涉及至少一个 seed 页）+ auto 禁 create + 保护页（index/log）；`applyDecisionCaps`/`restrictToSeed` 已退休 |
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
@@ -144,6 +144,7 @@ src/server/wiki/
 | 2026-06-23 | 新增 `page-ops.ts`（`executePageMerge` / `executePageSplit`，merge/split 执行内核，无 emit/enqueue）；新增 `curate-plan.ts`（`expandScopeWithNeighbors` / `applyDecisionCaps` / `restrictToSeed` 三个纯函数）；relink.ts 与 split-plan.ts 保留不变，由 page-ops 内部调用 |
 | 2026-06-24 | 文档：测试与质量小节更新为实际覆盖（9 文件） |
 | 2026-06-30 | `page-ops.ts` 新增 `executePageDelete`/`executePageCreate`（对话工具内核，无 emit/enqueue，Saga 事务）；`page-identity.ts` 新增 `deriveUniqueSlug(title, existingSlugs)`（create/split 共用唯一 slug 派生，冲突自动加后缀）；新增 `page-identity`/`page-ops-create-delete` 单测覆盖 |
+| 2026-06-30 | `curate-plan.ts` 重构：新增 `createCurateGuard({ seedSet, caps })` 工具层硬护栏（caps≤5×4 + seed 强制 + auto 禁 create + 保护页），退休 `applyDecisionCaps`/`restrictToSeed`（原结构化流水线护栏，已由 guard 取代） |
 
 ---
 
