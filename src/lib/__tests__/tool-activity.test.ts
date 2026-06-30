@@ -21,3 +21,18 @@ describe('tool-activity', () => {
     expect(summarizeToolArgs('wiki_search', null)).toBe('');
   });
 });
+
+describe('tool-activity - wiki_create/wiki_delete', () => {
+  it('图标', () => {
+    expect(toolActivityIcon('wiki_create')).toBe('➕');
+    expect(toolActivityIcon('wiki_delete')).toBe('🗑');
+  });
+  it('动词', () => {
+    expect(toolActivityVerb('wiki_create')).toBe('Creating');
+    expect(toolActivityVerb('wiki_delete')).toBe('Deleting');
+  });
+  it('参数摘要：create 取 title，delete 取 slug', () => {
+    expect(summarizeToolArgs('wiki_create', { title: 'Foo' })).toBe('Foo');
+    expect(summarizeToolArgs('wiki_delete', { slug: 'eigen' })).toBe('eigen');
+  });
+});
