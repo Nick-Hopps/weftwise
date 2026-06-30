@@ -6,6 +6,8 @@ import { wikiListTool } from './wiki-list';
 import { wikiReenrichTool } from './wiki-reenrich';
 import { wikiDeleteTool } from './wiki-delete';
 import { wikiCreateTool } from './wiki-create';
+import { wikiMergeTool } from './wiki-merge';
+import { wikiSplitTool } from './wiki-split';
 import { commitChangesetTool } from './commit-changeset';
 import { dispatchSkillTool } from './dispatch-skill';
 
@@ -18,6 +20,8 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(wikiReenrichTool as ToolDef);
   r.register(wikiDeleteTool as ToolDef);
   r.register(wikiCreateTool as ToolDef);
+  r.register(wikiMergeTool as ToolDef);
+  r.register(wikiSplitTool as ToolDef);
   r.register(commitChangesetTool as ToolDef);
   r.register(dispatchSkillTool as ToolDef);
   return r;
