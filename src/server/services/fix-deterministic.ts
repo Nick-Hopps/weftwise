@@ -6,6 +6,7 @@
  *   - orphan / stale-source / coverage-gap → 不修（ignored）。
  */
 import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
+import { META_PAGE_SLUGS } from '../wiki/page-identity';
 import type { LintFinding, WikiDocument, WikiFrontmatter } from '@/lib/contracts';
 
 export const DETERMINISTIC_FIX_TYPES: ReadonlySet<LintFinding['type']> = new Set(['missing-frontmatter']);
@@ -157,4 +158,34 @@ export function buildSubjectReportLines(
     byPage.get(finding.pageSlug)!.push(`${finding.type}: ${desc}`);
   }
   return order.map((slug) => ({ slug, lines: byPage.get(slug)! }));
+}
+
+// ── fix tool-loop 工具层硬护栏 ────────────────────────────────────────────────
+
+export interface FixGuard {
+  canWrite(): { ok: boolean; reason?: string };
+  canEditPage(slug: string): { ok: boolean; reason?: string };
+  record(op: 'update' | 'create'): void;
+  totals(): { update: number; create: number; writes: number };
+}
+
+/**
+ * fix tool-loop 的工具层硬护栏：写次数 cap（runaway backstop）+ 保护页（不可改 index/log）。
+ * fix 总是手动触发 → 无 seed 限制。忠实度（bodyShrankTooMuch）在 fix-tools wrapper 把守（需现有正文，guard 不读盘）。
+ */
+export function createFixGuard(opts: { caps: { writes: number } }): FixGuard {
+  const { caps } = opts;
+  const counts = { update: 0, create: 0 };
+  return {
+    canWrite() {
+      if (counts.update + counts.create >= caps.writes) return { ok: false, reason: `reached the limit of ${caps.writes} edits` };
+      return { ok: true };
+    },
+    canEditPage(slug) {
+      if (META_PAGE_SLUGS.has(slug)) return { ok: false, reason: 'cannot edit a protected page (index/log)' };
+      return { ok: true };
+    },
+    record(op) { counts[op] += 1; },
+    totals() { return { ...counts, writes: counts.update + counts.create }; },
+  };
 }

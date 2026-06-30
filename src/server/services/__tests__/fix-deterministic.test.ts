@@ -7,6 +7,7 @@ import {
   bodyShrankTooMuch,
   findRelatedPageSlugs,
   buildSubjectReportLines,
+  createFixGuard,
 } from '../fix-deterministic';
 import type { LintFinding, WikiDocument } from '@/lib/contracts';
 
@@ -194,5 +195,27 @@ describe('buildSubjectReportLines', () => {
     const out = buildSubjectReportLines([f('broken-link', 'a', long)]);
     expect(out[0].lines[0].endsWith('…')).toBe(true);
     expect(out[0].lines[0].length).toBeLessThan(220);
+  });
+});
+
+describe('createFixGuard', () => {
+  it('canWrite 达到 cap 后拒绝', () => {
+    const g = createFixGuard({ caps: { writes: 2 } });
+    expect(g.canWrite().ok).toBe(true);
+    g.record('update'); g.record('create');
+    const d = g.canWrite();
+    expect(d.ok).toBe(false);
+    expect(d.reason).toMatch(/limit of 2 edits/);
+  });
+  it('canEditPage 拒绝保护页 index/log，放行普通页', () => {
+    const g = createFixGuard({ caps: { writes: 5 } });
+    expect(g.canEditPage('index').ok).toBe(false);
+    expect(g.canEditPage('log').ok).toBe(false);
+    expect(g.canEditPage('eigen').ok).toBe(true);
+  });
+  it('totals 累加准确', () => {
+    const g = createFixGuard({ caps: { writes: 5 } });
+    g.record('update'); g.record('update'); g.record('create');
+    expect(g.totals()).toEqual({ update: 2, create: 1, writes: 3 });
   });
 });
