@@ -103,7 +103,7 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 写工具纪律', () => {
   });
   it('删除段要求后续轮确认、禁止同轮删除', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Deleting a page/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/confirm/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/ALWAYS confirm before delet/i);
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/LATER turn|later turn/);
   });
   it('创建段存在', () => {
