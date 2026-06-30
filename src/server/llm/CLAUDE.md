@@ -213,7 +213,7 @@ src/server/llm/
     ├── lint-prompt.ts         # 全库扫查
     ├── merge-prompt.ts        # 融合两页（由 page-ops 调用）
     ├── split-prompt.ts        # 拆分一页（由 page-ops 调用）
-    ├── curate-prompt.ts       # 🆕 agent 策展三阶段 schema + prompt builder
+    ├── curate-prompt.ts       # agentic tool-loop 策展 prompt（CURATE_AGENTIC_SYSTEM_PROMPT + builder；triage/confirm 已退休）
     └── fix-prompt.ts          # 🆕 逐页修复 lint findings（FixPageSchema + buildFixPageUserPrompt）
 ```
 
