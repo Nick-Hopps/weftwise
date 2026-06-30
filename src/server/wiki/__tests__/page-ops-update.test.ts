@@ -48,6 +48,7 @@ describe('executePageUpdate', () => {
     expect(cs.entries[0].content).toContain('title: Eigenvalue'); // 保留原标题
     expect(cs.entries[0].content).toContain('new body');           // 换了正文
     expect(cs.entries[0].content).toContain('linear-algebra');      // 覆盖 tags
+    expect(cs.entries[0].content).toContain('2020-01-01'); // 保留原 created 时间戳
   });
 
   it('页面不存在 → 抛错', async () => {
