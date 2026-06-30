@@ -46,12 +46,12 @@ operations.status = 'applied'                   ← 释放 lock
 | `markdown.ts` | `parseWikiDocument / serializeWikiDocument`、类型 `WikiDocument` | 组合 frontmatter + wikilinks，透传 currentSubjectSlug |
 | `frontmatter.ts` | `parseFrontmatter / serializeFrontmatter / validateFrontmatter`、类型 `WikiFrontmatter` | gray-matter 封装 |
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
-| `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / slugFromTitle / deriveUniqueSlug(title, existingSlugs) / GENERAL_SUBJECT_SLUG` | path ↔ (subject, slug) 互转；`deriveUniqueSlug` 为 create/split 共用的唯一 slug 派生（冲突自动加后缀）；保留 `slugFromWikiPath` shim 过渡（已无活跃调用方） |
+| `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / slugFromTitle / deriveUniqueSlug(title, existingSlugs) / GENERAL_SUBJECT_SLUG / META_PAGE_SLUGS` | path ↔ (subject, slug) 互转；`deriveUniqueSlug` 为 create/split 共用的唯一 slug 派生（冲突自动加后缀）；`META_PAGE_SLUGS`=内置系统页（index/log）**单一源**，indexer/lint/reenrich/curate/page-write 六处共用，杜绝漂移；保留 `slugFromWikiPath` shim 过渡（已无活跃调用方） |
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
 | `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
 | `page-ops.ts` | `executePageMerge(jobId, subject, {targetSlug, sourceSlug})` / `executePageSplit(jobId, subject, {sourceSlug, hint?})` / `executePageDelete(jobId, subject, slug)` / `executePageCreate(jobId, subject, {title, body?, tags?})` | merge/split/delete/create 执行内核（LLM 调用 + Saga 事务）；无 emit / 无 embed enqueue —— 调用方自持；供 `curate-service` 与 query 工具复用 |
-| `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, caps })` | 纯函数：scope 扩展（含邻居）；`createCurateGuard` 工具层硬护栏——caps 计数器（merge/split/delete/create 各≤5）+ seed 强制（auto，seedSet≠null 时 merge/split/delete 必须涉及至少一个 seed 页）+ auto 禁 create + 保护页（index/log）；`applyDecisionCaps`/`restrictToSeed` 已退休 |
+| `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, caps })` | 纯函数：scope 扩展（含邻居）；`createCurateGuard` 工具层硬护栏——caps 计数器（merge/split/delete/create 各≤5）+ seed 强制（auto，seedSet≠null 时 merge/split/delete 必须涉及至少一个 seed 页）+ auto 禁 create + 保护页（共用 `META_PAGE_SLUGS`=index/log 单一源）；`applyDecisionCaps`/`restrictToSeed` 已退休 |
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
@@ -145,6 +145,7 @@ src/server/wiki/
 | 2026-06-24 | 文档：测试与质量小节更新为实际覆盖（9 文件） |
 | 2026-06-30 | `page-ops.ts` 新增 `executePageDelete`/`executePageCreate`（对话工具内核，无 emit/enqueue，Saga 事务）；`page-identity.ts` 新增 `deriveUniqueSlug(title, existingSlugs)`（create/split 共用唯一 slug 派生，冲突自动加后缀）；新增 `page-identity`/`page-ops-create-delete` 单测覆盖 |
 | 2026-06-30 | `curate-plan.ts` 重构：新增 `createCurateGuard({ seedSet, caps })` 工具层硬护栏（caps≤5×4 + seed 强制 + auto 禁 create + 保护页），退休 `applyDecisionCaps`/`restrictToSeed`（原结构化流水线护栏，已由 guard 取代） |
+| 2026-06-30 | `page-identity.ts` 新增 `META_PAGE_SLUGS`（内置系统页 index/log 单一源）；`indexer`/`curate-plan` 及 services 层（`lint-deterministic`/`reenrich-enqueue`/`curate-service`/`page-write`）原本各持的 `['index','log']` 副本（`META_SLUGS`/`GUARD_META`/`ORPHAN_EXCLUDE_SLUGS`/`PROTECTED_SYSTEM_PAGES`）统一引用此常量；`expandScopeWithNeighbors` 形参 `metaSlugs` 收紧为 `ReadonlySet<string>`（curate follow-up B）|
 
 ---
 

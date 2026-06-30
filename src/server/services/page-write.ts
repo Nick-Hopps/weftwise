@@ -6,17 +6,15 @@
 import * as pagesRepo from '../db/repos/pages-repo';
 import { executePageDelete, executePageCreate } from '../wiki/page-ops';
 import { enqueueEmbedIndex } from './embedding-service';
+import { META_PAGE_SLUGS } from '../wiki/page-identity';
 import type { Subject } from '@/lib/contracts';
-
-/** 受保护、永不可删的系统页（任何 subject）。删除规则唯一来源，路由与对话共用。 */
-export const PROTECTED_SYSTEM_PAGES = new Set(['index', 'log']);
 
 /** 纯校验：可删返回 null，否则返回面向用户的错误消息。page=null 表示该 subject 下未找到。 */
 export function validateDeleteTarget(
   slug: string,
   page: { tags: string[] } | null,
 ): string | null {
-  if (PROTECTED_SYSTEM_PAGES.has(slug)) return `Cannot delete protected system page "${slug}".`;
+  if (META_PAGE_SLUGS.has(slug)) return `Cannot delete protected system page "${slug}".`;
   if (!page) return `Page "${slug}" not found in this subject.`;
   if (page.tags.includes('meta')) return `Cannot delete meta page "${slug}".`;
   return null;
