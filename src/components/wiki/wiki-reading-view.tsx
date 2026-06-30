@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   FileCode2,
@@ -15,6 +15,7 @@ import PageRenderer from './page-renderer';
 import { HtmlSourceFrame } from './html-source-frame';
 import { LensFeedback } from './lens-feedback';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
+import { SelectionAskButton } from './selection-ask-button';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useLens } from '@/hooks/use-lens';
@@ -51,6 +52,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const { backlinks, sourceCount, editHref, ...rendererProps } = props;
   const { slug } = rendererProps;
   const apiFetch = useApiFetch();
+  const articleRef = useRef<HTMLDivElement>(null);
 
   const [split, setSplit] = useState(false);
   const [docs, setDocs] = useState<PageSourceDoc[] | null>(null);
@@ -172,7 +174,10 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     return (
       <div className="flex flex-col lg:h-[calc(100vh-var(--header-height))]">
         <div className="grid grid-cols-1 lg:grid-cols-2 lg:flex-1 lg:min-h-0">
-          <div className="min-w-0 lg:overflow-y-auto">{article}</div>
+          <div ref={articleRef} className="min-w-0 lg:overflow-y-auto">
+            {article}
+            <SelectionAskButton containerRef={articleRef} />
+          </div>
           <div className="min-w-0 border-t border-border bg-canvas lg:border-l lg:border-t-0 lg:min-h-0 lg:overflow-hidden">
             <SourcesPane docs={docs} loading={loading} error={error} />
           </div>
@@ -181,7 +186,12 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     );
   }
 
-  return <div className="flex min-h-full flex-col">{article}</div>;
+  return (
+    <div ref={articleRef} className="flex min-h-full flex-col">
+      {article}
+      <SelectionAskButton containerRef={articleRef} />
+    </div>
+  );
 }
 
 function Backlinks({ backlinks }: { backlinks: BacklinkItem[] }) {
