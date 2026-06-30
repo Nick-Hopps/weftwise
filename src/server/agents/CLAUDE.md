@@ -126,11 +126,12 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
-| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选写能力：`reenrich?`（query runner）/ `deletePage?`（query runner）/ `createPage?`（query runner）/ `mergePages?(targetSlug, sourceSlug)`（curate runner）/ `splitPage?(slug, hint?)`（curate runner））；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现；`ToolDef.sideEffect` 联合类型支持 `'read'|'enqueue'|'destructive'|'create'|'merge'|'split'` |
+| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选写能力：`reenrich?`（query runner）/ `deletePage?`（query runner）/ `createPage?`（query runner）/ `updatePage?`（fix runner）/ `mergePages?(targetSlug, sourceSlug)`（curate runner）/ `splitPage?(slug, hint?)`（curate runner））；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现；`ToolDef.sideEffect` 联合类型支持 `'read'|'enqueue'|'destructive'|'create'|'update'|'merge'|'split'` |
 | `compile.ts` | `compileToolSet(toolDefs, ctx, opts?)` — 把 `ToolDef[]` + `ToolContext` 编译为 AI SDK 可用的工具对象；`synthesizeFinishTool(schema, capture)` — 合成 `finish` 收尾工具，使 planner/writer 能在工具循环末步产出结构化输出（组合路径收口）；`FINISH_TOOL_NAME` 常量 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
 | `builtin/wiki-search.ts` | `wiki.search` — 通过 `ToolContext.search` 做 FTS5 搜索（取代旧 `vault-search.ts`） |
 | `builtin/wiki-list.ts` | `wiki.list` — 通过 `ToolContext.listPages` 枚举本 subject 页标题/slug |
+| `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面正文（`sideEffect:'update'`，仅 fix runner） |
 | `builtin/commit-changeset.ts` | `commit_changeset` — 薄包装 `commitPending`（已无 skill 引用，保留供工具面/测试用） |
 | `builtin/dispatch-skill.ts` | `dispatch_skill` — orchestrator fanout 用；触发子 skill 执行（writer × N）|
 
@@ -286,6 +287,7 @@ src/server/agents/
 | 2026-06-30 | 对话创建/删除：新增 `tools/builtin/wiki-delete.ts`（`wiki.delete`，`sideEffect:'destructive'`，系统提示规定须后续轮确认、禁同轮执行）+ `tools/builtin/wiki-create.ts`（`wiki.create`，`sideEffect:'create'`）；`ToolContext` 新增 `deletePage?`/`createPage?` 写能力（仅 query runner 注入）；`ToolDef.sideEffect` 联合类型扩展 `'destructive'`/`'create'`；query runner 解析并注入两工具 + 系统提示加写动作确认纪律 |
 | 2026-06-30 | Curate tool-loop：新增 `tools/builtin/wiki-merge.ts`（`wiki.merge`，`sideEffect:'merge'`）+ `tools/builtin/wiki-split.ts`（`wiki.split`，`sideEffect:'split'`）；`ToolContext` 新增 `mergePages?(targetSlug, sourceSlug)` / `splitPage?(slug, hint?)` 写能力（仅 curate runner 注入）；`ToolDef.sideEffect` 联合类型扩展 `'merge'`/`'split'`；curate runner 经 `buildCurateToolContext`（`services/curate-tools.ts`）注入七工具（read/search/list/merge/split/delete/create）并驱动 `generateTextWithTools('curate')` tool-loop |
 | 2026-06-26 | 路由 key 统一：新增 `agent-loop::skillTaskKey(id)`（`ingest-planner`→`ingest:planner`），`resolveSkillModel` 改用之，task key 由 `skill:ingest-xxx` 改为 `ingest:xxx`（id/文件名不变）；配合移除内置 `ingest` task。文档修正：skill frontmatter 字段是 `model:`（非 `llm_override:`，schema `.strict()` 拒未知键）、router mode 值 `task-router-only`（非 `config-only`）|
+| 2026-06-30 | Fix tool-loop：新增 `tools/builtin/wiki-update.ts`（`wiki.update`，`sideEffect:'update'`，委托 `executePageUpdate`）；`ToolContext` 新增 `updatePage?`（仅 fix runner 注入）；`ToolDef.sideEffect` 扩 `'update'`（Spec 3）|
 
 ---
 

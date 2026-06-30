@@ -29,6 +29,9 @@ export interface ToolContext {
   /** curate 侧拆分一页（Saga）；仅 worker curate runner 注入。 */
   splitPage?(slug: string, hint?: string):
     Promise<{ primarySlug: string; pageSlugs: string[]; referencesRepointed: number }>;
+  /** fix 侧更新一页正文（Saga）；仅 fix runner 注入。 */
+  updatePage?(input: { slug: string; body: string; summary?: string; tags?: string[] }):
+    Promise<{ updatedSlug: string }>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
   agent?: AgentContext;
 }

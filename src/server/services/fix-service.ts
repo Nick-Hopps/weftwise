@@ -2,9 +2,9 @@
  * Fix service — 任务类型 'fix'：一键修复 Health lint findings。
  * 工作清单 = 新鲜重扫确定性（missing-frontmatter / broken-link）∪ 最近 lint 快照语义
  *   （missing-crossref / contradiction）。
- * 阶段1 确定性：所有 frontmatter 修复合并为一个 Saga commit。
- * 阶段2 LLM：按 pageSlug 分组，逐页 generateStructuredOutput('fix')，自我门控 + validateChangeset
- *   拦截新坏链，每页一个 commit。
+ * 阶段1（pre-pass，确定性）：所有 missing-frontmatter 合并为一个 Saga commit。
+ * 阶段2（tool-loop）：generateTextWithTools('fix') 驱动，模型自驱读页 + wiki.update/create 修复；
+ *   写能力经 FixGuard（写 cap + 保护页）+ 忠实度护栏把守，坏链/残链由内核确定性拒绝。每写一次一个 commit。
  * side-effect import：worker-entry import 本文件即完成 registerHandler('fix', ...)。
  */
 import { registerHandler } from '../jobs/worker';
@@ -14,31 +14,30 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { enqueueEmbedIndex } from './embedding-service';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { selectLatestFindings } from './lint-latest';
-import {
-  fixMissingFrontmatter,
-  partitionFindings,
-  buildFixWorklist,
-  bodyShrankTooMuch,
-  findRelatedPageSlugs,
-  buildSubjectReportLines,
-} from './fix-deterministic';
+import { fixMissingFrontmatter, partitionFindings, buildFixWorklist, buildSubjectReportLines, createFixGuard } from './fix-deterministic';
+import { buildFixToolContext } from './fix-tools';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { buildWikiPath } from '../wiki/page-identity';
-import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
 import { createChangeset, validateChangeset, applyChangeset } from '../wiki/wiki-transaction';
-import { generateStructuredOutput } from '../llm/provider-registry';
-import { FixPageSchema, FIX_SYSTEM_PROMPT, buildFixPageUserPrompt, type FixPageResult } from '../llm/prompts/fix-prompt';
+import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
+import { compileToolSet } from '@/server/agents/tools/compile';
+import { generateTextWithTools } from '../llm/provider-registry';
+import { FIX_AGENTIC_SYSTEM_PROMPT, buildFixAgenticUserPrompt } from '../llm/prompts/fix-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
-import type { ChangesetEntry, Job, LintFinding } from '@/lib/contracts';
+import type { ChangesetEntry, Job } from '@/lib/contracts';
 
-/** 关联页正文注入前的截断上限（字符），约束单页修复 prompt 的 token 体量。 */
-const RELATED_BODY_MAX = 8000;
+/** 工具循环最大步数（bound 读取轮次；写次数由 FixGuard cap 真正兜底）。 */
+export const FIX_MAX_STEPS = 60;
+
+const fixToolDefs = createBuiltinToolRegistry().resolve([
+  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.update', 'wiki.create',
+]);
 
 interface FixParams {
   subjectId?: string;
 }
 
-async function runFixJob(
+export async function runFixJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
@@ -57,181 +56,77 @@ async function runFixJob(
   ).findings.filter((f) => f.type === 'missing-crossref' || f.type === 'contradiction');
 
   const worklist = buildFixWorklist(freshDeterministic, snapshotSemantic);
-  const { frontmatter, llm } = partitionFindings(worklist);
+  const { frontmatter, llm: loop } = partitionFindings(worklist);
 
-  emit('fix:start', `Fixing ${frontmatter.length + llm.length} issue(s) in "${subject.slug}"…`, {
+  emit('fix:start', `Fixing ${frontmatter.length + loop.length} issue(s) in "${subject.slug}"…`, {
     deterministic: frontmatter.length,
-    semantic: llm.length,
+    semantic: loop.length,
   });
 
-  let fixed = 0;
-  let skipped = 0;
-  let failed = 0;
-  const byType: Record<string, number> = {};
-  const bump = (type: string, n = 1) => {
-    byType[type] = (byType[type] ?? 0) + n;
-  };
-
-  // 2. 阶段1 确定性 frontmatter 修复 — 合并为一个 commit
+  // 2. pre-pass：确定性补 frontmatter —— 合并为一个 commit
+  let deterministicFixed = 0;
   if (frontmatter.length > 0) {
     const now = new Date().toISOString();
     const entries: ChangesetEntry[] = [];
     for (const finding of frontmatter) {
-      try {
-        const doc = readPageInSubject(subject.slug, finding.pageSlug);
-        if (!doc) {
-          skipped += 1;
-          continue;
-        }
-        const content = fixMissingFrontmatter(finding.pageSlug, doc, now);
-        entries.push({ action: 'update', path: buildWikiPath(subject.slug, finding.pageSlug), content });
-      } catch {
-        skipped += 1;
-      }
+      const doc = readPageInSubject(subject.slug, finding.pageSlug);
+      if (!doc) continue;
+      entries.push({ action: 'update', path: buildWikiPath(subject.slug, finding.pageSlug), content: fixMissingFrontmatter(finding.pageSlug, doc, now) });
     }
     if (entries.length > 0) {
       const changeset = createChangeset(job.id, subject, entries);
       const validation = validateChangeset(changeset);
       if (validation.valid) {
         await applyChangeset(changeset);
-        fixed += entries.length;
-        // missing-frontmatter は目前 DETERMINISTIC_FIX_TYPES 的唯一成员，故可直接 bump；若该集合扩展，应改为按 finding.type 逐条 bump
-        bump('missing-frontmatter', entries.length);
+        deterministicFixed = entries.length;
         emit('fix:deterministic', `Fixed ${entries.length} frontmatter issue(s).`, { fixed: entries.length });
       } else {
-        failed += entries.length;
-        emit('fix:warn', `Frontmatter fixes failed validation: ${validation.errors.join('; ')}`, {
-          errors: validation.errors,
-        });
+        emit('fix:warn', `Frontmatter fixes failed validation: ${validation.errors.join('; ')}`, { errors: validation.errors });
       }
     }
   }
 
-  // 3. 阶段2 LLM 逐页修复 — 按 pageSlug 分组，每页一个 commit
-  // 注意：每页修复时注入「全局诊断报告 + 本页 findings 涉及的关联页正文」作只读上下文
-  //（contradiction 的对方页正文现已加载，供 LLM 参照和解）；但 LLM 仍只编辑当前页，
-  // proceed 自我门控 + 逐页 revert 是安全网；完整双页双向消解（同时改两页）仍超出本范围。
-  const byPage = new Map<string, LintFinding[]>();
-  for (const finding of llm) {
-    const arr = byPage.get(finding.pageSlug) ?? [];
-    arr.push(finding);
-    byPage.set(finding.pageSlug, arr);
-  }
+  // 3. tool-loop：修 broken-link / missing-crossref / contradiction
+  let update = 0;
+  let create = 0;
+  if (loop.length > 0) {
+    const writeCap = Math.max(20, new Set(loop.map((f) => f.pageSlug)).size * 2);
+    const guard = createFixGuard({ caps: { writes: writeCap } });
+    const ctx = buildFixToolContext(subject, { guard, jobId: job.id, emit });
+    const tools = compileToolSet(fixToolDefs, ctx);
 
-  const roster = pagesRepo.getAllPages(subject.id).map((p) => ({ slug: p.slug, title: p.title }));
-  const promptCtx = {
-    language: getWikiLanguage(),
-    subject: { slug: subject.slug, name: subject.name, description: subject.description },
-  };
-
-  // 全局只读上下文（对每页调用复用，构建一次）
-  const subjectReport = buildSubjectReportLines(worklist);
-  const contradictionPages = new Set(
-    worklist.filter((f) => f.type === 'contradiction').map((f) => f.pageSlug),
-  );
-
-  for (const [slug, findingsOnPage] of byPage) {
-    const doc = readPageInSubject(subject.slug, slug);
-    if (!doc) {
-      skipped += findingsOnPage.length;
-      emit('fix:skip', `Skip "${slug}": page not found.`, { slug });
-      continue;
-    }
-
-    // 关联页：从本页 findings 描述里启发式提取，实时读盘取最新内容（前面已 commit 的页可拿到修后正文）
-    const relatedSlugs = findRelatedPageSlugs(slug, findingsOnPage, roster, contradictionPages);
-    const relatedPages = relatedSlugs
-      .map((s) => {
-        const rdoc = readPageInSubject(subject.slug, s);
-        return rdoc
-          ? { title: rdoc.frontmatter.title || s, slug: s, body: rdoc.body.slice(0, RELATED_BODY_MAX) }
-          : null;
-      })
-      .filter((x): x is { title: string; slug: string; body: string } => x !== null);
-
-    let result: FixPageResult;
-    try {
-      result = await generateStructuredOutput(
-        'fix',
-        FixPageSchema,
-        FIX_SYSTEM_PROMPT,
-        buildFixPageUserPrompt(
-          { slug, title: doc.frontmatter.title, body: doc.body },
-          findingsOnPage.map((f) => ({ type: f.type, description: f.description, suggestedFix: f.suggestedFix })),
-          roster,
-          promptCtx,
-          { subjectReport, relatedPages },
-        ),
-      );
-    } catch (err) {
-      skipped += findingsOnPage.length;
-      emit('fix:skip', `Skip "${slug}": LLM error — ${(err as Error).message}`, { slug });
-      continue;
-    }
-
-    if (!result.proceed) {
-      skipped += findingsOnPage.length;
-      emit('fix:skip', `Skip "${slug}": ${result.reason}`, { slug, reason: result.reason });
-      continue;
-    }
-
-    // 忠实度护栏：修复后正文塌缩超过 50% 视为 LLM 丢内容，拒绝提交
-    if (bodyShrankTooMuch(doc.body, result.body)) {
-      failed += findingsOnPage.length;
-      emit('fix:warn', `Failed "${slug}": repair dropped too much content`, { slug });
-      continue;
-    }
-
-    const now = new Date().toISOString();
-    const frontmatterData = {
-      ...doc.frontmatter,
-      ...(result.summary ? { summary: result.summary } : {}),
+    const reportLines = buildSubjectReportLines(loop);
+    const roster = pagesRepo
+      .getAllPages(subject.id)
+      .filter((p) => !pagesRepo.isMetaPage(p))
+      .map((p) => ({ slug: p.slug, title: p.title }));
+    const promptCtx = {
+      language: getWikiLanguage(),
+      subject: { slug: subject.slug, name: subject.name, description: subject.description },
     };
-    const content = stampSystemFrontmatter(serializeFrontmatter(frontmatterData, result.body), {
-      now,
-      existingCreated: doc.frontmatter.created,
+
+    await generateTextWithTools('fix', {
+      system: FIX_AGENTIC_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx) }],
+      tools,
+      maxSteps: FIX_MAX_STEPS,
     });
 
-    const changeset = createChangeset(job.id, subject, [
-      { action: 'update', path: buildWikiPath(subject.slug, slug), content },
-    ]);
-    const validation = validateChangeset(changeset);
-    if (!validation.valid) {
-      failed += findingsOnPage.length;
-      emit('fix:warn', `Failed "${slug}": fix introduced invalid links — ${validation.errors.join('; ')}`, {
-        slug,
-        errors: validation.errors,
-      });
-      continue;
-    }
-    // 拦截 LLM 修复后仍残留同主题坏链（同主题未解析 wikilink 为 warning，valid 仍为 true）
-    if (validation.warnings.some((w) => w.includes('Unresolved wikilink:'))) {
-      failed += findingsOnPage.length;
-      emit('fix:warn', `Failed "${slug}": fix left an unresolved wikilink`, {
-        slug,
-        warnings: validation.warnings.filter((w) => w.includes('Unresolved wikilink:')),
-      });
-      continue;
-    }
-
-    await applyChangeset(changeset);
-    fixed += findingsOnPage.length;
-    for (const f of findingsOnPage) bump(f.type);
-    emit('fix:page', `Repaired "${slug}" (${findingsOnPage.map((f) => f.type).join(', ')}).`, {
-      slug,
-      types: findingsOnPage.map((f) => f.type),
-    });
+    const totals = guard.totals();
+    update = totals.update;
+    create = totals.create;
   }
 
-  if (fixed > 0) enqueueEmbedIndex(subject.id);
+  const writes = deterministicFixed + update + create;
+  if (writes > 0) enqueueEmbedIndex(subject.id);
 
-  emit('fix:complete', `Fix complete: ${fixed} fixed, ${skipped} skipped, ${failed} failed.`, {
-    fixed,
-    skipped,
-    failed,
-    byType,
+  emit('fix:complete', `Fix complete: ${deterministicFixed} frontmatter, ${update} edited, ${create} created.`, {
+    deterministic: deterministicFixed,
+    update,
+    create,
+    writes,
   });
-  return { fixed, skipped, failed, byType };
+  return { deterministic: deterministicFixed, update, create, writes };
 }
 
 registerHandler('fix', runFixJob);

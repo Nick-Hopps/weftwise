@@ -218,6 +218,7 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'fix:start',
         'fix:deterministic',
         'fix:page',
+        'fix:create',
         'fix:skip',
         'fix:warn',
         'fix:complete',

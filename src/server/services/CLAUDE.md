@@ -102,7 +102,7 @@ worker-entry.ts
 
 ### `fix-service.ts` 🆕 — 任务类型 `'fix'`
 
-一键修复 lint findings。`params { subjectId }`。
+一键修复 lint findings。`params { subjectId }`。**Spec 3 阶段2 改造为 tool-loop**。
 
 **工作清单构建**（`buildFixWorklist`，纯函数 `fix-deterministic.ts`）：
 - **确定性 findings**：调 `runDeterministicChecksForSubject(subjectId)`（新鲜重扫，不依赖快照），取 `missing-frontmatter` + `broken-link` 类型。
@@ -112,12 +112,13 @@ worker-entry.ts
 **流程（两阶段）**：
 
 1. **阶段1（确定性补 frontmatter）**：`fixMissingFrontmatter(slug, doc, now)` 纯函数批量填补缺失 frontmatter 字段（title/summary/tags/created），一次 Saga commit 提交所有受影响页（1 commit）。broken-link 在此阶段跳过（需 LLM 判断语义意图）。
-2. **阶段2（LLM 逐页修复）**：对剩余 findings 按页分组（broken-link / missing-crossref / contradiction），逐页调 `generateStructuredOutput('fix', FixPageSchema, ...)`：
-   - `FixPageSchema.proceed`（自我门控）：LLM 判断本页不值得修复时跳过，发 `fix:skip` 带理由。
-   - 修复结果经 `validateChangeset` 校验（拦截新引入的坏链），校验失败发 `fix:warn` 跳过该页。
-   - 每页成功修复独立 1 commit（粒度可回滚）。
+2. **阶段2（LLM 工具循环修复）**：对剩余 findings 按页分组→按 `buildSubjectReportLines` 格式组装诊断清单，调 `generateTextWithTools('fix', { system: FIX_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: FIX_MAX_STEPS (60) })`：
+   - 工具集（经 `createFixGuard` 把守）：`wiki.read` / `wiki.search` / `wiki.list`（读）+ `wiki.update` / `wiki.create`（写）。
+   - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `bodyShrankTooMuch`（需现有正文，护栏不读盘）。
+   - 模型自驱读页后调 `wiki.update`（破损/缺引用）或 `wiki.create`（新页）；每次写操作一个 commit。
+   - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
 
-**事件**：`fix:start` / `fix:deterministic` / `fix:page`（单页 LLM 修复成功）/ `fix:skip`（页面不存在 / LLM no-go / LLM 错误）/ `fix:warn`（校验失败或护栏拦截，计入 failed）/ `fix:complete`。
+**事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:complete`。
 
 完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发）。
 
@@ -190,8 +191,9 @@ src/server/services/
 ├── lint-service.ts      # 全库 lint 扫描
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：tool-loop 驱动，generateTextWithTools + buildCurateToolContext + CurateGuard）
 ├── curate-tools.ts      # 🆕 worker 侧 ToolContext：buildCurateToolContext（只读 vault + 写能力经 guard 把守）
-├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2）
-├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / partitionFindings
+├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2 tool-loop）
+├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / bodyShrankTooMuch / buildSubjectReportLines / createFixGuard（忠实度护栏 + 护栏）
+├── fix-tools.ts         # 🆕 worker 侧 ToolContext：buildFixToolContext（只读 vault + 写能力经 guard 鉴权后调 page-ops）
 ├── reenrich-enqueue.ts  # 🆕 纯函数 validateReenrichTarget + enqueueReenrich 入队 helper（供对话工具触发）
 ├── page-write.ts        # 🆕 共享写工具内核：validateDeleteTarget（删除守卫单一真实源）+ deletePageInSubject / createPageInSubject（Saga + embed 回填，供 DELETE 路由与 wiki.delete/wiki.create 对话工具复用）
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
@@ -224,6 +226,7 @@ src/server/services/
 | 2026-06-30 | 新增 `page-write.ts`（`validateDeleteTarget` 删除守卫单一真实源 + `deletePageInSubject`/`createPageInSubject`，同步 Saga+embed 回填，供 DELETE 路由 DRY 复用与 `wiki.delete`/`wiki.create` 对话工具复用） |
 | 2026-06-30 | `curate-service` 由 triage→confirm→execute 结构化流水线改造为 tool-loop 驱动：`generateTextWithTools('curate')` + `buildCurateToolContext` + `createCurateGuard` 硬护栏；新增 `curate-tools.ts`（worker 侧 ToolContext，读已提交 vault + 写能力经 guard 鉴权后调 page-ops 内核 + emit 事件）；退休 triage/confirm 三套 schema+prompt |
 | 2026-06-30 | curate follow-up：auto 模式不再解析 `wiki.create` 工具（按 `seedSet===null` 条件化 `resolve`，省模型试探步数；`guard.canCreate` 仍兜底）；`['index','log']` 保护页常量统一为 `wiki/page-identity::META_PAGE_SLUGS` 单一源（`curate-service`/`page-write`/`lint-deterministic`/`reenrich-enqueue` 不再各持副本）|
+| 2026-06-30 | Fix tool-loop（Spec 3）：`fix-service` 阶段2 由逐页 `generateStructuredOutput('fix')` 改为 `generateTextWithTools('fix')` 自驱 `wiki.update`/`wiki.create`；新增 `fix-tools.ts::buildFixToolContext`（读侧同构 curate-tools + 写经 `createFixGuard`+忠实度护栏调 page-ops 内核）；`fix-deterministic` 加 `createFixGuard`、退休关联页提取（`findRelatedPageSlugs`/`mentions`/`MAX_RELATED_PAGES`）；`fix-prompt` 退休逐页 `FixPageSchema` 三件套、新增 agentic prompt；每写一次一 commit |
 
 ---
 

@@ -5,8 +5,8 @@ import {
   partitionFindings,
   buildFixWorklist,
   bodyShrankTooMuch,
-  findRelatedPageSlugs,
   buildSubjectReportLines,
+  createFixGuard,
 } from '../fix-deterministic';
 import type { LintFinding, WikiDocument } from '@/lib/contracts';
 
@@ -120,62 +120,6 @@ describe('bodyShrankTooMuch', () => {
   });
 });
 
-describe('findRelatedPageSlugs', () => {
-  const roster = [
-    { slug: 'react', title: 'React' },
-    { slug: 'vue', title: 'Vue' },
-    { slug: 'category', title: 'Category Theory' },
-  ];
-
-  it('contradiction 描述含对方 slug → 召回对方、排除自身', () => {
-    const findings = [f('contradiction', 'react', 'react conflicts with vue on lifecycle')];
-    expect(findRelatedPageSlugs('react', findings, roster)).toEqual(['vue']);
-  });
-
-  it('描述含 roster title（大小写不敏感整词）→ 召回', () => {
-    const findings = [f('missing-crossref', 'react', 'mentions VUE but no link')];
-    expect(findRelatedPageSlugs('react', findings, roster)).toContain('vue');
-  });
-
-  it('词边界：cat 不命中 category 子串', () => {
-    const roster2 = [{ slug: 'cat', title: 'Cat' }];
-    const findings = [f('broken-link', 'p', 'see the category page')];
-    expect(findRelatedPageSlugs('p', findings, roster2)).toEqual([]);
-  });
-
-  it('连字符边界：react 不命中 react-hooks 内的 react', () => {
-    const roster2 = [{ slug: 'react', title: 'React' }];
-    const findings = [f('broken-link', 'p', 'see react-hooks docs for details')];
-    expect(findRelatedPageSlugs('p', findings, roster2)).toEqual([]);
-  });
-
-  it('非 ASCII（中文）title 子串匹配——无词边界', () => {
-    const roster2 = [{ slug: 'shen-jing-wang-luo', title: '神经网络' }];
-    const findings = [f('missing-crossref', 'p', '本页讨论神经网络的反向传播')];
-    expect(findRelatedPageSlugs('p', findings, roster2)).toEqual(['shen-jing-wang-luo']);
-  });
-
-  it('contradiction 兜底：描述无匹配但有其他 contradiction 页 → 召回（排除自身）', () => {
-    const findings = [f('contradiction', 'react', 'states something is true')];
-    const out = findRelatedPageSlugs('react', findings, roster, new Set(['vue', 'react']));
-    expect(out).toEqual(['vue']);
-  });
-
-  it('非 contradiction 不触发兜底', () => {
-    const findings = [f('broken-link', 'react', 'no roster names here')];
-    expect(findRelatedPageSlugs('react', findings, roster, new Set(['vue']))).toEqual([]);
-  });
-
-  it('上限 cap=4 且去重', () => {
-    const big = Array.from({ length: 8 }, (_, i) => ({ slug: `p${i}`, title: `P${i}` }));
-    const desc = big.map((r) => r.slug).join(' ');
-    const findings = [f('contradiction', 'src', desc), f('broken-link', 'src', desc)];
-    const out = findRelatedPageSlugs('src', findings, big);
-    // 取前 4 个、按出现顺序、跨两条同 desc 的 finding 去重（toEqual 同时锁定 cap=4 + 顺序 + 无重复）
-    expect(out).toEqual(['p0', 'p1', 'p2', 'p3']);
-  });
-});
-
 describe('buildSubjectReportLines', () => {
   it('按 pageSlug 分组、按首次出现保序、行格式 type: desc', () => {
     const wl = [
@@ -194,5 +138,27 @@ describe('buildSubjectReportLines', () => {
     const out = buildSubjectReportLines([f('broken-link', 'a', long)]);
     expect(out[0].lines[0].endsWith('…')).toBe(true);
     expect(out[0].lines[0].length).toBeLessThan(220);
+  });
+});
+
+describe('createFixGuard', () => {
+  it('canWrite 达到 cap 后拒绝', () => {
+    const g = createFixGuard({ caps: { writes: 2 } });
+    expect(g.canWrite().ok).toBe(true);
+    g.record('update'); g.record('create');
+    const d = g.canWrite();
+    expect(d.ok).toBe(false);
+    expect(d.reason).toMatch(/limit of 2 edits/);
+  });
+  it('canEditPage 拒绝保护页 index/log，放行普通页', () => {
+    const g = createFixGuard({ caps: { writes: 5 } });
+    expect(g.canEditPage('index').ok).toBe(false);
+    expect(g.canEditPage('log').ok).toBe(false);
+    expect(g.canEditPage('eigen').ok).toBe(true);
+  });
+  it('totals 累加准确', () => {
+    const g = createFixGuard({ caps: { writes: 5 } });
+    g.record('update'); g.record('update'); g.record('create');
+    expect(g.totals()).toEqual({ update: 2, create: 1, writes: 3 });
   });
 });
