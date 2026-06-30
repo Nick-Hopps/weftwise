@@ -2,7 +2,7 @@
  * 把 LLM 产出的拆分页清单整理为可落盘的页：派生唯一 slug、保证恰一个 primary。
  * 纯函数、无副作用。详见 docs/superpowers/specs/2026-06-22-page-split-design.md。
  */
-import { normalizeSlug } from './page-identity';
+import { deriveUniqueSlug } from './page-identity';
 
 export interface LlmSplitPage {
   title: string;
@@ -26,13 +26,7 @@ export function planSplitPages(
 
   let primaryAssigned = false;
   for (const p of pages) {
-    const base = normalizeSlug(p.title) || 'page';
-    let slug = base;
-    let n = 2;
-    while (taken.has(slug)) {
-      slug = `${base}-${n}`;
-      n += 1;
-    }
+    const slug = deriveUniqueSlug(p.title, taken);
     taken.add(slug);
 
     let isPrimary = false;
