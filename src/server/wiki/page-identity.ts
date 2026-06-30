@@ -95,3 +95,19 @@ export function wikiPathFromSlug(slug: string): string {
 export function slugFromTitle(title: string): string {
   return normalizeSlug(title);
 }
+
+/**
+ * 从标题派生在给定 slug 集合内唯一的 slug：`normalizeSlug(title)`（空则 `'page'`）为 base，
+ * 与 `taken` 冲突时追加 `-2`/`-3`…。纯函数。create 与 split 共用，杜绝两份派生逻辑漂移。
+ */
+export function deriveUniqueSlug(title: string, taken: Iterable<string>): string {
+  const set = taken instanceof Set ? taken : new Set(taken);
+  const base = normalizeSlug(title) || 'page';
+  let slug = base;
+  let n = 2;
+  while (set.has(slug)) {
+    slug = `${base}-${n}`;
+    n += 1;
+  }
+  return slug;
+}
