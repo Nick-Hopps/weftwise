@@ -46,11 +46,11 @@ operations.status = 'applied'                   ← 释放 lock
 | `markdown.ts` | `parseWikiDocument / serializeWikiDocument`、类型 `WikiDocument` | 组合 frontmatter + wikilinks，透传 currentSubjectSlug |
 | `frontmatter.ts` | `parseFrontmatter / serializeFrontmatter / validateFrontmatter`、类型 `WikiFrontmatter` | gray-matter 封装 |
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
-| `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / slugFromTitle / GENERAL_SUBJECT_SLUG` | path ↔ (subject, slug) 互转；保留 `slugFromWikiPath` shim 过渡（已无活跃调用方） |
+| `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / slugFromTitle / deriveUniqueSlug(title, existingSlugs) / GENERAL_SUBJECT_SLUG` | path ↔ (subject, slug) 互转；`deriveUniqueSlug` 为 create/split 共用的唯一 slug 派生（冲突自动加后缀）；保留 `slugFromWikiPath` shim 过渡（已无活跃调用方） |
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
 | `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
-| `page-ops.ts` | `executePageMerge(jobId, subject, {targetSlug, sourceSlug})` / `executePageSplit(jobId, subject, {sourceSlug, hint?})` | merge/split 执行内核（LLM 调用 + Saga 事务）；无 emit / 无 embed enqueue —— 调用方自持；供 `curate-service` 复用 |
+| `page-ops.ts` | `executePageMerge(jobId, subject, {targetSlug, sourceSlug})` / `executePageSplit(jobId, subject, {sourceSlug, hint?})` / `executePageDelete(jobId, subject, slug)` / `executePageCreate(jobId, subject, {title, body?, tags?})` | merge/split/delete/create 执行内核（LLM 调用 + Saga 事务）；无 emit / 无 embed enqueue —— 调用方自持；供 `curate-service` 与 query 工具复用 |
 | `curate-plan.ts` | `expandScopeWithNeighbors(slugs, links)` / `applyDecisionCaps(plan, caps)` / `restrictToSeed(candidates, seedSlugs)` | 纯函数：scope 扩展（含邻居）、候选数量截断（merge≤5/split≤5）、seed 护栏过滤（auto 策展专用） |
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
@@ -92,7 +92,7 @@ operations.status = 'applied'                   ← 释放 lock
 
 ## 测试与质量
 
-已覆盖（`__tests__/`，vitest，9 文件）：`wikilinks`（解析 + `[[subject:page]]` 跨主题 + `resolveWikiLinkTarget`）、`wiki-transaction`（validate / rollback 幂等 / applyChangeset）、`frontmatter`（round-trip）、`relink`（改标题/重指引用重写）、`split-plan`、`curate-plan`、`revert`、`history`、`indexer-wakeup`（邻居唤醒）。
+已覆盖（`__tests__/`，vitest，11 文件）：`wikilinks`（解析 + `[[subject:page]]` 跨主题 + `resolveWikiLinkTarget`）、`wiki-transaction`（validate / rollback 幂等 / applyChangeset）、`frontmatter`（round-trip）、`relink`（改标题/重指引用重写）、`split-plan`、`curate-plan`、`revert`、`history`、`indexer-wakeup`（邻居唤醒）、`page-identity`（`deriveUniqueSlug` 唯一 slug 派生及冲突后缀）、`page-ops-create-delete`（`executePageCreate`/`executePageDelete` Saga 流程与守卫）。
 
 仍待补充：
 
@@ -143,6 +143,7 @@ src/server/wiki/
 | 2026-06-22 | `wiki-transaction::SourceLinkOps` 升级为多源：`{ links: Array<{ sourceId; pageSlugs }>; extraStagePaths?: string[]; linkPageSource; updateSourcePageLinks; onWarning? }`；`applyChangeset` stage `affectedPaths ∪ extraStagePaths`、遍历 `links` 写 page_sources（事务内）+ `updateSourcePageLinks`（事务后各自 try/catch）；向后兼容（空 links+paths→sourceOps undefined）。供 ⑨ 把核查引用网页随同一 ingest commit 导入为 source |
 | 2026-06-23 | 新增 `page-ops.ts`（`executePageMerge` / `executePageSplit`，merge/split 执行内核，无 emit/enqueue）；新增 `curate-plan.ts`（`expandScopeWithNeighbors` / `applyDecisionCaps` / `restrictToSeed` 三个纯函数）；relink.ts 与 split-plan.ts 保留不变，由 page-ops 内部调用 |
 | 2026-06-24 | 文档：测试与质量小节更新为实际覆盖（9 文件） |
+| 2026-06-30 | `page-ops.ts` 新增 `executePageDelete`/`executePageCreate`（对话工具内核，无 emit/enqueue，Saga 事务）；`page-identity.ts` 新增 `deriveUniqueSlug(title, existingSlugs)`（create/split 共用唯一 slug 派生，冲突自动加后缀）；新增 `page-identity`/`page-ops-create-delete` 单测覆盖 |
 
 ---
 

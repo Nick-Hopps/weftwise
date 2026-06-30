@@ -101,7 +101,7 @@ src/lib/
 ├── slug.ts                 # URL-safe slug
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
-├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨）
+├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨，`wiki.create` 映射 ➕，`wiki.delete` 映射 🗑）
 └── theme/
     └── read-theme-vars.ts  # 读取 CSS 变量
 ```
@@ -118,6 +118,7 @@ src/lib/
 | 2026-06-23 | `Job.type` 移除 `'merge'|'split'`，新增 `'curate'`（merge/split 内化为 curate 子步骤，不再是独立 job 类型）；`AppSettings` 加 `agentAutoCurate: boolean`（默认 true，控制 ingest finalize 后是否自动入队 curate scope:'pages'）|
 | 2026-06-28 | 对话触发 Re-enrich：新增 `tool-activity.ts`（`toolActivityIcon/toolActivityVerb/summarizeToolArgs` 纯函数，client + query route 共用单一源，支持 `wiki.reenrich` 映射 ✨/Re-enriching）|
 | 2026-06-27 | Cognitive Lens：contracts 加 `StylePrefs`（+ 4 个枚举别名 Lens{ReadingLevel,Verbosity,ExampleDensity,Formality}）与 `UserProfileDTO`（client 侧纯类型；server zod 真源在 `server/profile/style.ts`，由该处编译期双向断言守卫两者一致）|
+| 2026-06-30 | `tool-activity.ts` 补 `wiki_create`(➕)/`wiki_delete`(🗑) 工具名→图标/动词映射，供对话创建/删除页面工具的 chat UI 活动展示 |
 
 ---
 
