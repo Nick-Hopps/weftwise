@@ -15,10 +15,10 @@ function ctx(over: Partial<ToolContext> = {}): ToolContext {
 describe('wiki.update tool', () => {
   it('注入 updatePage → ok:true 返回 updatedSlug', async () => {
     const updatePage = vi.fn(async () => ({ updatedSlug: 'eigen' }));
-    const res = await wikiUpdateTool.handler({ slug: 'eigen', body: 'x' }, ctx({ updatePage }));
+    const res = await wikiUpdateTool.handler({ slug: 'eigen', body: 'x', summary: 's', tags: ['math'] }, ctx({ updatePage }));
     expect(res.ok).toBe(true);
     expect(res.updatedSlug).toBe('eigen');
-    expect(updatePage).toHaveBeenCalledWith({ slug: 'eigen', body: 'x' });
+    expect(updatePage).toHaveBeenCalledWith({ slug: 'eigen', body: 'x', summary: 's', tags: ['math'] });
   });
   it('ctx 缺 updatePage → ok:false 优雅报错', async () => {
     const res = await wikiUpdateTool.handler({ slug: 'eigen', body: 'x' }, ctx());
