@@ -17,6 +17,11 @@ vi.mock('../verify-page', () => ({
   runPageVerification: (o: unknown) => mockRunPageVerification(o),
 }));
 
+const mockRunPageSupplement = vi.fn();
+vi.mock('../supplement-page', () => ({
+  runPageSupplement: (o: unknown) => mockRunPageSupplement(o),
+}));
+
 function ctxStub(chunks: StoredChunk[] = [], checkpoint?: IngestCheckpoint): AgentContext {
   const chunkStore = new Map<string, StoredChunk>();
   for (const c of chunks) chunkStore.set(`${c.sourceId}:${c.id}`, c);
@@ -745,5 +750,34 @@ describe('orchestrator verify step', () => {
     expect(mockRun).not.toHaveBeenCalled();
     // entry 暂存进 pending（path 经规范化）
     expect(ctx.pending.entries[0]).toMatchObject({ path: 'wiki/general/a.md' });
+  });
+});
+
+describe('orchestrator.runPipeline: supplement', () => {
+  it('supplement step 逐页调 runPageSupplement，转发 profileHint，产物按 path 落 ctx.pending', async () => {
+    mockRunPageSupplement.mockReset();
+    mockRunPageSupplement.mockResolvedValue({
+      runId: 's1', tokensUsed: 1, stepCount: 1,
+      output: { action: 'update', path: 'wiki/general/qs.md', content: '# supplemented' },
+    });
+    const ctx = ctxStub();
+    await runPipeline({
+      steps: [{ kind: 'supplement', skillId: 'reenrich-supplement', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'supplement-page' }],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {
+        plan: { pages: [{ slug: 'qs', title: 'QS', summary: 's' }] },
+        writerOutputs: [{ action: 'update', path: 'wiki/general/qs.md', content: '# original' }],
+        subjectSlug: 'general',
+        existingPages: [{ slug: 'qs' }],
+        profileHint: 'reader is a beginner',
+      },
+    });
+    expect(mockRunPageSupplement).toHaveBeenCalledTimes(1);
+    // profileHint 随 buildFanoutInput 转发进入每页输入
+    expect(mockRunPageSupplement.mock.calls[0][0].input.profileHint).toBe('reader is a beginner');
+    // draftContent = seed 的现有正文（injectPriorPageAs 从 writerOutputs 按 path 取）
+    expect(mockRunPageSupplement.mock.calls[0][0].input.draftContent).toBe('# original');
+    expect(ctx.pending.entries.find((e) => e.path === 'wiki/general/qs.md')?.content).toBe('# supplemented');
   });
 });
