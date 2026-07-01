@@ -124,9 +124,28 @@ worker-entry.ts
 
 ### `reenrich-service.ts` 🆕 — 任务类型 `'re-enrich'`
 
-手动重新增益：复用 ingest 增益流水线（enricher → verify），跳过 writer——现有页正文即忠实层，直接当 draft；`commitPending` 收口提交（不重写 index/log）。即便 subject `augmentationLevel` 为 `off` 也强制按 `standard` 跑（用户显式触发语义）。
+手动重新增益：现有页正文即忠实层，直接当 draft，跑**三阶段流水线** `reenrichSteps()`：
 
-emit `reenrich:start` 后进入 pipeline；流水线完成后 `checkpoint.clear()`，返回 commit result。需要 `ingest-enricher v2` / `ingest-verifier v2` / `ingest-verifier-triage v1` / `ingest-verifier-apply v1`（不满足则 fail-fast 提示删除旧 skill 文件重播种）。
+1. **`supplement`**（`skillId:'reenrich-supplement'`，新 step kind）——画像驱动正文缺口补全。`runtime/supplement-page.ts::runPageSupplement` 逐页调 skill 产候选 → `supplement-guard.ts::checkSupplementFidelity` 确定性护栏校验 → 不过则把违规项拼回输入重写一次 → 仍不过则**回落原文**（退化为「只叠 callout」，与改造前等价，不阻断后续阶段）。
+2. **`ingest-enricher`**（fanout，复用 ingest 增益层）——叠 `[!type]` callout。
+3. **`verify`**（复用 P3 联网核查/自检降级）。
+
+`buildReenrichInitialInput` 把现有正文 seed 进 `writerOutputs`（enricher 的 `injectPriorPageAs:'draftContent'` 据此取用）；同时把 `buildProfileHint(getProfileOrDefault(LOCAL_USER_ID))` 的输出作 `profileHint` 传给 supplement 阶段。
+
+**画像仅作探针**（`buildProfileHint`）：读取单租户画像（`LOCAL_USER_ID`）的 `backgroundSummary` + `stylePrefs`（readingLevel/verbosity/exampleDensity），拼成一句话提示——**只用来定位读者大概率不懂的概念，补充内容本身必须写成中性、对任何读者都普遍适用的讲解**；这是与 Cognitive Lens（读时按读者重塑讲法）的宪法边界：canonical 正文永远中性，读者专属讲法只在读时发生。无背景资料时回落「中级读者」中性假设。
+
+**忠实度护栏**（`supplement-guard.ts::checkSupplementFidelity`，纯函数）——因允许「插入 + 局部改写」无法逐字比对，改用 4 项组合式软护栏，floor=0.95：
+- 不缩水：`bodyShrankTooMuch(orig, candidate, 0.95)`（复用 `fix-deterministic.ts`）——正文字数不得跌破原文 95%；
+- 不臆造 wikilink：`checkLinkSubset`（复用 `profile/fidelity.ts`）——候选正文的 wikilink 目标必须是原文的子集，不许新增；
+- 标题不减：`headingsPreserved`——原文每个标题（级别+文字）须在候选正文原样出现；
+- frontmatter 不变：`frontmatterUnchanged`——frontmatter 数据对象深度相等（JSON 规范序列化比对）。
+四项全过才算通过；任一违规都会被收进 `violations[]` 用于重写反馈。
+
+即便 subject `augmentationLevel` 为 `off` 也强制按 `standard` 跑（用户显式触发语义）。
+
+emit `reenrich:start` 后进入 pipeline（supplement 阶段失败回落时额外 emit `reenrich:supplement-fallback`）；流水线完成后经 `commitPending` 收口提交（不重写 index/log）。**成熟度信号并入正文增长**：`deriveMaturityUpdate` 除原有 callout 增量外，新增 `proseGrowthIncrement(draftContent, finalContent)`（正文增长折算）一并计入 `newIncrement`，防止「多补正文少加 callout」被误判无进展。
+
+需要 `reenrich-supplement v1` / `ingest-enricher v4` / `ingest-verifier v2` / `ingest-verifier-triage v2` / `ingest-verifier-apply v3`（不满足则 fail-fast 提示删除旧 skill 文件重播种；`reenrich-supplement` 是新文件，首次启动自动播种，无需手动删）。
 
 ### `embedding-service.ts` 🆕 — 任务类型 `'embed-index'`
 
@@ -227,6 +246,7 @@ src/server/services/
 | 2026-06-30 | `curate-service` 由 triage→confirm→execute 结构化流水线改造为 tool-loop 驱动：`generateTextWithTools('curate')` + `buildCurateToolContext` + `createCurateGuard` 硬护栏；新增 `curate-tools.ts`（worker 侧 ToolContext，读已提交 vault + 写能力经 guard 鉴权后调 page-ops 内核 + emit 事件）；退休 triage/confirm 三套 schema+prompt |
 | 2026-06-30 | curate follow-up：auto 模式不再解析 `wiki.create` 工具（按 `seedSet===null` 条件化 `resolve`，省模型试探步数；`guard.canCreate` 仍兜底）；`['index','log']` 保护页常量统一为 `wiki/page-identity::META_PAGE_SLUGS` 单一源（`curate-service`/`page-write`/`lint-deterministic`/`reenrich-enqueue` 不再各持副本）|
 | 2026-06-30 | Fix tool-loop（Spec 3）：`fix-service` 阶段2 由逐页 `generateStructuredOutput('fix')` 改为 `generateTextWithTools('fix')` 自驱 `wiki.update`/`wiki.create`；新增 `fix-tools.ts::buildFixToolContext`（读侧同构 curate-tools + 写经 `createFixGuard`+忠实度护栏调 page-ops 内核）；`fix-deterministic` 加 `createFixGuard`、退休关联页提取（`findRelatedPageSlugs`/`mentions`/`MAX_RELATED_PAGES`）；`fix-prompt` 退休逐页 `FixPageSchema` 三件套、新增 agentic prompt；每写一次一 commit |
+| 2026-07-01 | reenrich-service 加画像驱动正文补全 supplement 首阶段（`reenrich-supplement` skill + `runPageSupplement` 护栏 + `buildProfileHint` 探针提示 + `deriveMaturityUpdate` 并入正文增长）；流水线三步（supplement→enricher→verify），仅 re-enrich，ingest 不变 |
 
 ---
 

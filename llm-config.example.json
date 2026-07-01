@@ -94,6 +94,11 @@
       "profile": "openai-default",
       "model": "gpt-4o-mini"
     },
+    "reenrich:supplement": {
+      "profile": "anthropic-default",
+      "model": "claude-sonnet-4-6",
+      "temperature": 0.3
+    },
     "reshape:page": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
