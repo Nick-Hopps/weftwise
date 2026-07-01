@@ -17,6 +17,8 @@ import * as queue from '../jobs/queue';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as maturityRepo from '../db/repos/maturity-repo';
+import { getProfileOrDefault } from '../db/repos/profiles-repo';
+import { LOCAL_USER_ID } from '../middleware/user';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
 import { loadCheckpoint } from '../agents/runtime/checkpoint';
@@ -37,9 +39,10 @@ interface ReenrichParams {
   subjectId: string;
 }
 
-/** re-enrich 固定两步：现有正文当 draft → enricher → verify。 */
+/** re-enrich 固定三步：现有正文当 draft → supplement（补讲解缺口）→ enricher → verify。 */
 export function reenrichSteps(): PipelineStep[] {
   return [
+    { kind: 'supplement', skillId: 'reenrich-supplement', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'supplement-page' },
     { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
     { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
   ];
@@ -54,6 +57,7 @@ export function buildReenrichInitialInput(opts: {
   draftContent: string;
   languageDirective: string;
   augmentationDirective: string;
+  profileHint: string;
 }): unknown {
   const path = `wiki/${opts.subjectSlug}/${opts.slug}.md`;
   const page = { slug: opts.slug, title: opts.title, summary: opts.summary };
@@ -65,6 +69,7 @@ export function buildReenrichInitialInput(opts: {
     existingPages: [page], // 命中 → enricher/verify 用 action=update
     languageDirective: opts.languageDirective,
     augmentationDirective: opts.augmentationDirective,
+    profileHint: opts.profileHint,
   };
 }
 
@@ -126,6 +131,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
 
   const { skillRegistry, toolRegistry } = getRuntimeRegistries();
   const MIN_SKILL_VERSIONS: Record<string, number> = {
+    'reenrich-supplement': 1,
     'ingest-enricher': 4, 'ingest-verifier': 2,
     'ingest-verifier-triage': 2, 'ingest-verifier-apply': 3,
   };
@@ -176,6 +182,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
   const level = subject.augmentationLevel === 'off' ? 'standard' : subject.augmentationLevel;
   const languageDirective = renderLanguageDirective(getWikiLanguage());
   const augmentationDirective = renderAugmentationDirective(level);
+  const profileHint = buildProfileHint(getProfileOrDefault(LOCAL_USER_ID));
 
   await runPipeline({
     steps: reenrichSteps(),
@@ -193,6 +200,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
       draftContent: existing.markdown,
       languageDirective,
       augmentationDirective,
+      profileHint,
     }),
   });
 

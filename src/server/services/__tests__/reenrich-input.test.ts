@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { buildReenrichInitialInput, reenrichSteps, buildProfileHint } from '../reenrich-service';
 
 describe('reenrich input', () => {
-  it('reenrichSteps 固定为 enricher fanout + verify', () => {
+  it('reenrichSteps 固定为 supplement → enricher fanout → verify', () => {
     const steps = reenrichSteps();
-    expect(steps.map((s) => ('skillId' in s ? s.skillId : s.kind))).toEqual(['ingest-enricher', 'verify']);
+    expect(steps.map((s) => ('skillId' in s ? s.skillId : s.kind))).toEqual(['reenrich-supplement', 'ingest-enricher', 'verify']);
     expect((steps[0] as { injectPriorPageAs?: string }).injectPriorPageAs).toBe('draftContent');
   });
 
@@ -17,6 +17,7 @@ describe('reenrich input', () => {
       draftContent: '# Eigenvalues\nbody',
       languageDirective: 'LANG',
       augmentationDirective: 'AUG',
+      profileHint: 'HINT',
     }) as {
       plan: { pages: Array<{ slug: string }> };
       writerOutputs: Array<{ path: string; content: string }>;
@@ -47,5 +48,26 @@ describe('buildProfileHint', () => {
       stylePrefs: { readingLevel: 'intermediate', verbosity: 'balanced', exampleDensity: 'some' },
     });
     expect(hint.toLowerCase()).toContain('general');
+  });
+});
+
+describe('reenrichSteps 三阶段', () => {
+  it('首步是 supplement，其后 enricher、verify', () => {
+    const steps = reenrichSteps();
+    expect(steps.map((s) => s.kind)).toEqual(['supplement', 'fanout', 'verify']);
+    expect(steps[0]).toMatchObject({ kind: 'supplement', skillId: 'reenrich-supplement', injectPriorPageAs: 'draftContent', checkpointAs: 'supplement-page' });
+  });
+});
+
+describe('buildReenrichInitialInput 携带 profileHint', () => {
+  it('把 profileHint 写进 initialInput（供 orchestrator 转发给 supplement）', () => {
+    const input = buildReenrichInitialInput({
+      slug: 'qs', title: 'QS', summary: 's', subjectSlug: 'general',
+      draftContent: '# body', languageDirective: 'L', augmentationDirective: 'A',
+      profileHint: 'reader is a beginner',
+    }) as { profileHint?: string; writerOutputs?: unknown[] };
+    expect(input.profileHint).toBe('reader is a beginner');
+    // writerOutputs 仍 seed 现有正文供 supplement 的 draftContent 注入
+    expect(input.writerOutputs).toEqual([{ action: 'update', path: 'wiki/general/qs.md', content: '# body' }]);
   });
 });
