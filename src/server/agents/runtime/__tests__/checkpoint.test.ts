@@ -106,3 +106,20 @@ describe('IngestCheckpoint — enricher/verifier page', () => {
     reloaded.clear();
   });
 });
+
+describe('IngestCheckpoint — supplement page', () => {
+  it('supplement page 双写并按 slug 读回，clear 后清空', async () => {
+    const { loadCheckpoint } = await import('../checkpoint');
+    const jobId = `ckpt-supplement-${Math.random().toString(36).slice(2)}`;
+    const ck = loadCheckpoint(jobId);
+    expect(ck.getSupplementPage('a')).toBeUndefined();
+    const s = { action: 'update' as const, path: 'wiki/general/a.md', content: 'supplemented' };
+    ck.putSupplementPage('a', s);
+
+    const reloaded = loadCheckpoint(jobId);
+    expect(reloaded.getSupplementPage('a')).toEqual(s);
+    expect(reloaded.hasAny()).toBe(true);
+    reloaded.clear();
+    expect(loadCheckpoint(jobId).getSupplementPage('a')).toBeUndefined();
+  });
+});

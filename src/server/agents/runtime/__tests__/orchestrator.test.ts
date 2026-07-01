@@ -52,6 +52,7 @@ function fakeCheckpoint(seed?: {
   const pages = new Map(Object.entries(seed?.pages ?? {}));
   const enricherPages = new Map<string, ChangesetEntry>();
   const verifierPages = new Map<string, ChangesetEntry>();
+  const supplementPages = new Map<string, ChangesetEntry>();
   let citedSources: import('../../types').CitedSource[] = [];
   let plan = seed?.plan;
   const putSummary = vi.fn((k: string, s: string) => { summaries.set(k, s); });
@@ -68,9 +69,11 @@ function fakeCheckpoint(seed?: {
     putEnricherPage: (slug, entry) => { enricherPages.set(slug, entry); },
     getVerifierPage: (slug) => verifierPages.get(slug),
     putVerifierPage: (slug, entry) => { verifierPages.set(slug, entry); },
+    getSupplementPage: (slug) => supplementPages.get(slug),
+    putSupplementPage: (slug, entry) => { supplementPages.set(slug, entry); },
     getCitedSources: () => citedSources,
     putCitedSources: (list) => { citedSources = list; },
-    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0 || citedSources.length > 0,
+    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0 || supplementPages.size > 0 || citedSources.length > 0,
     progress: () => ({ plan: plan !== undefined, chunkSummaries: summaries.size, writerPages: pages.size, totalPages: null }),
     clear: vi.fn(),
     _spies: { putSummary, putPlan, putPage },
