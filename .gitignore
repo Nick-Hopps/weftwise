@@ -55,3 +55,6 @@ data/
 
 # SDD 流程草稿（ledger/briefs/reports），不入库
 .superpowers/
+
+# git worktrees（本地隔离工作区，不入库）
+.worktrees/
