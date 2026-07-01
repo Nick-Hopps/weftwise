@@ -68,6 +68,28 @@ export function buildReenrichInitialInput(opts: {
   };
 }
 
+/**
+ * 把认知画像拼成 supplement 阶段的「探针提示」：
+ * 画像只用来定位「读者大概率不懂的概念」，但补充内容本身必须写成中性、对任何读者都普遍适用的讲解
+ * （读者专属讲法归读时 Cognitive Lens，不在 canonical 里做）。无背景时回落中性中级读者假设。
+ */
+export function buildProfileHint(profile: {
+  backgroundSummary: string;
+  stylePrefs: { readingLevel: string; verbosity: string; exampleDensity: string };
+}): string {
+  const { readingLevel, verbosity, exampleDensity } = profile.stylePrefs;
+  const bg = profile.backgroundSummary.trim();
+  const reader = bg
+    ? `The reader's background: ${bg}. Reading level: ${readingLevel}.`
+    : `Assume a general intermediate reader (reading level: ${readingLevel}).`;
+  return (
+    `${reader} Verbosity preference: ${verbosity}; example density: ${exampleDensity}. ` +
+    `Use this ONLY as a probe to spot which concepts most readers would likely find unexplained or confusing, ` +
+    `then fill those gaps. The supplement you write MUST be neutral, universally-useful canonical exposition — ` +
+    `never phrase it as if it only applies to this one reader.`
+  );
+}
+
 /** 用「新增 callout 数」作收敛信号，结合当前成熟度推导下一态。 */
 export function deriveMaturityUpdate(opts: {
   draftContent: string;
