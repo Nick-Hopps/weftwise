@@ -95,7 +95,7 @@ export function buildProfileHint(profile: {
   );
 }
 
-/** 用「新增 callout 数」作收敛信号，结合当前成熟度推导下一态。 */
+/** 用「新增 callout 数 + 正文增长折算」合并信号，结合当前成熟度推导下一态。 */
 export function deriveMaturityUpdate(opts: {
   draftContent: string;
   finalContent: string;
