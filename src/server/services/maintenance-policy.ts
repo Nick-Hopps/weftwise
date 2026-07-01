@@ -69,3 +69,13 @@ export function nextMaturity(input: MaturityInput, now: Date): MaturityNext {
   const ni = Math.min(SPACING_LADDER.length - 1, idx + step);
   return { passes, intervalDays: SPACING_LADDER[ni], state: 'active', nextDueAt: addDays(now, SPACING_LADDER[ni]) };
 }
+
+// 正文净增字符折算为「等效 callout 数」，并入成熟度收敛信号：
+// 补全阶段可能多补正文、少加 callout，若只数 callout 会误判「无进展」而过早毕业。
+export const PROSE_CHARS_PER_CALLOUT = 400;
+
+export function proseGrowthIncrement(draftContent: string, finalContent: string): number {
+  const grew = finalContent.trim().length - draftContent.trim().length;
+  if (grew <= 0) return 0;
+  return Math.floor(grew / PROSE_CHARS_PER_CALLOUT);
+}

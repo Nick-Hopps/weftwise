@@ -30,7 +30,7 @@ import {
 import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
 import { getRuntimeRegistries } from '../worker-runtime';
 import { enqueueEmbedIndex } from './embedding-service';
-import { countCallouts, nextMaturity, type MaturityNext } from './maintenance-policy';
+import { countCallouts, nextMaturity, proseGrowthIncrement, type MaturityNext } from './maintenance-policy';
 
 interface ReenrichParams {
   slug: string;
@@ -75,7 +75,9 @@ export function deriveMaturityUpdate(opts: {
   current: PageMaturity | null;
   now: Date;
 }): MaturityNext {
-  const newIncrement = Math.max(0, countCallouts(opts.finalContent) - countCallouts(opts.draftContent));
+  const calloutDelta = Math.max(0, countCallouts(opts.finalContent) - countCallouts(opts.draftContent));
+  // 合并信号：callout 增量 + 正文增长折算（防「多补正文少加 callout」被误判无进展）
+  const newIncrement = calloutDelta + proseGrowthIncrement(opts.draftContent, opts.finalContent);
   return nextMaturity(
     {
       state: opts.current?.state ?? 'active',
