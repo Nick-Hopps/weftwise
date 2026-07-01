@@ -1,12 +1,14 @@
 import type { AgentContext, SkillTemplate } from '../types';
 import { runAgentLoop, AgentCancelled, type AgentRunResult } from './agent-loop';
 import { runPageVerification } from './verify-page';
+import { runPageSupplement } from './supplement-page';
 import { BudgetExceededError } from './budget';
 import type { ChangesetEntry } from '@/lib/contracts';
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
   | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string; injectExistingPageForUpdate?: boolean }
+  | { kind: 'supplement'; skillId: string; fromOutput: string; checkpointAs?: 'supplement-page'; injectPriorPageAs?: string }
   | { kind: 'verify'; fromOutput: string; checkpointAs?: 'verifier-page'; injectPriorPageAs?: string }
   | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string; checkpointAs?: 'chunk-summary' };
 
@@ -108,10 +110,10 @@ export async function runPipeline(opts: {
       carry = isPlainObject(carry)
         ? { ...carry, [step.intoOutput]: results }
         : { [step.intoOutput]: results };
-    } else if (step.kind === 'fanout' || step.kind === 'verify') {
-      // fanout / verify 分支：overlay 快照隔离、WriterConflictError 检测、putEntries 合并。
-      // verify 与 fanout 共用全部骨架，仅「每项的计算」不同（verify 跑两段式核查而非单 skill）。
-      const skill = step.kind === 'fanout' ? opts.resolveSkill(step.skillId) : undefined;
+    } else if (step.kind === 'fanout' || step.kind === 'verify' || step.kind === 'supplement') {
+      // fanout / verify / supplement 分支：overlay 快照隔离、WriterConflictError 检测、putEntries 合并。
+      // verify / supplement 与 fanout 共用全部骨架，仅「每项的计算」不同（verify 跑两段式核查、supplement 跑护栏化正文补全，而非单 skill）。
+      const skill = step.kind === 'fanout' || step.kind === 'supplement' ? opts.resolveSkill(step.skillId) : undefined;
       const items = readPath(carry, step.fromOutput);
       if (!Array.isArray(items)) {
         throw new Error(`Fanout source at "${step.fromOutput}" is not an array (got ${typeof items})`);
@@ -133,9 +135,14 @@ export async function runPipeline(opts: {
           parentRunId: opts.ctx.rootRunId,
         };
         const input = await buildFanoutInput(carry, item, opts.ctx, step);
-        const r = step.kind === 'verify'
-          ? await runPageVerification({ resolveSkill: opts.resolveSkill, ctx: childCtx, input })
-          : await runAgentLoop({ skill: skill!, ctx: childCtx, input });
+        let r: AgentRunResult;
+        if (step.kind === 'verify') {
+          r = await runPageVerification({ resolveSkill: opts.resolveSkill, ctx: childCtx, input });
+        } else if (step.kind === 'supplement') {
+          r = await runPageSupplement({ skill: skill!, ctx: childCtx, input });
+        } else {
+          r = await runAgentLoop({ skill: skill!, ctx: childCtx, input });
+        }
         // 路径强制规范：fanout over plan.pages 时 orchestrator 已知 slug+subjectSlug，
         // 不信任模型自填的 path——实测 verifier 等会吐裸 slug（如 "quicksort" 而非
         // "wiki/general/quicksort.md"），导致落到 vault 根、indexer 解析不出 slug 而漏建索引。
@@ -190,19 +197,21 @@ function upsertPending(pending: { entries: ChangesetEntry[] }, entry: ChangesetE
   else pending.entries.push(entry);
 }
 
-function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page', slug: string): ChangesetEntry | undefined {
+function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page' | 'supplement-page', slug: string): ChangesetEntry | undefined {
   if (!ck) return undefined;
   if (kind === 'writer-page') return ck.getWriterPage(slug);
   if (kind === 'enricher-page') return ck.getEnricherPage(slug);
   if (kind === 'verifier-page') return ck.getVerifierPage(slug);
+  if (kind === 'supplement-page') return ck.getSupplementPage(slug);
   return undefined;
 }
 
-function writeStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page', slug: string, entry: ChangesetEntry): void {
+function writeStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page' | 'supplement-page', slug: string, entry: ChangesetEntry): void {
   if (!ck) return;
   if (kind === 'writer-page') ck.putWriterPage(slug, entry);
   else if (kind === 'enricher-page') ck.putEnricherPage(slug, entry);
   else if (kind === 'verifier-page') ck.putVerifierPage(slug, entry);
+  else if (kind === 'supplement-page') ck.putSupplementPage(slug, entry);
 }
 
 function readPath(obj: unknown, path: string): unknown {
@@ -238,6 +247,7 @@ export async function buildFanoutInput(
     plan: carry.plan,
     languageDirective: carry.languageDirective,
     augmentationDirective: carry.augmentationDirective,
+    profileHint: carry.profileHint,
     expositionDirective: carry.expositionDirective,
     ...item,
     relevantChunks,
