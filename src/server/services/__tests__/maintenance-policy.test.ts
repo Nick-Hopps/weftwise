@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { countCallouts, nextMaturity, SPACING_LADDER } from '../maintenance-policy';
+import { countCallouts, nextMaturity, proseGrowthIncrement, SPACING_LADDER, PROSE_CHARS_PER_CALLOUT } from '../maintenance-policy';
 
 const NOW = new Date('2026-06-23T00:00:00.000Z');
 
@@ -14,6 +14,18 @@ describe('countCallouts', () => {
       '> [!example] 📝 例题',
     ].join('\n');
     expect(countCallouts(md)).toBe(2);
+  });
+});
+
+describe('proseGrowthIncrement', () => {
+  it('正文净增 = floor(增量 / PROSE_CHARS_PER_CALLOUT)', () => {
+    const draft = 'a'.repeat(100);
+    const final = 'a'.repeat(100 + PROSE_CHARS_PER_CALLOUT * 2 + 10);
+    expect(proseGrowthIncrement(draft, final)).toBe(2);
+  });
+  it('无增长/缩水 → 0', () => {
+    expect(proseGrowthIncrement('a'.repeat(500), 'a'.repeat(500))).toBe(0);
+    expect(proseGrowthIncrement('a'.repeat(500), 'a'.repeat(100))).toBe(0);
   });
 });
 

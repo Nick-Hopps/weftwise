@@ -23,4 +23,12 @@ describe('deriveMaturityUpdate', () => {
     });
     expect(r.state).toBe('graduated');
   });
+
+  it('纯正文补全（无新 callout）也推进成熟度、不判 saturation', () => {
+    const draft = 'x'.repeat(200);
+    const final = 'x'.repeat(200 + 400 * 3); // 正文增量 → 等效 3 个 callout
+    const next = deriveMaturityUpdate({ draftContent: draft, finalContent: final, current: null, now: NOW });
+    // newIncrement=3 ≥ SUBSTANTIAL_INCREMENT → 停当前档（active，不毕业）
+    expect(next.state).toBe('active');
+  });
 });
