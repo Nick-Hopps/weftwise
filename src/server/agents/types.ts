@@ -79,6 +79,8 @@ export interface IngestCheckpoint {
   putEnricherPage(slug: string, entry: ChangesetEntry): void;
   getVerifierPage(slug: string): ChangesetEntry | undefined;
   putVerifierPage(slug: string, entry: ChangesetEntry): void;
+  getSupplementPage(slug: string): ChangesetEntry | undefined;
+  putSupplementPage(slug: string, entry: ChangesetEntry): void;
   /** ⑨ 核查累积的网页引用源（整张去重后列表，单 blob 持久化）；续传时 rehydrate 进 ctx.citedSources。 */
   getCitedSources(): CitedSource[];
   putCitedSources(list: CitedSource[]): void;

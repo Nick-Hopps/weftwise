@@ -11,6 +11,7 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
   const pages = new Map<string, ChangesetEntry>();
   const enricherPages = new Map<string, ChangesetEntry>();
   const verifierPages = new Map<string, ChangesetEntry>();
+  const supplementPages = new Map<string, ChangesetEntry>();
   let plan: unknown | undefined;
   let citedSources: CitedSource[] = [];
 
@@ -26,6 +27,8 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
       enricherPages.set(row.key, row.data as ChangesetEntry);
     } else if (row.kind === 'verifier-page') {
       verifierPages.set(row.key, row.data as ChangesetEntry);
+    } else if (row.kind === 'supplement-page') {
+      supplementPages.set(row.key, row.data as ChangesetEntry);
     } else if (row.kind === 'cited-sources') {
       citedSources = (row.data as { list?: CitedSource[] }).list ?? [];
     }
@@ -73,6 +76,11 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
       checkpointsRepo.putCheckpoint(jobId, 'verifier-page', slug, entry);
       verifierPages.set(slug, entry);
     },
+    getSupplementPage: (slug) => supplementPages.get(slug),
+    putSupplementPage: (slug, entry) => {
+      checkpointsRepo.putCheckpoint(jobId, 'supplement-page', slug, entry);
+      supplementPages.set(slug, entry);
+    },
     // ⑨ 续传补源：整张去重后列表存为单 blob（kind='cited-sources'，key 固定空串）。
     getCitedSources: () => citedSources,
     putCitedSources: (list) => {
@@ -80,13 +88,14 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
       checkpointsRepo.putCheckpoint(jobId, 'cited-sources', '', { list });
       citedSources = list;
     },
-    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0 || citedSources.length > 0,
+    hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0 || supplementPages.size > 0 || citedSources.length > 0,
     progress,
     clear: () => {
       summaries.clear();
       pages.clear();
       enricherPages.clear();
       verifierPages.clear();
+      supplementPages.clear();
       plan = undefined;
       citedSources = [];
       checkpointsRepo.deleteCheckpoints(jobId);
