@@ -110,8 +110,9 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `orchestrator.ts` | 按 step 顺序驱动多个 agent-loop；管理 context 传递（上一 step 的输出作为下一 step 的 user prompt 前缀）；捕获 emit 事件写 SSE；支持 sequence（carryThrough/omitFromInput）/fanout/map 三种 step；map 用于大文件逐块摘要；chunkStore 块路由（relevantChunks 按 planner sourceRefs 注入）；step 支持 `checkpointAs`（'plan'/'writer-page'/'enricher-page'/'verifier-page'/'chunk-summary'），命中检查点跳过 LLM，每页完成即落盘；fanout step 可携带 `injectPriorPageAs`，自动将上一阶段对应 path 的 content 注入当前阶段输入；亦可携带 `injectExistingPageForUpdate`（仅 writer step 启用），当本页 slug 命中 `existingPages`（=更新已有页）时经 `ctx.overlay.readPage` 注入现有正文 `existingPageContent`，供 writer 增量并入而非覆盖（⑤）；`ctx.pending` 按 path upsert（last-write-wins，后阶段覆盖前阶段）|
 | `budget.ts` | `createBudgetTracker`（job 级 token）+ `createRunStepTracker`（单实例 step）；超限抛 `BudgetExceededError` |
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
-| `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变。kinds：chunk-summary/plan/writer-page/enricher-page/verifier-page + `cited-sources`（⑨ 续传补源：整张 `CitedSource[]` 单 blob，`getCitedSources/putCitedSources`，`verify-page` record 后 persist、`ingest-service` pipeline 前 rehydrate） |
+| `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变。kinds：chunk-summary/plan/writer-page/enricher-page/verifier-page/`supplement-page`（re-enrich 专用，`getSupplementPage/putSupplementPage`）+ `cited-sources`（⑨ 续传补源：整张 `CitedSource[]` 单 blob，`getCitedSources/putCitedSources`，`verify-page` record 后 persist、`ingest-service` pipeline 前 rehydrate） |
 | `verify-page.ts` | `runPageVerification({ resolveSkill, ctx, input }): Promise<AgentRunResult>`（⑨）——逐页两段式联网核查：triage→编排层 `webSearch`→apply / 降级到 `ingest-verifier`(v2) 自检 / triage 空时 passthrough；apply 的 citedSources URL 经 `parseFrontmatter/serializeFrontmatter` 确定性追加进页 frontmatter `sources`，并累积进 `ctx.citedSources`（按 url 去重、合并 citedBy、fallbackContent 取匹配 snippet）。全程无 tools |
+| `supplement-page.ts` | `runPageSupplement({ skill, ctx, input }): Promise<AgentRunResult>`——re-enrich 专用，画像探针驱动正文缺口补全：调 skill（`reenrich-supplement`）产候选 → `supplement-guard.ts::checkSupplementFidelity` 4 项确定性护栏校验 → 不过则把 `violations[]` 拼回输入重写一次 → 仍不过则回落原文 passthrough（emit `reenrich:supplement-fallback`，不阻断后续阶段）。共用 fanout 骨架（`orchestrator.ts` 的 `kind:'supplement'` 分支），仅「每项计算」不同 |
 
 ### `skills/`
 
@@ -244,6 +245,9 @@ src/server/agents/
 │   ├── budget.ts                   # BudgetTracker
 │   ├── overlay-vault.ts            # 读写隔离层
 │   ├── checkpoint.ts               # IngestCheckpoint 句柄（内存索引 + 落盘双写）
+│   ├── verify-page.ts              # runPageVerification（⑨ 联网核查）
+│   ├── supplement-page.ts          # 🆕 runPageSupplement（re-enrich 专用，画像探针驱动正文补全 + 护栏 + 重写一次 + 回落原文）
+│   ├── supplement-guard.ts         # 🆕 checkSupplementFidelity 纯函数（4 项确定性护栏：不缩水/不臆造wikilink/标题不减/frontmatter不变）
 │   └── __tests__/
 ├── skills/
 │   ├── schema.ts                   # SkillSchema (zod)
@@ -288,6 +292,7 @@ src/server/agents/
 | 2026-06-30 | Curate tool-loop：新增 `tools/builtin/wiki-merge.ts`（`wiki.merge`，`sideEffect:'merge'`）+ `tools/builtin/wiki-split.ts`（`wiki.split`，`sideEffect:'split'`）；`ToolContext` 新增 `mergePages?(targetSlug, sourceSlug)` / `splitPage?(slug, hint?)` 写能力（仅 curate runner 注入）；`ToolDef.sideEffect` 联合类型扩展 `'merge'`/`'split'`；curate runner 经 `buildCurateToolContext`（`services/curate-tools.ts`）注入七工具（read/search/list/merge/split/delete/create）并驱动 `generateTextWithTools('curate')` tool-loop |
 | 2026-06-26 | 路由 key 统一：新增 `agent-loop::skillTaskKey(id)`（`ingest-planner`→`ingest:planner`），`resolveSkillModel` 改用之，task key 由 `skill:ingest-xxx` 改为 `ingest:xxx`（id/文件名不变）；配合移除内置 `ingest` task。文档修正：skill frontmatter 字段是 `model:`（非 `llm_override:`，schema `.strict()` 拒未知键）、router mode 值 `task-router-only`（非 `config-only`）|
 | 2026-06-30 | Fix tool-loop：新增 `tools/builtin/wiki-update.ts`（`wiki.update`，`sideEffect:'update'`，委托 `executePageUpdate`）；`ToolContext` 新增 `updatePage?`（仅 fix runner 注入）；`ToolDef.sideEffect` 扩 `'update'`（Spec 3）|
+| 2026-07-01 | 新增 `supplement` step kind + `runtime/supplement-page.ts::runPageSupplement`（re-enrich 专用，画像探针驱动正文缺口补全，共用 fanout 骨架、4 项确定性护栏 + 重写一次 + 回落原文）；`supplement-guard.ts` 护栏纯函数；checkpoint 加 `supplement-page` kind |
 
 ---
 
