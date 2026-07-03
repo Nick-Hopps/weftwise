@@ -31,7 +31,7 @@
 |------|------|------|
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
-| `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/`；或 JSON `{ urls: string[] }` 批量 URL（≤20，路由内同步抓取），入队 `ingest` 任务；返回 `{ jobId, sourceId }` 或 202 `{ jobIds: [...], sourceIds: [...], skipped?: [...] }` / 422 全失败 |
+| `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
