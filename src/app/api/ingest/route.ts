@@ -3,6 +3,8 @@ import * as queue from '@/server/jobs/queue';
 import { saveRawSource } from '@/server/sources/source-store';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
+import { fetchUrlSource } from '@/server/sources/url-fetcher';
+import { validateUrlList, ingestUrlBatch } from '@/server/sources/url-ingest';
 
 export const runtime = 'nodejs';
 
@@ -63,9 +65,43 @@ export async function POST(request: NextRequest) {
       const body = await request.json() as {
         text?: string;
         filename?: string;
+        urls?: unknown;
         subjectId?: string;
         subjectSlug?: string;
       };
+
+      // ── URL 批量分支：与 text 互斥 ──────────────────────────────
+      if (body.urls !== undefined) {
+        if (body.text !== undefined) {
+          return NextResponse.json(
+            { error: 'Provide either "urls" or "text", not both' },
+            { status: 400 },
+          );
+        }
+        const validated = validateUrlList(body.urls);
+        if ('error' in validated) {
+          return NextResponse.json({ error: validated.error }, { status: 400 });
+        }
+        const resolution = resolveSubjectFromRequest(request, { body });
+        if (resolution.error) return resolution.error;
+        const { subject } = resolution;
+
+        const results = await ingestUrlBatch(validated.urls, {
+          fetchSource: (url) => fetchUrlSource(url),
+          save: (filename, content, url) => saveRawSource(subject, filename, content, { originUrl: url }),
+          enqueue: (sourceId, filename) =>
+            queue.enqueue('ingest', { sourceId, filename, subjectId: subject.id }, subject.id),
+        });
+
+        const anySuccess = results.some((r) => r.jobId);
+        return NextResponse.json(
+          anySuccess
+            ? { results, subjectId: subject.id, subjectSlug: subject.slug }
+            : { error: 'All URLs failed', results },
+          { status: anySuccess ? 202 : 422 },
+        );
+      }
+
       const { text, filename: jsonFilename } = body;
 
       if (!text || typeof text !== 'string') {
