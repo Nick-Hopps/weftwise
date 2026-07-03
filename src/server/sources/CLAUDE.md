@@ -110,6 +110,8 @@ src/server/sources/
 ├── source-cleaner.ts                # 按来源预清洗（PDF 清洗链）
 ├── source-chunker.ts                # 结构感知递归切分器（token 计长）
 ├── source-store.ts                  # 持久化 + 去重 + page_sources
+├── url-fetcher.ts                   # URL 协议/超时10s/5MB/content-type 守卫
+├── url-ingest.ts                    # URL 列表校验 ≤20 + allSettled 编排
 └── parsers/
     ├── markdown-parser.ts
     ├── html-parser.ts               # turndown
@@ -121,6 +123,7 @@ src/server/sources/
 | 日期 | 变更 |
 |------|------|
 | 2026-04-22 | 初始化 |
+| 2026-07-03 | Ingest 支持 URL 输入：新增 `url-fetcher.ts`（fetch + 协议/超时10s/5MB 守卫）+ `url-ingest.ts`（validateUrlList≤20 + ingestUrlBatch allSettled 编排）；`src/lib/url-list.ts` 工具（URL 格式化与校验）；`POST /api/ingest` route 加 urls 分支；workbench 加 URL tab；parser-registry / source-store 零改动。|
 
 ---
 
