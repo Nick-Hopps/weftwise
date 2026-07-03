@@ -7,6 +7,7 @@ import {
   FileUp,
   GitCommitHorizontal,
   Layers,
+  Link2,
   ListChecks,
   PenLine,
   ScanText,
@@ -19,6 +20,7 @@ import {
 import { useJobStream } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
 import { takePendingIngestFile } from '@/lib/pending-ingest-file';
+import { parseUrlLines } from '@/lib/url-list';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
@@ -56,7 +58,11 @@ export function IngestWorkbench() {
   const queryClient = useQueryClient();
   const { slug: subjectSlug } = useCurrentSubject();
 
-  const [mode, setMode] = useState<'file' | 'text'>('file');
+  const [mode, setMode] = useState<'file' | 'text' | 'url'>('file');
+  const [urlInput, setUrlInput] = useState('');
+  const [urlResults, setUrlResults] = useState<
+    Array<{ url: string; jobId?: string; sourceId?: string; error?: string }> | null
+  >(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
   const [retrying, setRetrying] = useState(false);
@@ -98,6 +104,8 @@ export function IngestWorkbench() {
     setTextInput('');
     setFilenameInput('');
     setSourceName('');
+    setUrlInput('');
+    setUrlResults(null);
     setCheckpointProgress(null);
     setMode('file');
     if (fileRef.current) fileRef.current.value = '';
@@ -252,6 +260,52 @@ export function IngestWorkbench() {
       await startUpload(selectedFile);
       return;
     }
+    if (mode === 'url') {
+      const { urls, invalid } = parseUrlLines(urlInput);
+      if (invalid.length > 0) {
+        setError(`Invalid URLs (must start with http:// or https://): ${invalid.join(', ')}`);
+        return;
+      }
+      if (urls.length === 0) {
+        setError('Please enter at least one URL.');
+        return;
+      }
+      setError(null);
+      setCreatedPages([]);
+      setUrlResults(null);
+      setUploading(true);
+      try {
+        const subjectId = useUIStore.getState().currentSubjectId;
+        const res = await apiFetch('/api/ingest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subjectId ? { urls, subjectId } : { urls }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok && res.status !== 422) {
+          throw new Error(data.error || `Submit failed (${res.status})`);
+        }
+        const results = (data.results ?? []) as Array<{ url: string; jobId?: string; error?: string }>;
+        const jobIds = results.filter((r) => r.jobId).map((r) => r.jobId!);
+        // 通知全局 ProgressToast 追踪每个后台 job
+        for (const id of jobIds) {
+          window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: id } }));
+        }
+        if (jobIds.length === 1 && results.length === 1) {
+          // 单 URL 全成功：直接进入现有 live view
+          setSourceName(results[0].url);
+          setJobId(jobIds[0]);
+        } else {
+          // 批量：留在本页展示逐条结果（jobs 在后台跑，toast 追踪）
+          setUrlResults(results);
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
     // Text mode
     if (!textInput.trim()) {
       setError('Please enter some text to ingest.');
@@ -323,7 +377,8 @@ export function IngestWorkbench() {
   }
 
   // ── Setup ───────────────────────────────────────────────────────────────────
-  const canStart = mode === 'file' ? !!selectedFile : !!textInput.trim();
+  const canStart =
+    mode === 'file' ? !!selectedFile : mode === 'url' ? !!urlInput.trim() : !!textInput.trim();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -360,10 +415,11 @@ export function IngestWorkbench() {
         <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <span className="text-sm font-semibold text-foreground">New ingest</span>
-            <Tabs value={mode} onValueChange={(v) => setMode(v as 'file' | 'text')}>
+            <Tabs value={mode} onValueChange={(v) => setMode(v as 'file' | 'text' | 'url')}>
               <TabsList>
                 <TabsTrigger value="file">File</TabsTrigger>
                 <TabsTrigger value="text">Text</TabsTrigger>
+                <TabsTrigger value="url">URL</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -410,6 +466,20 @@ export function IngestWorkbench() {
                   </>
                 )}
               </button>
+            ) : mode === 'url' ? (
+              <div className="flex flex-col gap-3">
+                <Textarea
+                  rows={7}
+                  autoFocus
+                  placeholder={'One URL per line, e.g.\nhttps://example.com/article\nhttps://docs.example.com/guide'}
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  aria-label="URLs to ingest, one per line"
+                />
+                <span className="font-mono text-xs text-foreground-tertiary">
+                  Up to 20 URLs · fetched server-side · 5 MB per page
+                </span>
+              </div>
             ) : (
               <div className="flex flex-col gap-3">
                 <Input
@@ -433,6 +503,32 @@ export function IngestWorkbench() {
               <p role="alert" className="text-xs text-danger">
                 {error}
               </p>
+            )}
+
+            {urlResults && (
+              <div className="flex flex-col gap-1.5 rounded-md border border-border bg-canvas p-3">
+                <span className="text-xs font-semibold text-foreground">
+                  {urlResults.filter((r) => r.jobId).length}/{urlResults.length} URLs queued
+                </span>
+                <ul className="flex flex-col gap-1">
+                  {urlResults.map((r) => (
+                    <li key={r.url} className="flex items-start gap-2 text-xs">
+                      <Link2
+                        className={cn('mt-0.5 h-3 w-3 shrink-0', r.jobId ? 'text-accent' : 'text-danger')}
+                        aria-hidden
+                      />
+                      <span className="min-w-0">
+                        <span className="break-all font-mono text-foreground-secondary">{r.url}</span>
+                        {r.error && <span className="text-danger"> — {r.error}</span>}
+                        {r.jobId && <span className="text-foreground-tertiary"> — queued</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <span className="text-xs text-foreground-tertiary">
+                  Jobs run in the background — watch progress in the corner toast.
+                </span>
+              </div>
             )}
 
             <div className="flex items-center justify-between gap-3 pt-1">
