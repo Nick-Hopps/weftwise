@@ -17,6 +17,8 @@ interface SourceMetadataFile {
   filename: string;
   contentHash: string;
   savedAt: string;
+  /** 网页来源的原始 URL（URL ingest 溯源用）。 */
+  originUrl?: string;
 }
 
 function rawDirFor(subjectSlug: string): string {
@@ -37,7 +39,8 @@ function sourcesMetaDirFor(subjectSlug: string): string {
 export function saveRawSource(
   subject: Pick<Subject, 'id' | 'slug'>,
   filename: string,
-  content: Buffer | string
+  content: Buffer | string,
+  extra?: { originUrl?: string },
 ): SavedSourceResult {
   const rawDir = rawDirFor(subject.slug);
   fs.mkdirSync(rawDir, { recursive: true });
@@ -76,6 +79,7 @@ export function saveRawSource(
     filename: safeFilename,
     contentHash,
     savedAt: new Date().toISOString(),
+    ...(extra?.originUrl ? { originUrl: extra.originUrl } : {}),
   };
   fs.writeFileSync(metaFilePath, JSON.stringify(metaContent, null, 2), 'utf-8');
 
