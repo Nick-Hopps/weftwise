@@ -31,7 +31,7 @@
 |------|------|------|
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
-| `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/`，入队 `ingest` 任务；返回 `{ jobId, sourceId }` |
+| `/api/ingest` | POST | 接受 multipart/form-data 或 JSON（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/`；或 JSON `{ urls: string[] }` 批量 URL（≤20，路由内同步抓取），入队 `ingest` 任务；返回 `{ jobId, sourceId }` 或 202 `{ jobIds: [...], sourceIds: [...], skipped?: [...] }` / 422 全失败 |
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
@@ -139,6 +139,7 @@ src/app/
 | 2026-06-28 | Subject 体验重做：`(app)/subjects/page.tsx` 改可点卡片+gear+空态；创建/编辑/删除迁到全局 `SubjectDialog`（`src/components/subjects/`），切换器 "New subject…" 改唤起弹窗（删 `?new=1`）。零 API 改动 |
 | 2026-06-29 | Subject 级联删除：`DELETE /api/subjects/[id]` 改为级联删除——`subjectsRepo.deleteWithContents(id)` 单事务清全部 subject-scoped 行 + `fs.rmSync` 删 vault `wiki\|raw\|.llm-wiki/sources/<slug>` + `commitVaultChanges`；守卫 `general`→409 `protected`、有入站跨主题引用→409 `has-inbound-refs`、不存在→404；移除旧 `deleteIfEmpty`/`renditions-repo` 调用。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 | 2026-06-30 | `DELETE /api/pages/[...slug]` DRY 重构：改用 `services/page-write.ts::validateDeleteTarget`（守卫单一真实源）+ `executePageDelete`（Saga+embed 回填）；响应新增 `brokenBacklinks: number`（同-subject 内原指向被删页的链接数，供 chat UI 提示清理）。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-agentic-wiki-write-tools* |
+| 2026-07-03 | Ingest URL 输入：`POST /api/ingest` 新增 JSON `{ urls: string[] }` 批量分支（≤20，路由内同步抓取 HTML/Markdown/TXT 转 raw source），每 URL 独立 ingest job；202 部分成功/422 全失败；新增 sources/url-fetcher（协议/超时10s/5MB/content-type 守卫）+ url-ingest（校验+allSettled 编排）+ lib/url-list；workbench 加 URL tab；流水线逻辑零改动。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-03-ingest-url-input* |
 
 ---
 
