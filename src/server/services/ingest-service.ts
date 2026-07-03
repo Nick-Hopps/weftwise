@@ -29,7 +29,7 @@ import {
 } from './ingest-prep';
 import { getRuntimeRegistries } from '../worker-runtime';
 import { enqueueEmbedIndex } from './embedding-service';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { extractContent } from '../search/web-search';
 import type { AgentContext, CitedSource } from '../agents/types';
 import type { AugmentationLevel, ChangesetEntry, IngestResult, Job } from '@/lib/contracts';
