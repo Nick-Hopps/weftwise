@@ -4,6 +4,7 @@ import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import { parseSourceAsync, requiresBuffer } from '../sources/parser-registry';
 import { getRawSourceContent, getRawSourceBuffer, updateSourceChunks, saveRawSource } from '../sources/source-store';
+import { deriveUrlFilename } from '../sources/url-fetcher';
 import {
   getAgentMaxSteps,
   getAgentMaxTokensPerJob,
@@ -354,18 +355,7 @@ async function finalizeIngest(
 
 /** 从 URL 派生安全的 .md 文件名（host + 末段 + 短 hash）。 */
 export function filenameFromUrl(url: string): string {
-  const hash = createHash('sha256').update(url).digest('hex').slice(0, 8);
-  let base = 'page';
-  try {
-    const u = new URL(url);
-    const host = u.hostname.replace(/^www\./, '');
-    const last = u.pathname.split('/').filter(Boolean).pop() ?? '';
-    base = `${host}-${last}`.toLowerCase().replace(/[^a-z0-9._-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    base = base.slice(0, 80) || 'page';
-  } catch {
-    base = 'page';
-  }
-  return `web-${base}-${hash}.md`;
+  return deriveUrlFilename(url, '.md');
 }
 
 export interface WebSourceImportPlan {
