@@ -71,6 +71,11 @@ let cleanupFn: (() => void) | null = null;
 // 运行中任务表 jobId → type（并发调度依据）
 const runningJobs = new Map<string, string>();
 
+/** 供 worker-entry 优雅关停 drain 用：返回当前在飞任务数 */
+export function runningJobCount(): number {
+  return runningJobs.size;
+}
+
 /**
  * Returns true if the error is likely transient and retryable
  * (network timeouts, aborted requests, rate limits).
