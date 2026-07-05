@@ -2,9 +2,9 @@
 
 import { AUGMENTATION_OPTIONS } from '@/lib/augmentation';
 import type { AugmentationLevel } from '@/lib/contracts';
-import { cn } from '@/lib/cn';
+import { Segmented } from '@/components/ui/segmented';
 
-/** 英文分段增益强度选择控件（2×2 网格，radiogroup 语义）。*/
+/** 英文分段增益强度选择控件（2×2 网格），内部复用 ui/Segmented。*/
 export function AugmentationField({
   value,
   onChange,
@@ -15,30 +15,17 @@ export function AugmentationField({
   disabled?: boolean;
 }) {
   return (
-    <div role="radiogroup" aria-label="Augmentation level" className="grid grid-cols-2 gap-2">
-      {AUGMENTATION_OPTIONS.map((opt) => {
-        const active = opt.value === value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            disabled={disabled}
-            onClick={() => onChange(opt.value)}
-            className={cn(
-              'flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left transition-colors focus-ring',
-              'disabled:opacity-50 disabled:pointer-events-none',
-              active
-                ? 'border-accent bg-accent-subtle'
-                : 'border-border bg-surface hover:bg-subtle hover:border-border-strong',
-            )}
-          >
-            <span className="text-xs font-medium text-foreground">{opt.label}</span>
-            <span className="text-[11px] text-foreground-tertiary">{opt.helper}</span>
-          </button>
-        );
-      })}
-    </div>
+    <Segmented<AugmentationLevel>
+      value={value}
+      onChange={onChange}
+      disabled={disabled}
+      aria-label="Augmentation level"
+      columns={2}
+      options={AUGMENTATION_OPTIONS.map((o) => ({
+        value: o.value,
+        label: o.label,
+        helper: o.helper,
+      }))}
+    />
   );
 }
