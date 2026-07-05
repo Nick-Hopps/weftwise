@@ -52,7 +52,6 @@ export function SettingsDialog() {
     staleTime: 30_000,
   });
 
-  const [languageDraft, setLanguageDraft] = useState('');
   const [active, setActive] = useState<CategoryId>(DEFAULT_CATEGORY);
 
   // 每次打开弹窗回到默认分类，行为可预期。
@@ -60,17 +59,10 @@ export function SettingsDialog() {
     if (isOpen) setActive(DEFAULT_CATEGORY);
   }, [isOpen]);
 
-  useEffect(() => {
-    if (settingsQuery.data) {
-      setLanguageDraft(settingsQuery.data.wikiLanguage);
-    }
-  }, [settingsQuery.data]);
-
   const saveLanguage = useMutation({
     mutationFn: (value: string) => putSettings({ wikiLanguage: value }),
     onSuccess: (data) => {
       queryClient.setQueryData(['app-settings'], data);
-      setLanguageDraft(data.wikiLanguage);
     },
   });
 
@@ -126,8 +118,6 @@ export function SettingsDialog() {
             resetSidebarWidth={resetSidebarWidth}
             settings={settingsQuery.data}
             settingsLoading={settingsQuery.isLoading}
-            languageDraft={languageDraft}
-            setLanguageDraft={setLanguageDraft}
             saveLanguage={saveLanguage}
             savePartial={savePartial}
           />
