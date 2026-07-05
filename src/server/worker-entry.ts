@@ -10,7 +10,7 @@ try { process.loadEnvFile(); } catch { /* already loaded or unsupported */ }
 
 import { getDb, getRawDb } from './db/client';
 import { ensureVaultRepo } from './git/git-service';
-import { startWorker } from './jobs/worker';
+import { startWorker, runningJobCount } from './jobs/worker';
 import * as queue from './jobs/queue';
 import { rebuildSearchIndex } from './wiki/indexer';
 import { rollbackChangeset } from './wiki/wiki-transaction';
@@ -139,10 +139,32 @@ async function main() {
   const stop = startWorker(pollMs);
   log.info(`Worker started, polling every ${pollMs}ms`);
 
-  // M1 fix: Graceful shutdown — stop worker AND close DB connection
+  // M1 fix: Graceful shutdown — stop worker, drain in-flight jobs, then close DB connection
+  const DRAIN_INTERVAL_MS = 500;
+  const DRAIN_TIMEOUT_MS = 30_000;
+  let shuttingDown = false;
   async function shutdown(signal: string) {
+    if (shuttingDown) {
+      // 重复信号：直接强退（按现有代码风格，第二次不再等待）
+      log.warn(`Received ${signal} again during shutdown, forcing exit`);
+      process.exit(0);
+    }
+    shuttingDown = true;
     log.info(`Received ${signal}, stopping worker...`);
     stop();
+
+    // Drain：等待在飞任务清空，最多 30 秒，超时则照常退出（crash-recovery 兜底）
+    const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+    while (runningJobCount() > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, DRAIN_INTERVAL_MS));
+    }
+    const remaining = runningJobCount();
+    if (remaining > 0) {
+      log.warn(`[shutdown] drain timeout, ${remaining} job(s) still running`);
+    } else {
+      log.info('[shutdown] drain complete, no jobs running');
+    }
+
     try {
       getRawDb().close();
       log.info('Database connection closed');

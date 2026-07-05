@@ -59,9 +59,10 @@ export function GlobalJobTracker() {
             queueStatus: a.queueStatus,
             reconnectKey: prevById.get(a.job.id)?.reconnectKey ?? 0,
           }));
-        // 已离开 running/pending 的行保留（终态展示由行内 SSE 驱动，移除走 onRemove）
+        // 已离开 running/pending 的行仅在曾建过 SSE（running）时保留，终态展示由行内 SSE 驱动、移除走 onRemove；
+        // pending 行从未建 SSE，若在两次轮询间隙直接走完 pending→终态，静默丢弃防幽灵行永久残留。
         for (const t of prev) {
-          if (!activeIds.has(t.id) && !dismissed.has(t.id)) next.push(t);
+          if (!activeIds.has(t.id) && !dismissed.has(t.id) && t.queueStatus === 'running') next.push(t);
         }
         return next;
       });
