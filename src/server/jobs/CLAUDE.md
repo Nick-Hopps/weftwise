@@ -5,7 +5,7 @@
 ## 模块职责
 
 1. **队列**：基于 SQLite `jobs` 表的持久化任务队列。
-2. **Worker**：单进程轮询、单任务串行、带租约 + 心跳 + 自动重试。
+2. **Worker**：单进程轮询、并发调度（`runningJobs` Map + `decideClaim` 三态决策，ingest 之间可并发、上限 `app_settings.ingestConcurrency`，非 ingest 独占）、带租约 + 心跳 + 自动重试。
 3. **事件流**：通过 `events.emit` 把任务状态写入 `job_events` 表并推送到 SSE 订阅者。
 
 ## 入口与启动
@@ -36,7 +36,7 @@ startWorker(pollMs=2000): () => void          // 返回 stop()
 stopWorker()
 ```
 
-- **串行**：`isProcessing` 布尔 flag 确保一次只处理一个任务（LLM 任务分钟级 + 并行 git commit 会炸）。
+- **并发调度**：`runningJobs` Map 跟踪当前在跑任务（id→type）；每 tick 用纯函数 `decideClaim(runningTypes, ingestLimit)` 三态决策（可 claim ingest / 可 claim 非 ingest / 都不行）——非 ingest 类型独占（跑着任何非 ingest 任务时不再 claim）、ingest 之间允许并发但受 `app_settings.ingestConcurrency`（默认 2，范围 1-4，每 tick 实时读）上限约束；vault 写入安全靠 `vault-mutex`（进程内队列 + 跨进程文件锁）兜底，而非串行调度。
 - **心跳**：每 30s 调 `queue.updateHeartbeat` 续租。
 - **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / fetch failed / aborted / rate limit）；调 `queue.requeue(jobId)` 保持 job ID，前端 SSE 不会丢踪。
 
@@ -106,7 +106,7 @@ emit(jobId, type, message, data?): void
 ```
 src/server/jobs/
 ├── queue.ts      # 对 jobs-repo 的薄封装
-├── worker.ts     # 轮询 + 租约 + 重试 + 串行锁
+├── worker.ts     # 轮询 + 租约 + 重试 + 并发调度（runningJobs + decideClaim）
 └── events.ts     # job_events 写入 + SSE 分发
 ```
 
@@ -116,6 +116,7 @@ src/server/jobs/
 |------|------|
 | 2026-04-22 | 初始化 |
 | 2026-06-24 | 新增 `job_events` 保留清扫（worker 维护 tick 调 `queue.pruneEvents` → `jobs-repo.pruneJobEvents`，独立于成熟度维护开关，启动清一次积压）|
+| 2026-07-06 | Ingest 多任务支持：worker 由单任务串行改并发调度——新增 `runningJobs` Map + 纯函数 `decideClaim(runningTypes, ingestLimit)`（ingest 之间并发、上限 `app_settings.ingestConcurrency` 默认 2、非 ingest 独占）；vault 写入安全改靠 `vault-mutex` 兜底。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |
 
 ---
 

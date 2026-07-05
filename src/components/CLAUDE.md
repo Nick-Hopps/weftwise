@@ -87,8 +87,9 @@
 
 ### `shared/`
 
-- `global-job-tracker.tsx` —— 全局任务状态指示器（读队列中所有任务）
-- `progress-toast.tsx` —— SSE 进度条 toast
+- `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），托管 `JobsPanel`
+- `jobs-panel.tsx` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）：仅 running 行才建 SSE 连接，pending 行不建连接；completed 行 5s 后自动移除，failed 行常驻
+- `progress-toast.tsx` —— SSE 进度条 toast 组件（保留，但不再被 `global-job-tracker` 挂载，供 `JobsPanel` 内部行复用）
 
 > Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
 
@@ -156,7 +157,7 @@ src/components/
 ├── health/       {health-view}
 ├── history/      {operation-list, operation-diff, revert-button}
 ├── graph/        {mini-graph-view}
-└── shared/       {global-job-tracker, progress-toast}
+└── shared/       {global-job-tracker, jobs-panel, progress-toast}
 ```
 
 ## 变更记录 (Changelog)
@@ -183,6 +184,7 @@ src/components/
 | 2026-06-29 | Subject 级联删除：`subjects/subject-dialog.tsx` 的 `EditSubjectBody` 危险区改 `canDelete = !isActive && slug !== 'general'`（允许删非空 subject，级联清理由后端处理）；两步确认 armed 态加页数警告；禁删态区分 `general`（"can't be deleted"）/active（"switch first"）；409 入站引用经既有 `error` 行呈现。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 | 2026-06-30 | 选中正文文本悬浮追问：新增 `wiki/selection-ask-button.tsx` + `hooks/use-text-selection` + `lib/selection-text`；`ui-store` 加瞬态信箱 `pendingChatReference` + `askAboutSelection`/`consumePendingChatReference`；`chat-interface` embedded 变体消费信箱 pin 为引用 + 聚焦（并加 `prevPageSlugRef` 守卫防 StrictMode 双挂载清引用）；`wiki-reading-view` 两分支各包正文容器 ref 挂按钮。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-selection-ask-floating-button* |
 | 2026-06-30 | Per-subject 上次页面记忆：`hooks/use-switch-subject` 改为切换边界「记录离开页 + 恢复目标页 + 选中当前 subject no-op」；消费 `lib/subject-nav` 与 `ui-store.lastPageBySubject`/`rememberPage`；`subject-switcher`/`subjects` 卡片/`subject-dialog` 调用点无需改动。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-per-subject-last-page-restore* |
+| 2026-07-06 | Ingest 多任务支持：`global-job-tracker.tsx` 改为轮询 running+pending 聚合追踪；新增 `shared/jobs-panel.tsx`（聚合任务面板：多行、每 running 行独立 SSE、pending 行不建连接、completed 5s 自动移除、failed 常驻，行级详情复用 `JobDetailDialog`）；`progress-toast.tsx` 保留组件但不再被 tracker 直接挂载。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |
 
 ---
 
