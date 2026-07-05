@@ -196,9 +196,9 @@ function CognitiveLensPanel() {
   const profile = data.profile;
   const save = toSave(update);
 
+  // 只提交本次变更的字段，避免并发编辑用本地 stale profile 覆盖另一路已提交的修改。
   const savePrefs = (patch: Partial<StylePrefs>) =>
     update.mutate({
-      backgroundSummary: profile.backgroundSummary,
       stylePrefs: { ...profile.stylePrefs, ...patch },
     });
 
@@ -229,7 +229,7 @@ function CognitiveLensPanel() {
         description="Your background and goals (free text)"
         value={profile.backgroundSummary}
         placeholder="e.g. Backend engineer, comfortable with distributed systems but new to machine learning"
-        onSave={(v) => update.mutate({ backgroundSummary: v, stylePrefs: profile.stylePrefs })}
+        onSave={(v) => update.mutate({ backgroundSummary: v })}
         save={save}
       />
     </div>

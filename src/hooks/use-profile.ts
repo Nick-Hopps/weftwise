@@ -33,7 +33,12 @@ export function useUpdateProfile() {
       if (!res.ok) throw new Error(`profile PUT ${res.status}`);
       return res.json() as Promise<{ profile: UserProfileDTO }>;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      qc.setQueryData(
+        ['profile'],
+        (prev: { profile: UserProfileDTO; onboarded: boolean } | undefined) =>
+          prev ? { ...prev, profile: data.profile } : prev
+      );
       qc.invalidateQueries({ queryKey: ['profile'] });
       qc.invalidateQueries({ queryKey: ['lens'] }); // 画像变 → 重塑缓存键变 → 重取
     },
