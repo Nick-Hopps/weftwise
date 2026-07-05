@@ -55,7 +55,12 @@ export function GlobalJobTracker() {
           .map((a) => ({
             id: a.job.id,
             type: a.job.type,
-            label: prevById.get(a.job.id)?.label ?? jobLabel(a.job),
+            // 经 wiki:job-started 补入的行带占位 label（'Starting…'），轮询拿到
+            // params 后要替换为真实文件名，其余情况保留旧 label 防闪变。
+            label:
+              prevById.get(a.job.id)?.label && prevById.get(a.job.id)!.label !== 'Starting…'
+                ? prevById.get(a.job.id)!.label
+                : jobLabel(a.job),
             queueStatus: a.queueStatus,
             reconnectKey: prevById.get(a.job.id)?.reconnectKey ?? 0,
           }));
