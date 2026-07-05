@@ -7,17 +7,29 @@
  * 本文件只负责渲染与本地交互。服务端 app_settings 表是唯一真实源，不写 Zustand。
  */
 
-import { useEffect, useState } from 'react';
-import { Moon, Sun, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { SIDEBAR_WIDTH_DEFAULT } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/cn';
 import { apiFetch } from '@/lib/api-fetch';
 import type { AppSettings, MaintenanceStatus, StylePrefs } from '@/lib/contracts';
 import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
-import { SettingRow, NumberSettingRow, SelectSettingRow, TextSettingRow } from './settings-rows';
+import {
+  SettingRow,
+  SwitchRow,
+  SegmentedRow,
+  SelectRow,
+  NumberRow,
+  TextRow,
+  TextareaRow,
+  type RowSaveState,
+} from './settings-rows';
 import { SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
+
+/** mutation → RowSaveState 适配。*/
+function toSave(m: { isPending: boolean; isError: boolean; error: unknown }): RowSaveState {
+  return { pending: m.isPending, error: m.isError ? m.error : undefined };
+}
 
 const WIKI_LANGUAGE_PRESETS = [
   { value: 'English', label: 'English' },
@@ -56,8 +68,6 @@ interface SettingsContentProps {
   resetSidebarWidth: () => void;
   settings: AppSettings | undefined;
   settingsLoading: boolean;
-  languageDraft: string;
-  setLanguageDraft: (v: string) => void;
   saveLanguage: SaveLanguageMutation;
   savePartial: SavePartialMutation;
 }
@@ -83,8 +93,6 @@ export function SettingsContent(props: SettingsContentProps) {
           <LanguagePanel
             settings={props.settings}
             settingsLoading={props.settingsLoading}
-            languageDraft={props.languageDraft}
-            setLanguageDraft={props.setLanguageDraft}
             saveLanguage={props.saveLanguage}
           />
         )}
@@ -120,19 +128,12 @@ function AppearancePanel({
 >) {
   return (
     <div className="space-y-4">
-      <SettingRow label="Appearance" description={darkMode ? 'Dark mode' : 'Light mode'}>
-        <Button
-          intent="outline"
-          size="sm"
-          onClick={toggleDarkMode}
-          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          className="gap-1.5"
-        >
-          {darkMode ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-          {darkMode ? 'Light' : 'Dark'}
-        </Button>
-      </SettingRow>
-
+      <SwitchRow
+        label="Dark mode"
+        description="Toggle between light and dark theme"
+        checked={darkMode}
+        onSave={() => toggleDarkMode()}
+      />
       <SettingRow
         label="Sidebar width"
         description={`${Math.round(sidebarWidth)}px (default ${SIDEBAR_WIDTH_DEFAULT}px)`}
@@ -159,7 +160,7 @@ const LENS_LABELS: Record<keyof StylePrefs, string> = {
   formality: 'Tone',
 };
 
-const LENS_OPTIONS: Record<keyof StylePrefs, [string, string][]> = {
+const LENS_OPTIONS = {
   readingLevel: [
     ['beginner', 'Beginner'],
     ['intermediate', 'Intermediate'],
@@ -180,7 +181,7 @@ const LENS_OPTIONS: Record<keyof StylePrefs, [string, string][]> = {
     ['neutral', 'Neutral'],
     ['formal', 'Formal'],
   ],
-};
+} satisfies Record<keyof StylePrefs, [string, string][]>;
 
 const LENS_KEYS: (keyof StylePrefs)[] = ['readingLevel', 'verbosity', 'exampleDensity', 'formality'];
 
@@ -188,24 +189,18 @@ const LENS_KEYS: (keyof StylePrefs)[] = ['readingLevel', 'verbosity', 'exampleDe
 function CognitiveLensPanel() {
   const { data, isLoading } = useProfile();
   const update = useUpdateProfile();
-  const [bg, setBg] = useState('');
-  const [prefs, setPrefs] = useState<StylePrefs | null>(null);
 
-  useEffect(() => {
-    if (data && prefs === null) {
-      setPrefs(data.profile.stylePrefs);
-      setBg(data.profile.backgroundSummary);
-    }
-  }, [data, prefs]);
-
-  if (isLoading || !data || prefs === null) {
+  if (isLoading || !data) {
     return <p className="text-xs text-foreground-tertiary">Loading…</p>;
   }
-  const current = prefs;
+  const profile = data.profile;
+  const save = toSave(update);
 
-  const dirty =
-    bg !== data.profile.backgroundSummary ||
-    JSON.stringify(current) !== JSON.stringify(data.profile.stylePrefs);
+  const savePrefs = (patch: Partial<StylePrefs>) =>
+    update.mutate({
+      backgroundSummary: profile.backgroundSummary,
+      stylePrefs: { ...profile.stylePrefs, ...patch },
+    });
 
   return (
     <div className="space-y-4">
@@ -216,53 +211,27 @@ function CognitiveLensPanel() {
       </p>
 
       {LENS_KEYS.map((key) => (
-        <SettingRow key={key} label={LENS_LABELS[key]}>
-          <select
-            value={current[key]}
-            onChange={(e) =>
-              setPrefs((p) => (p ? ({ ...p, [key]: e.target.value } as StylePrefs) : p))
-            }
-            aria-label={LENS_LABELS[key]}
-            className="rounded-md border border-border bg-canvas px-2 py-1 text-sm"
-          >
-            {LENS_OPTIONS[key].map(([v, label]) => (
-              <option key={v} value={v}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </SettingRow>
+        <SegmentedRow
+          key={key}
+          label={LENS_LABELS[key]}
+          value={profile.stylePrefs[key]}
+          options={LENS_OPTIONS[key].map(([value, label]) => ({
+            value: value as StylePrefs[typeof key],
+            label,
+          }))}
+          onSave={(v) => savePrefs({ [key]: v } as Partial<StylePrefs>)}
+          save={save}
+        />
       ))}
 
-      <SettingRow
+      <TextareaRow
         label="Background"
         description="Your background and goals (free text)"
-        className="items-start"
-      >
-        <textarea
-          value={bg}
-          onChange={(e) => setBg(e.target.value)}
-          rows={3}
-          placeholder="e.g. Backend engineer, comfortable with distributed systems but new to machine learning"
-          className="w-60 rounded-md border border-border bg-canvas p-2 text-sm"
-        />
-      </SettingRow>
-
-      <div className="flex items-center justify-end gap-2">
-        {update.isError && (
-          <span role="alert" className="mr-auto text-xs text-danger">
-            Failed to save
-          </span>
-        )}
-        <Button
-          intent="outline"
-          size="sm"
-          disabled={!dirty || update.isPending}
-          onClick={() => update.mutate({ backgroundSummary: bg, stylePrefs: current })}
-        >
-          {update.isPending ? 'Saving…' : 'Save'}
-        </Button>
-      </div>
+        value={profile.backgroundSummary}
+        placeholder="e.g. Backend engineer, comfortable with distributed systems but new to machine learning"
+        onSave={(v) => update.mutate({ backgroundSummary: v, stylePrefs: profile.stylePrefs })}
+        save={save}
+      />
     </div>
   );
 }
@@ -270,74 +239,28 @@ function CognitiveLensPanel() {
 function LanguagePanel({
   settings,
   settingsLoading,
-  languageDraft,
-  setLanguageDraft,
   saveLanguage,
-}: Pick<
-  SettingsContentProps,
-  'settings' | 'settingsLoading' | 'languageDraft' | 'setLanguageDraft' | 'saveLanguage'
->) {
-  const savedLanguage = settings?.wikiLanguage;
-
-  // Build the option list: presets, plus the saved value if it's a custom one.
-  const languageOptions = (() => {
-    const presetValues = new Set<string>(WIKI_LANGUAGE_PRESETS.map((p) => p.value));
-    const opts: { value: string; label: string }[] = WIKI_LANGUAGE_PRESETS.map((p) => ({
-      value: p.value,
-      label: p.label,
-    }));
-    if (savedLanguage && !presetValues.has(savedLanguage)) {
-      opts.unshift({ value: savedLanguage, label: `${savedLanguage} (custom)` });
-    }
-    return opts;
-  })();
-
-  const canSave =
-    languageDraft.length > 0 && languageDraft !== savedLanguage && !saveLanguage.isPending;
-
+}: Pick<SettingsContentProps, 'settings' | 'settingsLoading' | 'saveLanguage'>) {
+  const savedLanguage = settings?.wikiLanguage ?? '';
+  const presetValues = new Set<string>(WIKI_LANGUAGE_PRESETS.map((p) => p.value));
+  const languageOptions: { value: string; label: string }[] = WIKI_LANGUAGE_PRESETS.map((p) => ({
+    value: p.value,
+    label: p.label,
+  }));
+  if (savedLanguage && !presetValues.has(savedLanguage)) {
+    languageOptions.unshift({ value: savedLanguage, label: `${savedLanguage} (custom)` });
+  }
   return (
     <div className="space-y-4">
-      <SettingRow
+      <SelectRow
         label="Wiki language"
         description="Language LLM uses for new wiki content (slugs and wikilinks stay verbatim)"
-        className="items-start"
-      >
-        <div className="flex items-center gap-1.5">
-          <select
-            value={languageDraft}
-            onChange={(e) => setLanguageDraft(e.target.value)}
-            aria-label="Wiki language"
-            disabled={settingsLoading}
-            className={cn(
-              'h-7 rounded-md border border-input-border bg-input-bg px-2 text-xs text-foreground',
-              'transition-colors duration-fast ease-standard',
-              'hover:border-border-strong',
-              'focus:outline-none focus:border-accent focus:ring-2 focus:ring-focus-ring/30',
-              'disabled:opacity-50 disabled:cursor-not-allowed',
-            )}
-          >
-            {languageOptions.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <Button
-            intent="outline"
-            size="sm"
-            onClick={() => saveLanguage.mutate(languageDraft)}
-            disabled={!canSave}
-          >
-            {saveLanguage.isPending ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
-      </SettingRow>
-
-      {saveLanguage.isError && (
-        <p role="alert" className="text-xs text-danger">
-          Failed to save: {(saveLanguage.error as Error).message}
-        </p>
-      )}
+        value={savedLanguage}
+        options={languageOptions}
+        disabled={settingsLoading}
+        onSave={(v) => saveLanguage.mutate(v)}
+        save={toSave(saveLanguage)}
+      />
     </div>
   );
 }
@@ -346,72 +269,64 @@ function AgentsPanel({
   settings,
   savePartial,
 }: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  const save = toSave(savePartial);
   return (
     <div className="space-y-4">
-      <NumberSettingRow
+      <NumberRow
         label="Max steps per agent"
         value={settings?.agentMaxSteps ?? 25}
         min={1}
         max={200}
         onSave={(v) => savePartial.mutate({ agentMaxSteps: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-      <NumberSettingRow
+      <NumberRow
         label="Total token budget per task"
         description="Default 500k handles sources up to ~200k tokens; raise to 1-1.5M for book-sized files"
         value={settings?.agentMaxTokensPerJob ?? 500_000}
         min={10_000}
         max={5_000_000}
         onSave={(v) => savePartial.mutate({ agentMaxTokensPerJob: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-      <NumberSettingRow
+      <NumberRow
         label="Parallel sub-agents"
         value={settings?.agentMaxParallelSubAgents ?? 3}
         min={1}
         max={10}
         onSave={(v) => savePartial.mutate({ agentMaxParallelSubAgents: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-      <SelectSettingRow
+      <SegmentedRow
         label="LLM selection mode"
         value={settings?.agentTaskRouterMode ?? 'frontmatter-override'}
         options={[
-          { value: 'task-router-only', label: 'task-router only' },
-          { value: 'frontmatter-override', label: 'frontmatter override' },
+          { value: 'task-router-only', label: 'Task router only' },
+          { value: 'frontmatter-override', label: 'Frontmatter override' },
         ]}
-        onChange={(v) =>
+        onSave={(v) =>
           savePartial.mutate({
             agentTaskRouterMode: v as 'task-router-only' | 'frontmatter-override',
           })
         }
-        pending={savePartial.isPending}
+        save={save}
       />
-      <SelectSettingRow
+      <SwitchRow
         label="Auto-curate after ingest"
-        value={(settings?.agentAutoCurate ?? true) ? 'on' : 'off'}
-        options={[
-          { value: 'on', label: 'On' },
-          { value: 'off', label: 'Off' },
-        ]}
-        onChange={(v) => savePartial.mutate({ agentAutoCurate: v === 'on' })}
-        pending={savePartial.isPending}
+        description="Automatically tidy touched pages after each ingest"
+        checked={settings?.agentAutoCurate ?? true}
+        onSave={(v) => savePartial.mutate({ agentAutoCurate: v })}
+        save={save}
       />
-      <NumberSettingRow
+      <NumberRow
         label="Ingest concurrency"
         description="How many ingest jobs run at once; other job types always run alone"
         value={settings?.ingestConcurrency ?? 2}
         min={1}
         max={4}
         onSave={(v) => savePartial.mutate({ ingestConcurrency: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-
-      {savePartial.isError && (
-        <p role="alert" className="text-xs text-danger">
-          Failed to save: {(savePartial.error as Error).message}
-        </p>
-      )}
     </div>
   );
 }
@@ -420,43 +335,33 @@ function WebSearchPanel({
   settings,
   savePartial,
 }: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  const save = toSave(savePartial);
   return (
     <div className="space-y-4">
       <p className="text-xs text-foreground-tertiary">
         Used by the ingest verifier to fact-check augmentation callouts and import cited pages as
         sources. Leave the API key empty to disable (verifier falls back to self-check).
       </p>
-
-      <SelectSettingRow
-        label="Provider"
-        value={settings?.webSearchProvider ?? 'tavily'}
-        options={[{ value: 'tavily', label: 'Tavily' }]}
-        onChange={(v) => savePartial.mutate({ webSearchProvider: v as 'tavily' })}
-        pending={savePartial.isPending}
-      />
-      <TextSettingRow
+      <SettingRow label="Provider" description="Only Tavily is supported for now">
+        <span className="text-xs text-foreground-secondary">Tavily</span>
+      </SettingRow>
+      <TextRow
         label="API key"
         description="Stored in app settings; empty disables web grounding"
         type="password"
         placeholder="tvly-…"
         value={settings?.webSearchApiKey ?? ''}
         onSave={(v) => savePartial.mutate({ webSearchApiKey: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-      <NumberSettingRow
+      <NumberRow
         label="Max results per query"
         value={settings?.webSearchMaxResults ?? 5}
         min={1}
         max={10}
         onSave={(v) => savePartial.mutate({ webSearchMaxResults: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-
-      {savePartial.isError && (
-        <p role="alert" className="text-xs text-danger">
-          Failed to save: {(savePartial.error as Error).message}
-        </p>
-      )}
     </div>
   );
 }
@@ -487,18 +392,16 @@ function MaintenancePanel({
     staleTime: 10_000,
   });
   const status = statusQuery.data;
+  const save = toSave(savePartial);
 
   return (
     <div className="space-y-4">
-      <SelectSettingRow
+      <SwitchRow
         label="Periodic maintenance"
-        value={settings?.maintenanceEnabled ? 'on' : 'off'}
-        options={[
-          { value: 'off', label: 'off (default)' },
-          { value: 'on', label: 'on — revisit & deepen pages over time' },
-        ]}
-        onChange={(v) => savePartial.mutate({ maintenanceEnabled: v === 'on' })}
-        pending={savePartial.isPending}
+        description="Revisit & deepen pages over time (off by default)"
+        checked={settings?.maintenanceEnabled ?? false}
+        onSave={(v) => savePartial.mutate({ maintenanceEnabled: v })}
+        save={save}
       />
 
       <SettingRow label="Status" description="Read-only — refreshes when this panel opens">
@@ -513,29 +416,23 @@ function MaintenancePanel({
           )}
         </div>
       </SettingRow>
-      <NumberSettingRow
+      <NumberRow
         label="Sweep interval (hours)"
         value={settings?.maintenanceSweepIntervalHours ?? 24}
         min={1}
         max={168}
         onSave={(v) => savePartial.mutate({ maintenanceSweepIntervalHours: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-      <NumberSettingRow
+      <NumberRow
         label="Max pages per sweep"
         description="Caps re-enrich jobs enqueued each cycle (cost guardrail)"
         value={settings?.maintenanceMaxPagesPerSweep ?? 5}
         min={1}
         max={50}
         onSave={(v) => savePartial.mutate({ maintenanceMaxPagesPerSweep: v })}
-        pending={savePartial.isPending}
+        save={save}
       />
-
-      {savePartial.isError && (
-        <p role="alert" className="text-xs text-danger">
-          Failed to save: {(savePartial.error as Error).message}
-        </p>
-      )}
     </div>
   );
 }
