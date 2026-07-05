@@ -116,6 +116,26 @@ export function decideJobFailureAction(
   return 'fail';
 }
 
+export type ClaimDecision = 'any' | 'ingest-only' | 'none';
+
+/**
+ * 并发调度决策（纯函数，便于测试）：
+ *  - 完全空闲 → 可 claim 任意类型（claim 到非 ingest 则该 job 独占直到结束）；
+ *  - 当前全是 ingest 且数量 < ingestLimit → 只允许再 claim 一个 ingest；
+ *  - 其余（有非 ingest 在跑 / ingest 已满额）→ 本轮不 claim。
+ * 仅 ingest 之间可并发；写入安全由 vault-mutex（进程内队列 + 跨进程文件锁）保证。
+ */
+export function decideClaim(
+  runningTypes: readonly string[],
+  ingestLimit: number,
+): ClaimDecision {
+  if (runningTypes.length === 0) return 'any';
+  if (runningTypes.every((t) => t === 'ingest') && runningTypes.length < ingestLimit) {
+    return 'ingest-only';
+  }
+  return 'none';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
