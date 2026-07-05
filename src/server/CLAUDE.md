@@ -93,7 +93,7 @@ Route Handler / Worker Handler
 
 ## 测试与质量
 
-已覆盖（vitest，82 测试文件 / 519 用例，2026-06-24；各子模块 `__tests__/`）：
+已覆盖（vitest，135 测试文件 / 821 用例，2026-07-06；各子模块 `__tests__/`）：
 
 - 分布：services 13 / db 12 / llm 11 / agents 11 / wiki 9 / sources 4 / search 4 / jobs 1 / git 1。
 - 重点：wikilinks / wiki-transaction（validate·rollback·applyChangeset）/ frontmatter / relink / split-plan / curate-plan / revert / history；db repos + 热路径索引 EQP；task-router / prompts；agents runtime（budget / agent-loop / orchestrator / overlay-vault / checkpoint）；ingest 流水线（prep / service / chunker / cleaner / finalize-sources / augmentation）；search（vector-math / semantic / hybrid / web）。
@@ -107,8 +107,7 @@ Route Handler / Worker Handler
 
 - **两个进程同时写 vault 怎么办？**
   - worker 内部用 `isProcessing` flag 串行；
-  - 写 vault 时再抢 `acquireVaultLock`（`wiki/vault-mutex.ts`）；
-  - git 提交的原子性保证同一时刻只有一次成功。
+  - 写 vault 时抢 `acquireVaultLock`（`wiki/vault-mutex.ts`）：进程内互斥队列 + **跨进程文件锁**（vault 同级 `.vault.lock`）——Next.js 路由（PUT/DELETE /api/pages、revert 等）与 worker 分属两个进程，文件锁保证同一时刻只有一个进程能执行 Saga 写入。
 - **崩溃后 SQLite 与 git 不一致？**
   启动时扫 `operations` 表的 `pending` 记录，调 `rollbackChangeset(pre_head)` 把 git 强制回退并清数据库对应变更；按 `operations.subject_id` 仅 reindex 该 subject。
 - **如何为新接口注入 subject？**

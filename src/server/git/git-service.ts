@@ -100,6 +100,17 @@ export async function restoreToHead(sha: string): Promise<void> {
 }
 
 /**
+ * Remove untracked files limited to the given vault-relative paths.
+ * Needed by rollback: `reset --hard` does not delete untracked files, and
+ * create-entry pages are exactly untracked before their first commit.
+ */
+export async function cleanUntrackedPaths(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  const git = getVaultGit();
+  await git.clean('f', ['--', ...paths]);
+}
+
+/**
  * Return the contents of a file as it existed at a given commit SHA.
  */
 export async function getFileAtCommit(

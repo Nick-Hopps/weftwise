@@ -42,7 +42,7 @@ operations.status = 'applied'                   ← 释放 lock
 | 文件 | 导出 | 用途 |
 |------|------|------|
 | `wiki-transaction.ts` | `createChangeset(jobId, subject, entries) / validateChangeset / applyChangeset / rollbackChangeset` | Saga 状态机主控；`Changeset` 含 `subjectId/subjectSlug` |
-| `wiki-store.ts` | `readPageBySlug(subjectSlug, slug) / readAllPages / writeVaultFiles / deleteVaultFile / scanWikiPages(subjectSlug?)` | 纯文件系统封装；vault/wiki/<subject>/ |
+| `wiki-store.ts` | `readPageBySlug(subjectSlug, slug) / readPageInSubject / readRawSource / writeVaultFiles / deleteVaultFile / scanWikiPages(subjectSlug?)` | 纯文件系统封装；vault/wiki/<subject>/ |
 | `markdown.ts` | `parseWikiDocument / serializeWikiDocument`、类型 `WikiDocument` | 组合 frontmatter + wikilinks，透传 currentSubjectSlug |
 | `frontmatter.ts` | `parseFrontmatter / serializeFrontmatter / validateFrontmatter`、类型 `WikiFrontmatter` | gray-matter 封装 |
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
@@ -55,7 +55,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
-| `vault-mutex.ts` | `acquireVaultLock / releaseVaultLock` | 单进程 in-memory mutex（因为 worker 单实例运行） |
+| `vault-mutex.ts` | `acquireVaultLock` | 进程内互斥队列 + **跨进程文件锁**（vault 同级 `.vault.lock`，O_EXCL 原子创建、持有者死亡/悬挂超时自动回收）；写路径分散在 Next.js 与 worker 两进程，仅内存锁不够 |
 
 ## 数据契约（`WikiFrontmatter`）
 
@@ -115,7 +115,7 @@ operations.status = 'applied'                   ← 释放 lock
 src/server/wiki/
 ├── wiki-transaction.ts   # Saga 主控
 ├── wiki-store.ts         # fs 读写
-├── vault-mutex.ts        # 内存锁
+├── vault-mutex.ts        # 进程内队列 + 跨进程文件锁
 ├── markdown.ts           # WikiDocument 组合
 ├── frontmatter.ts        # gray-matter 封装
 ├── wikilinks.ts          # ★ 单一真实源

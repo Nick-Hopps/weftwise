@@ -12,6 +12,7 @@ const gitMocks = vi.hoisted(() => ({
   getVaultHead: vi.fn(async () => 'pre-sha'),
   commitVaultChanges: vi.fn(async () => 'post-sha'),
   restoreToHead: vi.fn(async () => undefined),
+  cleanUntrackedPaths: vi.fn(async () => undefined),
 }));
 vi.mock('../../git/git-service', () => gitMocks);
 
@@ -209,12 +210,23 @@ describe('validateChangeset', () => {
 });
 
 describe('rollbackChangeset', () => {
-  it('preHead 为空时直接返回，不触碰 git 与索引', async () => {
+  it('preHead 为空时不 reset，但仍清理未跟踪文件并重建索引', async () => {
     const cs = makeChangeset([{ action: 'create', path: 'wiki/general/a.md', content: 'x' }]);
     expect(cs.preHead).toBe('');
     await rollbackChangeset(cs);
     expect(gitMocks.restoreToHead).not.toHaveBeenCalled();
-    expect(indexerMocks.indexTouchedPages).not.toHaveBeenCalled();
+    expect(gitMocks.cleanUntrackedPaths).toHaveBeenCalledWith(['wiki/general/a.md']);
+    expect(indexerMocks.indexTouchedPages).toHaveBeenCalledWith('s1', ['a']);
+  });
+
+  it('create 条目回滚：reset 后清理未跟踪残留文件（reset --hard 不删未跟踪）', async () => {
+    const cs = makeChangeset(
+      [{ action: 'create', path: 'wiki/general/a.md', content: 'x' }],
+      { preHead: 'pre-sha' }
+    );
+    await rollbackChangeset(cs);
+    expect(gitMocks.restoreToHead).toHaveBeenCalledWith('pre-sha');
+    expect(gitMocks.cleanUntrackedPaths).toHaveBeenCalledWith(['wiki/general/a.md']);
   });
 
   it('幂等：连续两次回滚安全，每次都恢复到 preHead 并重建索引', async () => {
