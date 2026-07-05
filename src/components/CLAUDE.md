@@ -27,7 +27,7 @@
 | `settings-nav.tsx` | 🆕 左侧分类导航栏（遍历 `SETTINGS_CATEGORIES`，选中高亮 `bg-accent-subtle`/`aria-current`，点击经 `onSelect` 切换） |
 | `settings-content.tsx` | 右内容区：按 `active` 渲染 5 个 panel（Appearance/Language/Agents/Web search/About），复用 `settings-rows` 原语；服务端 `app_settings` 唯一真实源，不写 Zustand |
 | `settings-categories.ts` | 🆕 分类元数据单一来源：`CategoryId` 类型 + `SETTINGS_CATEGORIES`(id/label/icon) + `DEFAULT_CATEGORY`，被 dialog/nav/content 共用避免循环依赖 |
-| `settings-rows.tsx` | 行级原语：`SettingRow/NumberSettingRow/SelectSettingRow/TextSettingRow`（带本地暂存+校验） |
+| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/NumberRow/TextRow/TextareaRow（行级保存状态） |
 
 ### `ui/` — 设计系统
 
@@ -39,6 +39,7 @@
 - `tag.tsx`（带 `tone` 变体）
 - `separator.tsx`
 - `tabs.tsx`
+- `switch.tsx` / `segmented.tsx` / `select.tsx`
 
 ### `wiki/` — wiki 页面渲染
 
@@ -147,7 +148,7 @@ React 错误边界，包裹 `(app)/layout.tsx` 主内容。
 src/components/
 ├── providers.tsx
 ├── error-boundary.tsx
-├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs}
+├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs, switch, segmented, select}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
 ├── wiki/         {page-renderer, page-actions, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, selection-ask-button}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
@@ -185,6 +186,7 @@ src/components/
 | 2026-06-30 | 选中正文文本悬浮追问：新增 `wiki/selection-ask-button.tsx` + `hooks/use-text-selection` + `lib/selection-text`；`ui-store` 加瞬态信箱 `pendingChatReference` + `askAboutSelection`/`consumePendingChatReference`；`chat-interface` embedded 变体消费信箱 pin 为引用 + 聚焦（并加 `prevPageSlugRef` 守卫防 StrictMode 双挂载清引用）；`wiki-reading-view` 两分支各包正文容器 ref 挂按钮。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-selection-ask-floating-button* |
 | 2026-06-30 | Per-subject 上次页面记忆：`hooks/use-switch-subject` 改为切换边界「记录离开页 + 恢复目标页 + 选中当前 subject no-op」；消费 `lib/subject-nav` 与 `ui-store.lastPageBySubject`/`rememberPage`；`subject-switcher`/`subjects` 卡片/`subject-dialog` 调用点无需改动。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-per-subject-last-page-restore* |
 | 2026-07-06 | Ingest 多任务支持：`global-job-tracker.tsx` 改为轮询 running+pending 聚合追踪；新增 `shared/jobs-panel.tsx`（聚合任务面板：多行、每 running 行独立 SSE、pending 行不建连接、completed 5s 自动移除、failed 常驻，行级详情复用 `JobDetailDialog`）；`progress-toast.tsx` 保留组件但不再被 tracker 直接挂载。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |
+| 2026-07-06 | Settings 表单统一重设计 | 新增 `ui/{switch,segmented,select}` 原语（AugmentationField 复用 Segmented）；`settings-rows` 重写为 6 个即时保存行原语（blur/Enter 提交 + 行级 spinner/✓/错误）；七个 panel 换 Switch/分段控件、删全部 Save 按钮；`settings-dialog` 去 languageDraft。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-settings-form-redesign* |
 
 ---
 
