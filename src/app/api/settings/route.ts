@@ -14,6 +14,8 @@ import {
   setAgentTaskRouterMode,
   getAgentAutoCurate,
   setAgentAutoCurate,
+  getIngestConcurrency,
+  setIngestConcurrency,
   getWebSearchProvider,
   setWebSearchProvider,
   getWebSearchApiKey,
@@ -34,6 +36,7 @@ import {
   AgentMaxParallelSubAgentsSchema,
   AgentTaskRouterModeSchema,
   AgentAutoCurateSchema,
+  IngestConcurrencySchema,
   WebSearchProviderSchema,
   WebSearchApiKeySchema,
   WebSearchMaxResultsSchema,
@@ -53,6 +56,7 @@ function readSettings(): AppSettings {
     agentMaxParallelSubAgents: getAgentMaxParallelSubAgents(),
     agentTaskRouterMode: getAgentTaskRouterMode(),
     agentAutoCurate: getAgentAutoCurate(),
+    ingestConcurrency: getIngestConcurrency(),
     webSearchProvider: getWebSearchProvider(),
     webSearchApiKey: getWebSearchApiKey(),
     webSearchMaxResults: getWebSearchMaxResults(),
@@ -75,6 +79,7 @@ const PutBodySchema = z.object({
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema.optional(),
   agentTaskRouterMode: AgentTaskRouterModeSchema.optional(),
   agentAutoCurate: AgentAutoCurateSchema.optional(),
+  ingestConcurrency: IngestConcurrencySchema.optional(),
   webSearchProvider: WebSearchProviderSchema.optional(),
   webSearchApiKey: WebSearchApiKeySchema.optional(),
   webSearchMaxResults: WebSearchMaxResultsSchema.optional(),
@@ -111,6 +116,7 @@ export async function PUT(request: NextRequest) {
   if (d.agentMaxParallelSubAgents !== undefined) setAgentMaxParallelSubAgents(d.agentMaxParallelSubAgents);
   if (d.agentTaskRouterMode !== undefined) setAgentTaskRouterMode(d.agentTaskRouterMode);
   if (d.agentAutoCurate !== undefined) setAgentAutoCurate(d.agentAutoCurate);
+  if (d.ingestConcurrency !== undefined) setIngestConcurrency(d.ingestConcurrency);
   if (d.webSearchProvider !== undefined) setWebSearchProvider(d.webSearchProvider);
   if (d.webSearchApiKey !== undefined) setWebSearchApiKey(d.webSearchApiKey);
   if (d.webSearchMaxResults !== undefined) setWebSearchMaxResults(d.webSearchMaxResults);

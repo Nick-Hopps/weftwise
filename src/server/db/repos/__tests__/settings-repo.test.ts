@@ -91,3 +91,23 @@ describe('settings-repo web search keys', () => {
     expect(() => repo.setWebSearchProvider('bing')).toThrow();
   });
 });
+
+describe('ingestConcurrency', () => {
+  it('缺省时返回默认值 2', async () => {
+    const repo = await import('../settings-repo');
+    expect(repo.getIngestConcurrency()).toBe(2);
+  });
+
+  it('set 后 get 读到新值', async () => {
+    const repo = await import('../settings-repo');
+    repo.setIngestConcurrency(4);
+    expect(repo.getIngestConcurrency()).toBe(4);
+  });
+
+  it('越界值被 zod 拒绝', async () => {
+    const repo = await import('../settings-repo');
+    expect(() => repo.setIngestConcurrency(0)).toThrow();
+    expect(() => repo.setIngestConcurrency(5)).toThrow();
+    expect(() => repo.setIngestConcurrency(2.5)).toThrow();
+  });
+});
