@@ -71,7 +71,10 @@ export function IngestWorkbench() {
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileResults, setFileResults] = useState<
+    Array<{ filename: string; jobId?: string; error?: string }> | null
+  >(null);
   const [textInput, setTextInput] = useState('');
   const [filenameInput, setFilenameInput] = useState('');
   const [sourceName, setSourceName] = useState('');
@@ -100,7 +103,8 @@ export function IngestWorkbench() {
     setJobId(null);
     setError(null);
     setCreatedPages([]);
-    setSelectedFile(null);
+    setSelectedFiles([]);
+    setFileResults(null);
     setTextInput('');
     setFilenameInput('');
     setSourceName('');
@@ -179,7 +183,7 @@ export function IngestWorkbench() {
     const handoff = takePendingIngestFile();
     if (!handoff) return;
     handoffStarted.current = true;
-    setSelectedFile(handoff);
+    setSelectedFiles([handoff]);
     void startUpload(handoff);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -253,11 +257,47 @@ export function IngestWorkbench() {
 
   const handleStart = async () => {
     if (mode === 'file') {
-      if (!selectedFile) {
+      if (selectedFiles.length === 0) {
         fileRef.current?.click();
         return;
       }
-      await startUpload(selectedFile);
+      if (selectedFiles.length === 1) {
+        await startUpload(selectedFiles[0]);
+        return;
+      }
+      // 批量：逐个上传（每文件独立 job），逐条归集结果，留在本页展示结果面板
+      setError(null);
+      setCreatedPages([]);
+      setFileResults(null);
+      setUploading(true);
+      const subjectId = useUIStore.getState().currentSubjectId;
+      const results: Array<{ filename: string; jobId?: string; error?: string }> = [];
+      for (const file of selectedFiles) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          if (subjectId) formData.append('subjectId', subjectId);
+          const res = await apiFetch('/api/ingest', { method: 'POST', body: formData });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `Upload failed (${res.status})`);
+          }
+          const data = await res.json();
+          results.push({ filename: file.name, jobId: data.jobId });
+          window.dispatchEvent(
+            new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }),
+          );
+        } catch (err) {
+          results.push({
+            filename: file.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      setFileResults(results);
+      setSelectedFiles([]);
+      if (fileRef.current) fileRef.current.value = '';
+      setUploading(false);
       return;
     }
     if (mode === 'url') {
@@ -342,10 +382,10 @@ export function IngestWorkbench() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) {
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
       setMode('file');
-      setSelectedFile(file);
+      setSelectedFiles(files);
       setError(null);
     }
   }, []);
@@ -378,7 +418,11 @@ export function IngestWorkbench() {
 
   // ── Setup ───────────────────────────────────────────────────────────────────
   const canStart =
-    mode === 'file' ? !!selectedFile : mode === 'url' ? !!urlInput.trim() : !!textInput.trim();
+    mode === 'file'
+      ? selectedFiles.length > 0
+      : mode === 'url'
+        ? !!urlInput.trim()
+        : !!textInput.trim();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -387,11 +431,12 @@ export function IngestWorkbench() {
           ref={fileRef}
           type="file"
           accept={ACCEPT}
+          multiple
           className="sr-only"
           onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              setSelectedFile(file);
+            const files = Array.from(e.target.files ?? []);
+            if (files.length > 0) {
+              setSelectedFiles(files);
               setError(null);
             }
           }}
@@ -439,19 +484,24 @@ export function IngestWorkbench() {
                   'flex w-full flex-col items-center gap-2 rounded-lg border-[1.5px] border-dashed px-4 py-8 text-center transition-colors duration-fast ease-standard focus-ring',
                   isDragging
                     ? 'border-accent bg-accent/[0.04]'
-                    : selectedFile
+                    : selectedFiles.length > 0
                       ? 'border-accent/60 bg-accent/[0.04]'
                       : 'border-border-strong bg-canvas hover:border-accent hover:bg-accent/[0.04]',
                 )}
               >
-                {selectedFile ? (
+                {selectedFiles.length > 0 ? (
                   <>
                     <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
                       <FileUp className="h-5 w-5 text-accent" aria-hidden />
-                      <span className="font-mono">{selectedFile.name}</span>
+                      <span className="font-mono">
+                        {selectedFiles.length === 1
+                          ? selectedFiles[0].name
+                          : `${selectedFiles.length} files selected`}
+                      </span>
                     </span>
                     <span className="font-mono text-xs text-foreground-tertiary">
-                      {formatBytes(selectedFile.size)} · click to choose another
+                      {formatBytes(selectedFiles.reduce((sum, f) => sum + f.size, 0))} · click to
+                      choose again
                     </span>
                   </>
                 ) : (
@@ -461,7 +511,7 @@ export function IngestWorkbench() {
                       Drag &amp; drop, or click to browse
                     </span>
                     <span className="font-mono text-xs text-foreground-tertiary">
-                      .md · .txt · .html · .pdf — up to 50 MB
+                      .md · .txt · .html · .pdf — up to 50 MB each, multiple files OK
                     </span>
                   </>
                 )}
@@ -527,6 +577,32 @@ export function IngestWorkbench() {
                 </ul>
                 <span className="text-xs text-foreground-tertiary">
                   Jobs run in the background — watch progress in the corner toast.
+                </span>
+              </div>
+            )}
+
+            {fileResults && (
+              <div className="flex flex-col gap-1.5 rounded-md border border-border bg-canvas p-3">
+                <span className="text-xs font-semibold text-foreground">
+                  {fileResults.filter((r) => r.jobId).length}/{fileResults.length} files queued
+                </span>
+                <ul className="flex flex-col gap-1">
+                  {fileResults.map((r) => (
+                    <li key={r.filename} className="flex items-start gap-2 text-xs">
+                      <FileUp
+                        className={cn('mt-0.5 h-3 w-3 shrink-0', r.jobId ? 'text-accent' : 'text-danger')}
+                        aria-hidden
+                      />
+                      <span className="min-w-0">
+                        <span className="break-all font-mono text-foreground-secondary">{r.filename}</span>
+                        {r.error && <span className="text-danger"> — {r.error}</span>}
+                        {r.jobId && <span className="text-foreground-tertiary"> — queued</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <span className="text-xs text-foreground-tertiary">
+                  Jobs run in the background — watch progress in the corner panel.
                 </span>
               </div>
             )}
