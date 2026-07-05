@@ -8,6 +8,7 @@ import {
   getMaintenanceMaxPagesPerSweep,
   getMaintenanceLastSweepAt,
   setMaintenanceLastSweepAt,
+  getIngestConcurrency,
 } from '../db/repos/settings-repo';
 
 type JobHandler = (
@@ -67,7 +68,8 @@ export function registerHandler(type: string, handler: JobHandler): void {
 }
 
 let cleanupFn: (() => void) | null = null;
-let isProcessing = false;
+// 运行中任务表 jobId → type（并发调度依据）
+const runningJobs = new Map<string, string>();
 
 /**
  * Returns true if the error is likely transient and retryable
@@ -140,6 +142,73 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function runJob(job: Job): Promise<void> {
+  const handler = handlers.get(job.type);
+  if (!handler) {
+    queue.fail(job.id, new Error(`No handler registered for job type: ${job.type}`));
+    events.emit(job.id, 'job:failed', `No handler registered for job type: ${job.type}`);
+    return;
+  }
+
+  const emit = (
+    type: string,
+    message: string,
+    data?: Record<string, unknown>
+  ): void => {
+    events.emit(job.id, type, message, data);
+  };
+
+  // Start heartbeat to extend lease during long-running jobs
+  const heartbeatId = setInterval(() => {
+    try {
+      queue.updateHeartbeat(job.id);
+    } catch {
+      // If heartbeat fails, the lease will expire and another worker can reclaim
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+
+  const attempt = job.attemptCount;
+
+  try {
+    const result = await handler(job, emit);
+    queue.complete(job.id, result);
+    events.emit(job.id, 'job:completed', 'Job completed successfully', { result });
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    const errorData: Record<string, unknown> = { error: errorMessage };
+    if (error && typeof error === 'object') {
+      const e = error as Record<string, unknown>;
+      if (e.finishReason) errorData.finishReason = e.finishReason;
+      if (e.usage) errorData.usage = e.usage;
+    }
+
+    const action = decideJobFailureAction(error, attempt, MAX_RETRIES);
+    if (action === 'cancelled') {
+      // 用户取消：cancel 路由通常已把 job 落终态(failed)+清检查点；这里幂等兜底
+      // （若仍为 running 则 requestCancel 会落终态），并补发 job:cancelled 区别于失败。
+      queue.requestCancel(job.id);
+      events.emit(job.id, 'job:cancelled', 'Job cancelled by user', { manual: true });
+    } else if (action === 'retry') {
+      // Retry: requeue the SAME job (preserves job ID for SSE tracking)
+      const delay = RETRY_DELAY_MS * attempt;
+      events.emit(
+        job.id,
+        'job:retrying',
+        `Retrying (attempt ${attempt + 1}/${MAX_RETRIES + 1}) after ${delay}ms...`,
+        { attempt, maxRetries: MAX_RETRIES },
+      );
+      await sleep(delay);
+      queue.requeue(job.id);
+    } else {
+      queue.fail(job.id, error);
+      events.emit(job.id, 'job:failed', errorMessage, errorData);
+    }
+  } finally {
+    clearInterval(heartbeatId);
+  }
+}
+
 export function startWorker(pollIntervalMs = 2000): () => void {
   // 启动即清一次积压（存量库可能已累积大量旧事件）。
   try {
@@ -148,82 +217,19 @@ export function startWorker(pollIntervalMs = 2000): () => void {
     console.error('[maintenance] job_events prune failed', err);
   }
 
-  const intervalId = setInterval(async () => {
-    // Prevent concurrent job execution — LLM handlers can run for minutes,
-    // and parallel git commits would corrupt the vault.
-    if (isProcessing) return;
+  const intervalId = setInterval(() => {
+    // 并发调度：仅 ingest 之间可并发（上限实时读设置）；非 ingest 独占。
+    // 写入安全由 vault-mutex（进程内队列 + 跨进程文件锁）保证，git commit 排队执行。
+    const decision = decideClaim([...runningJobs.values()], getIngestConcurrency());
+    if (decision === 'none') return;
 
-    const job = queue.claim();
+    const job = decision === 'ingest-only' ? queue.claim('ingest') : queue.claim();
     if (!job) return;
 
-    isProcessing = true;
-
-    const handler = handlers.get(job.type);
-    if (!handler) {
-      queue.fail(job.id, new Error(`No handler registered for job type: ${job.type}`));
-      events.emit(job.id, 'job:failed', `No handler registered for job type: ${job.type}`);
-      isProcessing = false;
-      return;
-    }
-
-    const emit = (
-      type: string,
-      message: string,
-      data?: Record<string, unknown>
-    ): void => {
-      events.emit(job.id, type, message, data);
-    };
-
-    // Start heartbeat to extend lease during long-running jobs
-    const heartbeatId = setInterval(() => {
-      try {
-        queue.updateHeartbeat(job.id);
-      } catch {
-        // If heartbeat fails, the lease will expire and another worker can reclaim
-      }
-    }, HEARTBEAT_INTERVAL_MS);
-
-    const attempt = job.attemptCount;
-
-    try {
-      const result = await handler(job, emit);
-      queue.complete(job.id, result);
-      events.emit(job.id, 'job:completed', 'Job completed successfully', { result });
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      const errorData: Record<string, unknown> = { error: errorMessage };
-      if (error && typeof error === 'object') {
-        const e = error as Record<string, unknown>;
-        if (e.finishReason) errorData.finishReason = e.finishReason;
-        if (e.usage) errorData.usage = e.usage;
-      }
-
-      const action = decideJobFailureAction(error, attempt, MAX_RETRIES);
-      if (action === 'cancelled') {
-        // 用户取消：cancel 路由通常已把 job 落终态(failed)+清检查点；这里幂等兜底
-        // （若仍为 running 则 requestCancel 会落终态），并补发 job:cancelled 区别于失败。
-        queue.requestCancel(job.id);
-        events.emit(job.id, 'job:cancelled', 'Job cancelled by user', { manual: true });
-      } else if (action === 'retry') {
-        // Retry: requeue the SAME job (preserves job ID for SSE tracking)
-        const delay = RETRY_DELAY_MS * attempt;
-        events.emit(
-          job.id,
-          'job:retrying',
-          `Retrying (attempt ${attempt + 1}/${MAX_RETRIES + 1}) after ${delay}ms...`,
-          { attempt, maxRetries: MAX_RETRIES },
-        );
-        await sleep(delay);
-        queue.requeue(job.id);
-      } else {
-        queue.fail(job.id, error);
-        events.emit(job.id, 'job:failed', errorMessage, errorData);
-      }
-    } finally {
-      clearInterval(heartbeatId);
-      isProcessing = false;
-    }
+    runningJobs.set(job.id, job.type);
+    void runJob(job).finally(() => {
+      runningJobs.delete(job.id);
+    });
   }, pollIntervalMs);
 
   // 维护层低频 tick：清扫过期 job_events（始终执行）+ 到节律选页入队 re-enrich（受开关控制）。
