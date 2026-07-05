@@ -259,6 +259,10 @@ export const DEFAULT_AGENT_MAX_PARALLEL_SUB_AGENTS = 3;
 export const DEFAULT_AGENT_TASK_ROUTER_MODE = 'frontmatter-override' as const;
 export const DEFAULT_AGENT_AUTO_CURATE = true;
 
+// ── Ingest 并发（worker 每轮 tick 实时读取；1 = 行为等同串行现状）─────────
+export const DEFAULT_INGEST_CONCURRENCY = 2;
+export const IngestConcurrencySchema = z.number().int().min(1).max(4);
+
 export const AgentTaskRouterModeSchema = z.enum(['task-router-only', 'frontmatter-override']);
 
 export const AgentMaxStepsSchema = z.number().int().min(1).max(200);
@@ -308,6 +312,7 @@ export interface AppSettings {
   agentMaxParallelSubAgents: number;
   agentTaskRouterMode: AgentTaskRouterMode;
   agentAutoCurate: boolean;
+  ingestConcurrency: number;
   webSearchProvider: WebSearchProvider;
   webSearchApiKey: string;
   webSearchMaxResults: number;
@@ -323,6 +328,7 @@ export const AppSettingsSchema = z.object({
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema,
   agentTaskRouterMode: AgentTaskRouterModeSchema,
   agentAutoCurate: AgentAutoCurateSchema,
+  ingestConcurrency: IngestConcurrencySchema,
   webSearchProvider: WebSearchProviderSchema,
   webSearchApiKey: WebSearchApiKeySchema,
   webSearchMaxResults: WebSearchMaxResultsSchema,

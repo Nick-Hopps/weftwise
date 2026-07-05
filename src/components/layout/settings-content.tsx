@@ -397,6 +397,15 @@ function AgentsPanel({
         onChange={(v) => savePartial.mutate({ agentAutoCurate: v === 'on' })}
         pending={savePartial.isPending}
       />
+      <NumberSettingRow
+        label="Ingest concurrency"
+        description="How many ingest jobs run at once; other job types always run alone"
+        value={settings?.ingestConcurrency ?? 2}
+        min={1}
+        max={4}
+        onSave={(v) => savePartial.mutate({ ingestConcurrency: v })}
+        pending={savePartial.isPending}
+      />
 
       {savePartial.isError && (
         <p role="alert" className="text-xs text-danger">
