@@ -35,7 +35,7 @@
 | `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
-| `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：triage → confirm → 执行 merge/split，caps merge≤5/split≤5）；返回 202 + `{ jobId }` |
+| `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
 | `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
@@ -72,7 +72,7 @@
   2. 顶部加 `export const runtime = 'nodejs'`；
   3. 先 `requireAuth` 再 `requireCsrf`；
   4. 解析 body 后 `resolveSubjectFromRequest(request, { required: true, body })`；error 非空直接 `return error`；
-  5. **不要**在这里跑 LLM 或 git；调 `queue.enqueue(<type>, subject.id, params)` 即可，并在对应 `src/server/services/*` 注册 handler。
+  5. **不要**在这里跑 LLM 或 git；调 `queue.enqueue(<type>, params, subject.id)`（签名为 `enqueue(type, params?, subjectId?)`）即可，并在对应 `src/server/services/*` 注册 handler。
 - **新增页面**：在 `(app)/` 下新建目录或文件；默认会套用 `Shell` 布局。私有子组件放 `_components/`。
 
 ## 相关文件清单

@@ -16,6 +16,7 @@ import {
   getVaultHead,
   commitVaultChanges,
   restoreToHead,
+  cleanUntrackedPaths,
 } from '../git/git-service';
 import { writeVaultFiles, deleteVaultFile } from './wiki-store';
 import { indexTouchedPages } from './indexer';
@@ -294,8 +295,19 @@ export async function applyChangeset(
  * affected subject. Idempotent — calling it multiple times is safe.
  */
 export async function rollbackChangeset(changeset: Changeset): Promise<void> {
-  if (!changeset.preHead) return;
-  await restoreToHead(changeset.preHead);
+  if (changeset.preHead) {
+    await restoreToHead(changeset.preHead);
+  }
+
+  // reset --hard 不删未跟踪文件：本次 create 的新页在首次 commit 前正是
+  // 未跟踪状态，必须显式清理，否则文件残留磁盘，且下方重索引会把它写回 DB
+  //（等于回滚失效）。preHead 为空（vault 尚无 commit）时同理，所有写入
+  // 均为未跟踪文件，清理后即完成回滚。
+  try {
+    await cleanUntrackedPaths(changeset.entries.map((e) => e.path));
+  } catch {
+    // best effort — 残留文件会在下次 rebuild/lint 中暴露
+  }
 
   try {
     const sqlite = getRawDb();

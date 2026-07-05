@@ -18,7 +18,7 @@
 ### `queue.ts`
 
 ```ts
-enqueue(type, params?): Job           // pending 状态入库
+enqueue(type, params?, subjectId?): Job  // pending 状态入库（subjectId 写入 jobs.subject_id）
 claim(type?): Job | null              // 原子"pending → running" + 租约
 complete(id, result)
 fail(id, error)
@@ -53,7 +53,7 @@ emit(jobId, type, message, data?): void
 | 字段 | 说明 |
 |------|------|
 | `id` | UUID |
-| `type` | `'ingest' \| 'lint' \| 'save-to-wiki'`（来自 `lib/contracts.Job`） |
+| `type` | `'ingest' \| 'lint' \| 'save-to-wiki' \| 'curate' \| 'embed-index' \| 're-enrich' \| 'fix'`（来自 `lib/contracts.Job`） |
 | `status` | `'pending' \| 'running' \| 'completed' \| 'failed'` |
 | `params_json` / `result_json` | 任意 JSON 入参与结果 |
 | `lease_expires_at` | 租约过期时间（`claim` 时写） |

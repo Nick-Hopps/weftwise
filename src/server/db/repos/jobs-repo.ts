@@ -221,20 +221,20 @@ export function completeJob(
   id: string,
   result: Record<string, unknown>
 ): void {
-  const db = getDb();
-  db
-    .update(jobs)
-    .set({
-      status: 'completed',
-      resultJson: JSON.stringify(result),
-      completedAt: new Date().toISOString(),
-    })
-    .where(eq(jobs.id, id))
-    .run();
+  // WHERE cancel_requested = 0：requestCancel 已把 job 落终态（failed+cancelled）
+  // 时，worker 迟到的 complete 不得把它复活成 completed；同时清租约/心跳，
+  // 避免终态行仍带活跃租约被 reclaim 逻辑误判。
+  getRawDb()
+    .prepare(
+      `UPDATE jobs
+       SET status = 'completed', result_json = ?, completed_at = ?,
+           lease_expires_at = NULL, heartbeat_at = NULL
+       WHERE id = ? AND cancel_requested = 0`
+    )
+    .run(JSON.stringify(result), new Date().toISOString(), id);
 }
 
 export function failJob(id: string, error: unknown): void {
-  const db = getDb();
   const errorObj: Record<string, unknown> =
     error instanceof Error
       ? { message: error.message, stack: error.stack }
@@ -252,15 +252,15 @@ export function failJob(id: string, error: unknown): void {
     }
   }
 
-  db
-    .update(jobs)
-    .set({
-      status: 'failed',
-      resultJson: JSON.stringify({ error: errorObj }),
-      completedAt: new Date().toISOString(),
-    })
-    .where(eq(jobs.id, id))
-    .run();
+  // 同 completeJob：已取消的 job 保留 cancelled 结果，不被迟到的失败覆盖。
+  getRawDb()
+    .prepare(
+      `UPDATE jobs
+       SET status = 'failed', result_json = ?, completed_at = ?,
+           lease_expires_at = NULL, heartbeat_at = NULL
+       WHERE id = ? AND cancel_requested = 0`
+    )
+    .run(JSON.stringify({ error: errorObj }), new Date().toISOString(), id);
 }
 
 export function appendJobEvent(

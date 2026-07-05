@@ -48,6 +48,7 @@ async function runLintJob(
   );
 
   const allFindings: (LintFinding & { subjectId: string; subjectSlug: string })[] = [];
+  const semanticFailures: string[] = [];
 
   for (const subject of targets) {
     emit('lint:deterministic:start', `Subject "${subject.slug}": running deterministic checks...`);
@@ -75,7 +76,16 @@ async function runLintJob(
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       emit('lint:semantic:error', `Subject "${subject.slug}": semantic analysis failed: ${msg}`);
+      semanticFailures.push(`${subject.slug}: ${msg}`);
     }
+  }
+
+  // 语义阶段失败不能伪装成体检通过：残缺快照会被 fix-service 当可信基线消费。
+  // 先 emit 完整过程事件再让 job 失败，前端仍能看到确定性阶段结果。
+  if (semanticFailures.length > 0) {
+    throw new Error(
+      `Semantic lint failed for ${semanticFailures.length} subject(s): ${semanticFailures.join('; ')}`
+    );
   }
 
   emit(
