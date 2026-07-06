@@ -89,4 +89,18 @@ describe('buildFanoutInput', () => {
     expect(out).toEqual([]);
     expect(retrieveRelevantPages).not.toHaveBeenCalled();
   });
+
+  it('T2.2: 跨主题 wikilink（[[other-subject:foo]]）不因本 subject 恰有同名 slug 被误纳入', async () => {
+    const existingPages = [
+      ...manyExistingPages(30),
+      { slug: 'foo', title: 'Foo', summary: 'same-slug page in this subject' },
+    ];
+    const retrieveRelevantPages = vi.fn().mockResolvedValue([]);
+    const carry = { subjectSlug: 'general', existingPages, plan: { pages: [] } };
+    const item = { slug: 'brand-new', title: 'Brand New', summary: 'See [[other-subject:foo]] and [[Page 5]]', sourceRefs: [] };
+    const out = (await buildFanoutInput(carry, item, stubCtx({ retrieveRelevantPages }), {})) as Record<string, unknown>;
+    const subset = out.existingPages as Array<{ slug: string }>;
+    expect(subset.some((p) => p.slug === 'foo')).toBe(false); // 跨主题目标不纳入
+    expect(subset.some((p) => p.slug === 'page-5')).toBe(true); // 本 subject 无前缀链接照常纳入
+  });
 });

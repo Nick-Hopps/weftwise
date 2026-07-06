@@ -323,6 +323,7 @@ export async function buildFanoutInput(
     item,
     existingPages: Array.isArray(carry.existingPages) ? (carry.existingPages as ExistingPageEntry[]) : [],
     priorContent: priorPageContent,
+    subjectSlug: typeof carry.subjectSlug === 'string' ? carry.subjectSlug : undefined,
   });
 
   // 共享字段在前、per-page 字段在后：序列化后各 writer 输入有字节一致的前缀，
@@ -373,9 +374,11 @@ export async function selectRelevantExistingPagesForFanout(params: {
   item: Record<string, unknown>;
   existingPages: ExistingPageEntry[];
   priorContent?: string;
+  /** 本 subject 的 slug；wikilink 目标须属于本 subject 才纳入（existingPages 全是本 subject 的页）。 */
+  subjectSlug?: string;
   topK?: number;
 }): Promise<ExistingPageEntry[]> {
-  const { ctx, item, existingPages, priorContent, topK = EXISTING_PAGES_FANOUT_TOP_K } = params;
+  const { ctx, item, existingPages, priorContent, subjectSlug, topK = EXISTING_PAGES_FANOUT_TOP_K } = params;
   if (existingPages.length === 0) return existingPages;
 
   const bySlug = new Map(existingPages.map((p) => [p.slug, p]));
@@ -395,7 +398,12 @@ export async function selectRelevantExistingPagesForFanout(params: {
     priorContent ?? '',
   ].join('\n');
   if (textForLinks.trim()) {
-    for (const link of extractWikiLinks(textForLinks)) {
+    // currentSubjectSlug 让无前缀链接解析为本 subject；显式 [[other-subject:foo]] 的
+    // targetSubjectSlug 会是别的 subject——即使本 subject 恰有同名 slug 也不得纳入
+    // （existingPages 全是本 subject 的页，跨主题引用不在其核对范围内）。
+    const currentSubjectSlug = subjectSlug ?? '';
+    for (const link of extractWikiLinks(textForLinks, { currentSubjectSlug })) {
+      if (link.targetSubjectSlug !== currentSubjectSlug) continue;
       if (bySlug.has(link.target)) selectedSlugs.add(link.target);
     }
   }
