@@ -135,6 +135,7 @@ export async function commitPending(
       extraStagePaths,
       linkPageSource: sourcesRepo.linkPageSource,
       updateSourcePageLinks,
+      unlinkPageSource: sourcesRepo.unlinkPageSource,
       onWarning: (message) => ctx.emit('ingest:warn', message),
     };
   }

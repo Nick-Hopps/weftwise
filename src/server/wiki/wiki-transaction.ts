@@ -182,8 +182,11 @@ export interface SourceLinkOps {
   links: Array<{ sourceId: string; pageSlugs: string[] }>;
   /** 提交前已写入 vault 工作树、需纳入本 commit 的额外文件路径（raw 源文件 + sidecar），相对 vault 根。 */
   extraStagePaths?: string[];
-  linkPageSource: (subjectId: string, pageSlug: string, sourceId: string) => void;
+  /** 返回 true 表示本次真正新插入了一行（用于回滚补偿判定，重复 ingest 命中已存在的行时返回 false）。 */
+  linkPageSource: (subjectId: string, pageSlug: string, sourceId: string) => boolean;
   updateSourcePageLinks: (sourceId: string, pageSlugs: string[]) => void;
+  /** 回滚补偿：删除单条 (subject, page, source) 链接；缺省时回滚不清理 page_sources（兼容旧调用方）。 */
+  unlinkPageSource?: (subjectId: string, pageSlug: string, sourceId: string) => void;
   /** sidecar 更新失败时的告警出口；缺省时静默（不影响 changeset 提交）。 */
   onWarning?: (message: string) => void;
 }
@@ -217,6 +220,12 @@ export async function applyChangeset(
       .prepare(`UPDATE operations SET pre_head = ? WHERE id = ?`)
       .run(preHead, operationId);
 
+    // 本次 apply 期间真正新插入的 (page, source) 对——只有这些才是回滚需要
+    // 补偿的行；重复 ingest 命中已存在的行 linkPageSource 会返回 false，
+    // 不计入，避免误删预先存在的溯源数据。声明在 try 外层，确保 catch 里
+    // 也能拿到（即便在写入这一步之前就失败也传空数组，无副作用）。
+    const insertedSourceLinks: Array<{ pageSlug: string; sourceId: string }> = [];
+
     try {
       const writeEntries: { path: string; content: string }[] = [];
       const deleteEntries: string[] = [];
@@ -243,26 +252,16 @@ export async function applyChangeset(
         if (sourceOps) {
           for (const link of sourceOps.links) {
             for (const slug of link.pageSlugs) {
-              sourceOps.linkPageSource(working.subjectId, slug, link.sourceId);
+              const inserted = sourceOps.linkPageSource(working.subjectId, slug, link.sourceId);
+              if (inserted) {
+                insertedSourceLinks.push({ pageSlug: slug, sourceId: link.sourceId });
+              }
             }
           }
         }
       });
-      updateIndex();
 
-      if (sourceOps) {
-        for (const link of sourceOps.links) {
-          try {
-            sourceOps.updateSourcePageLinks(link.sourceId, link.pageSlugs);
-          } catch (err) {
-            sourceOps.onWarning?.(
-              `Failed to update source page links for source ${link.sourceId}: ${
-                err instanceof Error ? err.message : String(err)
-              }`
-            );
-          }
-        }
-      }
+      updateIndex();
 
       const affectedPaths = working.entries.map((e) => e.path);
       const stagePaths =
@@ -280,9 +279,30 @@ export async function applyChangeset(
         )
         .run(postHead, operationId);
 
+      // sidecar（.llm-wiki/sources/<subject>/*.json）写入放在 git commit
+      // 成功之后：commit 已落地即代表 page_sources 索引已生效，sidecar 只是
+      // 溯源展示的旁路缓存，failure 不应回滚已提交的 changeset，也天然不
+      // 需要回滚补偿（commit 前从不触碰 sidecar 文件）。
+      if (sourceOps) {
+        for (const link of sourceOps.links) {
+          try {
+            sourceOps.updateSourcePageLinks(link.sourceId, link.pageSlugs);
+          } catch (err) {
+            sourceOps.onWarning?.(
+              `Failed to update source page links for source ${link.sourceId}: ${
+                err instanceof Error ? err.message : String(err)
+              }`
+            );
+          }
+        }
+      }
+
       return { ...working, postHead, status: 'applied' };
     } catch (err) {
-      await rollbackChangeset({ ...working, preHead });
+      await rollbackChangeset(
+        { ...working, preHead },
+        { insertedSourceLinks, unlinkPageSource: sourceOps?.unlinkPageSource }
+      );
       throw err;
     }
   } finally {
@@ -290,11 +310,26 @@ export async function applyChangeset(
   }
 }
 
+export interface SourceLinkCompensation {
+  /** 本次 apply 期间真正新插入、需要回滚删除的 (page, source) 对。 */
+  insertedSourceLinks?: Array<{ pageSlug: string; sourceId: string }>;
+  /** 删除单条 (subject, page, source) 链接；缺省时不清理 page_sources（兼容旧调用方/无 sourceOps 场景）。 */
+  unlinkPageSource?: (subjectId: string, pageSlug: string, sourceId: string) => void;
+}
+
 /**
  * Revert the vault to the changeset's preHead and reindex slugs in the
  * affected subject. Idempotent — calling it multiple times is safe.
+ *
+ * `compensation` (optional) additionally deletes `page_sources` rows that
+ * were newly inserted during the failed apply — pre-existing rows (e.g. a
+ * repeat ingest hitting the same page/source pair) are never touched, since
+ * only rows `linkPageSource` reported as newly-inserted are tracked here.
  */
-export async function rollbackChangeset(changeset: Changeset): Promise<void> {
+export async function rollbackChangeset(
+  changeset: Changeset,
+  compensation?: SourceLinkCompensation
+): Promise<void> {
   if (changeset.preHead) {
     await restoreToHead(changeset.preHead);
   }
@@ -318,6 +353,16 @@ export async function rollbackChangeset(changeset: Changeset): Promise<void> {
     reindex();
   } catch {
     // best effort
+  }
+
+  if (compensation?.insertedSourceLinks?.length && compensation.unlinkPageSource) {
+    for (const { pageSlug, sourceId } of compensation.insertedSourceLinks) {
+      try {
+        compensation.unlinkPageSource(changeset.subjectId, pageSlug, sourceId);
+      } catch {
+        // best effort — 残留行会在下次 rebuild/lint 中暴露
+      }
+    }
   }
 
   try {

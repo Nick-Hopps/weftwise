@@ -100,16 +100,42 @@ export function getSourcesForPage(
   return rows.map(rowToSource);
 }
 
+/**
+ * Link a page to a source. Returns `true` when a new row was actually
+ * inserted, `false` when the (subject, page, source) triple already existed
+ * (composite PK conflict, silently ignored) — callers use this to know
+ * whether the link needs compensating on rollback.
+ */
 export function linkPageSource(
+  subjectId: SubjectId,
+  pageSlug: string,
+  sourceId: string
+): boolean {
+  const db = getDb();
+  const result = db
+    .insert(pageSources)
+    .values({ subjectId, pageSlug, sourceId })
+    .onConflictDoNothing()
+    .run();
+  return result.changes > 0;
+}
+
+/** Remove a single (subject, page, source) link — used to compensate a rolled-back changeset. */
+export function unlinkPageSource(
   subjectId: SubjectId,
   pageSlug: string,
   sourceId: string
 ): void {
   const db = getDb();
   db
-    .insert(pageSources)
-    .values({ subjectId, pageSlug, sourceId })
-    .onConflictDoNothing()
+    .delete(pageSources)
+    .where(
+      and(
+        eq(pageSources.subjectId, subjectId),
+        eq(pageSources.pageSlug, pageSlug),
+        eq(pageSources.sourceId, sourceId)
+      )
+    )
     .run();
 }
 
