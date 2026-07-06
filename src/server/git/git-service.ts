@@ -91,13 +91,33 @@ export async function commitVaultChanges(
 }
 
 /**
- * Return the commit message of the current HEAD commit.
- * Returns an empty string when the vault has no commits yet.
+ * 在 `sinceSha..HEAD` 提交范围内查找 commit message 含给定标记的提交，
+ * 返回其 SHA；找不到返回 null。`sinceSha` 为空/未提供时检索全部 log。
+ *
+ * 供崩溃恢复用：并发调度下本 changeset 的提交可能已不是 HEAD（崩溃后
+ * 其他任务又正常提交过），标记必须在 preHead 之后的整个范围内查找。
  */
-export async function getHeadCommitMessage(): Promise<string> {
+export async function findCommitWithMarker(
+  marker: string,
+  sinceSha?: string
+): Promise<string | null> {
   const git = getVaultGit();
-  const log = await git.log({ maxCount: 1 }).catch(() => ({ latest: null }));
-  return log.latest?.message ?? '';
+  try {
+    const range = sinceSha ? [`${sinceSha}..HEAD`] : [];
+    const raw = await git.raw(['log', ...range, '--pretty=format:%H%x1f%s']);
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      const idx = line.indexOf('\x1f');
+      if (idx < 0) continue;
+      const sha = line.slice(0, idx);
+      const subject = line.slice(idx + 1);
+      if (subject.includes(marker)) return sha;
+    }
+    return null;
+  } catch {
+    // 空仓库（无 HEAD）或非法 range → 视为未找到
+    return null;
+  }
 }
 
 /**

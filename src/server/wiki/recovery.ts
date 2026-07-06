@@ -8,19 +8,21 @@
  * 别的提交一起 reset --hard 掉，静默丢数据。
  *
  * 判定依据：`commitVaultChanges` 会在 commit message 末尾追加确定性标记
- * `[cs:<changesetId>]`。恢复时读 HEAD commit message：
+ * `[cs:<changesetId>]`。恢复时在 `preHead..HEAD` 提交范围内查找该标记
+ * （并发调度下崩溃后可能已有其他任务正常提交，本 changeset 的提交未必是
+ * HEAD，只看 HEAD 会误判成分支 3）：
  *
- *   1. HEAD message 含本 changeset 的标记 → 已经提交成功，只是状态没落库
- *      → **前滚**：补 postHead、置 applied、幂等重跑 indexTouchedPages。
- *   2. 不含标记，且 HEAD === preHead（vault 没有变化，commit 从未发生）
+ *   1. 范围内找到标记提交 → 已经提交成功，只是状态没落库
+ *      → **前滚**：postHead=该提交哈希、置 applied、幂等重跑 indexTouchedPages。
+ *   2. 没找到，且 HEAD === preHead（vault 没有变化，commit 从未发生）
  *      → 按现状**回滚**（rollbackChangeset）。
- *   3. 不含标记，且 HEAD !== preHead（commit 未打标记，但之后已有其他提交
- *      落在它前面——例如另一个 changeset 顺利提交）→ 不能再 `restoreToHead`，
+ *   3. 没找到，且 HEAD !== preHead（本 changeset 的 commit 未落地，但之后
+ *      已有其他提交落在它前面）→ 不能再 `restoreToHead`，
  *      否则会把后续提交一起冲掉。只把该 operation 标成终态并记录告警，
  *      交由人工/lint 事后核查。
  */
 
-import { getVaultHead, getHeadCommitMessage } from '../git/git-service';
+import { getVaultHead, findCommitWithMarker } from '../git/git-service';
 import { getRawDb } from '../db/client';
 import { indexTouchedPages } from './indexer';
 import { rollbackChangeset, collectTouchedSlugs } from './wiki-transaction';
@@ -41,12 +43,16 @@ function changesetMarker(changesetId: string): string {
 export async function recoverPendingOperation(
   changeset: Changeset
 ): Promise<RecoveryOutcome> {
-  const headMessage = await getHeadCommitMessage();
   const marker = changesetMarker(changeset.id);
+  // 在 preHead..HEAD 范围内找标记提交（preHead 为空则查全部 log）——并发
+  // 调度下本 changeset 的提交可能已被后续提交盖过，不能只看 HEAD。
+  const markedSha = await findCommitWithMarker(
+    marker,
+    changeset.preHead || undefined
+  );
 
-  if (headMessage.includes(marker)) {
+  if (markedSha) {
     // 分支 1：commit 已成功，只是 applied 状态没来得及落库 → 前滚。
-    const headSha = await getVaultHead();
     const db = getRawDb();
 
     try {
@@ -64,9 +70,9 @@ export async function recoverPendingOperation(
 
     db
       .prepare(`UPDATE operations SET post_head = ?, status = 'applied' WHERE id = ?`)
-      .run(headSha, changeset.id);
+      .run(markedSha, changeset.id);
 
-    log.info(`Rolled forward operation ${changeset.id} (commit already applied at ${headSha})`);
+    log.info(`Rolled forward operation ${changeset.id} (commit already applied at ${markedSha})`);
     return 'rolled-forward';
   }
 
@@ -77,8 +83,9 @@ export async function recoverPendingOperation(
     return 'rolled-back';
   }
 
-  // 分支 3：HEAD 既没打标记也不等于 preHead —— 说明之后已有别的提交落在
-  // 它前面。restoreToHead 会把那些提交一并冲掉，绝不能做。只标终态+告警。
+  // 分支 3：范围内没有本 changeset 的标记，且 HEAD 已不等于 preHead ——
+  // 说明本 commit 未落地但之后已有别的提交落在它前面。restoreToHead
+  // 会把那些提交一并冲掉，绝不能做。只标终态+告警。
   try {
     getRawDb()
       .prepare(`UPDATE operations SET status = 'rolled-back' WHERE id = ?`)
@@ -88,9 +95,9 @@ export async function recoverPendingOperation(
   }
 
   log.warn(
-    `Operation ${changeset.id} left in an indeterminate state: HEAD (${headSha}) is neither ` +
-      `preHead (${changeset.preHead}) nor tagged with ${marker}. Vault has moved on since this ` +
-      `changeset's preHead — skipping restoreToHead to avoid discarding later commits. ` +
+    `Operation ${changeset.id} left in an indeterminate state: no commit tagged ${marker} ` +
+      `found in ${changeset.preHead || '(root)'}..HEAD, and HEAD (${headSha}) has moved past ` +
+      `preHead (${changeset.preHead}) — skipping restoreToHead to avoid discarding later commits. ` +
       `Marked as rolled-back without touching the vault; please audit manually.`
   );
   return 'orphaned';
