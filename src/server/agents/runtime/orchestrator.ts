@@ -127,13 +127,31 @@ export async function runPipeline(opts: {
       const perItemReserve = opts.ctx.estimateFanoutReserve
         ? opts.ctx.estimateFanoutReserve(items.length)
         : Math.max(1, Math.ceil(opts.ctx.budgetSnapshot.maxTokensPerJob / Math.max(1, items.length)));
+      // T1.6：冲突检测提前到 checkpoint.put 之前——用同一张 claimedPaths 表在「读缓存」与「写缓存」
+      // 两处都做同 path 认领，检测到冲突时丢弃后到者的检查点条目（不写入/主动删除），
+      // 避免坏页进检查点后 resume 按 slug 命中缓存、原样复现冲突、死循环重试。
+      // 所有认领操作都在 async 函数体内同步完成（无 await 穿插），单线程事件循环下不存在竞态。
+      const claimedPaths = new Map<string, string>();
       const results = await runWithSemaphore(items, limit, async (item) => {
         const slug = isPlainObject(item) && typeof item.slug === 'string' ? item.slug : undefined;
         // 断点续传：命中已写页则跳过 LLM（fanout 是书本级最贵步骤）——不产生调用，不预扣。
         if (step.checkpointAs && slug) {
           const cached = readStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug);
           if (cached) {
-            return { runId: 'cached-page', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
+            const cachedPath = cached.path;
+            if (cachedPath && claimedPaths.has(cachedPath)) {
+              // resume 防御：检查点中残留的同 path 冲突条目（如旧版本未做该检测时写入的）。
+              // 丢弃后到者的缓存条目并重新生成，而不是原样复现冲突。
+              const winnerSlug = claimedPaths.get(cachedPath);
+              opts.ctx.emit('ingest:warn', `Checkpoint conflict on resume: "${slug}" and "${winnerSlug}" both cached path "${cachedPath}" — discarding "${slug}"'s checkpoint and regenerating`, {
+                slug, winnerSlug, path: cachedPath,
+              });
+              opts.ctx.checkpoint?.deleteStagePage(step.checkpointAs, slug);
+              // 不 return：继续走下方正常生成路径
+            } else {
+              if (cachedPath) claimedPaths.set(cachedPath, slug);
+              return { runId: 'cached-page', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
+            }
           }
         }
         const reservation = await opts.ctx.budget.reserve(perItemReserve);
@@ -165,10 +183,21 @@ export async function runPipeline(opts: {
             entry.path = `wiki/${carry.subjectSlug}/${slug}.md`;
           }
         }
-        // 每页完成瞬间即落盘（barrier 之前）——fail-fast 中止时已完成 + 在飞页都保住
+        // 每页完成瞬间即落盘（barrier 之前）——fail-fast 中止时已完成 + 在飞页都保住。
+        // T1.6：落盘前先按 path 认领；撞见已认领的 path 时，判定为 WriterConflict——
+        // 既不写入本页检查点，也把先前"认领者"已落盘的检查点一并撤销，防止任一方
+        // 单独存活成为死循环续传的种子（真正的失败判定仍由下方 seenSlugs 统一抛出）。
         if (step.checkpointAs && slug) {
           const entry = r.output as ChangesetEntry | undefined;
-          if (entry?.path) writeStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug, entry);
+          if (entry?.path) {
+            if (claimedPaths.has(entry.path)) {
+              const winnerSlug = claimedPaths.get(entry.path);
+              if (winnerSlug) opts.ctx.checkpoint?.deleteStagePage(step.checkpointAs, winnerSlug);
+            } else {
+              claimedPaths.set(entry.path, slug);
+              writeStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug, entry);
+            }
+          }
         }
         return r;
       });
