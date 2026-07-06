@@ -1,7 +1,7 @@
 // src/server/agents/runtime/__tests__/orchestrator.test.ts
 import { describe, expect, it, vi } from 'vitest';
 import { runPipeline, WriterConflictError } from '../orchestrator';
-import { BudgetExceededError } from '../budget';
+import { BudgetExceededError, createBudgetTracker } from '../budget';
 import type { AgentContext, SkillTemplate, StoredChunk, IngestCheckpoint } from '../../types';
 import type { ChangesetEntry } from '@/lib/contracts';
 
@@ -29,7 +29,9 @@ function ctxStub(chunks: StoredChunk[] = [], checkpoint?: IngestCheckpoint): Age
     job: { id: 'j' } as AgentContext['job'],
     subject: { slug: 'general' } as AgentContext['subject'],
     emit: vi.fn(),
-    budget: { chargeTokens: vi.fn(), assertWithin: vi.fn(), tokensUsed: 0 },
+    // 真实 tracker（而非纯 mock）：orchestrator 的 fanout 分支现在会 reserve/settle，
+    // 用真实实现才能验证并发排队/释放语义不被 mock 掩盖。
+    budget: createBudgetTracker({ maxSteps: 25, maxTokensPerJob: 500_000, maxParallelSubAgents: 2 }),
     overlay: { snapshot: vi.fn(() => ({ snapshot: () => ({}), readPage: vi.fn(), search: vi.fn(), putEntries: vi.fn() })), readPage: vi.fn(), search: vi.fn(), putEntries: vi.fn() } as unknown as AgentContext['overlay'],
     toolRegistry: { register: vi.fn(), resolve: vi.fn(() => []), get: vi.fn() },
     skillRegistry: { get: vi.fn(), list: vi.fn(() => []), degraded: vi.fn(() => []) },
