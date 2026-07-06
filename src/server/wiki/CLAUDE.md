@@ -57,7 +57,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
-| `vault-mutex.ts` | `acquireVaultLock` | 进程内互斥队列 + **跨进程文件锁**（vault 同级 `.vault.lock`，O_EXCL 原子创建、持有者死亡/悬挂超时自动回收）；写路径分散在 Next.js 与 worker 两进程，仅内存锁不够 |
+| `vault-mutex.ts` | `acquireVaultLock(tuning?)` | 进程内互斥队列 + **跨进程文件锁**（vault 同级 `.vault.lock`，O_EXCL 原子创建）；持锁期间 30s 心跳刷新锁文件 mtime（`unref()` 定时器，release 时 try/finally 清理），stale 判定收紧为双条件——mtime 距今 > 3×心跳间隔 **且**（持锁进程不存活 **或** mtime 距今 > 硬上限 30min），避免长任务（>10min）被误判悬挂夺锁；写路径分散在 Next.js 与 worker 两进程，仅内存锁不够。`tuning` 参数仅供测试注入更短的常量 |
 | `recovery.ts` | `recoverPendingOperation(changeset): Promise<'rolled-forward' \| 'rolled-back' \| 'orphaned'>` | 崩溃恢复三分支判定（见上文"崩溃恢复"）；被 `worker-entry.ts` 启动时对每条 pending operation 调用，取代旧的"pending 一律回滚" |
 
 ## 数据契约（`WikiFrontmatter`）
