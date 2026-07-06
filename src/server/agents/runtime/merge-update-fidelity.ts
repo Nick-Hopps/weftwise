@@ -8,6 +8,8 @@ import type { AgentRunResult } from './agent-loop';
  * 与 supplement-page.ts 的「重写一次→回落」模式同构，但回落语义不同：supplement 回落到原文
  * （因新增材料价值归 enricher 兜底），merge-update 回落必须保住 writer 这次抓到的新材料
  * （否则源材料就白读了），故拼接而非纯回落原文。
+ * 前置假设：existingContent 来自 overlay.readPage（含 frontmatter 的完整文件），writer 产物为纯 body；
+ * 若未来 writer 改为输出带 frontmatter 的整页，此拼接会把第二段 frontmatter 泄入正文，需同步调整。
  */
 export async function reconcileMergeUpdateFidelity(opts: {
   existingContent: string;
