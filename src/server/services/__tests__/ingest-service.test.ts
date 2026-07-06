@@ -39,7 +39,7 @@ vi.mock('../../jobs/queue', () => ({
 }));
 
 // runPipeline 现在返回内容阶段的 carry（含 plan/subjectSlug/sources/languageDirective），
-// 不再自带 commit —— commit 由 service 在 finalize（indexer + commitPending）阶段完成。
+// 不再自带 commit —— commit 由 service 在 finalize（确定性渲染 index/log + commitPending）阶段完成。
 const mockRunPipeline = vi.fn(async () => ({
   plan: { pages: [{ slug: 'a', title: 'A', summary: 'sum a' }] },
   subjectSlug: 'general',
@@ -47,19 +47,8 @@ const mockRunPipeline = vi.fn(async () => ({
   sources: [{ sourceId: 'src1', filename: 'doc.txt' }],
   writerOutputs: [],
 }));
-const mockRunSingle = vi.fn(async () => ({
-  runId: 'r-indexer',
-  output: {
-    indexMd: '---\ntitle: General — Index\ntags: [meta]\n---\n# Index\n- [[a|A]] — sum a',
-    logMd: '---\ntitle: General — Change Log\ntags: [meta]\n---\n# Change Log\n- ingested "doc.txt": 1 page',
-  },
-  tokensUsed: 0,
-  stepCount: 1,
-  cacheHitTokens: 0,
-}));
 vi.mock('../../agents/runtime/orchestrator', () => ({
   runPipeline: (...args: unknown[]) => mockRunPipeline(...args as []),
-  runSingle: (...args: unknown[]) => mockRunSingle(...args as []),
   WriterConflictError: class extends Error {},
 }));
 
@@ -155,7 +144,6 @@ describe('ingest-service', () => {
       createdAt: '', startedAt: null, completedAt: null,
       leaseExpiresAt: null, heartbeatAt: null, attemptCount: 0,
     };
-    mockRunSingle.mockClear();
     mockCommitPending.mockClear();
     const emit = vi.fn();
     const result = await handler!(job, emit) as IngestResult;
@@ -165,21 +153,18 @@ describe('ingest-service', () => {
     // 小文件走 inline：planner(sequence) + writer/enricher/verifier(fanout×3) = 4 步（reviewer 已移除）
     expect(callArg.steps).toHaveLength(4);
 
-    // finalize：service 跑无-tools 的 ingest-indexer，再用 commitPending 收口提交 index/log
-    expect(mockRunSingle).toHaveBeenCalledTimes(1);
-    const indexerArg = (mockRunSingle.mock.calls[0] as unknown as unknown[])[0] as {
-      skill: { id: string };
-      input: { pages: Array<{ slug: string }> };
-    };
-    expect(indexerArg.skill.id).toBe('ingest-indexer');
-    // indexer 收到「现有页 ∪ 本次 plan 页」的并集（索引须覆盖全 subject，不只本次新页）
-    expect(indexerArg.input.pages.map((p) => p.slug).sort()).toEqual(['a', 'existing-a']);
-
+    // finalize（T2.1）：index/log 由确定性渲染产出（不再走 LLM），再用 commitPending 收口提交
     expect(mockCommitPending).toHaveBeenCalledTimes(1);
-    const supplied = (mockCommitPending.mock.calls[0] as unknown as unknown[])[1] as Array<{ path: string }>;
+    const supplied = (mockCommitPending.mock.calls[0] as unknown as unknown[])[1] as Array<{ path: string; content: string }>;
     expect(supplied.map((e) => e.path).sort()).toEqual([
       'wiki/general/index.md', 'wiki/general/log.md',
     ]);
+    const indexEntry = supplied.find((e) => e.path === 'wiki/general/index.md')!;
+    // 索引须覆盖「现有页 ∪ 本次 plan 页」的并集（不只本次新页）
+    expect(indexEntry.content).toContain('[[a|A]]');
+    expect(indexEntry.content).toContain('[[existing-a|Existing A]]');
+    const logEntry = supplied.find((e) => e.path === 'wiki/general/log.md')!;
+    expect(logEntry.content).toContain('ingested "doc.txt"');
   });
 
   it('小文件走 inline：无 map 步，chunkRefs.content 已填全文，existingPages 实读', async () => {

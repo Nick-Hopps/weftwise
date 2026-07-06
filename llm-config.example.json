@@ -90,10 +90,6 @@
       "model": "claude-sonnet-4-6",
       "temperature": 0
     },
-    "ingest:indexer": {
-      "profile": "openai-default",
-      "model": "gpt-4o-mini"
-    },
     "reenrich:supplement": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",

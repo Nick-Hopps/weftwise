@@ -76,23 +76,9 @@ describe('examples/skills round-trip', () => {
     expect(skills.find((s) => s.id === 'ingest-reviewer')).toBeUndefined();
   });
 
-  it('ingest-indexer 可加载、无 tools、outputSchema 为 { indexMd, logMd }', async () => {
+  it('ingest-indexer 已移除（T2.1：index/log 改确定性渲染，见 wiki/meta-pages.ts，不再走 LLM）', async () => {
     const { skills } = await loadSkillsFromDir(EXAMPLES_DIR);
-    const indexer = skills.find((s) => s.id === 'ingest-indexer');
-    expect(indexer).toBeDefined();
-    // 无 tools：结构化输出走 generateObject，根本不可能进工具循环（这正是替换 reviewer 的目的）
-    expect(indexer!.tools).toEqual([]);
-    expect(indexer!.outputSchema).toBeDefined();
-
-    const valid = indexer!.outputSchema!.safeParse({
-      indexMd: '---\ntitle: General — Index\n---\n# Index',
-      logMd: '---\ntitle: General — Change Log\n---\n# Log\n- 2026: ingested',
-    });
-    expect(valid.success).toBe(true);
-
-    // 两个字段都必填：缺 logMd 应解析失败
-    const missing = indexer!.outputSchema!.safeParse({ indexMd: '# Index' });
-    expect(missing.success).toBe(false);
+    expect(skills.find((s) => s.id === 'ingest-indexer')).toBeUndefined();
   });
 
   it('ingest-chunk-summarizer 可加载、tools 为空、且不设 maxTokens 上限', async () => {

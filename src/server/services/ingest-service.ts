@@ -14,12 +14,20 @@ import {
 } from '../db/repos/settings-repo';
 import * as queue from '../jobs/queue';
 import { renderLanguageDirective, renderAugmentationDirective, renderExpositionDirective } from '../llm/prompts/prompt-context';
-import { runPipeline, runSingle, type PipelineStep } from '../agents/runtime/orchestrator';
+import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
 import { loadCheckpoint } from '../agents/runtime/checkpoint';
 import { commitPending } from '../agents/tools/builtin/commit-changeset';
-import { buildWikiPath } from '../wiki/page-identity';
+import { buildWikiPath, parseWikiPath } from '../wiki/page-identity';
+import { parseFrontmatter } from '../wiki/frontmatter';
+import {
+  renderIndexPage,
+  renderLogPage,
+  parseLogEntries,
+  buildIngestLogEntry,
+  resolveTemplateLang,
+} from '../wiki/meta-pages';
 import {
   prepareIngest,
   fillInlineContent,
@@ -148,7 +156,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   // writer v6 起：复述者→讲解者契约 + 新增 expositionDirective 输入。
   // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
   const MIN_SKILL_VERSIONS: Record<string, number> = {
-    'ingest-planner': 2, 'ingest-writer': 6, 'ingest-indexer': 1,
+    'ingest-planner': 2, 'ingest-writer': 6,
     'ingest-enricher': 4, 'ingest-verifier': 2,
     'ingest-verifier-triage': 2, 'ingest-verifier-apply': 3,
   };
@@ -194,7 +202,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   const existingPages = pagesRepo
     .getAllPages(subjectId)
-    .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary }));
+    .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary, tags: p.tags }));
 
   const languageDirective = renderLanguageDirective(getWikiLanguage());
 
@@ -234,14 +242,17 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     sources?: Array<{ sourceId: string; filename: string }>;
   };
 
-  // finalize：无-tools 的 ingest-indexer（结构化输出，不可能进工具循环）产出 index.md / log.md，
+  // finalize：确定性渲染 index.md / log.md（T2.1，不再走 LLM），
   // 然后 commitPending 把 ctx.pending（全部内容页）∪ index/log 一次性原子提交。
   // 旧的 tool-using reviewer 阶段（在 packyapi openai-compatible 上工具死循环）已删除。
   const result = await finalizeIngest(ctx, {
     // 索引须覆盖全 subject：现有页 ∪ 本次 plan 页（按 slug 去重，plan 覆盖；排除 index/log meta 页）。
-    pages: mergePagesForIndex(existingPages, carry.plan?.pages ?? []),
+    // tags 优先取本次实际写入内容的 frontmatter（writer/enricher/verifier 产物），
+    // 未触碰的页沿用 DB 中的既有 tags。
+    pages: mergePagesForIndex(existingPages, carry.plan?.pages ?? [], pendingPageTags(ctx)),
     sources: carry.sources ?? [{ sourceId, filename }],
-    languageDirective,
+    subjectName: subject.name,
+    wikiLanguage: getWikiLanguage(),
   });
 
   // 成功（已 commit）→ 清除检查点；失败时不清，留给下次重试
@@ -271,21 +282,45 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   return result as unknown as Record<string, unknown>;
 });
 
-type IndexPage = { slug: string; title: string; summary: string };
+type IndexPage = { slug: string; title: string; summary: string; tags: string[] };
 
-/** 合并现有页与本次 plan 页为索引页清单：按 slug 去重（plan 覆盖现有），排除 index/log meta 页。 */
+/** 合并现有页与本次 plan 页为索引页清单：按 slug 去重（plan 覆盖现有），排除 index/log meta 页。
+ *  tags 优先取 `pendingTags`（本次实际写入内容的 frontmatter），未命中则沿用现有页的 tags，
+ *  仍未命中（本次新建但未在 pendingTags 中，理论不应发生）则为 []。 */
 function mergePagesForIndex(
-  existing: Array<{ slug: string; title: string; summary: string | null }>,
+  existing: Array<{ slug: string; title: string; summary: string | null; tags?: string[] }>,
   planPages: Array<{ slug: string; title: string; summary?: string }>,
+  pendingTags: Map<string, string[]>,
 ): IndexPage[] {
   const bySlug = new Map<string, IndexPage>();
-  for (const p of existing) bySlug.set(p.slug, { slug: p.slug, title: p.title, summary: p.summary ?? '' });
-  for (const p of planPages) bySlug.set(p.slug, { slug: p.slug, title: p.title, summary: p.summary ?? '' });
+  for (const p of existing) {
+    bySlug.set(p.slug, { slug: p.slug, title: p.title, summary: p.summary ?? '', tags: pendingTags.get(p.slug) ?? p.tags ?? [] });
+  }
+  for (const p of planPages) {
+    bySlug.set(p.slug, { slug: p.slug, title: p.title, summary: p.summary ?? '', tags: pendingTags.get(p.slug) ?? [] });
+  }
   return [...bySlug.values()].filter((p) => p.slug !== 'index' && p.slug !== 'log');
 }
 
 /**
- * 收口阶段：跑 ingest-indexer 重建 index.md / log.md（基于现有版本增量改写），
+ * 从本次运行暂存的内容页（ctx.pending，writer/enricher/verifier 产物）里解析出
+ * 每页最终的 tags（frontmatter），供索引渲染使用——比 planner 输出的 plan.pages 更准确
+ * （plan 阶段页面正文尚未写出，不含 LLM 最终选定的 tags）。
+ */
+function pendingPageTags(ctx: AgentContext): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  for (const entry of ctx.pending.entries) {
+    if (entry.action === 'delete') continue;
+    const parts = parseWikiPath(entry.path);
+    if (!parts) continue;
+    const { data } = parseFrontmatter(entry.content ?? '');
+    map.set(parts.slug, Array.isArray(data.tags) ? data.tags : []);
+  }
+  return map;
+}
+
+/**
+ * 收口阶段：确定性渲染 index.md / log.md（T2.1：不再走 LLM，见 src/server/wiki/meta-pages.ts），
  * 再用 commitPending 把内容页（ctx.pending）与 index/log 一并原子提交。
  */
 async function finalizeIngest(
@@ -293,38 +328,27 @@ async function finalizeIngest(
   args: {
     pages: IndexPage[];
     sources: Array<{ sourceId: string; filename: string }>;
-    languageDirective: string;
+    subjectName: string;
+    wikiLanguage: string;
   },
 ): Promise<IngestResult> {
-  const { skillRegistry } = getRuntimeRegistries();
-  const indexerSkill = skillRegistry.get('ingest-indexer');
-  if (!indexerSkill) throw new Error('Skill not loaded: ingest-indexer');
-
-  // 读现有 index/log 全文（含 overlay 暂存），供 indexer 增量改写；不存在则为 null（首建）。
+  // 读现有 index/log 全文（含 overlay 暂存），供 log.md 增量续写；不存在则为 null（首建）。
   const existingIndex = (await ctx.overlay.readPage(ctx.subject.slug, 'index'))?.markdown ?? null;
   const existingLog = (await ctx.overlay.readPage(ctx.subject.slug, 'log'))?.markdown ?? null;
 
-  const run = await runSingle({
-    skill: indexerSkill,
-    ctx,
-    input: {
-      subjectSlug: ctx.subject.slug,
-      pages: args.pages,
-      existingIndex,
-      existingLog,
-      sources: args.sources,
-      languageDirective: args.languageDirective,
-    },
-  });
+  const language = resolveTemplateLang(args.wikiLanguage);
+  const renderOpts = { subjectSlug: ctx.subject.slug, subjectName: args.subjectName, language };
 
-  const out = run.output as { indexMd?: string; logMd?: string } | undefined;
-  if (typeof out?.indexMd !== 'string' || typeof out?.logMd !== 'string') {
-    throw new Error('ingest-indexer produced no indexMd/logMd');
-  }
+  const indexMd = renderIndexPage(args.pages, renderOpts);
+
+  // 本次实际写入的内容页数（ctx.pending，不含 index/log）——用于 log 行的 "N page(s)"。
+  const touchedPageCount = ctx.pending.entries.filter((e) => e.action !== 'delete').length;
+  const newLogEntry = buildIngestLogEntry(args.sources, touchedPageCount);
+  const logMd = renderLogPage([newLogEntry, ...parseLogEntries(existingLog)], renderOpts);
 
   const metaEntries: ChangesetEntry[] = [
-    { action: existingIndex ? 'update' : 'create', path: buildWikiPath(ctx.subject.slug, 'index'), content: out.indexMd },
-    { action: existingLog ? 'update' : 'create', path: buildWikiPath(ctx.subject.slug, 'log'), content: out.logMd },
+    { action: existingIndex ? 'update' : 'create', path: buildWikiPath(ctx.subject.slug, 'index'), content: indexMd },
+    { action: existingLog ? 'update' : 'create', path: buildWikiPath(ctx.subject.slug, 'log'), content: logMd },
   ];
 
   // ⑨：把核查累积的网页引用源导入为 source（按需抓正文，extract 失败回落 snippet），

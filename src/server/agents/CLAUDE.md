@@ -7,6 +7,8 @@
 为长任务提供**多 agent 流水线执行环境**。核心动机：ingest 任务的四阶段内容工作流（规划 → 生成 → 增益 → 核查）在单次 LLM 调用中难以保证质量与可控性，需要独立 agent 角色分工、互相交接上下文、并受统一预算约束。
 
 > **2026-06-21 重构**：原第五阶段 tool-using `ingest-reviewer`（`generateText` + `commit_changeset` 工具循环）在 packyapi 的 openai-compatible 转译下工具死循环（反复读 index/log 却不消费、永不 commit → 撞 maxSteps），已删除。索引/日志生成下沉为**无 tools 的 `ingest-indexer` 结构化输出**，**commit 上移回 service 层**（`ingest-service.ts::finalizeIngest` → `commitPending`）。详见根 `CLAUDE.md` Changelog 2026-06-21。
+>
+> **2026-07-06（T2.1）重构**：`ingest-indexer` skill 本身也已移除——index/log 改为 `wiki/meta-pages.ts` 纯函数确定性渲染（不再有任何 LLM 调用）。动机：原方案每次 ingest 都要把**全 subject 页清单**塞进 indexer 的 prompt，页数上几百后单调膨胀直至超上下文窗口，且每次都要重复付一遍 token；目录/日志本质是可从数据库+本次运行信息确定性派生的数据。详见根 `CLAUDE.md` Changelog 2026-07-06。
 
 当前启用范围：**仅 `ingest` 任务**。其余任务（`query` / `lint`）仍走 `services/` 内的直接 LLM 调用。
 
@@ -55,9 +57,11 @@ ingest-service.ts
   ────────────────────────────────────────────────────
   ingest-service.ts :: finalizeIngest（service 层收口）
         │
-        ├── runSingle skill 'ingest-indexer'  (无 tools, generateObject)
-        │     └── 输入: 全 subject 页清单(existing ∪ plan, 排除 meta) + 现有 index/log 全文
-        │         输出: { indexMd, logMd }（不进页正文、不可能进工具循环）
+        ├── wiki/meta-pages.ts：确定性渲染（T2.1，不再走 LLM）
+        │     └── renderIndexPage(pages, opts) / renderLogPage(entries, opts)
+        │         输入: 全 subject 页清单(existing ∪ plan, 排除 meta，tags 优先取
+        │               ctx.pending 内本次实际写入内容的 frontmatter) + 现有 log 解析出的历史条目
+        │         输出: { indexMd, logMd }（不进页正文、无 LLM 调用、无工具循环）
         │
         └── commitPending(ctx, [index.md, log.md])
                     commit = ctx.pending ∪ [index, log]（按 path 去重）
@@ -71,10 +75,10 @@ ingest-service.ts
 
 **执行路径分支**（`compile.ts` + `agent-loop.ts`）：
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
-- **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier / indexer 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。
+- **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
 - **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
 
-**暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。indexer 只产出 `index.md` / `log.md`（meta 页），所有内容页随 `pending` 自动提交——索引/日志 LLM 调用不接触页正文，从根本上杜绝巨量工具参数与工具循环。
+**暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。`index.md` / `log.md`（meta 页）由 `wiki/meta-pages.ts` 纯函数渲染，所有内容页随 `pending` 自动提交——T2.1 起索引/日志根本不再有 LLM 调用（此前是无 tools 结构化输出，不接触页正文；现在连该调用也去掉了），从根本上杜绝巨量提示词随页数增长与工具循环风险。
 
 **跨阶段注入**：fanout step 可携带 `injectPriorPageAs`，orchestrator 将上一阶段对应 path 的 `content` 注入到当前阶段的输入，实现 writer → enricher → verifier 逐层内容传递。
 
@@ -296,6 +300,7 @@ src/server/agents/
 | 2026-07-06 | T1.5 token 预算预扣制：`BudgetTracker` 新增 `reserve(estimated)`/`settle(handle, actual)`，维持不变式 `tokensUsed+reserved<=maxTokensPerJob`（`assertWithin` 一并计入 reserved），修掉并发 fanout 击穿 `maxTokensPerJob` 的问题（原先所有并发实例都在任何一页记账前通过 assertWithin 闸门）；`orchestrator.ts` 的 fanout/verify/supplement 分支在派发每一项前 `reserve`、`finally` 里 `settle`（跳过检查点命中项）；单项预扣量取 `ctx.estimateFanoutReserve?.(itemCount)`（ingest 复用 `ingest-prep.ts::estimatePerPageTokens`，与 `reduceCostForResume` 共用 `FANOUT_SHARE` 常量），未注入时回退均分估算 |
 | 2026-07-06 | T1.6 WriterConflict 与检查点顺序修复：`orchestrator.ts` fanout/verify/supplement 分支用请求级 `claimedPaths`（path→slug）表把同 path 冲突检测提前到 `checkpoint.put` 之前——写入前撞见已认领 path 时不写自己且撤销先认领者已落盘条目；resume 读缓存命中同 path 冲突时丢弃后到者缓存条目（`emit('ingest:warn', ...)`）重新生成而非原样复现冲突。`IngestCheckpoint` 新增 `deleteStagePage(kind, slug)`（`checkpoint.ts` 内存+DB 双删，`checkpoints-repo.deleteCheckpoint` 新增）；`WriterConflictError` 抛出时机/分类不变，只消灭死锁重试 |
 | 2026-07-06 | T1.4 ingest merge-update 接入统一保真护栏：新增 `runtime/merge-update-fidelity.ts::reconcileMergeUpdateFidelity`，`orchestrator.ts` writer fanout 分支在 `injectExistingPageForUpdate` 命中且注入了 `existingPageContent` 时接入——writer 产物违规（相对现有正文丢链接/丢标题/塌缩超 15%，`wiki/rewrite-fidelity.ts` profile `merge-update`）→ 把 violations 拼进指令重写一次 → 仍违规 → 保守回落：保留现有正文 + 文末追加整段重写草稿（`---` 分隔，确定性拼接、零 token）+ emit `ingest:warn`；create 语义（无 existingPageContent）不受影响 |
+| 2026-07-06 | T2.1 index/log 去 LLM 化：移除 `ingest-indexer` skill（`examples/skills/ingest-indexer.md` 已删）+ `MIN_SKILL_VERSIONS` 去掉该项；`finalizeIngest` 改调 `wiki/meta-pages.ts` 纯函数 `renderIndexPage`/`renderLogPage` 确定性渲染。原因：原方案每次 ingest 都要把全 subject 页清单塞进 indexer prompt，页数上几百后单调膨胀直至超上下文窗口，且目录/日志本质是数据库可确定性派生的数据。finalize 阶段现在零 LLM 调用 |
 
 ---
 
