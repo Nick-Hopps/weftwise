@@ -117,11 +117,12 @@
 
 - **依赖**：`better-sqlite3@11`、`drizzle-orm@0.38`、`drizzle-kit@0.29`（生成迁移用）。
 - **PRAGMA**：`journal_mode=WAL`、`foreign_keys=ON`、`busy_timeout=5000`。
-- **FTS5**：`pages_fts(title, summary, body, subject_id UNINDEXED, slug UNINDEXED)` + 同步触发器（`pages_ai / pages_ad / pages_au`，触发器同时复制 subject_id/slug）。
+- **FTS5**：`pages_fts(title, summary, body, subject_id UNINDEXED, slug UNINDEXED)`。**没有** `CREATE TRIGGER`（`pages_ai/pages_ad/pages_au` 这类触发器在代码中不存在）——一致性完全靠**手动维护**：`pages-repo.ts::updateFtsEntry`（写/改）与 `deleteFtsEntry`（删）两个函数，调用点集中在 `wiki/indexer.ts`（`rebuildPageIndex`/单页重索引路径）与 `pages-repo.ts` 自身的删除逻辑。**警示**：任何绕开 `indexTouchedPages`/`updateFtsEntry`/`deleteFtsEntry` 直接写 `pages` 表的代码（例如临时脚本用原生 SQL `UPDATE pages`）都会造成 `pages_fts` 与 `pages` 静默漂移（全文搜索结果与实际内容不一致），且没有触发器兜底纠正；发现漂移时用 `npm run db:rebuild` 全量重建修复。
 - **环境**：`DATABASE_PATH`（默认 `./data/wiki.db`）。
 - 迁移命令：
   - `npm run db:generate` / `npm run db:migrate`：drizzle-kit 生成/应用结构性迁移
   - `npm run db:migrate-subjects`：一次性脚本（`scripts/migrate-introduce-subject.ts`），把 legacy DB / vault 升级为 subject-aware（备份 → backfill → vault git mv）
+  - `npm run db:rebuild`：灾难恢复脚本（`scripts/rebuild-cache.ts`），DB 丢失/损坏/与 vault 不同步时从 vault 全量重建（`rebuild.ts::rebuildDatabaseFromVault`：清空 pages/pages_fts/wiki_links/page_aliases/sources/page_sources → 按 vault 文件重新索引 → 从 `.llm-wiki/sources/<subject>/*.json` 侧车恢复 source 记录与 page_sources 关联）；运行前会先抢 vault 写锁，抢不到（worker 仍在跑）会报错退出，提示先停 worker
   - 目前实际建表 + 自迁移走 `client.ts::ensureTables`
 
 ## 数据模型
@@ -138,7 +139,7 @@
 | `page_sources` | `(subject_id, page_slug, source_id)` | 多对多溯源 |
 | `jobs` | `id` | `subject_id` 可空（全局型 lint / reset）；ingest/save-to-wiki 必填 |
 | `job_events` | `id` | 顺序由 `created_at` 决定；SSE 用 `Last-Event-Id` 续播 |
-| `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back` |
+| `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back / reverted`；🆕 GC：`pruneOldOperations` 每 subject 只保留最近 500 条终态行（`pending` 永不删），挂在 worker 低频 sweep（无时间戳列，退化为单条件数量保留，见 operations-repo.ts 注释） |
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
@@ -158,13 +159,14 @@
 
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
-- repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations / conversations / embeddings / maturity / checkpoints / settings。
+- repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations（含 `pruneOldOperations` 边界：未超上限不删/超出只删多出的最旧行/`pending` 永不删/按 subject 隔离）/ conversations / embeddings / maturity / checkpoints / settings。
 - `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描）。
+- `rebuild.test.ts`：`rebuildDatabaseFromVault` 核心逻辑（wipe + reindex + 侧车恢复统计）；`scripts/rebuild-cache.ts` 入口脚本本身（CLI 输出 + 锁获取）未覆盖，逻辑极薄，说明即可。
 
 仍待补充：
 
 - `jobs-repo.claimNextJob`：并发情况下只能有一个 worker 拿到（用 `pragma busy_timeout`）。
-- FTS 触发器：插入/更新/删除 `pages` 后 `pages_fts` 一致性。
+- FTS 一致性：`pages` 表手动维护路径（`updateFtsEntry`/`deleteFtsEntry`）的覆盖率——**不是**触发器（触发器不存在，见上文 FTS5 一节）。
 
 ## 常见问题 (FAQ)
 

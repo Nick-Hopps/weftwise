@@ -2,6 +2,7 @@ import * as queue from './queue';
 import * as events from './events';
 import type { Job } from '@/lib/contracts';
 import { runMaintenanceSweep } from '../services/maintenance-scheduler';
+import { pruneOldOperations } from '../db/repos/operations-repo';
 import {
   getMaintenanceEnabled,
   getMaintenanceSweepIntervalHours,
@@ -27,6 +28,7 @@ const RETRY_DELAY_MS = 5_000;
 const HEARTBEAT_INTERVAL_MS = 30_000; // 30 seconds
 const MAINTENANCE_TICK_MS = 60_000; // 每分钟检查一次节律闸门（实际扫描受 intervalHours 控制）
 const JOB_EVENT_RETENTION_MS = 7 * 24 * 60 * 60_000; // job_events 保留 7 天
+const OPERATIONS_KEEP_PER_SUBJECT = 500; // operations 每 subject 保留最近 N 条终态行
 
 /**
  * job_events 保留清扫：删除超出保留窗口的事件，止住该表无界增长。
@@ -36,6 +38,16 @@ function pruneOldJobEvents(): void {
   const cutoff = new Date(Date.now() - JOB_EVENT_RETENTION_MS).toISOString();
   const removed = queue.pruneEvents(cutoff);
   if (removed > 0) console.log(`[maintenance] pruned ${removed} expired job_events`);
+}
+
+/**
+ * operations 表保留清扫：每 subject 只保留最近 500 条终态（非 pending）行，止住
+ * Saga 变更集持久化表随写入无限增长。独立于成熟度维护开关——基础卫生操作必须始终执行。
+ * 被清理的 operation 对应的 /history 条目会随之消失（vault git 提交本身不受影响）。
+ */
+function pruneOldOperationsTick(): void {
+  const removed = pruneOldOperations(OPERATIONS_KEEP_PER_SUBJECT);
+  if (removed > 0) console.log(`[maintenance] pruned ${removed} expired operations`);
 }
 
 /** 维护节律闸门：从未扫描或距上次 ≥ intervalHours 则应扫。 */
@@ -215,11 +227,16 @@ async function runJob(job: Job): Promise<void> {
 }
 
 export function startWorker(pollIntervalMs = 2000): () => void {
-  // 启动即清一次积压（存量库可能已累积大量旧事件）。
+  // 启动即清一次积压（存量库可能已累积大量旧事件/操作记录）。
   try {
     pruneOldJobEvents();
   } catch (err) {
     console.error('[maintenance] job_events prune failed', err);
+  }
+  try {
+    pruneOldOperationsTick();
+  } catch (err) {
+    console.error('[maintenance] operations prune failed', err);
   }
 
   const intervalId = setInterval(() => {
@@ -243,6 +260,11 @@ export function startWorker(pollIntervalMs = 2000): () => void {
       pruneOldJobEvents();
     } catch (err) {
       console.error('[maintenance] job_events prune failed', err);
+    }
+    try {
+      pruneOldOperationsTick();
+    } catch (err) {
+      console.error('[maintenance] operations prune failed', err);
     }
     try {
       maintenanceTick();
