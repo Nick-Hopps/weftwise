@@ -91,6 +91,16 @@ export async function commitVaultChanges(
 }
 
 /**
+ * Return the commit message of the current HEAD commit.
+ * Returns an empty string when the vault has no commits yet.
+ */
+export async function getHeadCommitMessage(): Promise<string> {
+  const git = getVaultGit();
+  const log = await git.log({ maxCount: 1 }).catch(() => ({ latest: null }));
+  return log.latest?.message ?? '';
+}
+
+/**
  * Hard-reset the vault to a specific commit SHA.
  * Used for rollback operations.
  */
