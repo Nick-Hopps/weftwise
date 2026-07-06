@@ -3,8 +3,8 @@ import { isEmbeddingConfigured, generateEmbeddings } from '@/server/llm/provider
 import { semanticSearch } from './semantic-search';
 import { rrfMerge } from './vector-math';
 
-const RRF_K = 60;
-const VEC_K = 10;
+export const RRF_K = 60;
+export const VEC_K = 10;
 
 /** FTS + 向量两路 RRF 合并的排名 slug 列表；未配置/嵌入失败 → 纯 FTS top-N。 */
 export async function hybridRankSlugs(
