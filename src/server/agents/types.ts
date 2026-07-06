@@ -135,6 +135,18 @@ export interface AgentContext {
   checkpoint?: IngestCheckpoint;
   /** ⑨ 核查阶段累积的网页引用源；仅 ingest 注入（Map<url, CitedSource>）。 */
   citedSources?: Map<string, CitedSource>;
+  /**
+   * T1.5：fanout 每项启动前的 token 预扣估算函数（入参=本次 fanout 的项数，出参=单项预扣量）。
+   * ingest 注入时复用 `ingest-prep.ts::estimatePerPageTokens`（按预检总估算折算）；
+   * 未注入（如 re-enrich 等单页/小规模场景）时 orchestrator 回退为
+   * `maxTokensPerJob / itemCount` 的均分估算，不新造第二套估算体系。
+   */
+  estimateFanoutReserve?: (itemCount: number) => number;
+}
+
+/** reserve() 返回的预留句柄；settle() 用它退回对应额度。 */
+export interface BudgetReservation {
+  readonly estimated: number;
 }
 
 // Forward-declared interfaces; concrete classes live in their own files.
@@ -142,6 +154,14 @@ export interface BudgetTracker {
   chargeTokens(n: number): void;
   assertWithin(): void;
   readonly tokensUsed: number;
+  /**
+   * 预扣 `estimated` token 额度（T1.5：fanout 并发派发前调用，避免所有并发实例
+   * 在任何一页记账前就都通过 assertWithin 闸门）。额度不足时等待其他预留 settle
+   * 释放空间；若排队后即便所有在飞预留都结算完仍不够，拒绝并抛 BudgetExceededError。
+   */
+  reserve(estimated: number): Promise<BudgetReservation>;
+  /** 结算一笔预留：释放其占用的额度，唤醒排队等待者。actual 由调用方自行记账（见 budget.ts 顶部注释）。 */
+  settle(handle: BudgetReservation, actual: number): void;
 }
 
 /** 单 agent 实例内的 step 计数器（防单实例失控循环；job 级总量防线是 token）。 */

@@ -26,6 +26,7 @@ import {
   isInlinePath,
   estimateIngestCost,
   reduceCostForResume,
+  estimatePerPageTokens,
 } from './ingest-prep';
 import { getRuntimeRegistries } from '../worker-runtime';
 import { enqueueEmbedIndex } from './embedding-service';
@@ -182,6 +183,8 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     budgetSnapshot,
     checkpoint,
     citedSources: new Map(),
+    // T1.5：fanout 逐页预扣按同一份预检估算折算，与 estimatedCost/reduceCostForResume 同源。
+    estimateFanoutReserve: (itemCount) => estimatePerPageTokens(estimatedCost, itemCount),
   };
 
   // ⑨ 续传补源：从 checkpoint rehydrate 已核查页累积的网页引用源。新 run 为空 no-op；

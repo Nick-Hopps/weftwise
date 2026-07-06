@@ -27,6 +27,11 @@ const PIPELINE_RESERVE_TOKENS = 60_000;
  * inline 路径直接 ×5，大路径在 MAP_REDUCE_TOKEN_FACTOR 之上再叠加内容阶段。
  */
 const CONTENT_STAGE_FACTOR = 5;
+/**
+ * fanout（writer/enricher/verifier 等逐页阶段）占总估算的份额；与 reduceCostForResume
+ * 折减、estimatePerPageTokens 预扣共用同一常量，避免两套估算体系互相漂移。
+ */
+const FANOUT_SHARE = 0.6;
 
 export interface PreparedSourceInput {
   sourceId: string;
@@ -123,7 +128,16 @@ function firstLineOf(text: string): string {
  */
 export function reduceCostForResume(fullEstimate: number, progress: CheckpointProgress): number {
   if (!progress.plan || !progress.totalPages || progress.totalPages <= 0) return fullEstimate;
-  const FANOUT_SHARE = 0.6;
   const doneFraction = Math.min(1, progress.writerPages / progress.totalPages);
   return Math.round(fullEstimate * (1 - FANOUT_SHARE * doneFraction));
+}
+
+/**
+ * T1.5：单页 token 预扣估算。fanout（writer/enricher/verifier）总成本按
+ * `fullEstimate * FANOUT_SHARE` 折算，再摊到每页——与 reduceCostForResume 用
+ * 同一份额常量，不新造第二套估算体系。pageCount<=0 时退化为整份估算（保守）。
+ */
+export function estimatePerPageTokens(fullEstimate: number, pageCount: number): number {
+  if (pageCount <= 0) return fullEstimate;
+  return Math.max(1, Math.round((fullEstimate * FANOUT_SHARE) / pageCount));
 }

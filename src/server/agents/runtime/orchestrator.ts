@@ -120,28 +120,41 @@ export async function runPipeline(opts: {
       }
       const baseOverlay = opts.ctx.overlay.snapshot();
       const limit = opts.ctx.budgetSnapshot.maxParallelSubAgents;
+      // T1.5：并发 fanout 的每一项都要在启动前预扣 token 额度，否则所有并发实例会在任何一页
+      // 记账前就都通过 assertWithin 闸门，并行度直接击穿 maxTokensPerJob。估算优先复用调用方
+      // （ingest-service）注入的 ingest-prep 估算；未注入时按 maxTokensPerJob 均分估算，
+      // 保证 re-enrich 等非 ingest 场景也不会跳过预扣。
+      const perItemReserve = opts.ctx.estimateFanoutReserve
+        ? opts.ctx.estimateFanoutReserve(items.length)
+        : Math.max(1, Math.ceil(opts.ctx.budgetSnapshot.maxTokensPerJob / Math.max(1, items.length)));
       const results = await runWithSemaphore(items, limit, async (item) => {
         const slug = isPlainObject(item) && typeof item.slug === 'string' ? item.slug : undefined;
-        // 断点续传：命中已写页则跳过 LLM（fanout 是书本级最贵步骤）
+        // 断点续传：命中已写页则跳过 LLM（fanout 是书本级最贵步骤）——不产生调用，不预扣。
         if (step.checkpointAs && slug) {
           const cached = readStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug);
           if (cached) {
             return { runId: 'cached-page', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
           }
         }
-        const childCtx: AgentContext = {
-          ...opts.ctx,
-          overlay: baseOverlay.snapshot(),
-          parentRunId: opts.ctx.rootRunId,
-        };
-        const input = await buildFanoutInput(carry, item, opts.ctx, step);
+        const reservation = await opts.ctx.budget.reserve(perItemReserve);
         let r: AgentRunResult;
-        if (step.kind === 'verify') {
-          r = await runPageVerification({ resolveSkill: opts.resolveSkill, ctx: childCtx, input });
-        } else if (step.kind === 'supplement') {
-          r = await runPageSupplement({ skill: skill!, ctx: childCtx, input });
-        } else {
-          r = await runAgentLoop({ skill: skill!, ctx: childCtx, input });
+        try {
+          const childCtx: AgentContext = {
+            ...opts.ctx,
+            overlay: baseOverlay.snapshot(),
+            parentRunId: opts.ctx.rootRunId,
+          };
+          const input = await buildFanoutInput(carry, item, opts.ctx, step);
+          if (step.kind === 'verify') {
+            r = await runPageVerification({ resolveSkill: opts.resolveSkill, ctx: childCtx, input });
+          } else if (step.kind === 'supplement') {
+            r = await runPageSupplement({ skill: skill!, ctx: childCtx, input });
+          } else {
+            r = await runAgentLoop({ skill: skill!, ctx: childCtx, input });
+          }
+        } finally {
+          // 成功或失败都必须结算释放预留——否则失败页会永久占着额度饿死排队中的其他页。
+          opts.ctx.budget.settle(reservation, 0);
         }
         // 路径强制规范：fanout over plan.pages 时 orchestrator 已知 slug+subjectSlug，
         // 不信任模型自填的 path——实测 verifier 等会吐裸 slug（如 "quicksort" 而非
