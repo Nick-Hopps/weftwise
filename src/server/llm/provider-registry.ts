@@ -6,6 +6,32 @@ import { getLLMConfig } from './config-loader';
 import { getEmbeddingModel, getLanguageModel } from './provider-factory';
 import { resolveTask } from './task-router';
 import { LLMConfigError } from './errors';
+import { AgentCancelled } from '../agents/runtime/agent-loop';
+
+/** shouldCancel 轮询间隔（ms）——固定 2s，兼顾及时性与开销。 */
+const CANCEL_POLL_INTERVAL_MS = 2000;
+
+/**
+ * 若传入 shouldCancel，则以固定间隔轮询该函数；一旦返回 true 就 abort 传入的
+ * controller，供调用方据 aborted 标记决定是否需要抛 AgentCancelled。
+ * 未传 shouldCancel 时不创建定时器，行为与改动前完全一致。
+ * 返回的 cleanup 必须在所有退出路径（正常完成/异常/取消）调用，定时器已 unref。
+ */
+function startCancelPolling(
+  shouldCancel: (() => boolean) | undefined,
+  controller: AbortController,
+): { cleanup: () => void; cancelledRef: { current: boolean } } {
+  const cancelledRef = { current: false };
+  if (!shouldCancel) return { cleanup: () => {}, cancelledRef };
+  const timer = setInterval(() => {
+    if (shouldCancel()) {
+      cancelledRef.current = true;
+      controller.abort();
+    }
+  }, CANCEL_POLL_INTERVAL_MS);
+  timer.unref?.();
+  return { cleanup: () => clearInterval(timer), cancelledRef };
+}
 
 export function resolveModel(route: ResolvedTaskRoute): LanguageModel {
   return getLanguageModel(route);
@@ -144,6 +170,9 @@ export function streamTextWithTools(
     overrides?: LLMRouteOverride;
   },
 ): ReturnType<typeof streamText> {
+  // 注：本函数暂无可取消 job 调用方（query 走 streamTextWithTools 但 query 本身
+  // 不支持取消）；streamText 同步返回 stream、生命周期不像 generateText 那样能用
+  // try/finally 包裹，若未来需要取消支持须额外设计资源释放时机，此处不引入。
   const route = resolveTask(task, opts.overrides ?? {});
   const prefix = `[LLM][Task: ${route.task}][Model: ${route.logLabel}]`;
   console.log(`${prefix} streamText (tools) started, maxSteps=${opts.maxSteps}`);
@@ -192,6 +221,8 @@ export async function generateTextWithTools(
     tools: Record<string, CoreTool>;
     maxSteps: number;
     overrides?: LLMRouteOverride;
+    /** 每 2s 轮询一次；返回 true 时 abort 当前请求并抛出 AgentCancelled。 */
+    shouldCancel?: () => boolean;
   },
 ): Promise<{ text: string }> {
   const route = resolveTask(task, opts.overrides ?? {});
@@ -202,6 +233,7 @@ export async function generateTextWithTools(
     console.error(`${prefix} abort: timeout reached after ${route.timeoutMs}ms`);
     controller.abort();
   }, route.timeoutMs);
+  const { cleanup: stopCancelPolling, cancelledRef } = startCancelPolling(opts.shouldCancel, controller);
 
   try {
     const result = await generateText({
@@ -223,9 +255,14 @@ export async function generateTextWithTools(
       providerOptions: route.providerOptions,
       abortSignal: controller.signal,
     });
+    if (cancelledRef.current) throw new AgentCancelled();
     return { text: result.text };
+  } catch (err) {
+    if (cancelledRef.current) throw new AgentCancelled();
+    throw err;
   } finally {
     clearTimeout(timeoutId);
+    stopCancelPolling();
   }
 }
 

@@ -6,6 +6,7 @@
  *  - 'subject'(manual)：scope = 全 subject 非 meta 页；无 seed 限制、允许 create。
  */
 import { registerHandler } from '../jobs/worker';
+import * as queue from '../jobs/queue';
 import { enqueueEmbedIndex } from './embedding-service';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
@@ -91,6 +92,7 @@ export async function runCurateJob(
     messages: [{ role: 'user', content: buildCurateAgenticUserPrompt(metas, promptCtx, { auto: seedSet !== null }) }],
     tools,
     maxSteps: CURATE_MAX_STEPS,
+    shouldCancel: () => queue.isCancelRequested(job.id),
   });
 
   const totals = guard.totals();

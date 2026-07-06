@@ -110,6 +110,7 @@ export async function runFixJob(
       messages: [{ role: 'user', content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx) }],
       tools,
       maxSteps: FIX_MAX_STEPS,
+      shouldCancel: () => queue.isCancelRequested(job.id),
     });
 
     const totals = guard.totals();
