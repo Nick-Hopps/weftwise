@@ -7,6 +7,11 @@
  * git 工作树会互相破坏（restoreToHead 的 reset --hard 会抹掉对方未提交
  * 的写入）。因此在内存锁之外，再以 vault 同级目录的锁文件（O_EXCL 原子
  * 创建）实现跨进程互斥；锁文件放在 vault 之外，避免被 git 清理波及。
+ *
+ * 心跳续租：持锁期间定时刷新锁文件 mtime，避免长任务（>10 分钟）被误判为
+ * 悬挂而被第二个等待者夺锁——那会导致两进程同时进入 Saga，互相
+ * `reset --hard` 损坏 vault。stale 判定为双条件：mtime 陈旧（超过心跳间隔
+ * 的若干倍）且（持锁进程不存活 或 mtime 超过硬上限）。
  */
 
 import fs from 'node:fs';
@@ -25,8 +30,19 @@ function lockFilePath(): string {
 }
 
 const RETRY_INTERVAL_MS = 100;
-/** 持锁进程存活但超过该时长仍未释放 → 视为异常悬挂，强制夺锁 */
-const STALE_LOCK_MS = 10 * 60 * 1000;
+/** 心跳刷新间隔：持锁期间以此间隔刷新锁文件 mtime */
+const HEARTBEAT_INTERVAL_MS = 30 * 1000;
+/** mtime 距今超过 心跳间隔 × 该倍数 才可能被视为陈旧（先决条件之一） */
+const STALE_HEARTBEAT_MULTIPLIER = 3;
+/** 无论进程是否"存活"（可能是 PID 复用），mtime 超过该硬上限一律视为悬挂 */
+const HARD_STALE_LOCK_MS = 30 * 60 * 1000;
+
+export interface VaultLockTuning {
+  heartbeatIntervalMs?: number;
+  staleHeartbeatMultiplier?: number;
+  hardStaleLockMs?: number;
+  retryIntervalMs?: number;
+}
 
 function isProcessAlive(pid: number): boolean {
   try {
@@ -39,21 +55,40 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /** 判断已存在的锁文件是否为陈旧残留（持有者已死或悬挂超时） */
-function isStaleLock(file: string): boolean {
+function isStaleLock(file: string, tuning: Required<VaultLockTuning>): boolean {
   try {
     const raw = fs.readFileSync(file, 'utf8');
     const pid = Number.parseInt(raw, 10);
-    if (Number.isFinite(pid) && pid > 0 && !isProcessAlive(pid)) return true;
     const age = Date.now() - fs.statSync(file).mtimeMs;
-    return age > STALE_LOCK_MS;
+
+    // 先决条件：mtime 必须陈旧到超过若干个心跳周期，否则说明持锁方仍在
+    // 正常续租（哪怕它的 PID 因某种原因判定不存活也不夺锁——避免瞬时抖动）。
+    const staleByHeartbeat = age > tuning.heartbeatIntervalMs * tuning.staleHeartbeatMultiplier;
+    if (!staleByHeartbeat) return false;
+
+    const deadProcess = Number.isFinite(pid) && pid > 0 && !isProcessAlive(pid);
+    const pastHardCap = age > tuning.hardStaleLockMs;
+    return deadProcess || pastHardCap;
   } catch {
     // 读取竞态（对方刚释放）→ 当作非陈旧，下轮重试自然拿到
     return false;
   }
 }
 
+function touchLockFile(file: string): void {
+  try {
+    const now = new Date();
+    fs.utimesSync(file, now, now);
+  } catch {
+    // 心跳失败（如锁文件被外部删除）不抛进业务流，仅记录告警；
+    // 下一轮持锁尝试自然会重建锁文件。
+    // eslint-disable-next-line no-console
+    console.warn('[vault-mutex] heartbeat failed to touch lock file:', file);
+  }
+}
+
 /** 跨进程文件锁：O_EXCL 原子创建，占用则轮询重试，陈旧锁自动回收 */
-async function acquireFileLock(): Promise<() => void> {
+async function acquireFileLock(tuning: Required<VaultLockTuning>): Promise<() => void> {
   const file = lockFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   for (;;) {
@@ -61,7 +96,12 @@ async function acquireFileLock(): Promise<() => void> {
       const fd = fs.openSync(file, 'wx');
       fs.writeSync(fd, String(process.pid));
       fs.closeSync(fd);
+
+      const heartbeat = setInterval(() => touchLockFile(file), tuning.heartbeatIntervalMs);
+      heartbeat.unref();
+
       return () => {
+        clearInterval(heartbeat);
         try {
           fs.unlinkSync(file);
         } catch {
@@ -70,7 +110,7 @@ async function acquireFileLock(): Promise<() => void> {
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      if (isStaleLock(file)) {
+      if (isStaleLock(file, tuning)) {
         try {
           fs.unlinkSync(file);
         } catch {
@@ -78,7 +118,7 @@ async function acquireFileLock(): Promise<() => void> {
         }
         continue;
       }
-      await new Promise((r) => setTimeout(r, RETRY_INTERVAL_MS));
+      await new Promise((r) => setTimeout(r, tuning.retryIntervalMs));
     }
   }
 }
@@ -87,13 +127,22 @@ async function acquireFileLock(): Promise<() => void> {
  * 获取 vault 写锁，返回释放函数。
  * 先在进程内排队（避免同进程多个等待者对锁文件忙轮询），
  * 队首再去竞争跨进程文件锁。
+ *
+ * `tuning` 仅供测试注入更短的心跳/上限常量，生产调用不传即用默认值。
  */
-export function acquireVaultLock(): Promise<Release> {
+export function acquireVaultLock(tuning: VaultLockTuning = {}): Promise<Release> {
+  const resolvedTuning: Required<VaultLockTuning> = {
+    heartbeatIntervalMs: tuning.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
+    staleHeartbeatMultiplier: tuning.staleHeartbeatMultiplier ?? STALE_HEARTBEAT_MULTIPLIER,
+    hardStaleLockMs: tuning.hardStaleLockMs ?? HARD_STALE_LOCK_MS,
+    retryIntervalMs: tuning.retryIntervalMs ?? RETRY_INTERVAL_MS,
+  };
+
   return new Promise<Release>((resolve, reject) => {
     const tryAcquire = () => {
       if (!locked) {
         locked = true;
-        acquireFileLock().then(
+        acquireFileLock(resolvedTuning).then(
           (releaseFile) => {
             resolve(() => {
               releaseFile();
