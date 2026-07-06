@@ -81,6 +81,8 @@ export interface IngestCheckpoint {
   putVerifierPage(slug: string, entry: ChangesetEntry): void;
   getSupplementPage(slug: string): ChangesetEntry | undefined;
   putSupplementPage(slug: string, entry: ChangesetEntry): void;
+  /** T1.6：撤销某阶段某页已落盘的检查点条目（WriterConflict 场景：冲突页不得残留可续传的坏检查点）。 */
+  deleteStagePage(kind: 'writer-page' | 'enricher-page' | 'verifier-page' | 'supplement-page', slug: string): void;
   /** ⑨ 核查累积的网页引用源（整张去重后列表，单 blob 持久化）；续传时 rehydrate 进 ctx.citedSources。 */
   getCitedSources(): CitedSource[];
   putCitedSources(list: CitedSource[]): void;

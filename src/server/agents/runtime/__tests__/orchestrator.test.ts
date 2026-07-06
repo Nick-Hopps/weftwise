@@ -54,7 +54,7 @@ function fakeCheckpoint(seed?: {
   summaries?: Record<string, string>;
   plan?: unknown;
   pages?: Record<string, ChangesetEntry>;
-}): IngestCheckpoint & { _spies: { putSummary: ReturnType<typeof vi.fn>; putPlan: ReturnType<typeof vi.fn>; putPage: ReturnType<typeof vi.fn> } } {
+}): IngestCheckpoint & { _spies: { putSummary: ReturnType<typeof vi.fn>; putPlan: ReturnType<typeof vi.fn>; putPage: ReturnType<typeof vi.fn>; deleteStagePage: ReturnType<typeof vi.fn> } } {
   const summaries = new Map(Object.entries(seed?.summaries ?? {}));
   const pages = new Map(Object.entries(seed?.pages ?? {}));
   const enricherPages = new Map<string, ChangesetEntry>();
@@ -65,6 +65,12 @@ function fakeCheckpoint(seed?: {
   const putSummary = vi.fn((k: string, s: string) => { summaries.set(k, s); });
   const putPlan = vi.fn((o: unknown) => { plan = o; });
   const putPage = vi.fn((slug: string, e: ChangesetEntry) => { pages.set(slug, e); });
+  const deleteStagePage = vi.fn((kind: 'writer-page' | 'enricher-page' | 'verifier-page' | 'supplement-page', slug: string) => {
+    if (kind === 'writer-page') pages.delete(slug);
+    else if (kind === 'enricher-page') enricherPages.delete(slug);
+    else if (kind === 'verifier-page') verifierPages.delete(slug);
+    else if (kind === 'supplement-page') supplementPages.delete(slug);
+  });
   return {
     getChunkSummary: (k) => summaries.get(k),
     putChunkSummary: putSummary,
@@ -78,12 +84,13 @@ function fakeCheckpoint(seed?: {
     putVerifierPage: (slug, entry) => { verifierPages.set(slug, entry); },
     getSupplementPage: (slug) => supplementPages.get(slug),
     putSupplementPage: (slug, entry) => { supplementPages.set(slug, entry); },
+    deleteStagePage,
     getCitedSources: () => citedSources,
     putCitedSources: (list) => { citedSources = list; },
     hasAny: () => summaries.size > 0 || plan !== undefined || pages.size > 0 || enricherPages.size > 0 || verifierPages.size > 0 || supplementPages.size > 0 || citedSources.length > 0,
     progress: () => ({ plan: plan !== undefined, chunkSummaries: summaries.size, writerPages: pages.size, totalPages: null }),
     clear: vi.fn(),
-    _spies: { putSummary, putPlan, putPage },
+    _spies: { putSummary, putPlan, putPage, deleteStagePage },
   };
 }
 
@@ -467,6 +474,73 @@ describe('orchestrator.runPipeline: fanout', () => {
       ctx: ctxStub(),
       initialInput: {},
     })).rejects.toThrow(WriterConflictError);
+  });
+
+  it('T1.6: 冲突检测提前到 checkpoint.put 之前，冲突页不残留可续传检查点', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'a' }, { slug: 'a' }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'create', path: 'wiki/general/a.md', content: '# first' }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w2', output: { action: 'create', path: 'wiki/general/a.md', content: '# second' }, tokensUsed: 0, stepCount: 1 });
+    const ckpt = fakeCheckpoint();
+    const ctx = ctxStub([], ckpt);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行：first 先完成落盘，second 后到检测冲突
+    await expect(runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner' },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: {},
+    })).rejects.toThrow(WriterConflictError);
+    // 冲突页（同 path 的两个 writer 共用 slug 'a'）不得残留检查点：
+    // second 检测到 path 已被认领时，撤销 first 已落盘的条目、自己也不写入。
+    expect(ckpt.getWriterPage('a')).toBeUndefined();
+    expect(ckpt._spies.deleteStagePage).toHaveBeenCalledWith('writer-page', 'a');
+  });
+});
+
+describe('orchestrator.runPipeline: resume 防御（检查点残留同 path 冲突）', () => {
+  it('resume 命中检查点中残留的同 path 冲突条目时丢弃后到者、emit warn 并重新生成', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({
+        runId: 'p',
+        output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }, { slug: 'b', sourceRefs: [] }] } },
+        tokensUsed: 0, stepCount: 1, cacheHitTokens: 0,
+      })
+      .mockResolvedValueOnce({ runId: 'wb', output: { action: 'create', path: 'wiki/general/b.md', content: '# B regenerated' }, tokensUsed: 0, stepCount: 1, cacheHitTokens: 0 });
+    // 模拟旧版本残留：两条检查点条目（slug 'a' / 'b'）指向同一 path（本不该发生，但需能自愈）。
+    const ckpt = fakeCheckpoint({
+      pages: {
+        a: { action: 'create', path: 'wiki/general/x.md', content: '# A cached' },
+        b: { action: 'create', path: 'wiki/general/x.md', content: '# B cached (stale conflict)' },
+      },
+    });
+    const ctx = ctxStub([], ckpt);
+    ctx.budgetSnapshot.maxParallelSubAgents = 1; // 串行：a 先认领 path，b 后到触发冲突处理
+    const result = await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', checkpointAs: 'writer-page' },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [] },
+    });
+    // a 命中缓存直接用；b 的缓存被判定冲突丢弃后重新走 LLM（只有 1 次额外调用：planner + b）
+    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(ctx.emit).toHaveBeenCalledWith(
+      'ingest:warn',
+      expect.stringContaining('Checkpoint conflict'),
+      expect.objectContaining({ slug: 'b' }),
+    );
+    expect(ckpt._spies.deleteStagePage).toHaveBeenCalledWith('writer-page', 'b');
+    // 重新生成后 b 的 path 与 a 不再冲突，流水线正常完成、两页都在 pending 里
+    const paths = ctx.pending.entries.map((e) => e.path).sort();
+    expect(paths).toEqual(['wiki/general/b.md', 'wiki/general/x.md']);
+    expect((result as { writerOutputs: unknown[] }).writerOutputs).toHaveLength(2);
   });
 });
 

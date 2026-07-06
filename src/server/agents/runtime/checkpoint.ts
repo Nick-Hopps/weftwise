@@ -81,6 +81,14 @@ export function loadCheckpoint(jobId: string): IngestCheckpoint {
       checkpointsRepo.putCheckpoint(jobId, 'supplement-page', slug, entry);
       supplementPages.set(slug, entry);
     },
+    // T1.6：WriterConflict 场景撤销单条检查点条目，DB 与内存索引同步清除。
+    deleteStagePage: (kind, slug) => {
+      checkpointsRepo.deleteCheckpoint(jobId, kind, slug);
+      if (kind === 'writer-page') pages.delete(slug);
+      else if (kind === 'enricher-page') enricherPages.delete(slug);
+      else if (kind === 'verifier-page') verifierPages.delete(slug);
+      else if (kind === 'supplement-page') supplementPages.delete(slug);
+    },
     // ⑨ 续传补源：整张去重后列表存为单 blob（kind='cited-sources'，key 固定空串）。
     getCitedSources: () => citedSources,
     putCitedSources: (list) => {

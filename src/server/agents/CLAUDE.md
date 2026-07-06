@@ -294,6 +294,7 @@ src/server/agents/
 | 2026-06-30 | Fix tool-loop：新增 `tools/builtin/wiki-update.ts`（`wiki.update`，`sideEffect:'update'`，委托 `executePageUpdate`）；`ToolContext` 新增 `updatePage?`（仅 fix runner 注入）；`ToolDef.sideEffect` 扩 `'update'`（Spec 3）|
 | 2026-07-01 | 新增 `supplement` step kind + `runtime/supplement-page.ts::runPageSupplement`（re-enrich 专用，画像探针驱动正文缺口补全，共用 fanout 骨架、4 项确定性护栏 + 重写一次 + 回落原文）；`supplement-guard.ts` 护栏纯函数；checkpoint 加 `supplement-page` kind |
 | 2026-07-06 | T1.5 token 预算预扣制：`BudgetTracker` 新增 `reserve(estimated)`/`settle(handle, actual)`，维持不变式 `tokensUsed+reserved<=maxTokensPerJob`（`assertWithin` 一并计入 reserved），修掉并发 fanout 击穿 `maxTokensPerJob` 的问题（原先所有并发实例都在任何一页记账前通过 assertWithin 闸门）；`orchestrator.ts` 的 fanout/verify/supplement 分支在派发每一项前 `reserve`、`finally` 里 `settle`（跳过检查点命中项）；单项预扣量取 `ctx.estimateFanoutReserve?.(itemCount)`（ingest 复用 `ingest-prep.ts::estimatePerPageTokens`，与 `reduceCostForResume` 共用 `FANOUT_SHARE` 常量），未注入时回退均分估算 |
+| 2026-07-06 | T1.6 WriterConflict 与检查点顺序修复：`orchestrator.ts` fanout/verify/supplement 分支用请求级 `claimedPaths`（path→slug）表把同 path 冲突检测提前到 `checkpoint.put` 之前——写入前撞见已认领 path 时不写自己且撤销先认领者已落盘条目；resume 读缓存命中同 path 冲突时丢弃后到者缓存条目（`emit('ingest:warn', ...)`）重新生成而非原样复现冲突。`IngestCheckpoint` 新增 `deleteStagePage(kind, slug)`（`checkpoint.ts` 内存+DB 双删，`checkpoints-repo.deleteCheckpoint` 新增）；`WriterConflictError` 抛出时机/分类不变，只消灭死锁重试 |
 
 ---
 

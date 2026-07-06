@@ -107,6 +107,34 @@ describe('IngestCheckpoint — enricher/verifier page', () => {
   });
 });
 
+describe('IngestCheckpoint — deleteStagePage (T1.6 WriterConflict 撤销)', () => {
+  it('删除某阶段某页后内存与重新 loadCheckpoint 均读不到', async () => {
+    const { loadCheckpoint } = await import('../checkpoint');
+    const jobId = `ckpt-delete-${Math.random().toString(36).slice(2)}`;
+    const ck = loadCheckpoint(jobId);
+    ck.putWriterPage('a', { action: 'create', path: 'wiki/general/a.md', content: '# A' });
+    expect(ck.getWriterPage('a')).toBeDefined();
+
+    ck.deleteStagePage('writer-page', 'a');
+    expect(ck.getWriterPage('a')).toBeUndefined();
+    expect(loadCheckpoint(jobId).getWriterPage('a')).toBeUndefined();
+  });
+
+  it('只删指定 slug/kind，不影响其他条目', async () => {
+    const { loadCheckpoint } = await import('../checkpoint');
+    const jobId = `ckpt-delete-scoped-${Math.random().toString(36).slice(2)}`;
+    const ck = loadCheckpoint(jobId);
+    ck.putWriterPage('a', { action: 'create', path: 'wiki/general/a.md', content: '# A' });
+    ck.putWriterPage('b', { action: 'create', path: 'wiki/general/b.md', content: '# B' });
+    ck.putEnricherPage('a', { action: 'create', path: 'wiki/general/a.md', content: 'enriched' });
+
+    ck.deleteStagePage('writer-page', 'a');
+    expect(ck.getWriterPage('a')).toBeUndefined();
+    expect(ck.getWriterPage('b')).toBeDefined();
+    expect(ck.getEnricherPage('a')).toBeDefined();
+  });
+});
+
 describe('IngestCheckpoint — supplement page', () => {
   it('supplement page 双写并按 slug 读回，clear 后清空', async () => {
     const { loadCheckpoint } = await import('../checkpoint');

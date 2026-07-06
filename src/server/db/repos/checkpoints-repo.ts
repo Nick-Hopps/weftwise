@@ -37,6 +37,12 @@ export function deleteCheckpoints(jobId: string): void {
   sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id = ?`).run(jobId);
 }
 
+/** T1.6：丢弃单条检查点条目（用于 WriterConflict 场景撤销已落盘的冲突页）。 */
+export function deleteCheckpoint(jobId: string, kind: string, key: string): void {
+  const sqlite = getRawDb();
+  sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id = ? AND kind = ? AND key = ?`).run(jobId, kind, key);
+}
+
 export function getProgress(jobId: string): CheckpointProgress | null {
   const sqlite = getRawDb();
   const counts = sqlite
