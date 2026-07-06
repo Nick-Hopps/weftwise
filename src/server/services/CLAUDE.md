@@ -217,7 +217,8 @@ src/server/services/
 ├── page-write.ts        # 🆕 共享写工具内核：validateDeleteTarget（删除守卫单一真实源）+ deletePageInSubject / createPageInSubject（Saga + embed 回填，供 DELETE 路由与 wiki.delete/wiki.create 对话工具复用）
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
 ├── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
-├── maintenance-policy.ts # 🆕 纯函数：递减回报间隔策略（SPACING_LADDER / countCallouts / nextMaturity，P5）
+├── maintenance-policy.ts # 🆕 纯函数：递减回报间隔策略（SPACING_LADDER / countCallouts / nextMaturity，P5；T1.8 起 nextMaturity 质量优先——qualityDelta<=0 时体量信号清零 + staleSource 前置阻断毕业）
+├── page-quality-signal.ts # 🆕 T1.8：re-enrich 单页质量信号取数（IO 层，确定性零 LLM）——countPageDeterministicFindings（单页 broken-link+frontmatter）/ pageHasStaleSources（复用 lint-deterministic 单页判定，不跑全库）
 └── maintenance-scheduler.ts # 🆕 纯函数：sweep 页面选取（runMaintenanceSweep，P5）
 ```
 
@@ -247,6 +248,7 @@ src/server/services/
 | 2026-06-30 | curate follow-up：auto 模式不再解析 `wiki.create` 工具（按 `seedSet===null` 条件化 `resolve`，省模型试探步数；`guard.canCreate` 仍兜底）；`['index','log']` 保护页常量统一为 `wiki/page-identity::META_PAGE_SLUGS` 单一源（`curate-service`/`page-write`/`lint-deterministic`/`reenrich-enqueue` 不再各持副本）|
 | 2026-06-30 | Fix tool-loop（Spec 3）：`fix-service` 阶段2 由逐页 `generateStructuredOutput('fix')` 改为 `generateTextWithTools('fix')` 自驱 `wiki.update`/`wiki.create`；新增 `fix-tools.ts::buildFixToolContext`（读侧同构 curate-tools + 写经 `createFixGuard`+忠实度护栏调 page-ops 内核）；`fix-deterministic` 加 `createFixGuard`、退休关联页提取（`findRelatedPageSlugs`/`mentions`/`MAX_RELATED_PAGES`）；`fix-prompt` 退休逐页 `FixPageSchema` 三件套、新增 agentic prompt；每写一次一 commit |
 | 2026-07-01 | reenrich-service 加画像驱动正文补全 supplement 首阶段（`reenrich-supplement` skill + `runPageSupplement` 护栏 + `buildProfileHint` 探针提示 + `deriveMaturityUpdate` 并入正文增长）；流水线三步（supplement→enricher→verify），仅 re-enrich，ingest 不变 |
+| 2026-07-06 | T1.8 成熟度信号质量化：`nextMaturity` 新增 `qualityDelta`/`staleSource` 输入，质量优先——`qualityDelta<=0` 时体量信号（callout+正文增长折算）清零，纯长肉不再续命，直接走 saturation；`staleSource=true` 时前置阻断毕业（也不快进间隔，留在当前档）。新增 `page-quality-signal.ts`（IO 层，单页确定性 findings 计数 + 单页 stale 判定，均不跑全库）；`lint-deterministic.ts` 抽出可复用的 `checkStaleSourcesForPage`；`reenrich-service.ts::deriveMaturityUpdate` 改纯函数（qualityDelta/staleSource 由调用方在 handler 里用 `page-quality-signal` 算好传入），quality 分量 = 单页确定性 findings「修复前−修复后」+ 本轮 `ctx.citedSources` 新增证据条数（未接入 verify 结构化"修订计数"，因 apply 只回传最终正文不单独暴露修了几处——用引用证据数作确定性代理，零额外 LLM 调用）；`page_maturity` 表结构不动（质量信号现场重算，无迁移）|
 | 2026-07-06 | T1.4 统一保真护栏：`fix-tools.ts`（profile `fix`，floor 0.5→0.8）与 `reshape-service.ts`（profile `reshape`，新增长度 floor 0.8）改调 `wiki/rewrite-fidelity.ts::checkRewriteFidelity`；`fix-deterministic.ts::bodyShrankTooMuch` 退役（收编）；`supplement-guard.ts::checkSupplementFidelity` 收编为薄转发（profile `supplement`），链接规则由「禁止新增」改为「禁止丢失」（preserve）|
 
 ---

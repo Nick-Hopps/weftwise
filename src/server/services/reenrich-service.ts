@@ -33,6 +33,7 @@ import { renderLanguageDirective, renderAugmentationDirective } from '../llm/pro
 import { getRuntimeRegistries } from '../worker-runtime';
 import { enqueueEmbedIndex } from './embedding-service';
 import { countCallouts, nextMaturity, proseGrowthIncrement, type MaturityNext } from './maintenance-policy';
+import { countPageDeterministicFindings, pageHasStaleSources } from './page-quality-signal';
 
 interface ReenrichParams {
   slug: string;
@@ -95,15 +96,22 @@ export function buildProfileHint(profile: {
   );
 }
 
-/** 用「新增 callout 数 + 正文增长折算」合并信号，结合当前成熟度推导下一态。 */
+/**
+ * 用「新增 callout 数 + 正文增长折算」合并体量信号，结合 T1.8 质量信号（qualityDelta/
+ * staleSource，由调用方在 IO 层用 `page-quality-signal.ts` 算好传入）推导下一态。
+ * 本函数保持纯——不做任何 DB/FS 访问。
+ */
 export function deriveMaturityUpdate(opts: {
   draftContent: string;
   finalContent: string;
   current: PageMaturity | null;
   now: Date;
+  qualityDelta: number;
+  staleSource: boolean;
 }): MaturityNext {
   const calloutDelta = Math.max(0, countCallouts(opts.finalContent) - countCallouts(opts.draftContent));
-  // 合并信号：callout 增量 + 正文增长折算（防「多补正文少加 callout」被误判无进展）
+  // 体量信号：callout 增量 + 正文增长折算（防「多补正文少加 callout」被误判无进展）；
+  // 是否计入由 nextMaturity 按 qualityDelta 决定（质量优先，体量不改善时清零）。
   const newIncrement = calloutDelta + proseGrowthIncrement(opts.draftContent, opts.finalContent);
   return nextMaturity(
     {
@@ -111,6 +119,8 @@ export function deriveMaturityUpdate(opts: {
       passes: opts.current?.passes ?? 0,
       intervalDays: opts.current?.intervalDays ?? 1,
       newIncrement,
+      qualityDelta: opts.qualityDelta,
+      staleSource: opts.staleSource,
     },
     opts.now,
   );
@@ -207,15 +217,38 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
   // 流水线把核查后页 upsert 进 ctx.pending；commitPending 提交（无 index/log meta）。
   const result = await commitPending(ctx, []);
 
-  // 维护层：用本遍 callout 增量推进成熟度（draft = 旧正文，final = 提交版正文）。
+  // 维护层：用本遍 callout 增量（体量）+ 质量信号推进成熟度（draft = 旧正文，final = 提交版正文）。
   const path = `wiki/${subject.slug}/${slug}.md`;
   const finalContent = ctx.pending.entries.find((e) => e.path === path)?.content ?? existing.markdown;
   const now = new Date();
+
+  // T1.8 质量信号（全确定性、零额外 LLM 调用）：
+  //   - 确定性分量：单页 broken-link + frontmatter findings，「修复前 − 修复后」= 改善量；
+  //   - verify 分量：本轮 verify 阶段实际写入 ctx.citedSources 的证据条数（有证据修正才计正）。
+  // 拿不到结构化 verify 修订计数（apply 只回传最终正文，不单独暴露"修了几处"），故 verify 分量
+  // 退化为「本轮新增几条被引用来源」这个确定性代理——同样零 LLM 调用，符合验收要求的降级说明。
+  const preFindings = countPageDeterministicFindings({
+    subjectId: subject.id,
+    pageSlug: slug,
+    content: existing.markdown,
+  });
+  const postFindings = countPageDeterministicFindings({
+    subjectId: subject.id,
+    pageSlug: slug,
+    content: finalContent,
+  });
+  const deterministicDelta = preFindings - postFindings;
+  const verifyDelta = ctx.citedSources ? ctx.citedSources.size : 0;
+  const qualityDelta = deterministicDelta + verifyDelta;
+  const staleSource = pageHasStaleSources(subject, slug);
+
   const next = deriveMaturityUpdate({
     draftContent: existing.markdown,
     finalContent,
     current: maturityRepo.get(subject.id, slug),
     now,
+    qualityDelta,
+    staleSource,
   });
   maturityRepo.applyAfterEnrich(subject.id, slug, next, now.toISOString());
   emit('reenrich:maturity', `Maturity → ${next.state}, next in ${next.intervalDays}d`, {

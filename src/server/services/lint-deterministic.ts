@@ -144,42 +144,49 @@ function rawSourcePathsToCheck(subjectSlug: string, filename: string): string[] 
   ];
 }
 
-function checkStaleSources(subject: Subject, allPages: WikiPage[]): LintFinding[] {
+/**
+ * 单页 stale-source 判定（供 T1.8 re-enrich 质量信号复用，避免为一页触发全库扫描）。
+ */
+export function checkStaleSourcesForPage(subject: Subject, page: WikiPage): LintFinding[] {
   const findings: LintFinding[] = [];
+  const sources = sourcesRepo.getSourcesForPage(subject.id, page.slug);
+  for (const source of sources) {
+    const candidates = rawSourcePathsToCheck(subject.slug, source.filename);
+    const found = candidates.find((p) => fs.existsSync(p));
+    if (!found) {
+      findings.push({
+        type: 'stale-source',
+        severity: 'info',
+        pageSlug: page.slug,
+        description: `Source file "${source.filename}" linked to "${page.slug}" (subject: ${subject.slug}) no longer exists on disk.`,
+        suggestedFix: `Re-ingest the source or remove the association from the database.`,
+      });
+      continue;
+    }
 
-  for (const page of allPages) {
-    const sources = sourcesRepo.getSourcesForPage(subject.id, page.slug);
-    for (const source of sources) {
-      const candidates = rawSourcePathsToCheck(subject.slug, source.filename);
-      const found = candidates.find((p) => fs.existsSync(p));
-      if (!found) {
-        findings.push({
-          type: 'stale-source',
-          severity: 'info',
-          pageSlug: page.slug,
-          description: `Source file "${source.filename}" linked to "${page.slug}" (subject: ${subject.slug}) no longer exists on disk.`,
-          suggestedFix: `Re-ingest the source or remove the association from the database.`,
-        });
-        continue;
-      }
+    const diskContent = fs.readFileSync(found);
+    const diskHash = createHash('sha256')
+      .update(diskContent)
+      .digest('hex')
+      .slice(0, 16);
 
-      const diskContent = fs.readFileSync(found);
-      const diskHash = createHash('sha256')
-        .update(diskContent)
-        .digest('hex')
-        .slice(0, 16);
-
-      if (diskHash !== source.contentHash) {
-        findings.push({
-          type: 'stale-source',
-          severity: 'info',
-          pageSlug: page.slug,
-          description: `Source file "${source.filename}" for page "${page.slug}" (subject: ${subject.slug}) has changed on disk (stored hash: ${source.contentHash}, current hash: ${diskHash}).`,
-          suggestedFix: `Re-ingest the source file to update the wiki page content.`,
-        });
-      }
+    if (diskHash !== source.contentHash) {
+      findings.push({
+        type: 'stale-source',
+        severity: 'info',
+        pageSlug: page.slug,
+        description: `Source file "${source.filename}" for page "${page.slug}" (subject: ${subject.slug}) has changed on disk (stored hash: ${source.contentHash}, current hash: ${diskHash}).`,
+        suggestedFix: `Re-ingest the source file to update the wiki page content.`,
+      });
     }
   }
+  return findings;
+}
 
+function checkStaleSources(subject: Subject, allPages: WikiPage[]): LintFinding[] {
+  const findings: LintFinding[] = [];
+  for (const page of allPages) {
+    findings.push(...checkStaleSourcesForPage(subject, page));
+  }
   return findings;
 }
