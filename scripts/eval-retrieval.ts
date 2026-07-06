@@ -47,6 +47,7 @@ async function main(): Promise<void> {
     const pagesRepo = await import('../src/server/db/repos/pages-repo');
     const { semanticSearch } = await import('../src/server/search/semantic-search');
     const { rrfMerge } = await import('../src/server/search/vector-math');
+    const { RRF_K, VEC_K } = await import('../src/server/search/hybrid-retrieval');
     const { isEmbeddingConfigured, generateEmbeddings } = await import(
       '../src/server/llm/provider-registry'
     );
@@ -119,10 +120,10 @@ async function main(): Promise<void> {
 
       if (embeddingAvailable) {
         const [qVec] = await generateEmbeddings([q.query]);
-        const vecSlugs = semanticSearch(subject.id, qVec, 10).map((r) => r.slug);
+        const vecSlugs = semanticSearch(subject.id, qVec, VEC_K).map((r) => r.slug);
         vecResults.push({ ranked: vecSlugs, expected: q.expectedSlugs });
 
-        const hybridSlugs = rrfMerge(ftsSlugs, vecSlugs, 60, 10);
+        const hybridSlugs = rrfMerge(ftsSlugs, vecSlugs, RRF_K, VEC_K);
         hybridResults.push({ ranked: hybridSlugs, expected: q.expectedSlugs });
       } else {
         // 未配置 embedding：混合路径退化为纯 FTS（与 hybrid-retrieval.ts 生产逻辑一致）。
