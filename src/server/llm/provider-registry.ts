@@ -6,7 +6,7 @@ import { getLLMConfig } from './config-loader';
 import { getEmbeddingModel, getLanguageModel } from './provider-factory';
 import { resolveTask } from './task-router';
 import { LLMConfigError } from './errors';
-import { AgentCancelled } from '../agents/runtime/agent-loop';
+import { AgentCancelled } from '../agents/runtime/errors';
 
 /** shouldCancel 轮询间隔（ms）——固定 2s，兼顾及时性与开销。 */
 const CANCEL_POLL_INTERVAL_MS = 2000;
