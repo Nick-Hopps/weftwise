@@ -1,7 +1,7 @@
 import type { Subject } from '@/lib/contracts';
 import { streamTextResponse } from '@/server/llm/provider-registry';
 import { getWikiLanguage } from '@/server/db/repos/settings-repo';
-import { checkLinkSubset } from '@/server/profile/fidelity';
+import { checkRewriteFidelity, FIDELITY_PROFILES } from '@/server/wiki/rewrite-fidelity';
 import type { StylePrefs } from '@/server/profile/style';
 import {
   RESHAPE_PAGE_SYSTEM_PROMPT,
@@ -47,10 +47,10 @@ export async function reshapePageBody(input: {
   const baseUser = buildReshapePageUserPrompt(input.body, input.profile, ctx);
 
   let out = await collect('reshape:page', RESHAPE_PAGE_SYSTEM_PROMPT, baseUser, input.abortSignal);
-  if (!checkLinkSubset(input.body, out).ok) {
-    const retryUser = `${baseUser}\n\n=== CORRECTION ===\nYour previous attempt invented wikilinks not present in the canonical body. Do NOT introduce any new [[link]]. Only use links that already exist.`;
+  if (!checkRewriteFidelity(input.body, out, FIDELITY_PROFILES.reshape).ok) {
+    const retryUser = `${baseUser}\n\n=== CORRECTION ===\nYour previous attempt invented wikilinks not present in the canonical body, or shrank the body too much. Do NOT introduce any new [[link]]; only use links that already exist. Keep the body substantial.`;
     out = await collect('reshape:page', RESHAPE_PAGE_SYSTEM_PROMPT, retryUser, input.abortSignal);
-    if (!checkLinkSubset(input.body, out).ok) {
+    if (!checkRewriteFidelity(input.body, out, FIDELITY_PROFILES.reshape).ok) {
       return { body: input.body, fallback: true, model: null };
     }
   }
@@ -68,7 +68,7 @@ export async function reshapeSection(input: {
   const ctx = ctxFor(input.subject);
   const user = buildReshapeSectionUserPrompt(input.block, input.direction, input.profile, ctx, input.context);
   const out = await collect('reshape:section', RESHAPE_SECTION_SYSTEM_PROMPT, user);
-  if (!checkLinkSubset(input.block, out).ok) {
+  if (!checkRewriteFidelity(input.block, out, FIDELITY_PROFILES.reshape).ok) {
     return { block: input.block, fallback: true };
   }
   return { block: out, fallback: false };

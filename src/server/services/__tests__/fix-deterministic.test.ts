@@ -4,7 +4,6 @@ import {
   fixMissingFrontmatter,
   partitionFindings,
   buildFixWorklist,
-  bodyShrankTooMuch,
   buildSubjectReportLines,
   createFixGuard,
 } from '../fix-deterministic';
@@ -101,24 +100,8 @@ describe('buildFixWorklist', () => {
   });
 });
 
-describe('bodyShrankTooMuch', () => {
-  it('修复后正文不足原文 50% → 返回 true', () => {
-    const original = 'a'.repeat(100);
-    const shrunken = 'a'.repeat(10);
-    expect(bodyShrankTooMuch(original, shrunken)).toBe(true);
-  });
-
-  it('小幅外科式收缩（96/100）→ 返回 false', () => {
-    const original = 'a'.repeat(100);
-    const trimmed = 'a'.repeat(96);
-    expect(bodyShrankTooMuch(original, trimmed)).toBe(false);
-  });
-
-  it('原文为空 → 始终返回 false', () => {
-    expect(bodyShrankTooMuch('', 'anything')).toBe(false);
-    expect(bodyShrankTooMuch('   ', '')).toBe(false);
-  });
-});
+// bodyShrankTooMuch 已退役收编到 wiki/rewrite-fidelity.ts::checkRewriteFidelity（profile 'fix'），
+// 其行为矩阵覆盖在 src/server/wiki/__tests__/rewrite-fidelity.test.ts。
 
 describe('buildSubjectReportLines', () => {
   it('按 pageSlug 分组、按首次出现保序、行格式 type: desc', () => {
