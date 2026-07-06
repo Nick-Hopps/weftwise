@@ -34,6 +34,7 @@ vi.mock('../../../../db/repos/pages-repo', () => ({
 
 vi.mock('../../../../db/repos/sources-repo', () => ({
   linkPageSource: vi.fn(),
+  unlinkPageSource: vi.fn(),
 }));
 
 vi.mock('../../../../sources/source-store', () => ({

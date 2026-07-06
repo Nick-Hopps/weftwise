@@ -325,4 +325,100 @@ describe('applyChangeset', () => {
     });
     expect(applied.status).toBe('applied');
   });
+
+  it('sidecar 写入发生在 git commit 成功之后（commit 前不触碰 sidecar）', async () => {
+    const callOrder: string[] = [];
+    gitMocks.commitVaultChanges.mockImplementationOnce(async () => {
+      callOrder.push('commit');
+      return 'post-sha';
+    });
+    const updateSourcePageLinks = vi.fn(() => {
+      callOrder.push('sidecar');
+    });
+    const cs = makeChangeset([
+      { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },
+    ]);
+    await applyChangeset(cs, {
+      links: [{ sourceId: 'src-1', pageSlugs: ['a'] }],
+      linkPageSource: vi.fn(() => true),
+      updateSourcePageLinks,
+    });
+    expect(callOrder).toEqual(['commit', 'sidecar']);
+  });
+
+  it('索引事务成功后、git commit 前抛错：回滚删除本次新插入的 page_sources 行，sidecar 从未被调用', async () => {
+    gitMocks.commitVaultChanges.mockRejectedValueOnce(new Error('git boom'));
+    const linkPageSource = vi.fn(() => true); // 模拟真正新插入
+    const unlinkPageSource = vi.fn();
+    const updateSourcePageLinks = vi.fn();
+    const cs = makeChangeset([
+      { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },
+    ]);
+
+    await expect(
+      applyChangeset(cs, {
+        links: [{ sourceId: 'src-1', pageSlugs: ['a'] }],
+        linkPageSource,
+        updateSourcePageLinks,
+        unlinkPageSource,
+      })
+    ).rejects.toThrow('git boom');
+
+    expect(linkPageSource).toHaveBeenCalledWith('s1', 'a', 'src-1');
+    // 回滚补偿：本次新插入的一行被删除
+    expect(unlinkPageSource).toHaveBeenCalledWith('s1', 'a', 'src-1');
+    expect(unlinkPageSource).toHaveBeenCalledTimes(1);
+    // sidecar 顺序调整后在 commit 之前从未被调用，也不需要回滚
+    expect(updateSourcePageLinks).not.toHaveBeenCalled();
+  });
+
+  it('linkPageSource 返回 false（本次之前已存在的行）时不计入回滚补偿——不误删预先存在的行', async () => {
+    gitMocks.commitVaultChanges.mockRejectedValueOnce(new Error('git boom'));
+    const linkPageSource = vi.fn(() => false); // 已存在，本次未新插入
+    const unlinkPageSource = vi.fn();
+    const cs = makeChangeset([
+      { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },
+    ]);
+
+    await expect(
+      applyChangeset(cs, {
+        links: [{ sourceId: 'src-1', pageSlugs: ['a'] }],
+        linkPageSource,
+        updateSourcePageLinks: vi.fn(),
+        unlinkPageSource,
+      })
+    ).rejects.toThrow('git boom');
+
+    expect(unlinkPageSource).not.toHaveBeenCalled();
+  });
+});
+
+describe('rollbackChangeset 的 page_sources 补偿', () => {
+  it('按 compensation.insertedSourceLinks 清单逐条删除，未提供 unlinkPageSource 时不报错也不清理', async () => {
+    const cs = makeChangeset(
+      [{ action: 'create', path: 'wiki/general/a.md', content: 'x' }],
+      { preHead: 'pre-sha' }
+    );
+    await expect(rollbackChangeset(cs)).resolves.toBeUndefined();
+    await expect(
+      rollbackChangeset(cs, { insertedSourceLinks: [{ pageSlug: 'a', sourceId: 'src-1' }] })
+    ).resolves.toBeUndefined();
+  });
+
+  it('unlinkPageSource 抛错时被吞掉（best effort）', async () => {
+    const cs = makeChangeset(
+      [{ action: 'create', path: 'wiki/general/a.md', content: 'x' }],
+      { preHead: 'pre-sha' }
+    );
+    const unlinkPageSource = vi.fn(() => {
+      throw new Error('unlink boom');
+    });
+    await expect(
+      rollbackChangeset(cs, {
+        insertedSourceLinks: [{ pageSlug: 'a', sourceId: 'src-1' }],
+        unlinkPageSource,
+      })
+    ).resolves.toBeUndefined();
+    expect(unlinkPageSource).toHaveBeenCalledWith('s1', 'a', 'src-1');
+  });
 });
