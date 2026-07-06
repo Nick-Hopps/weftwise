@@ -152,7 +152,7 @@
   1. `schema.ts` 新增 `sqliteTable(...)`；
   2. `client.ts::ensureTables` 补 `CREATE TABLE IF NOT EXISTS`；
   3. 对应 `repos/` 新建文件封装查询；
-  4. 若涉及全文搜索，补 FTS 虚拟表 + 同步触发器。
+  4. 若涉及全文搜索，补 FTS 虚拟表，并在对应 repo 提供手动维护入口（参照 pages-repo 的 updateFtsEntry/deleteFtsEntry；本项目不使用触发器）。
 - **事务**：用 `getRawDb().transaction(fn)()`（better-sqlite3 原生同步事务）。
 
 ## 测试与质量
