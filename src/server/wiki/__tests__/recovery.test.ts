@@ -143,6 +143,71 @@ describe('recoverPendingOperation', () => {
     expect(readPageInSubject(subject.slug, 'a')).not.toBeNull();
   });
 
+  it('分支1 前滚（并发场景）：标记提交之后又有其他提交，仍前滚且 post_head 指向标记提交本身', async () => {
+    const {
+      getVaultHead,
+      commitVaultChanges,
+      getRawDb,
+      pagesRepo,
+      writeVaultFiles,
+      recoverPendingOperation,
+      subject,
+    } = await setup();
+
+    const db = getRawDb();
+    const preHead = await getVaultHead();
+    const changesetId = randomUUID();
+    const relPath = `wiki/${subject.slug}/d.md`;
+    const entries = [{ action: 'create', path: relPath, content: PAGE_CONTENT }];
+
+    insertPendingOperation(db, changesetId, 'job-4', subject.id, preHead, entries);
+
+    // 本 changeset 的 commit 成功（打了标记）……
+    writeVaultFiles([{ path: relPath, content: PAGE_CONTENT }]);
+    const markedSha = await commitVaultChanges(
+      `[subject:${subject.slug}] Apply changeset ${changesetId} (job: job-4) [cs:${changesetId}]`,
+      [relPath]
+    );
+
+    // ……随后崩溃期间/重启前，另一个并发任务又正常提交了一次（HEAD 前移）。
+    const otherPath = `wiki/${subject.slug}/concurrent.md`;
+    writeVaultFiles([{ path: otherPath, content: PAGE_CONTENT }]);
+    const laterHead = await commitVaultChanges(
+      `[subject:${subject.slug}] Apply changeset ${randomUUID()} (job: job-other) [cs:${randomUUID()}]`,
+      [otherPath]
+    );
+    expect(laterHead).not.toBe(markedSha);
+
+    const outcome = await recoverPendingOperation({
+      id: changesetId,
+      jobId: 'job-4',
+      subjectId: subject.id,
+      subjectSlug: subject.slug,
+      entries: entries as never,
+      preHead,
+      postHead: null,
+      status: 'pending',
+    });
+
+    // 标记不在 HEAD 而在祖先提交，也必须识别为已提交 → 前滚，不能误标 rolled-back。
+    expect(outcome).toBe('rolled-forward');
+
+    const row = db
+      .prepare(`SELECT status, post_head FROM operations WHERE id = ?`)
+      .get(changesetId) as { status: string; post_head: string };
+    expect(row.status).toBe('applied');
+    // post_head 必须指向本 changeset 的标记提交，而非当前 HEAD。
+    expect(row.post_head).toBe(markedSha);
+
+    // HEAD（后续并发提交）不受影响。
+    expect(await getVaultHead()).toBe(laterHead);
+
+    // 索引已幂等重放，且后续提交的页面完好。
+    expect(pagesRepo.getPageBySlug(subject.id, 'd')).not.toBeNull();
+    const { readPageInSubject } = await import('@/server/wiki/wiki-store');
+    expect(readPageInSubject(subject.slug, 'concurrent')).not.toBeNull();
+  });
+
   it('分支2 回滚：HEAD 未打标记且仍等于 preHead → 走常规 rollbackChangeset', async () => {
     const { getVaultHead, getRawDb, pagesRepo, recoverPendingOperation, subject } = await setup();
 

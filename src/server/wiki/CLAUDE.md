@@ -37,7 +37,7 @@ operations.status = 'applied'                   ← 释放 lock
 
 失败任何一步：`rollbackChangeset(changeset)` 会 `restoreToHead(preHead)` 强制回滚 git，并清掉 SQLite 中对应变更，**仅** reindex 本 subject。
 
-**崩溃恢复（roll-forward）**：git commit 与 `operations.status='applied'` 落库之间不是原子的——进程若恰好在两步之间崩溃，operation 会停在 `pending`，但变更其实已经提交成功。commit message 末尾的 `[cs:<changesetId>]` 标记就是给这种情况用的：worker 启动时（`worker-entry.ts`）对每条 pending operation 调用 `recovery.ts::recoverPendingOperation(changeset)`，读 HEAD commit message 三分支判定——① 含本 changeset 标记→**前滚**（补 postHead + `applied` + 幂等 `indexTouchedPages`，不碰 git）；② 不含标记且 HEAD===preHead→常规 `rollbackChangeset`；③ 不含标记且 HEAD!==preHead（之后已有别的提交落在前面）→**不做** `restoreToHead`（会连累后续提交），只标 `rolled-back` 终态并记录告警，交人工核查。
+**崩溃恢复（roll-forward）**：git commit 与 `operations.status='applied'` 落库之间不是原子的——进程若恰好在两步之间崩溃，operation 会停在 `pending`，但变更其实已经提交成功。commit message 末尾的 `[cs:<changesetId>]` 标记就是给这种情况用的：worker 启动时（`worker-entry.ts`）对每条 pending operation 调用 `recovery.ts::recoverPendingOperation(changeset)`，在 `preHead..HEAD` 提交范围内查找标记（`git-service::findCommitWithMarker`；并发调度下本 changeset 的提交可能已被后续提交盖过，不能只看 HEAD）三分支判定——① 范围内找到标记提交→**前滚**（postHead=**该提交**哈希 + `applied` + 幂等 `indexTouchedPages`，不碰 git）；② 没找到且 HEAD===preHead→常规 `rollbackChangeset`；③ 没找到且 HEAD!==preHead（本 commit 未落地但之后已有别的提交）→**不做** `restoreToHead`（会连累后续提交），只标 `rolled-back` 终态并记录告警，交人工核查。
 
 ## 对外接口
 
@@ -150,7 +150,7 @@ src/server/wiki/
 | 2026-06-30 | `curate-plan.ts` 重构：新增 `createCurateGuard({ seedSet, caps })` 工具层硬护栏（caps≤5×4 + seed 强制 + auto 禁 create + 保护页），退休 `applyDecisionCaps`/`restrictToSeed`（原结构化流水线护栏，已由 guard 取代） |
 | 2026-06-30 | `page-identity.ts` 新增 `META_PAGE_SLUGS`（内置系统页 index/log 单一源）；`indexer`/`curate-plan` 及 services 层（`lint-deterministic`/`reenrich-enqueue`/`curate-service`/`page-write`）原本各持的 `['index','log']` 副本（`META_SLUGS`/`GUARD_META`/`ORPHAN_EXCLUDE_SLUGS`/`PROTECTED_SYSTEM_PAGES`）统一引用此常量；`expandScopeWithNeighbors` 形参 `metaSlugs` 收紧为 `ReadonlySet<string>`（curate follow-up B）|
 | 2026-06-30 | `page-ops.ts` 新增 `executePageUpdate(jobId, subject, {slug, body, summary?, tags?})`（update 内核：保留 title/created、替换正文、覆盖 tags/summary、坏链与残留 unresolved-wikilink 一律抛错不落盘）；新增 `page-ops-update` 单测（Spec 3）|
-| 2026-07-06 | Saga 提交点原子性（roll-forward 恢复，T1.1）| `commitVaultChanges` message 追加 `[cs:<changesetId>]` 确定性标记；`git-service.ts` 新增 `getHeadCommitMessage()`；新增 `recovery.ts::recoverPendingOperation(changeset)` 三分支恢复（HEAD 含标记→前滚补 postHead+applied+幂等重索引；不含标记且 HEAD===preHead→常规 `rollbackChangeset`；不含标记且 HEAD!==preHead→**不** `restoreToHead`（避免冲掉后续提交），只标 `rolled-back` 终态+告警）；`worker-entry.ts` 启动扫描 pending operations 改调此函数（原先一律 `rollbackChangeset` 会把已提交成功的变更连同崩溃时序问题一起静默回退丢数据）；`wiki-transaction.ts` 导出 `collectTouchedSlugs` 供恢复模块复用；新增 `recovery.test.ts`（真实临时 vault git 仓库 + 真实临时 SQLite，覆盖三分支）|
+| 2026-07-06 | Saga 提交点原子性（roll-forward 恢复，T1.1）| `commitVaultChanges` message 追加 `[cs:<changesetId>]` 确定性标记；`git-service.ts` 新增 `findCommitWithMarker(marker, sinceSha?)`（在 `sinceSha..HEAD` 范围内查找标记提交——并发调度下本 changeset 的提交可能已被后续提交盖过，不能只看 HEAD）；新增 `recovery.ts::recoverPendingOperation(changeset)` 三分支恢复（范围内找到标记提交→前滚，postHead=该提交哈希+applied+幂等重索引；没找到且 HEAD===preHead→常规 `rollbackChangeset`；没找到且 HEAD!==preHead→**不** `restoreToHead`（避免冲掉后续提交），只标 `rolled-back` 终态+告警）；`worker-entry.ts` 启动扫描 pending operations 改调此函数（原先一律 `rollbackChangeset` 会把已提交成功的变更连同崩溃时序问题一起静默回退丢数据）；`wiki-transaction.ts` 导出 `collectTouchedSlugs` 供恢复模块复用；新增 `recovery.test.ts`（真实临时 vault git 仓库 + 真实临时 SQLite，覆盖三分支 + 并发盖过场景）|
 
 ---
 
