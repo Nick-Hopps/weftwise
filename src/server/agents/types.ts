@@ -144,6 +144,13 @@ export interface AgentContext {
    * `maxTokensPerJob / itemCount` 的均分估算，不新造第二套估算体系。
    */
   estimateFanoutReserve?: (itemCount: number) => number;
+  /**
+   * T2.2：fanout 每页 existingPages 检索式子集裁剪的检索函数（入参=subjectId/查询文本/topN，
+   * 出参=按相关度排序的 slug 列表）。未注入时 buildFanoutInput 跳过检索，仅保留自身条目 +
+   * wikilink 目标（最小降级集合）——不会导致 fanout 失败。ingest-service 注入时复用
+   * `search/hybrid-retrieval.ts::hybridRankSlugs`（FTS+向量 RRF，未配置嵌入自动回落纯 FTS）。
+   */
+  retrieveRelevantPages?: (subjectId: string, query: string, topN: number) => Promise<string[]>;
 }
 
 /** reserve() 返回的预留句柄；settle() 用它退回对应额度。 */
