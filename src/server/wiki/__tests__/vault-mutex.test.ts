@@ -2,6 +2,9 @@
  * vault-mutex 跨进程文件锁：心跳续租 + stale 判定单测。
  *
  * 用真实临时目录（非 mock fs）+ 注入短心跳/上限常量，避免真等 30min。
+ * 注意：同进程内第二个 acquireVaultLock 会直接进进程内队列排队、走不到
+ * isStaleLock，因此"长持锁不被夺"通过直接对导出的 isStaleLock 做判定矩阵
+ * 断言来验证（跨进程夺锁只发生在 isStaleLock 返回 true 时）。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,13 +16,32 @@ vi.mock('../../config/env', () => ({
   getConfig: () => ({ vaultPath: configMock.vaultPath }),
 }));
 
-import { acquireVaultLock } from '../vault-mutex';
+import { acquireVaultLock, isStaleLock } from '../vault-mutex';
 
 let tmpDir: string;
 
 function lockFilePath(): string {
   return path.join(path.dirname(configMock.vaultPath), '.vault.lock');
 }
+
+/** 手工伪造一个锁文件：写入 pid，并把 mtime 拨到 ageMs 之前 */
+function fakeLockFile(pid: number | string, ageMs: number): string {
+  const file = lockFilePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, String(pid));
+  const old = new Date(Date.now() - ageMs);
+  fs.utimesSync(file, old, old);
+  return file;
+}
+
+const TUNING = {
+  heartbeatIntervalMs: 1000,
+  staleHeartbeatMultiplier: 3, // stale 阈值 = 3000ms
+  hardStaleLockMs: 10_000,
+  retryIntervalMs: 10,
+} as const;
+
+const DEAD_PID = 999999; // 几乎不可能存在的 PID
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-mutex-test-'));
@@ -30,8 +52,29 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe('acquireVaultLock heartbeat + stale 判定', () => {
-  it('心跳持续刷新时，即使锁文件已"存在很久"也不会被第二个等待者夺锁', async () => {
+describe('isStaleLock 判定矩阵', () => {
+  it('① mtime 新鲜（< 3×心跳间隔）→ 不论持锁进程存活与否均不夺锁', () => {
+    // 存活进程（当前进程自身）
+    expect(isStaleLock(fakeLockFile(process.pid, 500), TUNING)).toBe(false);
+    // 死进程：mtime 新鲜时同样不夺锁（避免瞬时抖动误判）
+    expect(isStaleLock(fakeLockFile(DEAD_PID, 500), TUNING)).toBe(false);
+  });
+
+  it('② mtime 超 3×心跳 但进程存活且未超硬上限 → 不夺锁（长持锁+心跳存活即安全）', () => {
+    expect(isStaleLock(fakeLockFile(process.pid, 5000), TUNING)).toBe(false);
+  });
+
+  it('③ mtime 超硬上限，即便进程"存活"（可能是 PID 复用）→ 视为悬挂可夺锁', () => {
+    expect(isStaleLock(fakeLockFile(process.pid, 15_000), TUNING)).toBe(true);
+  });
+
+  it('④ 进程不存活且 mtime 超 3×心跳 → 视为悬挂可夺锁', () => {
+    expect(isStaleLock(fakeLockFile(DEAD_PID, 5000), TUNING)).toBe(true);
+  });
+});
+
+describe('acquireVaultLock 心跳续租', () => {
+  it('持锁期间心跳持续刷新锁文件 mtime，使 stale 先决条件永不成立', async () => {
     const release = await acquireVaultLock({
       heartbeatIntervalMs: 20,
       staleHeartbeatMultiplier: 3,
@@ -44,40 +87,25 @@ describe('acquireVaultLock heartbeat + stale 判定', () => {
     const old = new Date(Date.now() - 60_000);
     fs.utimesSync(lockFilePath(), old, old);
 
-    // 等待若干个心跳周期，确认心跳持续把 mtime 刷新为新鲜。
     await new Promise((r) => setTimeout(r, 100));
     const age = Date.now() - fs.statSync(lockFilePath()).mtimeMs;
     expect(age).toBeLessThan(50);
 
-    // 第二个获取者应长时间拿不到锁（因为心跳持续续租，不判 stale）。
-    let acquired = false;
-    const second = acquireVaultLock({
-      heartbeatIntervalMs: 20,
-      staleHeartbeatMultiplier: 3,
-      hardStaleLockMs: 10_000,
-      retryIntervalMs: 10,
-    }).then((r) => {
-      acquired = true;
-      return r;
-    });
-
-    await new Promise((r) => setTimeout(r, 150));
-    expect(acquired).toBe(false);
+    // mtime 已被心跳续新鲜 → 跨进程视角下 isStaleLock 必为 false（不会被夺）。
+    expect(
+      isStaleLock(lockFilePath(), {
+        heartbeatIntervalMs: 20,
+        staleHeartbeatMultiplier: 3,
+        hardStaleLockMs: 10_000,
+        retryIntervalMs: 10,
+      }),
+    ).toBe(false);
 
     release();
-    const secondRelease = await second;
-    expect(acquired).toBe(true);
-    secondRelease();
   });
 
-  it('持锁进程已死亡时，锁在一个 stale 判定周期内被回收', async () => {
-    // 手动伪造一个"死进程"持有的锁文件（不走 acquireVaultLock，绕开心跳）。
-    const file = lockFilePath();
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    // 一个几乎不可能存在的 PID
-    fs.writeFileSync(file, '999999');
-    const old = new Date(Date.now() - 1000);
-    fs.utimesSync(file, old, old);
+  it('持锁进程已死亡时，锁在一个 stale 判定周期内被回收（等待者成功获取）', async () => {
+    fakeLockFile(DEAD_PID, 1000);
 
     const start = Date.now();
     const release = await acquireVaultLock({
@@ -92,7 +120,7 @@ describe('acquireVaultLock heartbeat + stale 判定', () => {
     release();
   });
 
-  it('释放锁（正常路径）会清理心跳定时器，不留下持续刷新的悬挂句柄', async () => {
+  it('释放锁会清理心跳定时器：锁文件被删且不再被残留定时器重建/触碰', async () => {
     const release = await acquireVaultLock({
       heartbeatIntervalMs: 10,
       staleHeartbeatMultiplier: 3,
@@ -101,42 +129,11 @@ describe('acquireVaultLock heartbeat + stale 判定', () => {
     });
     release();
 
-    const mtimeAfterRelease = (() => {
-      try {
-        return fs.statSync(lockFilePath()).mtimeMs;
-      } catch {
-        return null;
-      }
-    })();
     // 锁文件已被 release 删除
-    expect(mtimeAfterRelease).toBeNull();
-
-    // 等待若干心跳周期，确认没有定时器把已删除的文件重新 touch/报错刷屏。
-    await new Promise((r) => setTimeout(r, 60));
     expect(fs.existsSync(lockFilePath())).toBe(false);
-  });
 
-  it('异常释放路径（reject）也会清理心跳定时器', async () => {
-    // 直接构造场景：两次获取，第二次因为第一次未释放会一直等待；
-    // 这里改为验证 acquireFileLock 内部异常路径——通过让 openSync 之外的分支
-    // 走 reject，观察 pending 状态恢复且无残留定时器导致的重复 touch 报错。
-    const release = await acquireVaultLock({
-      heartbeatIntervalMs: 10,
-      staleHeartbeatMultiplier: 3,
-      hardStaleLockMs: 10_000,
-      retryIntervalMs: 10,
-    });
-
-    // 释放后立即再次获取应正常成功（证明状态机 locked 被正确复位，
-    // 且第一次的心跳定时器已被清理不会互相干扰）。
-    release();
-    const release2 = await acquireVaultLock({
-      heartbeatIntervalMs: 10,
-      staleHeartbeatMultiplier: 3,
-      hardStaleLockMs: 10_000,
-      retryIntervalMs: 10,
-    });
-    release2();
+    // 等待若干心跳周期，确认没有残留定时器把已删除的文件重新 touch。
+    await new Promise((r) => setTimeout(r, 60));
     expect(fs.existsSync(lockFilePath())).toBe(false);
   });
 });

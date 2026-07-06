@@ -54,8 +54,11 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-/** 判断已存在的锁文件是否为陈旧残留（持有者已死或悬挂超时） */
-function isStaleLock(file: string, tuning: Required<VaultLockTuning>): boolean {
+/**
+ * 判断已存在的锁文件是否为陈旧残留（持有者已死或悬挂超时）。
+ * 导出仅供单测直接断言 stale 判定矩阵，业务方不要直接调用。
+ */
+export function isStaleLock(file: string, tuning: Required<VaultLockTuning>): boolean {
   try {
     const raw = fs.readFileSync(file, 'utf8');
     const pid = Number.parseInt(raw, 10);
