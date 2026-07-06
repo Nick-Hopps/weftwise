@@ -116,6 +116,23 @@ describe('generateTextWithTools — shouldCancel 轮询', () => {
     clearIntervalSpy.mockRestore();
   });
 
+  it('shouldCancel 恒为 false 时，普通 AbortError（如超时）不会被误判为 AgentCancelled', async () => {
+    const timeoutErr = new Error('The operation was aborted due to timeout');
+    timeoutErr.name = 'AbortError';
+    mocks.generateText.mockRejectedValue(timeoutErr);
+
+    const promise = generateTextWithTools('curate', {
+      system: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: {},
+      maxSteps: 5,
+      shouldCancel: () => false,
+    });
+
+    await expect(promise).rejects.toBe(timeoutErr);
+    await expect(promise).rejects.not.toBeInstanceOf(AgentCancelled);
+  });
+
   it('未传 shouldCancel 时不创建轮询定时器', async () => {
     mocks.generateText.mockResolvedValue({ text: 'ok' });
     const setIntervalSpy = vi.spyOn(global, 'setInterval');

@@ -9,9 +9,9 @@ import { createRunStepTracker } from './budget';
 import { agentToolContext } from '../tools/tool-context';
 import { compileToolSet, synthesizeFinishTool, FINISH_TOOL_NAME } from '../tools/compile';
 
-export class AgentCancelled extends Error {
-  constructor() { super('Agent cancelled'); this.name = 'AgentCancelled'; }
-}
+// 下沉到 errors.ts（叶子模块）以打破与 provider-registry 的循环依赖；此处 re-export 兼容既有调用方。
+export { AgentCancelled } from './errors';
+import { AgentCancelled } from './errors';
 
 export interface AgentRunResult {
   runId: string;
