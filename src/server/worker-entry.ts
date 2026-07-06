@@ -13,7 +13,7 @@ import { ensureVaultRepo } from './git/git-service';
 import { startWorker, runningJobCount } from './jobs/worker';
 import * as queue from './jobs/queue';
 import { rebuildSearchIndex } from './wiki/indexer';
-import { rollbackChangeset } from './wiki/wiki-transaction';
+import { recoverPendingOperation } from './wiki/recovery';
 import type { Changeset } from '@/lib/contracts';
 
 import { join } from 'node:path';
@@ -78,9 +78,12 @@ async function main() {
     log.info(`Reclaimed ${reclaimed} expired running job(s)`);
   }
 
-  // Rollback pending (uncommitted) operations from crashed runs.
-  // Reconstruct the full Changeset (incl. subject metadata) so the rollback
-  // path can reindex the right subject.
+  // Recover pending operations left behind by crashed runs. A `pending`
+  // operation does NOT necessarily mean the commit failed — the process may
+  // have crashed between a successful `git commit` and the `status='applied'`
+  // write. Reconstruct the full Changeset (incl. subject metadata) and let
+  // recoverPendingOperation() decide: roll forward / roll back / leave as an
+  // orphan (see src/server/wiki/recovery.ts for the three-branch rationale).
   const pendingOps = sqlite.prepare(
     "SELECT * FROM operations WHERE status = 'pending'"
   ).all() as Array<{
@@ -111,10 +114,10 @@ async function main() {
         postHead: op.post_head,
         status: 'pending',
       };
-      await rollbackChangeset(changeset);
-      log.info(`Rolled back pending operation ${op.id} (subject: ${subject.slug})`);
+      const outcome = await recoverPendingOperation(changeset);
+      log.info(`Recovered pending operation ${op.id} (subject: ${subject.slug}): ${outcome}`);
     } catch (err) {
-      log.error(`Failed to rollback operation ${op.id}:`, err);
+      log.error(`Failed to recover operation ${op.id}:`, err);
     }
   }
 

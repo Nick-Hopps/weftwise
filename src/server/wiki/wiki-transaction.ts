@@ -270,7 +270,7 @@ export async function applyChangeset(
           ? [...affectedPaths, ...sourceOps.extraStagePaths]
           : affectedPaths;
       const postHead = await commitVaultChanges(
-        `[subject:${working.subjectSlug}] Apply changeset ${working.id} (job: ${working.jobId})`,
+        `[subject:${working.subjectSlug}] Apply changeset ${working.id} (job: ${working.jobId}) [cs:${working.id}]`,
         stagePaths
       );
 
@@ -330,7 +330,7 @@ export async function rollbackChangeset(changeset: Changeset): Promise<void> {
   }
 }
 
-function collectTouchedSlugs(subjectSlug: string, entries: ChangesetEntry[]): string[] {
+export function collectTouchedSlugs(subjectSlug: string, entries: ChangesetEntry[]): string[] {
   const slugs = new Set<string>();
   for (const entry of entries) {
     const parts = parseWikiPath(entry.path);
