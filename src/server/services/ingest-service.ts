@@ -15,6 +15,7 @@ import {
 import * as queue from '../jobs/queue';
 import { renderLanguageDirective, renderAugmentationDirective, renderExpositionDirective } from '../llm/prompts/prompt-context';
 import { runPipeline, type PipelineStep } from '../agents/runtime/orchestrator';
+import { hybridRankSlugs } from '../search/hybrid-retrieval';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
 import { loadCheckpoint } from '../agents/runtime/checkpoint';
@@ -193,6 +194,8 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     citedSources: new Map(),
     // T1.5：fanout 逐页预扣按同一份预检估算折算，与 estimatedCost/reduceCostForResume 同源。
     estimateFanoutReserve: (itemCount) => estimatePerPageTokens(estimatedCost, itemCount),
+    // T2.2：fanout 每页 existingPages 检索式子集裁剪，避免全量注入随库规模 O(N·M) 膨胀。
+    retrieveRelevantPages: (subjectId, query, topN) => hybridRankSlugs(subjectId, query, topN),
   };
 
   // ⑨ 续传补源：从 checkpoint rehydrate 已核查页累积的网页引用源。新 run 为空 no-op；

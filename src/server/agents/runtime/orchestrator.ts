@@ -4,7 +4,11 @@ import { runPageVerification } from './verify-page';
 import { runPageSupplement } from './supplement-page';
 import { reconcileMergeUpdateFidelity } from './merge-update-fidelity';
 import { BudgetExceededError } from './budget';
+import { extractWikiLinks } from '@/server/wiki/wikilinks';
 import type { ChangesetEntry } from '@/lib/contracts';
+
+/** T2.2：fanout 每页 existingPages 检索式子集的 top-K 常量（可调）。 */
+export const EXISTING_PAGES_FANOUT_TOP_K = 20;
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
@@ -296,12 +300,38 @@ export async function buildFanoutInput(
     });
   }
 
+  // 增益/核查阶段：把上一阶段该页产物的 content 按 path 先解出（existingPages 子集检索的
+  // wikilink 提取需要用到这份草稿文本），再决定注入到哪个 key。
+  let priorPageContent: string | undefined;
+  if (step.injectPriorPageAs && typeof item.slug === 'string') {
+    const path = `wiki/${String(carry.subjectSlug)}/${item.slug}.md`;
+    const prior = Array.isArray(carry.writerOutputs)
+      ? (carry.writerOutputs as Array<{ path?: string; content?: string }>).find((e) => e?.path === path)
+      : undefined;
+    if (prior?.content !== undefined) {
+      priorPageContent = prior.content;
+    } else {
+      ctx.emit('ingest:warn', `Enrich/verify for "${item.slug}" found no prior-stage page at ${path}`, { slug: item.slug });
+    }
+  }
+
+  // T2.2：existingPages 全量注入是 O(N·M) token 的元凶（N=现有页数，M=本次 fanout 页数）。
+  // 改为每页只注入相关子集：检索 top-K ∪ wikilink 目标 ∪ 自身条目（update 语义）。
+  // plan 内的兄弟页信息仍经上面 `plan: carry.plan` 整体透传，不受影响（不在此处重复）。
+  const existingPagesSubset = await selectRelevantExistingPagesForFanout({
+    ctx,
+    item,
+    existingPages: Array.isArray(carry.existingPages) ? (carry.existingPages as ExistingPageEntry[]) : [],
+    priorContent: priorPageContent,
+  });
+
   // 共享字段在前、per-page 字段在后：序列化后各 writer 输入有字节一致的前缀，
-  // 供 DeepSeek 自动前缀缓存（命中要求从第 0 token 起完全一致）复用 plan/existingPages；
-  // item / relevantChunks 为 per-page 内容，排在可变后缀（缓存 miss）。语义不变（字段按名读取）。
+  // 供 DeepSeek 自动前缀缓存（命中要求从第 0 token 起完全一致）复用 plan；
+  // existingPages 自 T2.2 起按页裁剪、不再跨页恒定，该字段的前缀缓存收益因此让位于 token 节省
+  // （见 spec 陷阱提示：属预期代价）。item / relevantChunks 为 per-page 内容，排在可变后缀。
   const base: Record<string, unknown> = {
     subjectSlug: carry.subjectSlug,
-    existingPages: carry.existingPages,
+    existingPages: existingPagesSubset,
     plan: carry.plan,
     languageDirective: carry.languageDirective,
     augmentationDirective: carry.augmentationDirective,
@@ -311,17 +341,8 @@ export async function buildFanoutInput(
     relevantChunks,
   };
 
-  // 增益/核查阶段：把上一阶段该页产物的 content 按 path 注入指定 key。
-  if (step.injectPriorPageAs && typeof item.slug === 'string') {
-    const path = `wiki/${String(carry.subjectSlug)}/${item.slug}.md`;
-    const prior = Array.isArray(carry.writerOutputs)
-      ? (carry.writerOutputs as Array<{ path?: string; content?: string }>).find((e) => e?.path === path)
-      : undefined;
-    if (prior?.content !== undefined) {
-      base[step.injectPriorPageAs] = prior.content;
-    } else {
-      ctx.emit('ingest:warn', `Enrich/verify for "${item.slug}" found no prior-stage page at ${path}`, { slug: item.slug });
-    }
+  if (step.injectPriorPageAs && priorPageContent !== undefined) {
+    base[step.injectPriorPageAs] = priorPageContent;
   }
   // 增量合并：writer 阶段若本页 slug 命中 existingPages（=更新已有页），注入现有正文供 writer 并入。
   if (step.injectExistingPageForUpdate && typeof item.slug === 'string') {
@@ -335,6 +356,77 @@ export async function buildFanoutInput(
     }
   }
   return base;
+}
+
+interface ExistingPageEntry {
+  slug: string;
+  [key: string]: unknown;
+}
+
+/**
+ * T2.2：从全量 existingPages 中为单个 fanout 项裁出相关子集。
+ * 子集 = 检索 top-K ∩ existingPages  ∪  wikilink 目标 ∩ existingPages  ∪  自身条目（update 语义）。
+ * 检索失败/未注入/零结果时优雅降级为「wikilink 目标 + 自身条目」的最小集合，绝不抛错致 fanout 失败。
+ */
+export async function selectRelevantExistingPagesForFanout(params: {
+  ctx: AgentContext;
+  item: Record<string, unknown>;
+  existingPages: ExistingPageEntry[];
+  priorContent?: string;
+  topK?: number;
+}): Promise<ExistingPageEntry[]> {
+  const { ctx, item, existingPages, priorContent, topK = EXISTING_PAGES_FANOUT_TOP_K } = params;
+  if (existingPages.length === 0) return existingPages;
+
+  const bySlug = new Map(existingPages.map((p) => [p.slug, p]));
+  const selectedSlugs = new Set<string>();
+  const selfSlug = typeof item.slug === 'string' ? item.slug : undefined;
+
+  // 自身条目：本页若命中 existingPages（=update 语义），必须在子集中——writer/enricher/verify
+  // 都靠 existingPages.some(slug===item.slug) 判定 update/create（见 injectExistingPageForUpdate
+  // 及 verify-page/supplement-page 的 exists 判定）。
+  if (selfSlug && bySlug.has(selfSlug)) selectedSlugs.add(selfSlug);
+
+  // wikilink 目标：本页 plan 条目可用文本（title/summary）+ 上一阶段草稿（enricher/verify 场景）
+  // 中出现的 [[...]] 目标，只要命中 existingPages 就必须在子集里，供模型核对链接。
+  const textForLinks = [
+    typeof item.title === 'string' ? item.title : '',
+    typeof item.summary === 'string' ? item.summary : '',
+    priorContent ?? '',
+  ].join('\n');
+  if (textForLinks.trim()) {
+    for (const link of extractWikiLinks(textForLinks)) {
+      if (bySlug.has(link.target)) selectedSlugs.add(link.target);
+    }
+  }
+
+  // 检索 top-K：优先复用 ctx.retrieveRelevantPages（ingest-service 注入 hybridRankSlugs）。
+  // 未注入 / 抛错 / 零结果时静默跳过——上面已收集的自身条目 + wikilink 目标即为最小降级集合。
+  if (ctx.retrieveRelevantPages) {
+    const query = [
+      typeof item.title === 'string' ? item.title : '',
+      typeof item.summary === 'string' ? item.summary : '',
+    ].filter(Boolean).join(' — ') || selfSlug;
+    if (query) {
+      try {
+        const subjectId = ctx.subject?.id;
+        if (subjectId) {
+          const ranked = await ctx.retrieveRelevantPages(subjectId, query, topK);
+          for (const slug of ranked) {
+            if (bySlug.has(slug)) selectedSlugs.add(slug);
+          }
+        }
+      } catch (err) {
+        ctx.emit('ingest:warn', `existingPages retrieval failed for "${selfSlug ?? '?'}" — falling back to minimal set`, {
+          slug: selfSlug ?? null,
+          error: (err as Error).message,
+        });
+        // 不上抛：selectedSlugs 已有的自身条目 + wikilink 目标原样返回，fanout 继续。
+      }
+    }
+  }
+
+  return existingPages.filter((p) => selectedSlugs.has(p.slug));
 }
 
 /** 按 planner 标注的 sourceRefs 从 chunkStore 解析出相关块全文；缺失块跳过并告警。 */
