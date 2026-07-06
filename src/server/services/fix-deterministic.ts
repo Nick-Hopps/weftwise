@@ -2,9 +2,10 @@
  * Fix service — fix 的纯函数（无 I/O）。
  * - fixMissingFrontmatter() — 确定性补 frontmatter 必填字段。
  * - partitionFindings() / buildFixWorklist() — findings 分桶/合并。
- * - bodyShrankTooMuch() — 忠实度护栏。
  * - buildSubjectReportLines() — 诊断清单渲染。
- * - createFixGuard() — tool-loop 工具层硬护栏（写次数上限 + 保护页 + 忠实度门控）。
+ * - createFixGuard() — tool-loop 工具层硬护栏（写次数上限 + 保护页）。
+ * 忠实度护栏已收编到 `wiki/rewrite-fidelity.ts::checkRewriteFidelity`（profile 'fix'），
+ * 调用点见 `fix-tools.ts`，不在本文件重复实现。
  * broken-link / missing-crossref / contradiction 交给 **fix tool-loop** 修复（非逐页结构化输出）。
  * orphan / stale-source / coverage-gap 不修。
  */
@@ -52,13 +53,6 @@ export function partitionFindings(findings: LintFinding[]): {
     else ignored.push(finding);
   }
   return { frontmatter, llm, ignored };
-}
-
-/** 忠实度护栏：修复后正文相对原文塌缩超过阈值（默认 >50%）视为 LLM 丢内容，应拒绝。 */
-export function bodyShrankTooMuch(originalBody: string, newBody: string, floor = 0.5): boolean {
-  const before = originalBody.trim().length;
-  if (before === 0) return false;
-  return newBody.trim().length < before * floor;
 }
 
 /**
@@ -115,7 +109,7 @@ export interface FixGuard {
 
 /**
  * fix tool-loop 的工具层硬护栏：写次数 cap（runaway backstop）+ 保护页（不可改 index/log）。
- * fix 总是手动触发 → 无 seed 限制。忠实度（bodyShrankTooMuch）在 fix-tools wrapper 把守（需现有正文，guard 不读盘）。
+ * fix 总是手动触发 → 无 seed 限制。忠实度（checkRewriteFidelity）在 fix-tools wrapper 把守（需现有正文，guard 不读盘）。
  */
 export function createFixGuard(opts: { caps: { writes: number } }): FixGuard {
   const { caps } = opts;
