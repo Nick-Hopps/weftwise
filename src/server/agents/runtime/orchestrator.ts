@@ -2,6 +2,7 @@ import type { AgentContext, SkillTemplate } from '../types';
 import { runAgentLoop, AgentCancelled, type AgentRunResult } from './agent-loop';
 import { runPageVerification } from './verify-page';
 import { runPageSupplement } from './supplement-page';
+import { reconcileMergeUpdateFidelity } from './merge-update-fidelity';
 import { BudgetExceededError } from './budget';
 import type { ChangesetEntry } from '@/lib/contracts';
 
@@ -169,6 +170,21 @@ export async function runPipeline(opts: {
             r = await runPageSupplement({ skill: skill!, ctx: childCtx, input });
           } else {
             r = await runAgentLoop({ skill: skill!, ctx: childCtx, input });
+            // 增量合并保真护栏：仅本页命中 existingPages（update 语义，buildFanoutInput 已注入
+            // existingPageContent）时校验——create 语义的新页没有"现有正文"可比较，不适用。
+            if (
+              step.injectExistingPageForUpdate &&
+              isPlainObject(input) &&
+              typeof input.existingPageContent === 'string'
+            ) {
+              r = await reconcileMergeUpdateFidelity({
+                existingContent: input.existingPageContent,
+                first: r,
+                rerun: (extra) => runAgentLoop({ skill: skill!, ctx: childCtx, input: { ...input, ...extra } }),
+                emit: opts.ctx.emit,
+                slug,
+              });
+            }
           }
         } finally {
           // 成功或失败都必须结算释放预留——否则失败页会永久占着额度饿死排队中的其他页。

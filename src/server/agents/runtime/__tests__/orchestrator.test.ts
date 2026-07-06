@@ -722,7 +722,8 @@ describe('orchestrator.runPipeline: 多内容阶段（增益）', () => {
     mockRun.mockReset();
     mockRun
       .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'existing-a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
-      .mockResolvedValueOnce({ runId: 'w', output: { action: 'update', path: 'wiki/general/existing-a.md', content: '' }, tokensUsed: 0, stepCount: 1 });
+      // 保真通过（原样保留现有正文）——本用例只关心 existingPageContent 是否被注入，不涉及保真护栏。
+      .mockResolvedValueOnce({ runId: 'w', output: { action: 'update', path: 'wiki/general/existing-a.md', content: 'EXISTING BODY' }, tokensUsed: 0, stepCount: 1 });
     const ctx = ctxStub([]);
     const readPage = vi.fn().mockResolvedValue({ markdown: 'EXISTING BODY' });
     ctx.overlay.readPage = readPage as unknown as AgentContext['overlay']['readPage'];
@@ -801,6 +802,92 @@ describe('orchestrator.runPipeline: 多内容阶段（增益）', () => {
     const paths = ctx.pending.entries.map((e) => e.path);
     expect(paths).toContain('wiki/general/quicksort.md');
     expect(paths).not.toContain('quicksort');
+  });
+});
+
+describe('orchestrator.runPipeline: ingest merge-update 保真护栏（T1.4）', () => {
+  const EXISTING = '## Intro\nSee [[Alpha]] for more context here, padding padding padding padding.\n';
+
+  it('writer 首次违规（丢链接+丢标题）→ 重写一次 → 干净 → 采用重写结果，不回落', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'existing-a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      // 首次：丢了 heading 与 [[Alpha]] 链接，且明显缩水
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'update', path: 'wiki/general/existing-a.md', content: 'short.' }, tokensUsed: 0, stepCount: 1 })
+      // 重写：保留 heading + 链接，长度达标
+      .mockResolvedValueOnce({
+        runId: 'w2',
+        output: { action: 'update', path: 'wiki/general/existing-a.md', content: '## Intro\nSee [[Alpha]] for more context here, padding padding padding padding, plus new material.\n' },
+        tokensUsed: 0, stepCount: 1,
+      });
+    const ctx = ctxStub([]);
+    ctx.overlay.readPage = vi.fn().mockResolvedValue({ markdown: EXISTING }) as unknown as AgentContext['overlay']['readPage'];
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', injectExistingPageForUpdate: true },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    expect(mockRun).toHaveBeenCalledTimes(3);
+    // 重写调用收到了违规反馈
+    const retryInput = mockRun.mock.calls[2][0].input as Record<string, unknown>;
+    expect(retryInput.fidelityViolations).toBeDefined();
+    const entry = ctx.pending.entries.find((e) => e.path === 'wiki/general/existing-a.md');
+    expect(entry?.content).toContain('plus new material');
+    expect(entry?.content).not.toContain('---'); // 未触发回落拼接
+    const warnCalls = (ctx.emit as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[0] === 'ingest:warn');
+    expect(warnCalls.some((c) => String(c[1]).includes('fidelity'))).toBe(false);
+  });
+
+  it('writer 重写一次后仍违规 → 保守回落：保留现有正文 + 追加新草稿 + emit ingest:warn', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'existing-a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w1', output: { action: 'update', path: 'wiki/general/existing-a.md', content: 'short.' }, tokensUsed: 0, stepCount: 1 })
+      // 重写依然丢链接/丢标题/缩水
+      .mockResolvedValueOnce({ runId: 'w2', output: { action: 'update', path: 'wiki/general/existing-a.md', content: 'still short, still bad.' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    ctx.overlay.readPage = vi.fn().mockResolvedValue({ markdown: EXISTING }) as unknown as AgentContext['overlay']['readPage'];
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', injectExistingPageForUpdate: true },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    expect(mockRun).toHaveBeenCalledTimes(3);
+    const entry = ctx.pending.entries.find((e) => e.path === 'wiki/general/existing-a.md');
+    // 回落：现有正文逐字保留在前，新草稿拼接在后（不是整页覆盖）
+    expect(entry?.content?.startsWith(EXISTING.trimEnd())).toBe(true);
+    expect(entry?.content).toContain('still short, still bad.');
+    const warnCalls = (ctx.emit as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[0] === 'ingest:warn');
+    expect(warnCalls.some((c) => String(c[1]).includes('fidelity'))).toBe(true);
+  });
+
+  it('create 语义（无 existingPageContent）不触发保真护栏', async () => {
+    mockRun.mockReset();
+    mockRun
+      .mockResolvedValueOnce({ runId: 'p', output: { plan: { pages: [{ slug: 'brand-new', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1 })
+      .mockResolvedValueOnce({ runId: 'w', output: { action: 'create', path: 'wiki/general/brand-new.md', content: 'x' }, tokensUsed: 0, stepCount: 1 });
+    const ctx = ctxStub([]);
+    ctx.overlay.readPage = vi.fn().mockResolvedValue({ markdown: EXISTING }) as unknown as AgentContext['overlay']['readPage'];
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug', 'existingPages'] },
+        { kind: 'fanout', skillId: 'writer', fromOutput: 'plan.pages', injectExistingPageForUpdate: true },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general', existingPages: [{ slug: 'existing-a', title: 'A', summary: 's' }] },
+    });
+    // 只有 planner + 一次 writer，没有触发重写
+    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(ctx.pending.entries.find((e) => e.path === 'wiki/general/brand-new.md')?.content).toBe('x');
   });
 });
 
