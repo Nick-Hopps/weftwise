@@ -67,3 +67,32 @@ export function getById(id: string): OperationRow | null {
 export function markReverted(id: string): void {
   getRawDb().prepare(`UPDATE operations SET status = 'reverted' WHERE id = ?`).run(id);
 }
+
+/**
+ * operations 表 GC：每 subject 只保留最近 `keepPerSubject` 条**终态**（非 pending）行。
+ *
+ * 注意：`operations` 表没有可靠的时间戳列（无 `created_at`），因此无法实现需求文档
+ * 描述的"500 条或 90 天，取更宽者"双条件保留策略——这里退化为单条件（仅按数量，
+ * 按 subject 隔离，rowid 倒序=时间倒序）。`pending` 行永不删除（崩溃恢复依赖它）。
+ * 被删除的 operation 对应的 `/history` 时间线条目会随之消失（vault git 提交仍在，
+ * 数据本身不受影响，只是无法再从 UI 上追溯/一键回滚该次操作）。
+ */
+export function pruneOldOperations(keepPerSubject = 500): number {
+  const result = getRawDb()
+    .prepare(
+      `DELETE FROM operations
+       WHERE status != 'pending'
+         AND id IN (
+           SELECT id FROM (
+             SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY subject_id ORDER BY rowid DESC
+             ) AS rn
+             FROM operations
+             WHERE status != 'pending'
+           )
+           WHERE rn > ?
+         )`,
+    )
+    .run(keepPerSubject);
+  return result.changes;
+}
