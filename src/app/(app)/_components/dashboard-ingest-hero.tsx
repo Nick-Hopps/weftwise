@@ -64,7 +64,7 @@ function currentPhase(events: JobStreamEvent[]): number {
     const t = e.type;
     const skillId = typeof payloadOf(e).skillId === 'string' ? (payloadOf(e).skillId as string) : '';
     let idx: number | null = null;
-    if (t === 'ingest:committing' || skillId === 'ingest-indexer') idx = 5;
+    if (t === 'ingest:committing') idx = 5;
     else if (t === 'ingest:verify' || skillId.startsWith('ingest-verifier')) idx = 4;
     else if (skillId === 'ingest-enricher') idx = 3;
     else if (skillId === 'ingest-writer') idx = 2;

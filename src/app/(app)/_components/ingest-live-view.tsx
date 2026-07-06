@@ -71,7 +71,6 @@ const MILESTONE_SKILLS = new Set([
   'ingest-writer',
   'ingest-enricher',
   'ingest-planner',
-  'ingest-indexer',
 ]);
 
 /** The raw stream has hundreds of low-level agent events; the timeline shows
@@ -100,7 +99,7 @@ function phaseIndexForEvent(evt: JobStreamEvent): number | null {
   const t = evt.type;
   const p = payloadOf(evt);
   const skillId = typeof p.skillId === 'string' ? p.skillId : '';
-  if (t === 'ingest:committing' || skillId === 'ingest-indexer' || t === 'job:completed') return 5;
+  if (t === 'ingest:committing' || t === 'job:completed') return 5;
   if (t === 'ingest:verify' || skillId.startsWith('ingest-verifier')) return 4;
   if (skillId === 'ingest-enricher') return 3;
   if (skillId === 'ingest-writer') return 2;
