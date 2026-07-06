@@ -180,7 +180,7 @@ export function validateChangeset(
 export interface SourceLinkOps {
   /** 每个 source → 其关联的页 slug 列表（多源：ingest 原始源 + 本次核查引用的网页源）。 */
   links: Array<{ sourceId: string; pageSlugs: string[] }>;
-  /** 提交前已写入 vault 工作树、需纳入本 commit 的额外文件路径（raw 源文件 + sidecar），相对 vault 根。 */
+  /** 提交前已写入 vault 工作树、需纳入本 commit 的额外文件路径（raw 源文件 + sidecar 初始内容），相对 vault 根。sidecar 的 linkedPages 富化（updateSourcePageLinks）发生在 commit 之后，不进入本 commit（best-effort 旁路，可由 rebuild 重建）。 */
   extraStagePaths?: string[];
   /** 返回 true 表示本次真正新插入了一行（用于回滚补偿判定，重复 ingest 命中已存在的行时返回 false）。 */
   linkPageSource: (subjectId: string, pageSlug: string, sourceId: string) => boolean;
