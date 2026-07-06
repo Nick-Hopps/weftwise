@@ -57,7 +57,8 @@ streamTextResponse(task, systemPrompt, userPrompt, overrides?): StreamTextResult
 
 streamTextWithTools(task, opts: { system, messages, tools, maxSteps, abortSignal? }): StreamTextResult
 
-generateTextWithTools(task, opts: { system, messages, tools, maxSteps }): Promise<{ text: string }>
+generateTextWithTools(task, opts: { system, messages, tools, maxSteps, shouldCancel? }): Promise<{ text: string }>
+// shouldCancel?: () => boolean — 传入时每 2s 轮询一次，为真则 abort 并抛出 AgentCancelled（复用 agents/runtime/agent-loop.ts）；不传则零开销、行为不变。curate/fix 传 () => queue.isCancelRequested(jobId)。
 
 generateEmbeddings(texts: string[]): Promise<number[][]>
 
