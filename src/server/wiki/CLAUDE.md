@@ -49,6 +49,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `frontmatter.ts` | `parseFrontmatter / serializeFrontmatter / validateFrontmatter`、类型 `WikiFrontmatter` | gray-matter 封装 |
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
 | `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / slugFromTitle / deriveUniqueSlug(title, existingSlugs) / GENERAL_SUBJECT_SLUG / META_PAGE_SLUGS` | path ↔ (subject, slug) 互转；`deriveUniqueSlug` 为 create/split 共用的唯一 slug 派生（冲突自动加后缀）；`META_PAGE_SLUGS`=内置系统页（index/log）**单一源**，indexer/lint/reenrich/curate/page-write 六处共用，杜绝漂移；保留 `slugFromWikiPath` shim 过渡（已无活跃调用方） |
+| `rewrite-fidelity.ts` 🆕 | `checkRewriteFidelity(original, revised, profile) / FIDELITY_PROFILES`（四档：`supplement`/`merge-update`/`fix`/`reshape`） | **统一保真护栏单一真实源**（T1.4）：长度/wikilink（复用 `wikilinks.ts::extractWikiLinks`，preserve/subset/none）/heading/frontmatter 四项检查，阈值集中在 `FIDELITY_PROFILES`；fix/reshape/supplement 三条既有护栏 + ingest merge-update（新增）共用同一实现，不再各写一份 |
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
 | `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
@@ -123,6 +124,7 @@ src/server/wiki/
 ├── frontmatter.ts        # gray-matter 封装
 ├── wikilinks.ts          # ★ 单一真实源
 ├── page-identity.ts      # slug ↔ path
+├── rewrite-fidelity.ts   # 🆕 统一保真护栏（四档 profile，T1.4）
 ├── indexer.ts            # 写入 pages + FTS
 ├── relink.ts             # 改标题/重指引用 重写（纯函数）
 ├── split-plan.ts         # 拆分页 slug 派生 + 恰一主页（纯函数）
@@ -152,6 +154,7 @@ src/server/wiki/
 | 2026-06-30 | `page-ops.ts` 新增 `executePageUpdate(jobId, subject, {slug, body, summary?, tags?})`（update 内核：保留 title/created、替换正文、覆盖 tags/summary、坏链与残留 unresolved-wikilink 一律抛错不落盘）；新增 `page-ops-update` 单测（Spec 3）|
 | 2026-07-06 | Saga 提交点原子性（roll-forward 恢复，T1.1）| `commitVaultChanges` message 追加 `[cs:<changesetId>]` 确定性标记；`git-service.ts` 新增 `findCommitWithMarker(marker, sinceSha?)`（在 `sinceSha..HEAD` 范围内查找标记提交——并发调度下本 changeset 的提交可能已被后续提交盖过，不能只看 HEAD）；新增 `recovery.ts::recoverPendingOperation(changeset)` 三分支恢复（范围内找到标记提交→前滚，postHead=该提交哈希+applied+幂等重索引；没找到且 HEAD===preHead→常规 `rollbackChangeset`；没找到且 HEAD!==preHead→**不** `restoreToHead`（避免冲掉后续提交），只标 `rolled-back` 终态+告警）；`worker-entry.ts` 启动扫描 pending operations 改调此函数（原先一律 `rollbackChangeset` 会把已提交成功的变更连同崩溃时序问题一起静默回退丢数据）；`wiki-transaction.ts` 导出 `collectTouchedSlugs` 供恢复模块复用；新增 `recovery.test.ts`（真实临时 vault git 仓库 + 真实临时 SQLite，覆盖三分支 + 并发盖过场景）|
 | 2026-07-06 | 回滚补偿完整化：page_sources / sidecar（T1.2）| `sourcesRepo.linkPageSource` 改为返回 `boolean`（本次是否真正新插入，命中已存在的 `(subject,page,source)` 行返回 `false`）；新增 `sourcesRepo.unlinkPageSource(subjectId,pageSlug,sourceId)`（单行删除，供回滚补偿）；`SourceLinkOps` 加可选 `unlinkPageSource`；`applyChangeset` 在事务内收集本次真正新插入的 `insertedSourceLinks` 清单，失败时把清单+`unlinkPageSource` 一并传给 `rollbackChangeset(changeset, compensation)`——只删本次新插入的行，预先存在的行（重复 ingest 场景）不受影响；`sourceOps.updateSourcePageLinks`（sidecar `.llm-wiki/sources/<subject>/*.json`）调用时机从"索引事务后、git commit 前"挪到"git commit 成功 + `operations.applied` 落库之后"——commit 已代表 page_sources 生效，sidecar 只是旁路缓存，失败不该牵连已提交的 changeset；顺序调整后 commit 前从不触碰 sidecar 文件，天然无需回滚补偿。已知限制：`recovery.ts` 分支②（commit 从未发生）复用 `rollbackChangeset(changeset)` 时不传 compensation（崩溃恢复重建的 `Changeset` 不携带 insertedSourceLinks 清单）——若进程恰好在 `linkPageSource` 事务提交后、git commit 前崩溃，重启回滚不会清理这批 page_sources 行，可由后续 rebuild/lint 兜底；此窗口极窄且不在本任务范围|
+| 2026-07-06 | T1.4 统一保真护栏：新增 `rewrite-fidelity.ts::checkRewriteFidelity` + `FIDELITY_PROFILES`（四档 `supplement`/`merge-update`/`fix`/`reshape`），wikilink 提取复用 `wikilinks.ts::extractWikiLinks`；fix/reshape/re-enrich supplement 三条既有护栏改调此模块（退役各自独立实现）；ingest merge-update（orchestrator 写更新页）首次接入长度/链接/heading 护栏 |
 
 ---
 

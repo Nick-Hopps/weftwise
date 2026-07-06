@@ -114,7 +114,7 @@ worker-entry.ts
 1. **阶段1（确定性补 frontmatter）**：`fixMissingFrontmatter(slug, doc, now)` 纯函数批量填补缺失 frontmatter 字段（title/summary/tags/created），一次 Saga commit 提交所有受影响页（1 commit）。broken-link 在此阶段跳过（需 LLM 判断语义意图）。
 2. **阶段2（LLM 工具循环修复）**：对剩余 findings 按页分组→按 `buildSubjectReportLines` 格式组装诊断清单，调 `generateTextWithTools('fix', { system: FIX_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: FIX_MAX_STEPS (60) })`：
    - 工具集（经 `createFixGuard` 把守）：`wiki.read` / `wiki.search` / `wiki.list`（读）+ `wiki.update` / `wiki.create`（写）。
-   - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `bodyShrankTooMuch`（需现有正文，护栏不读盘）。
+   - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `checkRewriteFidelity(…, FIDELITY_PROFILES.fix)`（`wiki/rewrite-fidelity.ts`，需现有正文，护栏不读盘；floor 0.8）。
    - 模型自驱读页后调 `wiki.update`（破损/缺引用）或 `wiki.create`（新页）；每次写操作一个 commit。
    - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
 
@@ -134,12 +134,12 @@ worker-entry.ts
 
 **画像仅作探针**（`buildProfileHint`）：读取单租户画像（`LOCAL_USER_ID`）的 `backgroundSummary` + `stylePrefs`（readingLevel/verbosity/exampleDensity），拼成一句话提示——**只用来定位读者大概率不懂的概念，补充内容本身必须写成中性、对任何读者都普遍适用的讲解**；这是与 Cognitive Lens（读时按读者重塑讲法）的宪法边界：canonical 正文永远中性，读者专属讲法只在读时发生。无背景资料时回落「中级读者」中性假设。
 
-**忠实度护栏**（`supplement-guard.ts::checkSupplementFidelity`，纯函数）——因允许「插入 + 局部改写」无法逐字比对，改用 4 项组合式软护栏，floor=0.95：
-- 不缩水：`bodyShrankTooMuch(orig, candidate, 0.95)`（复用 `fix-deterministic.ts`）——正文字数不得跌破原文 95%；
-- 不臆造 wikilink：`checkLinkSubset`（复用 `profile/fidelity.ts`）——候选正文的 wikilink 目标必须是原文的子集，不许新增；
-- 标题不减：`headingsPreserved`——原文每个标题（级别+文字）须在候选正文原样出现；
-- frontmatter 不变：`frontmatterUnchanged`——frontmatter 数据对象深度相等（JSON 规范序列化比对）。
-四项全过才算通过；任一违规都会被收进 `violations[]` 用于重写反馈。
+**忠实度护栏**（`supplement-guard.ts::checkSupplementFidelity`，薄转发到统一模块 `wiki/rewrite-fidelity.ts::checkRewriteFidelity(…, FIDELITY_PROFILES.supplement)`，T1.4）——因允许「插入 + 局部改写」无法逐字比对，用组合式软护栏，floor=0.95：
+- 不缩水：正文字数不得跌破原文 95%；
+- 不丢失原有 wikilink（`linkRule:'preserve'`）——允许新增链接，但不许丢失原文已有的链接目标（早期版本反过来禁止新增，T1.4 改为对齐"改写不得丢事实"的统一语义）；
+- 标题不减（`preserveHeadings`）：原文每个标题（级别+文字）须在候选正文原样出现；
+- frontmatter 不变（`preserveFrontmatter`）：frontmatter 数据对象深度相等（JSON 规范序列化比对）。
+全过才算通过；任一违规都会被收进 `violations[]` 用于重写反馈。
 
 即便 subject `augmentationLevel` 为 `off` 也强制按 `standard` 跑（用户显式触发语义）。
 
@@ -211,7 +211,7 @@ src/server/services/
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：tool-loop 驱动，generateTextWithTools + buildCurateToolContext + CurateGuard）
 ├── curate-tools.ts      # 🆕 worker 侧 ToolContext：buildCurateToolContext（只读 vault + 写能力经 guard 把守）
 ├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2 tool-loop）
-├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / bodyShrankTooMuch / buildSubjectReportLines / createFixGuard（忠实度护栏 + 护栏）
+├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / buildSubjectReportLines / createFixGuard（写 cap + 保护页；忠实度已收编到 wiki/rewrite-fidelity.ts）
 ├── fix-tools.ts         # 🆕 worker 侧 ToolContext：buildFixToolContext（只读 vault + 写能力经 guard 鉴权后调 page-ops）
 ├── reenrich-enqueue.ts  # 🆕 纯函数 validateReenrichTarget + enqueueReenrich 入队 helper（供对话工具触发）
 ├── page-write.ts        # 🆕 共享写工具内核：validateDeleteTarget（删除守卫单一真实源）+ deletePageInSubject / createPageInSubject（Saga + embed 回填，供 DELETE 路由与 wiki.delete/wiki.create 对话工具复用）
@@ -247,6 +247,7 @@ src/server/services/
 | 2026-06-30 | curate follow-up：auto 模式不再解析 `wiki.create` 工具（按 `seedSet===null` 条件化 `resolve`，省模型试探步数；`guard.canCreate` 仍兜底）；`['index','log']` 保护页常量统一为 `wiki/page-identity::META_PAGE_SLUGS` 单一源（`curate-service`/`page-write`/`lint-deterministic`/`reenrich-enqueue` 不再各持副本）|
 | 2026-06-30 | Fix tool-loop（Spec 3）：`fix-service` 阶段2 由逐页 `generateStructuredOutput('fix')` 改为 `generateTextWithTools('fix')` 自驱 `wiki.update`/`wiki.create`；新增 `fix-tools.ts::buildFixToolContext`（读侧同构 curate-tools + 写经 `createFixGuard`+忠实度护栏调 page-ops 内核）；`fix-deterministic` 加 `createFixGuard`、退休关联页提取（`findRelatedPageSlugs`/`mentions`/`MAX_RELATED_PAGES`）；`fix-prompt` 退休逐页 `FixPageSchema` 三件套、新增 agentic prompt；每写一次一 commit |
 | 2026-07-01 | reenrich-service 加画像驱动正文补全 supplement 首阶段（`reenrich-supplement` skill + `runPageSupplement` 护栏 + `buildProfileHint` 探针提示 + `deriveMaturityUpdate` 并入正文增长）；流水线三步（supplement→enricher→verify），仅 re-enrich，ingest 不变 |
+| 2026-07-06 | T1.4 统一保真护栏：`fix-tools.ts`（profile `fix`，floor 0.5→0.8）与 `reshape-service.ts`（profile `reshape`，新增长度 floor 0.8）改调 `wiki/rewrite-fidelity.ts::checkRewriteFidelity`；`fix-deterministic.ts::bodyShrankTooMuch` 退役（收编）；`supplement-guard.ts::checkSupplementFidelity` 收编为薄转发（profile `supplement`），链接规则由「禁止新增」改为「禁止丢失」（preserve）|
 
 ---
 
