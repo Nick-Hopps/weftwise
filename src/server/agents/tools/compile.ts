@@ -43,7 +43,7 @@ export function compileToolSet(
     used.add(providerName);
     toolSet[providerName] = tool({
       description: t.description,
-      parameters: t.inputSchema,
+      inputSchema: t.inputSchema,
       execute: async (args: unknown) => {
         const start = Date.now();
         opts?.chargeStep?.();
@@ -66,7 +66,7 @@ export function synthesizeFinishTool(schema: ZodSchema, capture: (value: unknown
   return {
     [FINISH_TOOL_NAME]: tool({
       description: 'Submit the final structured result. Call this exactly once when done; do not answer in plain text.',
-      parameters: schema,
+      inputSchema: schema,
       execute: async (args: unknown) => {
         capture(args);
         return { accepted: true };

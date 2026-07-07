@@ -31,6 +31,7 @@ vi.mock('ai', () => ({
   generateObject: vi.fn(),
   generateText: mocks.generateText,
   streamText: vi.fn(),
+  stepCountIs: (n: number) => ({ stepCount: n }),
 }));
 
 vi.mock('../task-router', () => ({

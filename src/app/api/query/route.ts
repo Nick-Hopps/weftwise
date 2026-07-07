@@ -196,12 +196,12 @@ export async function POST(request: NextRequest) {
         for await (const part of answerStream.fullStream) {
           if (request.signal.aborted) return;
           if (part.type === 'text-delta') {
-            fullAnswer += part.textDelta;
-            emit('answer-delta', { delta: part.textDelta });
+            fullAnswer += part.text;
+            emit('answer-delta', { delta: part.text });
           } else if (part.type === 'tool-call') {
             emit('tool-call', {
               toolName: part.toolName,
-              args: summarizeToolArgs(part.toolName, part.args),
+              args: summarizeToolArgs(part.toolName, part.input),
             });
           } else if (part.type === 'error') {
             const message = part.error instanceof Error ? part.error.message : String(part.error);

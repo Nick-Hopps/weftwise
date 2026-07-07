@@ -60,7 +60,7 @@ beforeEach(() => {
   mockAgentic.mockReturnValue({
     stream: {
       fullStream: (async function* () {
-        yield { type: 'text-delta', textDelta: 'hello' } as const;
+        yield { type: 'text-delta', text: 'hello' } as const;
       })(),
     },
     accessed: { meta: new Map(), bodies: new Map() },
