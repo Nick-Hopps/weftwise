@@ -72,4 +72,10 @@ describe('jobs-repo.findLatestIngestJobForSource', () => {
     expect([j1.id, j2.id]).toContain(hit!.id);
     expect(repo.findLatestIngestJobForSource('s1', 'src-zzz')).toBeNull();
   });
+
+  it('不同 subject 不命中（subject 隔离）', async () => {
+    const { repo } = await setupJobs();
+    repo.enqueueJob('ingest', { sourceId: 'src-a', filename: 'a.md', subjectId: 's1' }, 's1');
+    expect(repo.findLatestIngestJobForSource('s2', 'src-a')).toBeNull();
+  });
 });
