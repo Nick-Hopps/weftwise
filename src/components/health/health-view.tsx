@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import { groupBySeverity, SEVERITY_TONE } from './lint-findings';
 import { FindingRow } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
+import { ResearchBacklogSection } from './research-backlog-section';
 import type { LintFinding, ResearchCandidate } from '@/lib/contracts';
 
 type Scope = 'subject' | 'all';
@@ -351,6 +352,8 @@ export function HealthView() {
           confirming={ingesting}
         />
       )}
+
+      {!allSubjects && <ResearchBacklogSection onResearchStarted={setResearchJobId} />}
 
       {running && (
         <p className="text-sm text-foreground-secondary">{latestMessage || 'Running health check…'}</p>
