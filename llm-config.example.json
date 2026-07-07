@@ -57,6 +57,16 @@
       "profile": "openai-default",
       "model": "text-embedding-3-small"
     },
+    "research:queries": {
+      "profile": "openai-default",
+      "model": "gpt-4o-mini",
+      "temperature": 0.2
+    },
+    "research:triage": {
+      "profile": "openai-default",
+      "model": "gpt-4o-mini",
+      "temperature": 0
+    },
     "ingest:planner": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6"

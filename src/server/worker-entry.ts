@@ -31,6 +31,7 @@ import './services/embedding-service';
 import './services/curate-service';
 import './services/reenrich-service';
 import './services/fix-service';
+import './services/research-service';
 
 const log = createLogger('worker');
 
