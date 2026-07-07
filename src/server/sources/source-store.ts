@@ -224,3 +224,29 @@ export function updateSourcePageLinks(sourceId: string, pageSlugs: string[]): vo
     // best-effort
   }
 }
+
+/**
+ * 删除 source 的落盘文件：subject-scoped raw 文件 + sidecar（含 legacy 平铺 sidecar）。
+ * Best-effort：文件缺失/删除失败均静默。
+ * 刻意**不删** legacy 平铺 raw（vault/raw/<filename>）——它按 filename 命名，
+ * 可能与其他 subject 的同名 source 共享，删除有误伤风险；由 stale-source 检查兜底提示。
+ */
+export function deleteRawSourceFiles(
+  subjectSlug: string,
+  filename: string,
+  sourceId: string,
+): void {
+  const safeFilename = path.basename(filename);
+  const candidates = [
+    path.join(rawDirFor(subjectSlug), safeFilename),
+    path.join(sourcesMetaDirFor(subjectSlug), `${sourceId}.json`),
+    vaultPath('.llm-wiki', 'sources', `${sourceId}.json`), // legacy 平铺 sidecar（UUID 命名，无歧义）
+  ];
+  for (const p of candidates) {
+    try {
+      fs.rmSync(p, { force: true });
+    } catch {
+      // best-effort
+    }
+  }
+}
