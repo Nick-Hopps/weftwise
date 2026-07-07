@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as sourcesRepo from '@/server/db/repos/sources-repo';
+import * as jobsRepo from '@/server/db/repos/jobs-repo';
 import { deleteRawSourceFiles } from '@/server/sources/source-store';
 import { commitVaultChanges } from '@/server/git/git-service';
 import { acquireVaultLock } from '@/server/wiki/vault-mutex';
@@ -10,6 +11,7 @@ export const runtime = 'nodejs';
 
 /**
  * DELETE /api/sources/[id] —— 删除孤儿 source（零 page_sources 关联才允许）。
+ * 同源 ingest job 在途（pending/running）时 409 in-flight（对称于 reingest 端点）。
  * vault 锁内：删 raw 文件 + sidecar（best-effort）→ 删 sources 行 → git commit。
  * 关联的 failed job 行不动（留着无害；reingest 端点靠 source 存在性校验兜底）。
  */
@@ -35,6 +37,13 @@ export async function DELETE(
   const unreferenced = sourcesRepo.listUnreferencedSources(subject.id).some((s) => s.id === id);
   if (!unreferenced) {
     return NextResponse.json({ error: 'already-referenced' }, { status: 409 });
+  }
+
+  // 同源 ingest job 在途时不允许删除（对称于 reingest 端点的 in-flight 守卫）：
+  // 删除在途任务的 raw 文件会让 worker 读盘失败，甚至在 Saga 完成后插入指向已删 source 的悬挂 page_sources 行
+  const job = jobsRepo.findLatestIngestJobForSource(subject.id, id);
+  if (job && (job.status === 'pending' || job.status === 'running')) {
+    return NextResponse.json({ error: 'in-flight' }, { status: 409 });
   }
 
   const release = await acquireVaultLock();

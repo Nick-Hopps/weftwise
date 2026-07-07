@@ -101,6 +101,21 @@ export function HealthView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixStatus, fixEvents, queryClient, allSubjects, subjectId]);
 
+  const [reingestJobId, setReingestJobId] = useState<string | null>(null);
+  const { status: reingestStatus } = useJobStream(reingestJobId);
+
+  // Retry ingest 完成 → 自动重跑体检刷新 findings（与 Fix 闭环一致）；失败则仅停止追踪
+  useEffect(() => {
+    if (reingestStatus === 'completed') {
+      queryClient.invalidateQueries({ queryKey: ['pages'] });
+      setReingestJobId(null);
+      void runLint();
+    } else if (reingestStatus === 'failed') {
+      setReingestJobId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reingestStatus, queryClient]);
+
   async function runCurate() {
     setCurateStarting(true);
     try {
@@ -211,7 +226,9 @@ export function HealthView() {
     try {
       const res = await apiFetch(`/api/sources/${sourceId}/reingest`, { method: 'POST' });
       if (res.status === 202) {
-        // 新 job 会出现在全局 JobsPanel；本行标记已处置并本地隐藏
+        // 新 job 会出现在全局 JobsPanel；本行标记已处置并本地隐藏；同时本地追踪完成后自动重跑体检
+        const json = (await res.json()) as { jobId: string };
+        setReingestJobId(json.jobId);
         setHandledSourceIds((prev) => new Set(prev).add(sourceId));
       }
     } finally {
@@ -244,6 +261,7 @@ export function HealthView() {
     setResearchError(null);
     setHandledSourceIds(new Set());
     setSourceActing(null);
+    setReingestJobId(null);
   }
 
   const [typeFilter, setTypeFilter] = useState<LintFinding['type'] | null>(null);

@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mockResolve = vi.fn();
 const mockGetSource = vi.fn();
 const mockListUnreferenced = vi.fn();
+const mockFindJob = vi.fn();
 const mockDeleteSource = vi.fn();
 const mockDeleteFiles = vi.fn();
 const mockCommit = vi.fn();
@@ -18,6 +19,9 @@ vi.mock('@/server/db/repos/sources-repo', () => ({
   getSource: (...a: unknown[]) => mockGetSource(...a),
   listUnreferencedSources: (...a: unknown[]) => mockListUnreferenced(...a),
   deleteSource: (...a: unknown[]) => mockDeleteSource(...a),
+}));
+vi.mock('@/server/db/repos/jobs-repo', () => ({
+  findLatestIngestJobForSource: (...a: unknown[]) => mockFindJob(...a),
 }));
 vi.mock('@/server/sources/source-store', () => ({
   deleteRawSourceFiles: (...a: unknown[]) => mockDeleteFiles(...a),
@@ -44,6 +48,7 @@ beforeEach(() => {
   mockResolve.mockReturnValue({ subject: SUBJECT, error: null });
   mockGetSource.mockReturnValue(SOURCE);
   mockListUnreferenced.mockReturnValue([SOURCE]);
+  mockFindJob.mockReturnValue(null);
   mockAcquire.mockResolvedValue(mockRelease);
   mockCommit.mockResolvedValue('sha');
 });
@@ -62,6 +67,15 @@ describe('DELETE /api/sources/[id]', () => {
     const res = await call('src1');
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('already-referenced');
+    expect(mockDeleteSource).not.toHaveBeenCalled();
+  });
+
+  it('同源 ingest job 在途（pending/running）→ 409 in-flight，不动锁', async () => {
+    mockFindJob.mockReturnValue({ id: 'j1', status: 'running' });
+    const res = await call('src1');
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('in-flight');
+    expect(mockAcquire).not.toHaveBeenCalled();
     expect(mockDeleteSource).not.toHaveBeenCalled();
   });
 
