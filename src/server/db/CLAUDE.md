@@ -53,6 +53,7 @@
 ### `sources-repo.ts`
 
 - `upsertSource(subjectId, payload) / findByHash(subjectId, hash) / linkPageToSource(subjectId, pageSlug, sourceId)`
+- `listUnreferencedSources(subjectId)` —— 零 page_sources 关联的 source（孤儿候选）；`deleteSource(id)` —— 删单行（文件清理归 source-store）；`findLatestIngestJobForSource(subjectId, sourceId)`（jobs-repo）—— listJobs 按 type/subject 过滤后全量遍历 + JSON 解析精确匹配反查最新 ingest job
 
 ### `operations-repo.ts`
 
