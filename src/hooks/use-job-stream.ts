@@ -222,6 +222,11 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'fix:skip',
         'fix:warn',
         'fix:complete',
+        // Research events
+        'research:queries',
+        'research:search',
+        'research:triage',
+        'research:complete',
       ];
 
       const listeners: Array<{ type: string; handler: (e: Event) => void }> = [];

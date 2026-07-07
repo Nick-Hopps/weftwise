@@ -89,7 +89,7 @@ export interface WikiLink {
 
 export interface Job {
   id: string;
-  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix';
+  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research';
   status: 'pending' | 'running' | 'completed' | 'failed';
   paramsJson: string;
   resultJson: string | null;
@@ -168,6 +168,16 @@ export interface QueryResult {
   answer: string;
   citations: { pageSlug: string; excerpt: string }[];
   savedAsPage: string | null;
+}
+
+/** research job 输出的单条候选：只发现不写入，确认后经现有 /api/ingest urls[] 收口。 */
+export interface ResearchCandidate {
+  url: string;
+  title: string;
+  snippet: string;
+  /** triage 评分 0-3；triage 降级时为 null（按搜索排名前 3 未评分）。 */
+  score: number | null;
+  reason: string | null;
 }
 
 export interface LintFinding {
