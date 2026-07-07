@@ -26,7 +26,7 @@ export function TagPagesView({ tag }: { tag: string }) {
   const matched = pagesWithTag(pages, tag);
 
   return (
-    <div className="max-w-content mx-auto px-6 py-8 w-full space-y-6">
+    <div className="max-w-4xl mx-auto px-6 py-8 w-full space-y-6">
       <header>
         <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
           <Hash className="h-5 w-5 text-foreground-tertiary" />
