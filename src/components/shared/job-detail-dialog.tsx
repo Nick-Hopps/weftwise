@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronRight, Copy, X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-fetch';
@@ -96,7 +97,9 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
 
   const title = jobTitle(events);
 
-  return (
+  // 经 portal 渲染到 body：挂载点（JobsPanel/ProgressToast）祖先带 transform 类，
+  // 会劫持 position:fixed 的包含块，导致全屏遮罩被钉在右下角小面板内。
+  return createPortal(
     <div
       role="presentation"
       onClick={(e) => {
@@ -225,6 +228,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
