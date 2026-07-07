@@ -217,6 +217,28 @@ export function listJobs(filter?: JobFilter): Job[] {
   return rows.map(rowToJob);
 }
 
+/**
+ * 按 params.sourceId 反查本 subject 最新一条 ingest job（orphan-source 体检/reingest 用）。
+ * jobs 表无独立 source_id 列，靠解析 paramsJson 精确匹配；量级为单 subject 的 ingest
+ * job 数，个人库场景全量遍历可接受。
+ */
+export function findLatestIngestJobForSource(
+  subjectId: SubjectId,
+  sourceId: string
+): Job | null {
+  const candidates = listJobs({ type: 'ingest', subjectId }); // createdAt asc
+  let latest: Job | null = null;
+  for (const job of candidates) {
+    try {
+      const params = JSON.parse(job.paramsJson ?? '{}') as { sourceId?: unknown };
+      if (params.sourceId === sourceId) latest = job;
+    } catch {
+      // params 不可解析 → 跳过
+    }
+  }
+  return latest;
+}
+
 export function completeJob(
   id: string,
   result: Record<string, unknown>
