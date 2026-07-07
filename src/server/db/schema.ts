@@ -243,3 +243,16 @@ export const profileSignals = sqliteTable('profile_signals', {
   slug: text('slug'),
   createdAt: text('created_at').notNull(),
 });
+
+// T3.2：待研究问题队列（Ask AI 未命中信号 + 手动添加），subject-scoped。
+export const researchBacklog = sqliteTable('research_backlog', {
+  id: text('id').primaryKey(),
+  subjectId: text('subject_id')
+    .notNull()
+    .references(() => subjects.id, { onDelete: 'cascade' }),
+  question: text('question').notNull(),
+  source: text('source').notNull(), // 'ask-ai' | 'manual'
+  status: text('status').notNull().default('open'), // 'open' | 'researched' | 'dismissed'
+  researchJobId: text('research_job_id'),
+  createdAt: text('created_at').notNull(),
+});

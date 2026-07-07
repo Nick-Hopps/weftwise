@@ -145,6 +145,7 @@
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
+| `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
 
 ## 扩展指南
 
@@ -212,6 +213,7 @@ src/server/db/
 | 2026-06-24 | 性能：补热路径索引（`ensureIndexes`：wiki_links target/source + job_events + jobs）；`getBacklinks`/`getSourcesForPage` 改 JOIN 消除 N+1；`getAllLinks` 加可选 `metaKeys` 参；新增 `pruneJobEvents`；落地 pages/sources/jobs-repo + indexes 单测 |
 | 2026-06-27 | Cognitive Lens：新增 `user_profiles`（账户层画像，单例 user_id='local'）/ `page_renditions`（重塑缓存，一页一行，**故意不挂 subjects FK**，由 deleteBySubject+命中校验自洽）/ `profile_signals`（append-only 反馈）三表（`ensureTables` 加 3 个 `migrateXxx`）；新增 `profiles-repo`(getProfile/getProfileOrDefault/upsertProfile 自增 version) / `renditions-repo`(getRendition 按 hash+version 命中 / upsertRendition / deleteBySubject) / `signals-repo`(appendSignal/recentSignals) |
 | 2026-06-29 | Subject 级联删除：subjects-repo 新增 `deleteWithContents(id)`（单事务按子→父清全部 subject-scoped 表 + subject 行，原生 SQL 同 reset 风格）与 `listInboundReferences(id)`（入站跨主题引用守卫）；`SubjectError` code 去 `not-empty`、加 `protected`/`has-inbound-refs`；删除旧 `deleteIfEmpty`。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
+| 2026-07-07 | T3.2：新增 `research_backlog` 表（subject-scoped，id PK，FK subject_id CASCADE）+ `research-backlog-repo`（create 按归一化 question 去重 open 项 / listForSubject / updateStatus）；`deleteWithContents` 级联清单补该表；`lib/research-question.ts::normalizeResearchQuestion` 纯函数供去重复用 |
 
 ---
 

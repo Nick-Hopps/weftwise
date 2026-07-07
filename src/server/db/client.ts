@@ -483,6 +483,23 @@ function migrateProfileSignals(): void {
   `);
 }
 
+// T3.2：待研究问题队列（Ask AI 未命中信号 + 手动添加）。
+function migrateResearchBacklog(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('research_backlog')) return;
+  sqlite.exec(`
+    CREATE TABLE research_backlog (
+      id TEXT PRIMARY KEY,
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      question TEXT NOT NULL,
+      source TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      research_job_id TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
+}
+
 // 特例：FTS5 虚拟表不支持 _new + INSERT FROM 重建（索引可由 pages 重建），缺列时直接 DROP 重建
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
@@ -522,6 +539,8 @@ function ensureIndexes(): void {
       ON job_events(job_id, created_at, id);
     CREATE INDEX IF NOT EXISTS jobs_status_type_created_idx
       ON jobs(status, type, created_at);
+    CREATE INDEX IF NOT EXISTS research_backlog_subject_status_idx
+      ON research_backlog(subject_id, status, created_at);
   `);
 }
 
@@ -548,6 +567,7 @@ function ensureTables() {
     migrateUserProfiles();
     migratePageRenditions();
     migrateProfileSignals();
+    migrateResearchBacklog();
     ensurePagesFts();
     ensureIndexes();
   } finally {
