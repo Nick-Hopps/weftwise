@@ -6,6 +6,7 @@ import {
   CircleDashed,
   Clock,
   FileWarning,
+  FileX,
   Link2,
   Search,
   Unlink,
@@ -25,6 +26,7 @@ const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
   contradiction: AlertTriangle,
   'missing-crossref': Link2,
   'coverage-gap': CircleDashed,
+  'orphan-source': FileX,
 };
 
 const TYPE_LABEL: Record<LintFinding['type'], string> = {
@@ -35,6 +37,7 @@ const TYPE_LABEL: Record<LintFinding['type'], string> = {
   contradiction: 'Contradiction',
   'missing-crossref': 'Missing cross-ref',
   'coverage-gap': 'Coverage gap',
+  'orphan-source': 'Orphan source',
 };
 
 export function FindingRow({

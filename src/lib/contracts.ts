@@ -192,11 +192,17 @@ export interface ResearchBacklogEntry {
 }
 
 export interface LintFinding {
-  type: 'broken-link' | 'orphan' | 'missing-frontmatter' | 'stale-source' | 'contradiction' | 'missing-crossref' | 'coverage-gap';
+  type: 'broken-link' | 'orphan' | 'missing-frontmatter' | 'stale-source' | 'contradiction' | 'missing-crossref' | 'coverage-gap' | 'orphan-source';
   severity: 'critical' | 'warning' | 'info';
   pageSlug: string;
   description: string;
   suggestedFix: string | null;
+  /** orphan-source 专属：孤儿 source 的 DB id。 */
+  sourceId?: string;
+  /** orphan-source 专属：source 文件名（pageSlug 为空时的展示替代）。 */
+  sourceFilename?: string;
+  /** orphan-source 专属：关联的 failed ingest job id；查无 job / job 非 failed 时为 null。 */
+  failedJobId?: string | null;
 }
 
 export interface EnrichedLintFinding extends LintFinding {

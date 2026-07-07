@@ -145,3 +145,23 @@ describe('createFixGuard', () => {
     expect(g.totals()).toEqual({ update: 2, create: 1, writes: 3 });
   });
 });
+
+describe('partitionFindings — orphan-source', () => {
+  it('orphan-source 归入 ignored 桶（不进 Fix issues）', async () => {
+    const { partitionFindings } = await import('../fix-deterministic');
+    const finding = {
+      type: 'orphan-source' as const,
+      severity: 'warning' as const,
+      pageSlug: '',
+      description: 'Source "a.md" was ingested but its ingest job failed.',
+      suggestedFix: null,
+      sourceId: 'src-1',
+      sourceFilename: 'a.md',
+      failedJobId: 'job-1',
+    };
+    const { frontmatter, llm, ignored } = partitionFindings([finding]);
+    expect(frontmatter).toHaveLength(0);
+    expect(llm).toHaveLength(0);
+    expect(ignored).toEqual([finding]);
+  });
+});
