@@ -206,6 +206,32 @@ export function HealthView() {
     }
   }
 
+  async function reingestSource(sourceId: string) {
+    setSourceActing(sourceId);
+    try {
+      const res = await apiFetch(`/api/sources/${sourceId}/reingest`, { method: 'POST' });
+      if (res.status === 202) {
+        // 新 job 会出现在全局 JobsPanel；本行标记已处置并本地隐藏
+        setHandledSourceIds((prev) => new Set(prev).add(sourceId));
+      }
+    } finally {
+      setSourceActing(null);
+    }
+  }
+
+  async function deleteSource(sourceId: string) {
+    setSourceActing(sourceId);
+    try {
+      const res = await apiFetch(`/api/sources/${sourceId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setHandledSourceIds((prev) => new Set(prev).add(sourceId));
+        queryClient.invalidateQueries({ queryKey: ['sources'] });
+      }
+    } finally {
+      setSourceActing(null);
+    }
+  }
+
   function switchScope(next: Scope) {
     setScope(next);
     setJobId(null);
@@ -216,16 +242,26 @@ export function HealthView() {
     setResearchJobId(null);
     setCandidates(null);
     setResearchError(null);
+    setHandledSourceIds(new Set());
+    setSourceActing(null);
   }
 
   const [typeFilter, setTypeFilter] = useState<LintFinding['type'] | null>(null);
   useEffect(() => setTypeFilter(null), [scope]);
 
+  // orphan-source 行内动作：处置成功后本地隐藏该行（快照要等下次 lint 才刷新）
+  const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
+  const [sourceActing, setSourceActing] = useState<string | null>(null);
+
   const allFindings = data?.findings ?? [];
-  const visibleFindings = useMemo(
-    () => (typeFilter ? allFindings.filter((f) => f.type === typeFilter) : allFindings),
-    [allFindings, typeFilter],
-  );
+  // ⚠️ 已处置的 orphan-source 行过滤只能放在这一层——allFindings 的数组下标是
+  // coverageGapIds 的 gapId，服务端按最近快照同序校验，动 allFindings 会导致下标漂移
+  const visibleFindings = useMemo(() => {
+    const notHandled = allFindings.filter(
+      (f) => !(f.type === 'orphan-source' && f.sourceId && handledSourceIds.has(f.sourceId)),
+    );
+    return typeFilter ? notHandled.filter((f) => f.type === typeFilter) : notHandled;
+  }, [allFindings, typeFilter, handledSourceIds]);
   const groups = useMemo(() => groupBySeverity(visibleFindings), [visibleFindings]);
   const presentTypes = useMemo(
     () => [...new Set(allFindings.map((f) => f.type))].sort(),
@@ -462,6 +498,17 @@ export function HealthView() {
                         showSubject={allSubjects}
                         onResearch={gapId && !allSubjects ? () => startResearch({ gapIds: [gapId] }) : undefined}
                         researching={researching}
+                        onReingestSource={
+                          f.type === 'orphan-source' && f.sourceId && !allSubjects
+                            ? () => reingestSource(f.sourceId!)
+                            : undefined
+                        }
+                        onDeleteSource={
+                          f.type === 'orphan-source' && f.sourceId && !allSubjects
+                            ? () => deleteSource(f.sourceId!)
+                            : undefined
+                        }
+                        sourceActing={f.type === 'orphan-source' && f.sourceId === sourceActing}
                       />
                     );
                   })}
