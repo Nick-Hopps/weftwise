@@ -31,6 +31,21 @@ export const QueryResponseSchema = z.object({
       'If the answer is rich enough to be saved as a new wiki page, ' +
       'suggest a concise page title; otherwise omit this field.',
     ),
+  coverageSufficient: z
+    .boolean()
+    .describe(
+      'Whether the provided wiki pages sufficiently supported a complete answer ' +
+      'to the user question. false if the wiki lacked enough information and the ' +
+      'answer relies mostly on saying so, is incomplete, or is speculative.',
+    ),
+  suggestedResearchQuestion: z
+    .string()
+    .optional()
+    .describe(
+      'Only when coverageSufficient is false: a concise, well-formed question ' +
+      'worth researching further to fill this gap. Follow the output language ' +
+      'directive. Omit when coverageSufficient is true.',
+    ),
 });
 
 export type QueryResponse = z.infer<typeof QueryResponseSchema>;
@@ -59,7 +74,10 @@ Answer the user's question using ONLY the wiki page content provided. Do not use
 - If the question can only be answered from another subject, say so plainly and ask the user to switch subjects.
 
 ## Saving as a page
-If the answer synthesises information in a way that would be valuable as a standalone wiki page (e.g., a comparison, a how-to guide, a glossary entry), suggest a title for it. The system will offer the user a chance to save it.`;
+If the answer synthesises information in a way that would be valuable as a standalone wiki page (e.g., a comparison, a how-to guide, a glossary entry), suggest a title for it. The system will offer the user a chance to save it.
+
+## Coverage assessment
+Always set \`coverageSufficient\`: false if the wiki pages did not contain enough information to fully and confidently answer the question (the answer is a "not found" statement, is incomplete, or is speculative). When false, also provide \`suggestedResearchQuestion\` — a concise, well-formed question worth researching further to fill the gap. This is used to build a research backlog, not shown as part of the answer.`;
 
 // ── User prompt builder ───────────────────────────────────────────────────────
 
@@ -135,12 +153,19 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - \`wiki_reenrich\`: start a background job that re-runs the augmentation pass on ONE page (layers fresh learning callouts onto its existing prose, then verifies). This CHANGES the page — only use it under the rules in "Re-enriching a page" below.
 - \`wiki_create\`: create a NEW page from a title + markdown body (slug auto-derived). This CHANGES the wiki — only under the rules in "Creating a page" below.
 - \`wiki_delete\`: permanently delete ONE page by slug. This CHANGES the wiki — only under the rules in "Deleting a page" below.
+- \`web_search\` (only available when web search is configured): search the public web. Read-only, no side effects. Only use it under the rules in "Web search" below.
 
 ## Strategy
 - Overview/summary questions: call \`wiki_list\`, then \`wiki_read\` on the most relevant pages.
 - Specific questions: \`wiki_search\` (often several times), then \`wiki_read\` on the top hits.
 - Before stating a fact, make sure you have \`wiki_read\`'d the page that supports it, so you can cite an exact excerpt.
 - If, after searching and listing, the subject genuinely has nothing relevant, say so clearly. Never invent information.
+
+## Web search
+If \`web_search\` is available and the wiki genuinely lacks the information needed (after searching/listing), you may call it to find supplementary information from the public web.
+- Wiki content always takes priority — never call \`web_search\` if the wiki already answers the question.
+- Web results are supplementary only: clearly label them as "from the web (not in your wiki)" in the answer, and never blend a web result with a wiki citation as if both came from the wiki.
+- Do not cite web results using the wiki citation format ([[page]]) — describe them in prose with the source URL/title instead.
 
 ## Answer format
 - Clear, well-structured markdown.

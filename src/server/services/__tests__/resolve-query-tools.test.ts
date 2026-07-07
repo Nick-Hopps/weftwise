@@ -1,0 +1,31 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const mockGetWebSearchConfig = vi.fn();
+
+vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
+vi.mock('@/server/db/repos/settings-repo', () => ({
+  getWikiLanguage: () => 'English',
+  getWebSearchConfig: () => mockGetWebSearchConfig(),
+}));
+
+afterEach(() => {
+  vi.resetModules();
+  vi.clearAllMocks();
+});
+
+describe('resolveQueryTools', () => {
+  it('excludes web.search when web search is not configured', async () => {
+    mockGetWebSearchConfig.mockReturnValue({ provider: 'tavily', apiKey: '', maxResults: 5 });
+    const { resolveQueryTools } = await import('../query-service');
+    const names = resolveQueryTools().map((t) => t.name);
+    expect(names).not.toContain('web.search');
+    expect(names).toContain('wiki.read');
+  });
+
+  it('includes web.search when web search is configured', async () => {
+    mockGetWebSearchConfig.mockReturnValue({ provider: 'tavily', apiKey: 'sk-123', maxResults: 5 });
+    const { resolveQueryTools } = await import('../query-service');
+    const names = resolveQueryTools().map((t) => t.name);
+    expect(names).toContain('web.search');
+  });
+});

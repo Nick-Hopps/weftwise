@@ -41,14 +41,36 @@ import { buildWikiPath, slugFromTitle } from '../wiki/page-identity';
 import { serializeFrontmatter } from '../wiki/frontmatter';
 import { registerHandler } from '../jobs/worker';
 import type { QueryResult, Job, Subject } from '@/lib/contracts';
+import { isWebSearchConfigured } from '@/server/search/web-search';
+import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
-// 模块级：ToolDef 无状态纯对象，构造一次即可复用
-const queryToolDefs = createBuiltinToolRegistry().resolve(['wiki.read', 'wiki.search', 'wiki.list', 'wiki.reenrich', 'wiki.create', 'wiki.delete']);
+const BASE_QUERY_TOOL_NAMES = ['wiki.read', 'wiki.search', 'wiki.list', 'wiki.reenrich', 'wiki.create', 'wiki.delete'];
 
-const QueryCitationsSchema = QueryResponseSchema.pick({ citations: true });
+/** query 工具集：`web.search` 仅在联网检索已配置时注入——未配置时模型完全看不到该工具。导出供单测直接校验。 */
+export function resolveQueryTools() {
+  const names = isWebSearchConfigured() ? [...BASE_QUERY_TOOL_NAMES, 'web.search'] : BASE_QUERY_TOOL_NAMES;
+  return createBuiltinToolRegistry().resolve(names);
+}
+
+const QueryCitationsSchema = QueryResponseSchema.pick({
+  citations: true,
+  coverageSufficient: true,
+  suggestedResearchQuestion: true,
+});
+
+/**
+ * best-effort 把"库内答不上"的问题写入待研究队列；写入失败只记日志，不影响问答响应。
+ */
+function recordCoverageGap(subject: Subject, question: string, suggestedQuestion?: string): void {
+  try {
+    researchBacklogRepo.create(subject.id, suggestedQuestion?.trim() || question, 'ask-ai');
+  } catch (err) {
+    console.error('[query] failed to record research backlog entry', err);
+  }
+}
 
 // QueryContextPage 类型已迁至 query-tools，此处再导出保持向后兼容
 export type { QueryContextPage, AccessedPages } from './query-tools';
@@ -65,12 +87,18 @@ function subjectCtxFrom(subject: Subject) {
   };
 }
 
+export interface QueryCitationsResult {
+  citations: { pageSlug: string; excerpt: string }[];
+  coverageSufficient: boolean;
+  suggestedResearchQuestion?: string;
+}
+
 export async function generateQueryCitations(
   question: string,
   fullAnswer: string,
   context: QueryContextPage[],
   subject: Subject,
-): Promise<{ pageSlug: string; excerpt: string }[]> {
+): Promise<QueryCitationsResult> {
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(subject),
@@ -90,7 +118,7 @@ ${fullAnswer}
 Return only the structured citations for the draft answer above. Do not rewrite the answer.`,
   );
 
-  return response.citations.map((c) => {
+  const citations = response.citations.map((c) => {
     const page = context.find((p) => p.slug === c.pageSlug);
     if (!page) return { ...c, excerpt: `[unverified] ${c.excerpt}` };
     const normalizedContent = page.content.toLowerCase().replace(/\s+/g, ' ');
@@ -98,6 +126,12 @@ Return only the structured citations for the draft answer above. Do not rewrite 
     const isVerified = normalizedContent.includes(normalizedExcerpt);
     return isVerified ? c : { ...c, excerpt: `[unverified] ${c.excerpt}` };
   });
+
+  return {
+    citations,
+    coverageSufficient: response.coverageSufficient,
+    suggestedResearchQuestion: response.suggestedResearchQuestion,
+  };
 }
 
 /**
@@ -112,7 +146,7 @@ export function streamAgenticQuery(opts: {
   abortSignal?: AbortSignal;
 }): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
   const accessed = createAccessedPages();
-  const tools = compileToolSet(queryToolDefs, buildQueryToolContext(opts.subject, accessed));
+  const tools = compileToolSet(resolveQueryTools(), buildQueryToolContext(opts.subject, accessed));
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(opts.subject),
@@ -140,11 +174,12 @@ export async function runQuery(
   currentPageSlug?: string,
 ): Promise<QueryResult> {
   if (!subjectHasContent(subject.id)) {
+    recordCoverageGap(subject, question);
     return { answer: NO_QUERY_CONTEXT_ANSWER, citations: [], savedAsPage: null };
   }
 
   const accessed = createAccessedPages();
-  const tools = compileToolSet(queryToolDefs, buildQueryToolContext(subject, accessed));
+  const tools = compileToolSet(resolveQueryTools(), buildQueryToolContext(subject, accessed));
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(subject),
@@ -162,12 +197,16 @@ export async function runQuery(
 
   let citations: { pageSlug: string; excerpt: string }[] = [];
   try {
-    citations = await generateQueryCitations(
+    const result = await generateQueryCitations(
       question,
       answer,
       accessedToContext(subject, accessed),
       subject,
     );
+    citations = result.citations;
+    if (!result.coverageSufficient) {
+      recordCoverageGap(subject, question, result.suggestedResearchQuestion);
+    }
   } catch {
     citations = [];
   }

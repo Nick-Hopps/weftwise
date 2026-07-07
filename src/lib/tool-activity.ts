@@ -13,6 +13,7 @@ export function toolActivityIcon(tool: string): string {
     case 'wiki_delete': return '🗑';
     case 'wiki_merge': return '🔗';
     case 'wiki_split': return '✂️';
+    case 'web_search': return '🌐';
     default: return '•';
   }
 }
@@ -28,6 +29,7 @@ export function toolActivityVerb(tool: string): string {
     case 'wiki_delete': return 'Deleting';
     case 'wiki_merge': return 'Merging';
     case 'wiki_split': return 'Splitting';
+    case 'web_search': return 'Searching the web';
     default: return tool;
   }
 }
@@ -46,5 +48,6 @@ export function summarizeToolArgs(tool: string, args: unknown): string {
     return s && t ? `${s} → ${t}` : s || t;
   }
   if (tool === 'wiki_split') return typeof a.slug === 'string' ? a.slug : '';
+  if (tool === 'web_search') return typeof a.query === 'string' ? a.query : '';
   return '';
 }

@@ -51,3 +51,11 @@ describe('tool-activity - wiki_merge/wiki_split', () => {
     expect(summarizeToolArgs('wiki_split', { slug: 'a' })).toBe('a');
   });
 });
+
+describe('tool-activity - web_search', () => {
+  it('图标/动词/参数摘要', () => {
+    expect(toolActivityIcon('web_search')).toBe('🌐');
+    expect(toolActivityVerb('web_search')).toBe('Searching the web');
+    expect(summarizeToolArgs('web_search', { query: 'foo' })).toBe('foo');
+  });
+});

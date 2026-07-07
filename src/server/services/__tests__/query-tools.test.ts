@@ -29,6 +29,11 @@ vi.mock('../page-write', () => ({
   createPageInSubject: (...a: unknown[]) => mockCreatePage(...a),
 }));
 
+const mockWebSearch = vi.fn();
+vi.mock('@/server/search/web-search', () => ({
+  webSearch: (...a: unknown[]) => mockWebSearch(...a),
+}));
+
 import {
   buildQueryToolContext,
   createAccessedPages,
@@ -223,5 +228,16 @@ describe('buildQueryToolContext - delete/create', () => {
     const out = await ctx.createPage!(input);
     expect(mockCreatePage).toHaveBeenCalledWith(SUBJECT, input);
     expect(out).toEqual({ createdSlug: 'foo' });
+  });
+});
+
+describe('buildQueryToolContext - webSearch', () => {
+  it('委托底层 webSearch(query)', async () => {
+    mockWebSearch.mockReset();
+    mockWebSearch.mockResolvedValue([{ title: 'T', url: 'https://x', snippet: 'S' }]);
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    const out = await ctx.webSearch!('foo');
+    expect(mockWebSearch).toHaveBeenCalledWith('foo');
+    expect(out).toEqual([{ title: 'T', url: 'https://x', snippet: 'S' }]);
   });
 });
