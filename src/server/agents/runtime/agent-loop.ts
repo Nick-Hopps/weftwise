@@ -1,9 +1,9 @@
-import { generateObject, generateText, InvalidToolArgumentsError, type ToolSet, type CoreMessage } from 'ai';
+import { generateObject, generateText, InvalidToolInputError, stepCountIs, type ToolSet, type ModelMessage } from 'ai';
 import { randomUUID } from 'node:crypto';
 import type { ZodSchema } from 'zod';
 import type { AgentContext, SkillTemplate } from '../types';
 import { resolveTask } from '../../llm/task-router';
-import { resolveModel } from '../../llm/provider-registry';
+import { resolveModel, withAnthropicStructuredOutputDefault } from '../../llm/provider-registry';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';
 import { createRunStepTracker } from './budget';
 import { agentToolContext } from '../tools/tool-context';
@@ -154,7 +154,7 @@ function resolveSkillModel(skill: SkillTemplate): { model: ResolvedModel; route:
 }
 
 /** 构造 system + user 消息（非字符串 input 序列化为 JSON）。 */
-function buildMessages(skill: SkillTemplate, input: unknown): CoreMessage[] {
+function buildMessages(skill: SkillTemplate, input: unknown): ModelMessage[] {
   return [
     { role: 'system', content: skill.systemPrompt },
     { role: 'user', content: typeof input === 'string' ? input : JSON.stringify(input) },
@@ -169,7 +169,7 @@ async function generateStructuredResult(
   runSteps: RunStepTracker,
   model: ResolvedModel,
   route: TaskRoute,
-  messages: CoreMessage[],
+  messages: ModelMessage[],
 ): Promise<GenerationResult> {
   const schema = skill.outputSchema!;
   try {
@@ -177,13 +177,14 @@ async function generateStructuredResult(
       model,
       schema,
       messages,
-      maxTokens: skill.model?.maxTokens ?? route.maxTokens,
+      maxOutputTokens: skill.model?.maxTokens ?? route.maxTokens,
       temperature: skill.model?.temperature ?? route.temperature,
+      providerOptions: withAnthropicStructuredOutputDefault(route),
     });
     return {
       output: result.object,
-      inputTokens: result.usage?.promptTokens ?? 0,
-      outputTokens: result.usage?.completionTokens ?? 0,
+      inputTokens: result.usage?.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? 0,
       cacheHitTokens: readCacheHitTokens(result.providerMetadata),
     };
   } catch (err) {
@@ -214,25 +215,25 @@ async function generateTextResult(
   runId: string,
   model: ResolvedModel,
   route: TaskRoute,
-  messages: CoreMessage[],
+  messages: ModelMessage[],
   toolSet: ToolSet,
 ): Promise<GenerationResult> {
   const result = await generateText({
     model,
     tools: toolSet,
     messages,
-    maxTokens: skill.model?.maxTokens ?? route.maxTokens,
+    maxOutputTokens: skill.model?.maxTokens ?? route.maxTokens,
     temperature: skill.model?.temperature ?? route.temperature,
     // SDK maxSteps 是第一道防线（静默截断工具轮次）；runSteps 是纵深防御——
     // generateObject 路径的唯一步数防线，也是全路径的步数遥测来源。
     // 两者同值是有意的，不要为让 runSteps 先触发而改成 N-1。
-    maxSteps: ctx.budgetSnapshot.maxSteps,
+    stopWhen: stepCountIs(ctx.budgetSnapshot.maxSteps),
     // 工具调用参数修复：部分供应商（如 DeepSeek）会在合法 JSON 参数后多吐尾随字符
-    //（典型多一个 `}`），AI SDK 严格 JSON.parse 拒绝 → InvalidToolArgumentsError。
+    //（典型多一个 `}`），AI SDK 严格 JSON.parse 拒绝 → InvalidToolInputError。
     // 提取第一个配平 JSON 值剥离尾随垃圾后重试；仅修参数解析错误，schema 不匹配不误修。
     experimental_repairToolCall: async ({ toolCall, error }) => {
-      if (!InvalidToolArgumentsError.isInstance(error)) return null;
-      const repaired = repairToolCallArgs(toolCall.args);
+      if (!InvalidToolInputError.isInstance(error)) return null;
+      const repaired = repairToolCallArgs(toolCall.input);
       if (!repaired) return null;
       ctx.emit('agent:step', `${skill.name} repaired tool-call args for ${toolCall.toolName}`, {
         runId,
@@ -241,13 +242,13 @@ async function generateTextResult(
         kind: 'tool-call-repair',
         tool: toolCall.toolName,
       });
-      return { ...toolCall, args: repaired };
+      return { ...toolCall, input: repaired };
     },
   });
   return {
     output: result.text,
-    inputTokens: result.usage?.promptTokens ?? 0,
-    outputTokens: result.usage?.completionTokens ?? 0,
+    inputTokens: result.usage?.inputTokens ?? 0,
+    outputTokens: result.usage?.outputTokens ?? 0,
     cacheHitTokens: readCacheHitTokens(result.providerMetadata),
   };
 }
@@ -257,11 +258,11 @@ class NoFinishOutputError extends Error {}
 
 /**
  * 「finish 工具入参校验失败」判定：模型偶发以空/不合规入参调 finish（典型 packyapi+Claude：
- * extended thinking 后函数调用参数串为空 → AI SDK 以 {} 校验 schema → InvalidToolArgumentsError）。
+ * extended thinking 后函数调用参数串为空 → AI SDK 以 {} 校验 schema → InvalidToolInputError）。
  * 这类抖动靠重试恢复，而非补字段；普通工具（wiki.read/search）的入参错误不在此列。
  */
 function isFinishArgsError(err: unknown): boolean {
-  return InvalidToolArgumentsError.isInstance(err)
+  return InvalidToolInputError.isInstance(err)
     && (err as { toolName?: unknown }).toolName === FINISH_TOOL_NAME;
 }
 
@@ -280,7 +281,7 @@ async function generateCombinedResult(
   runId: string,
   model: ResolvedModel,
   route: TaskRoute,
-  messages: CoreMessage[],
+  messages: ModelMessage[],
   toolSet: ToolSet,
   schema: ZodSchema,
 ): Promise<GenerationResult> {
@@ -314,7 +315,7 @@ async function runCombinedAttempt(
   ctx: AgentContext,
   model: ResolvedModel,
   route: TaskRoute,
-  messages: CoreMessage[],
+  messages: ModelMessage[],
   toolSet: ToolSet,
   schema: ZodSchema,
 ): Promise<GenerationResult> {
@@ -325,18 +326,20 @@ async function runCombinedAttempt(
     model,
     tools,
     messages,
-    maxTokens: skill.model?.maxTokens ?? route.maxTokens,
+    maxOutputTokens: skill.model?.maxTokens ?? route.maxTokens,
     temperature: skill.model?.temperature ?? route.temperature,
-    maxSteps: ctx.budgetSnapshot.maxSteps,
-    // 末步强制调 finish，杜绝"只读不交"：到达倒数第二步且尚未 finish 时锁定 toolChoice。
-    experimental_prepareStep: async ({ stepNumber, maxSteps }: { stepNumber: number; maxSteps: number }) =>
-      stepNumber >= maxSteps - 1 && captured === undefined
-        ? { toolChoice: { type: 'tool' as const, toolName: FINISH_TOOL_NAME } }
+    stopWhen: stepCountIs(ctx.budgetSnapshot.maxSteps),
+    // 末步只留 finish 工具，杜绝"只读不交"：到达倒数第二步且尚未 finish 时用 activeTools
+    // 收窄工具集（不用 tool_choice 强制——Claude Code 系中转会整单拒绝强制自定义工具；
+    // 模型若仍以纯文本作答，由下方 recoverStructuredOutput 兜底）。
+    prepareStep: async ({ stepNumber }) =>
+      stepNumber >= ctx.budgetSnapshot.maxSteps - 1 && captured === undefined
+        ? { activeTools: [FINISH_TOOL_NAME] }
         : {},
     experimental_repairToolCall: async ({ toolCall, error }) => {
-      if (!InvalidToolArgumentsError.isInstance(error)) return null;
-      const repaired = repairToolCallArgs(toolCall.args);
-      return repaired ? { ...toolCall, args: repaired } : null;
+      if (!InvalidToolInputError.isInstance(error)) return null;
+      const repaired = repairToolCallArgs(toolCall.input);
+      return repaired ? { ...toolCall, input: repaired } : null;
     },
   });
   if (captured === undefined) {
@@ -347,8 +350,8 @@ async function runCombinedAttempt(
   }
   return {
     output: captured,
-    inputTokens: result.usage?.promptTokens ?? 0,
-    outputTokens: result.usage?.completionTokens ?? 0,
+    inputTokens: result.usage?.inputTokens ?? 0,
+    outputTokens: result.usage?.outputTokens ?? 0,
     cacheHitTokens: readCacheHitTokens(result.providerMetadata),
   };
 }
@@ -377,8 +380,8 @@ function recoverStructuredOutput(err: unknown, schema: ZodSchema): {
   if (direct.success) {
     return {
       object: direct.data,
-      inputTokens: readUsageToken(err, 'promptTokens'),
-      outputTokens: readUsageToken(err, 'completionTokens'),
+      inputTokens: readUsageToken(err, 'inputTokens'),
+      outputTokens: readUsageToken(err, 'outputTokens'),
       reason: 'recovered JSON from err.text matched schema',
     };
   }
@@ -388,8 +391,8 @@ function recoverStructuredOutput(err: unknown, schema: ZodSchema): {
 
   return {
     object: repaired,
-    inputTokens: readUsageToken(err, 'promptTokens'),
-    outputTokens: readUsageToken(err, 'completionTokens'),
+    inputTokens: readUsageToken(err, 'inputTokens'),
+    outputTokens: readUsageToken(err, 'outputTokens'),
     reason: 'parsed JSON-string object fields from err.text',
   };
 }
@@ -599,7 +602,7 @@ export function readCacheHitTokens(meta: unknown): number {
   return 0;
 }
 
-function readUsageToken(value: unknown, key: 'promptTokens' | 'completionTokens'): number {
+function readUsageToken(value: unknown, key: 'inputTokens' | 'outputTokens'): number {
   if (!value || typeof value !== 'object') return 0;
   const usage = (value as Record<string, unknown>).usage;
   if (!usage || typeof usage !== 'object') return 0;
