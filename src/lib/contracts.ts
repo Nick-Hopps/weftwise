@@ -180,6 +180,17 @@ export interface ResearchCandidate {
   reason: string | null;
 }
 
+/** T3.2 待研究问题队列条目（Ask AI 未命中信号 + 手动添加）。 */
+export interface ResearchBacklogEntry {
+  id: string;
+  subjectId: SubjectId;
+  question: string;
+  source: 'ask-ai' | 'manual';
+  status: 'open' | 'researched' | 'dismissed';
+  researchJobId: string | null;
+  createdAt: string;
+}
+
 export interface LintFinding {
   type: 'broken-link' | 'orphan' | 'missing-frontmatter' | 'stale-source' | 'contradiction' | 'missing-crossref' | 'coverage-gap';
   severity: 'critical' | 'warning' | 'info';

@@ -181,6 +181,7 @@ export function deleteWithContents(id: string): void {
     sqlite.prepare(`DELETE FROM pages WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM sources WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM profile_signals WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM research_backlog WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id IN (SELECT id FROM jobs WHERE subject_id = ?)`).run(id);
     sqlite.prepare(`DELETE FROM job_events WHERE job_id IN (SELECT id FROM jobs WHERE subject_id = ?)`).run(id);
     sqlite.prepare(`DELETE FROM operations WHERE subject_id = ?`).run(id);

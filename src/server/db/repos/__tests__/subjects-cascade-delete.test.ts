@@ -51,12 +51,14 @@ function seedSubjectData(sqlite: any, subjectId: string) {
     .run(`job-${subjectId}`, 'plan', 'k', '{}', now);
   sqlite.prepare(`INSERT INTO operations (id, job_id, subject_id, pre_head, post_head, changeset_json, status) VALUES (?,?,?,?,?,?,?)`)
     .run(`op-${subjectId}`, `job-${subjectId}`, subjectId, 'pre', 'post', '{}', 'applied');
+  sqlite.prepare(`INSERT INTO research_backlog (id, subject_id, question, source, status, research_job_id, created_at) VALUES (?,?,?,?,?,?,?)`)
+    .run(`rb-${subjectId}`, subjectId, 'what is x?', 'ask-ai', 'open', null, now);
 }
 
 const SUBJECT_TABLES = [
   'pages', 'sources', 'page_sources', 'page_aliases', 'wiki_links',
   'page_embeddings', 'page_maturity', 'page_renditions', 'profile_signals',
-  'conversations', 'operations', 'jobs', 'pages_fts',
+  'conversations', 'operations', 'jobs', 'pages_fts', 'research_backlog',
 ];
 
 function totalRowsForSubject(sqlite: any, subjectId: string): number {
