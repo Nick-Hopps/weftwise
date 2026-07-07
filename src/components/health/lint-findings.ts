@@ -35,7 +35,7 @@ export function groupBySeverity(
 }
 
 export function findingHref(f: EnrichedLintFinding): string | null {
-  // coverage-gap 指向尚不存在的建议新页，不可点击
-  if (f.type === 'coverage-gap') return null;
+  // coverage-gap 指向尚不存在的建议新页；orphan-source 无对应页面 —— 均不可点击
+  if (f.type === 'coverage-gap' || f.type === 'orphan-source') return null;
   return `/wiki/${f.pageSlug}?s=${encodeURIComponent(f.subjectSlug)}`;
 }

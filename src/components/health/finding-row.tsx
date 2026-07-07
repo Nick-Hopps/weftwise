@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -8,7 +9,9 @@ import {
   FileWarning,
   FileX,
   Link2,
+  RefreshCw,
   Search,
+  Trash2,
   Unlink,
   Unplug,
   type LucideIcon,
@@ -45,13 +48,21 @@ export function FindingRow({
   showSubject = false,
   onResearch,
   researching = false,
+  onReingestSource,
+  onDeleteSource,
+  sourceActing = false,
 }: {
   finding: EnrichedLintFinding;
   showSubject?: boolean;
   /** coverage-gap 专属：触发针对本条 gap 的 research job。未传则不渲染按钮。 */
   onResearch?: () => void;
   researching?: boolean;
+  /** orphan-source 专属：重新触发 ingest / 删除 source。未传则不渲染按钮。 */
+  onReingestSource?: () => void;
+  onDeleteSource?: () => void;
+  sourceActing?: boolean;
 }) {
+  const [deleteArmed, setDeleteArmed] = useState(false);
   const Icon = TYPE_ICON[finding.type];
   const href = findingHref(finding);
 
@@ -71,6 +82,10 @@ export function FindingRow({
             <Link href={href} className="text-sm font-medium text-accent hover:underline truncate">
               {finding.pageSlug}
             </Link>
+          ) : finding.type === 'orphan-source' ? (
+            <span className="text-sm font-medium text-foreground truncate">
+              {finding.sourceFilename ?? finding.sourceId}
+            </span>
           ) : (
             <span className="text-sm font-medium text-foreground truncate inline-flex items-center">
               {finding.pageSlug}
@@ -91,6 +106,34 @@ export function FindingRow({
             {!researching && <Search className="h-3 w-3" />}
             Research this gap
           </Button>
+        )}
+        {finding.type === 'orphan-source' && (onReingestSource || onDeleteSource) && (
+          <div className="mt-1 flex items-center gap-2">
+            {onReingestSource && (
+              <Button intent="secondary" size="sm" onClick={onReingestSource} loading={sourceActing}>
+                {!sourceActing && <RefreshCw className="h-3 w-3" />}
+                Retry ingest
+              </Button>
+            )}
+            {onDeleteSource && (
+              <Button
+                intent={deleteArmed ? 'danger' : 'secondary'}
+                size="sm"
+                disabled={sourceActing}
+                onClick={() => {
+                  if (!deleteArmed) {
+                    setDeleteArmed(true);
+                    return;
+                  }
+                  setDeleteArmed(false);
+                  onDeleteSource();
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+                {deleteArmed ? 'Confirm delete' : 'Delete source'}
+              </Button>
+            )}
+          </div>
         )}
       </div>
     </div>
