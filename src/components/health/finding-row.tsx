@@ -7,12 +7,14 @@ import {
   Clock,
   FileWarning,
   Link2,
+  Search,
   Unlink,
   Unplug,
   type LucideIcon,
 } from 'lucide-react';
 import type { EnrichedLintFinding, LintFinding } from '@/lib/contracts';
 import { Tag } from '@/components/ui/tag';
+import { Button } from '@/components/ui/button';
 import { findingHref, SEVERITY_TONE } from './lint-findings';
 
 const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
@@ -38,9 +40,14 @@ const TYPE_LABEL: Record<LintFinding['type'], string> = {
 export function FindingRow({
   finding,
   showSubject = false,
+  onResearch,
+  researching = false,
 }: {
   finding: EnrichedLintFinding;
   showSubject?: boolean;
+  /** coverage-gap 专属：触发针对本条 gap 的 research job。未传则不渲染按钮。 */
+  onResearch?: () => void;
+  researching?: boolean;
 }) {
   const Icon = TYPE_ICON[finding.type];
   const href = findingHref(finding);
@@ -75,6 +82,12 @@ export function FindingRow({
           <p className="text-xs text-foreground-tertiary">
             <span className="font-medium">Fix:</span> {finding.suggestedFix}
           </p>
+        )}
+        {finding.type === 'coverage-gap' && onResearch && (
+          <Button intent="secondary" size="sm" onClick={onResearch} loading={researching} className="mt-1">
+            {!researching && <Search className="h-3 w-3" />}
+            Research this gap
+          </Button>
         )}
       </div>
     </div>
