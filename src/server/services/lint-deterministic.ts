@@ -1,7 +1,7 @@
 /**
  * Lint Phase 1 — deterministic 检查（无需 LLM）。
  *
- * 覆盖：broken wikilinks / orphan pages / missing frontmatter / stale sources。
+ * 覆盖：broken wikilinks / orphan pages / missing frontmatter / stale sources / orphan sources。
  * 全部按 subject 维度扫描。
  */
 
@@ -10,6 +10,7 @@ import fs from 'fs';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
+import * as jobsRepo from '../db/repos/jobs-repo';
 import { scanWikiPages } from '../wiki/wiki-store';
 import { vaultPath } from '../config/env';
 import { parseFrontmatter, validateFrontmatter } from '../wiki/frontmatter';
@@ -30,6 +31,7 @@ export function runDeterministicChecksForSubject(subject: Subject): LintFinding[
   findings.push(...checkOrphanPages(subject, allPages, allLinks));
   findings.push(...checkMissingFrontmatter(subject));
   findings.push(...checkStaleSources(subject, allPages));
+  findings.push(...checkOrphanSources(subject));
   return findings;
 }
 
@@ -187,6 +189,41 @@ function checkStaleSources(subject: Subject, allPages: WikiPage[]): LintFinding[
   const findings: LintFinding[] = [];
   for (const page of allPages) {
     findings.push(...checkStaleSourcesForPage(subject, page));
+  }
+  return findings;
+}
+
+/**
+ * 孤儿 source 检测：零 page_sources 关联的 source，按其 ingest job 状态分类——
+ *   pending/running → 在途，跳过（正常状态，不报）；
+ *   failed          → 报（可 checkpoint 续传重试，带 failedJobId）；
+ *   查无 job        → 报（enqueue 失败或 job 行已清理，failedJobId=null）；
+ *   completed       → 报（ingest 成功但溯源丢失，属异常，failedJobId=null）。
+ */
+export function checkOrphanSources(subject: Subject): LintFinding[] {
+  const findings: LintFinding[] = [];
+  for (const source of sourcesRepo.listUnreferencedSources(subject.id)) {
+    const job = jobsRepo.findLatestIngestJobForSource(subject.id, source.id);
+    if (job && (job.status === 'pending' || job.status === 'running')) continue;
+
+    const failedJobId = job?.status === 'failed' ? job.id : null;
+    const description = !job
+      ? `Orphan source: "${source.filename}" (subject: ${subject.slug}) is not referenced by any wiki page and has no ingest job on record.`
+      : job.status === 'failed'
+        ? `Orphan source: "${source.filename}" (subject: ${subject.slug}) was saved but its ingest job failed — no wiki page references it.`
+        : `Orphan source: "${source.filename}" (subject: ${subject.slug}) has a completed ingest job but no wiki page references it (provenance lost).`;
+
+    findings.push({
+      type: 'orphan-source',
+      severity: 'warning',
+      pageSlug: '',
+      description,
+      suggestedFix:
+        'Retry the ingest to (re)build pages from this source, or delete the source if it is no longer needed.',
+      sourceId: source.id,
+      sourceFilename: source.filename,
+      failedJobId,
+    });
   }
   return findings;
 }

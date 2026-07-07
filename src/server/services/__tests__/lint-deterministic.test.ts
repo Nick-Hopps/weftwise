@@ -81,3 +81,87 @@ describe('runDeterministicChecksForSubject', () => {
     expect(orphans).not.toContain('c'); // 跨主题入链 s2:x→c → 证明 orphan 用的是跨主题 allLinks
   });
 });
+
+describe('checkOrphanSources', () => {
+  async function setupOrphans() {
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const jobsRepo = await import('@/server/db/repos/jobs-repo');
+    const { getRawDb } = await import('@/server/db/client');
+    const db = getRawDb();
+    const s = subjectsRepo.create({ slug: 's-orph', name: 'S' });
+
+    const insSrc = db.prepare(
+      `INSERT INTO sources (id, subject_id, filename, content_hash, parsed_at, metadata_json)
+       VALUES (?,?,?,?,?,?)`
+    );
+    // 五个 source，全部零 page_sources 关联，job 状态各不同
+    insSrc.run('src-failed', s.id, 'failed.md', 'h1', null, '{}');
+    insSrc.run('src-running', s.id, 'running.md', 'h2', null, '{}');
+    insSrc.run('src-pending', s.id, 'pending.md', 'h3', null, '{}');
+    insSrc.run('src-nojob', s.id, 'nojob.md', 'h4', null, '{}');
+    insSrc.run('src-done', s.id, 'done.md', 'h5', null, '{}');
+    // 第六个 source 已被页面引用 → 不进候选
+    insSrc.run('src-linked', s.id, 'linked.md', 'h6', null, '{}');
+    db.prepare(`INSERT INTO page_sources (subject_id, page_slug, source_id) VALUES (?,?,?)`)
+      .run(s.id, 'some-page', 'src-linked');
+
+    const mkJob = (sourceId: string, filename: string, status: string) => {
+      const j = jobsRepo.enqueueJob('ingest', { sourceId, filename, subjectId: s.id }, s.id);
+      db.prepare(`UPDATE jobs SET status = ? WHERE id = ?`).run(status, j.id);
+      return j;
+    };
+    const failedJob = mkJob('src-failed', 'failed.md', 'failed');
+    mkJob('src-running', 'running.md', 'running');
+    mkJob('src-pending', 'pending.md', 'pending');
+    mkJob('src-done', 'done.md', 'completed');
+
+    const { checkOrphanSources } = await import('@/server/services/lint-deterministic');
+    return { s, failedJob, checkOrphanSources };
+  }
+
+  it('failed job → 报 finding 且带 failedJobId', async () => {
+    const { s, failedJob, checkOrphanSources } = await setupOrphans();
+    const findings = checkOrphanSources(s);
+    const f = findings.find((x) => x.sourceId === 'src-failed');
+    expect(f).toBeDefined();
+    expect(f!.type).toBe('orphan-source');
+    expect(f!.severity).toBe('warning');
+    expect(f!.pageSlug).toBe('');
+    expect(f!.sourceFilename).toBe('failed.md');
+    expect(f!.failedJobId).toBe(failedJob.id);
+  });
+
+  it('pending / running job → 跳过（在途，正常）', async () => {
+    const { s, checkOrphanSources } = await setupOrphans();
+    const findings = checkOrphanSources(s);
+    expect(findings.find((x) => x.sourceId === 'src-running')).toBeUndefined();
+    expect(findings.find((x) => x.sourceId === 'src-pending')).toBeUndefined();
+  });
+
+  it('查无 job → 报 finding 且 failedJobId 为 null', async () => {
+    const { s, checkOrphanSources } = await setupOrphans();
+    const f = checkOrphanSources(s).find((x) => x.sourceId === 'src-nojob');
+    expect(f).toBeDefined();
+    expect(f!.failedJobId).toBeNull();
+  });
+
+  it('completed 但零关联 → 报 finding（溯源丢失）且 failedJobId 为 null', async () => {
+    const { s, checkOrphanSources } = await setupOrphans();
+    const f = checkOrphanSources(s).find((x) => x.sourceId === 'src-done');
+    expect(f).toBeDefined();
+    expect(f!.failedJobId).toBeNull();
+    expect(f!.description).toContain('completed');
+  });
+
+  it('已被页面引用的 source 不报', async () => {
+    const { s, checkOrphanSources } = await setupOrphans();
+    expect(checkOrphanSources(s).find((x) => x.sourceId === 'src-linked')).toBeUndefined();
+  });
+
+  it('并入 runDeterministicChecksForSubject 输出', async () => {
+    const { s } = await setupOrphans();
+    const { runDeterministicChecksForSubject } = await import('@/server/services/lint-deterministic');
+    const all = runDeterministicChecksForSubject(s);
+    expect(all.filter((x) => x.type === 'orphan-source').length).toBe(3); // failed + nojob + done
+  });
+});
