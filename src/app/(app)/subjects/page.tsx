@@ -33,7 +33,7 @@ export default function SubjectsPage() {
   );
 
   return (
-    <div className="max-w-content mx-auto w-full space-y-6 px-6 py-8">
+    <div className="max-w-4xl mx-auto w-full space-y-6 px-6 py-8">
       <header className="flex items-center justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">

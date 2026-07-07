@@ -244,8 +244,9 @@ export function HealthView() {
     .map((f, i) => (f.type === 'coverage-gap' ? String(i) : null))
     .filter((id): id is string => id !== null);
 
+  // 动作条一行 5 个控件超出 65ch 阅读宽度，本页放宽到 max-w-4xl
   return (
-    <div className="max-w-content mx-auto px-6 py-8 w-full space-y-6">
+    <div className="max-w-4xl mx-auto px-6 py-8 w-full space-y-6">
       <header className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
@@ -267,7 +268,7 @@ export function HealthView() {
               type="button"
               onClick={() => switchScope('subject')}
               className={
-                'h-8 px-3 text-sm transition-colors ' +
+                'h-8 px-3 text-sm whitespace-nowrap transition-colors ' +
                 (!allSubjects ? 'bg-subtle text-foreground font-medium' : 'text-foreground-secondary hover:bg-subtle')
               }
             >
@@ -277,7 +278,7 @@ export function HealthView() {
               type="button"
               onClick={() => switchScope('all')}
               className={
-                'h-8 px-3 text-sm transition-colors border-l border-border ' +
+                'h-8 px-3 text-sm whitespace-nowrap transition-colors border-l border-border ' +
                 (allSubjects ? 'bg-subtle text-foreground font-medium' : 'text-foreground-secondary hover:bg-subtle')
               }
             >

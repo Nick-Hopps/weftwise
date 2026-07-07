@@ -74,7 +74,7 @@ export function OperationList() {
   });
 
   return (
-    <div className="mx-auto w-full max-w-content space-y-6 px-6 py-8">
+    <div className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8">
       <header>
         <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
           <HistoryIcon className="h-5 w-5 text-foreground-tertiary" />
