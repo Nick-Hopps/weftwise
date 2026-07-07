@@ -7,24 +7,14 @@ import {
   streamAgenticQuery,
   subjectHasContent,
   accessedToContext,
+  recordCoverageGap,
 } from '@/server/services/query-service';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
-import * as researchBacklogRepo from '@/server/db/repos/research-backlog-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
-import type { Subject } from '@/lib/contracts';
-
-/** best-effort：写入失败只记日志，不影响问答响应。 */
-function recordCoverageGap(subject: Subject, question: string, suggestedQuestion?: string): void {
-  try {
-    researchBacklogRepo.create(subject.id, suggestedQuestion?.trim() || question, 'ask-ai');
-  } catch (err) {
-    console.error('[query] failed to record research backlog entry', err);
-  }
-}
 
 export const runtime = 'nodejs';
 

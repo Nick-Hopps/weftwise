@@ -23,6 +23,7 @@ vi.mock('@/server/services/query-service', () => ({
   accessedToContext: (...a: unknown[]) => mockAccessedToContext(...a),
   generateQueryCitations: (...a: unknown[]) => mockCitations(...a),
   runQuery: vi.fn(),
+  recordCoverageGap: vi.fn(),
   NO_QUERY_CONTEXT_ANSWER: 'NO_CONTEXT',
 }));
 vi.mock('@/server/services/conversation-title', () => ({
