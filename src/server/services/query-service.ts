@@ -64,7 +64,7 @@ const QueryCitationsSchema = QueryResponseSchema.pick({
 /**
  * best-effort 把"库内答不上"的问题写入待研究队列；写入失败只记日志，不影响问答响应。
  */
-function recordCoverageGap(subject: Subject, question: string, suggestedQuestion?: string): void {
+export function recordCoverageGap(subject: Subject, question: string, suggestedQuestion?: string): void {
   try {
     researchBacklogRepo.create(subject.id, suggestedQuestion?.trim() || question, 'ask-ai');
   } catch (err) {
