@@ -2,16 +2,18 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, RefreshCw, Wand2, Wrench } from 'lucide-react';
+import { Activity, RefreshCw, Search, Wand2, Wrench } from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { useLintSummary } from '@/hooks/use-lint-summary';
 import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
+import { Input } from '@/components/ui/input';
 import { groupBySeverity, SEVERITY_TONE } from './lint-findings';
 import { FindingRow } from './finding-row';
-import type { LintFinding } from '@/lib/contracts';
+import { ResearchCandidatesDialog } from './research-candidates-dialog';
+import type { LintFinding, ResearchCandidate } from '@/lib/contracts';
 
 type Scope = 'subject' | 'all';
 
@@ -133,6 +135,76 @@ export function HealthView() {
     }
   }
 
+  // ── Research：缺口/主题 → 联网检索候选清单（只发现不写入） ─────────────────
+  const [researchJobId, setResearchJobId] = useState<string | null>(null);
+  const [researchStarting, setResearchStarting] = useState(false);
+  const [researchError, setResearchError] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<ResearchCandidate[] | null>(null);
+  const [topicInput, setTopicInput] = useState('');
+  const [ingesting, setIngesting] = useState(false);
+  const { status: researchStatus } = useJobStream(researchJobId);
+  const researching = researchStarting || (researchJobId !== null && researchStatus !== 'completed' && researchStatus !== 'failed');
+
+  useEffect(() => {
+    if (researchStatus === 'completed' && researchJobId) {
+      (async () => {
+        const res = await apiFetch(`/api/jobs/${researchJobId}`);
+        if (res.ok) {
+          const json = (await res.json()) as { resultJson?: string | null };
+          try {
+            const parsed = json.resultJson ? (JSON.parse(json.resultJson) as { candidates?: ResearchCandidate[] }) : null;
+            setCandidates(parsed?.candidates ?? []);
+          } catch {
+            setCandidates([]);
+          }
+        }
+        setResearchJobId(null);
+      })();
+    } else if (researchStatus === 'failed') {
+      setResearchError('Research failed — see job details for the underlying error.');
+      setResearchJobId(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [researchStatus, researchJobId]);
+
+  async function startResearch(body: { gapIds?: string[]; topic?: string }) {
+    setResearchStarting(true);
+    setResearchError(null);
+    try {
+      const res = await apiFetch('/api/research', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const json = (await res.json()) as { jobId: string };
+        setResearchJobId(json.jobId);
+      } else {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        setResearchError(json.error ?? `Research request failed (${res.status})`);
+      }
+    } finally {
+      setResearchStarting(false);
+    }
+  }
+
+  async function confirmIngest(urls: string[]) {
+    setIngesting(true);
+    try {
+      const res = await apiFetch('/api/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls, subjectId }),
+      });
+      if (res.ok || res.status === 202) {
+        setCandidates(null);
+        queryClient.invalidateQueries({ queryKey: ['pages'] });
+      }
+    } finally {
+      setIngesting(false);
+    }
+  }
+
   function switchScope(next: Scope) {
     setScope(next);
     setJobId(null);
@@ -140,6 +212,9 @@ export function HealthView() {
     setCurateJobId(null);
     setFixJobId(null);
     setFixSummary(null);
+    setResearchJobId(null);
+    setCandidates(null);
+    setResearchError(null);
   }
 
   const [typeFilter, setTypeFilter] = useState<LintFinding['type'] | null>(null);
@@ -161,6 +236,12 @@ export function HealthView() {
 
   const FIXABLE_TYPES: LintFinding['type'][] = ['missing-frontmatter', 'broken-link', 'missing-crossref', 'contradiction'];
   const fixableCount = allFindings.filter((f) => FIXABLE_TYPES.includes(f.type)).length;
+
+  // gapId = 该 finding 在最近快照 findings 数组里的下标（服务端 selectLatestFindings 同一顺序），
+  // 由 POST /api/research 重新读取快照校验存在——见 research-service.ts::resolveTopicsFromGapIds。
+  const coverageGapIds = allFindings
+    .map((f, i) => (f.type === 'coverage-gap' ? String(i) : null))
+    .filter((id): id is string => id !== null);
 
   return (
     <div className="max-w-content mx-auto px-6 py-8 w-full space-y-6">
@@ -220,11 +301,63 @@ export function HealthView() {
             {!fixing && <Wrench className="h-3.5 w-3.5" />}
             Fix issues
           </Button>
+          <Button
+            intent="secondary"
+            onClick={() => startResearch({ gapIds: coverageGapIds })}
+            loading={researching}
+            disabled={allSubjects || coverageGapIds.length === 0}
+          >
+            {!researching && <Search className="h-3.5 w-3.5" />}
+            Research gaps{coverageGapIds.length > 0 ? ` (${coverageGapIds.length})` : ''}
+          </Button>
         </div>
       </header>
 
+      {!allSubjects && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const t = topicInput.trim();
+            if (!t) return;
+            void startResearch({ topic: t });
+            setTopicInput('');
+          }}
+        >
+          <Input
+            value={topicInput}
+            onChange={(e) => setTopicInput(e.target.value)}
+            placeholder="Research a topic…"
+            className="max-w-xs"
+          />
+          <Button intent="secondary" type="submit" loading={researching} disabled={!topicInput.trim()}>
+            {!researching && <Search className="h-3.5 w-3.5" />}
+            Research
+          </Button>
+        </form>
+      )}
+
+      {researchError && (
+        <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
+          {researchError}
+        </div>
+      )}
+
+      {candidates && (
+        <ResearchCandidatesDialog
+          candidates={candidates}
+          onClose={() => setCandidates(null)}
+          onConfirm={confirmIngest}
+          confirming={ingesting}
+        />
+      )}
+
       {running && (
         <p className="text-sm text-foreground-secondary">{latestMessage || 'Running health check…'}</p>
+      )}
+
+      {researching && (
+        <p className="text-sm text-foreground-secondary">Researching…</p>
       )}
 
       {curating && (
@@ -316,9 +449,18 @@ export function HealthView() {
                   {group.severity} ({group.findings.length})
                 </h2>
                 <div className="space-y-0.5">
-                  {group.findings.map((f, i) => (
-                    <FindingRow key={`${f.subjectId}:${f.type}:${f.pageSlug}:${i}`} finding={f} showSubject={allSubjects} />
-                  ))}
+                  {group.findings.map((f, i) => {
+                    const gapId = f.type === 'coverage-gap' ? String(allFindings.indexOf(f)) : null;
+                    return (
+                      <FindingRow
+                        key={`${f.subjectId}:${f.type}:${f.pageSlug}:${i}`}
+                        finding={f}
+                        showSubject={allSubjects}
+                        onResearch={gapId && !allSubjects ? () => startResearch({ gapIds: [gapId] }) : undefined}
+                        researching={researching}
+                      />
+                    );
+                  })}
                 </div>
               </section>
             ),
