@@ -69,3 +69,22 @@ describe('sources-repo.getSourcesForPage', () => {
     expect(repo.getSourcesForPage('s1', 'nope')).toEqual([]);
   });
 });
+
+describe('sources-repo.listUnreferencedSources / deleteSource', () => {
+  it('只返回本 subject 零 page_sources 关联的 source', async () => {
+    const repo = await setup();
+    const { getRawDb } = await import('../../client');
+    getRawDb()
+      .prepare(`INSERT INTO sources (id, subject_id, filename, content_hash, parsed_at, metadata_json) VALUES (?,?,?,?,?,?)`)
+      .run('src-orphan', 's1', 'orphan.md', 'h9', NOW, '{}');
+    const ids = repo.listUnreferencedSources('s1').map((s) => s.id);
+    expect(ids).toEqual(['src-orphan']); // src1/src2 有关联，src3 属 s2
+  });
+
+  it('deleteSource 删除指定行且不影响其他行', async () => {
+    const repo = await setup();
+    repo.deleteSource('src1');
+    expect(repo.getSource('src1')).toBeNull();
+    expect(repo.getSource('src2')).not.toBeNull();
+  });
+});

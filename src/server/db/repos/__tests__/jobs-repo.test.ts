@@ -46,3 +46,30 @@ describe('jobs-repo.pruneJobEvents', () => {
     expect(repo.getJobEvents('j1')).toHaveLength(3);
   });
 });
+
+const NOW = '2026-01-01T00:00:00Z';
+
+describe('jobs-repo.findLatestIngestJobForSource', () => {
+  async function setupJobs() {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const repo = await import('../jobs-repo');
+    return { repo };
+  }
+
+  it('按 params.sourceId 精确匹配并取最新一条；无命中返回 null', async () => {
+    const { repo } = await setupJobs();
+    const j1 = repo.enqueueJob('ingest', { sourceId: 'src-x', filename: 'a.md', subjectId: 's1' }, 's1');
+    const j2 = repo.enqueueJob('ingest', { sourceId: 'src-x', filename: 'a.md', subjectId: 's1' }, 's1');
+    repo.enqueueJob('ingest', { sourceId: 'src-y', filename: 'b.md', subjectId: 's1' }, 's1');
+    repo.enqueueJob('lint', { sourceId: 'src-x' }, 's1'); // 非 ingest 不算
+
+    const hit = repo.findLatestIngestJobForSource('s1', 'src-x');
+    expect(hit?.id).toBe(j2.id);
+    expect([j1.id, j2.id]).toContain(hit!.id);
+    expect(repo.findLatestIngestJobForSource('s1', 'src-zzz')).toBeNull();
+  });
+});

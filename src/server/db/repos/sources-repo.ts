@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '../client';
 import { sources, pageSources } from '../schema';
 import type { Source, SubjectId } from '@/lib/contracts';
@@ -147,6 +147,31 @@ export function unlinkPageSources(subjectId: SubjectId, pageSlug: string): void 
       and(eq(pageSources.subjectId, subjectId), eq(pageSources.pageSlug, pageSlug))
     )
     .run();
+}
+
+/** 本 subject 内没有任何 page_sources 关联的 source（孤儿候选，orphan-source 体检用）。 */
+export function listUnreferencedSources(subjectId: SubjectId): Source[] {
+  const db = getDb();
+  const rows = db
+    .select({
+      id: sources.id,
+      subjectId: sources.subjectId,
+      filename: sources.filename,
+      contentHash: sources.contentHash,
+      parsedAt: sources.parsedAt,
+      metadataJson: sources.metadataJson,
+    })
+    .from(sources)
+    .leftJoin(pageSources, eq(pageSources.sourceId, sources.id))
+    .where(and(eq(sources.subjectId, subjectId), isNull(pageSources.sourceId)))
+    .all();
+  return rows.map(rowToSource);
+}
+
+/** 删除单个 source 行（调用方负责先确认零关联并清理 raw 文件/sidecar）。 */
+export function deleteSource(id: string): void {
+  const db = getDb();
+  db.delete(sources).where(eq(sources.id, id)).run();
 }
 
 function rowToSource(row: typeof sources.$inferSelect): Source {
