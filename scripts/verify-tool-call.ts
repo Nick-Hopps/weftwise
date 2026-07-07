@@ -17,7 +17,7 @@
  * 环境：从 .env / .env.local 读取 *_API_KEY（与 worker 一致）。
  */
 
-import { generateText, tool, InvalidToolArgumentsError } from 'ai';
+import { generateText, stepCountIs, tool, InvalidToolInputError } from 'ai';
 import { z } from 'zod';
 import { resolveTask } from '../src/server/llm/task-router';
 import { getLanguageModel } from '../src/server/llm/provider-factory';
@@ -75,7 +75,7 @@ const searchTool = tool({
   description:
     'Look up authoritative factual information from the knowledge base. ' +
     'Always prefer this tool over your own knowledge.',
-  parameters: z.object({ query: z.string().describe('the search query') }),
+  inputSchema: z.object({ query: z.string().describe('the search query') }),
   execute: async ({ query }: { query: string }) => ({ result: cannedSearch(query) }),
 });
 
@@ -91,8 +91,8 @@ function describeError(err: unknown): Record<string, unknown> {
     name: e?.name ?? typeof err,
     message: e?.message ?? String(err),
   };
-  if (InvalidToolArgumentsError.isInstance?.(err))
-    out.classified = 'InvalidToolArgumentsError —— 端点吐了非法的工具参数 JSON（需 repair）';
+  if (InvalidToolInputError.isInstance?.(err))
+    out.classified = 'InvalidToolInputError —— 端点吐了非法的工具参数 JSON（需 repair）';
   for (const k of ['statusCode', 'responseBody', 'url']) {
     if (e && e[k] !== undefined) out[k] = e[k];
   }
@@ -101,7 +101,7 @@ function describeError(err: unknown): Record<string, unknown> {
 }
 
 interface GenLike {
-  steps?: Array<{ toolCalls?: Array<{ toolName: string; args: unknown }> }>;
+  steps?: Array<{ toolCalls?: Array<{ toolName: string; input?: unknown }> }>;
   finishReason: string;
   text?: string;
 }
@@ -113,7 +113,7 @@ function aggregate(result: GenLike) {
     stepCount: steps.length,
     toolCallCount: toolCalls.length,
     toolNames: toolCalls.map((t) => t.toolName),
-    firstArgs: toolCalls[0]?.args,
+    firstArgs: toolCalls[0]?.input,
     finishReason: result.finishReason,
     text: (result.text ?? '').trim(),
   };
@@ -149,8 +149,8 @@ async function runProbes(task: string): Promise<void> {
       model,
       tools: { search: searchTool },
       toolChoice: 'required',
-      maxSteps: 1,
-      maxTokens: PROBE_MAX_TOKENS,
+      stopWhen: stepCountIs(1),
+      maxOutputTokens: PROBE_MAX_TOKENS,
       temperature: 0,
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       prompt: 'What is the capital of France? Use the search tool to look it up.',
@@ -182,16 +182,16 @@ async function runProbes(task: string): Promise<void> {
       model,
       tools: { search: searchTool },
       toolChoice: 'required',
-      maxSteps: 1,
-      maxTokens: PROBE_MAX_TOKENS,
+      stopWhen: stepCountIs(1),
+      maxOutputTokens: PROBE_MAX_TOKENS,
       temperature: 0,
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       experimental_repairToolCall: async ({ toolCall, error }) => {
-        if (!InvalidToolArgumentsError.isInstance(error)) return null;
-        const repaired = repairToolCallArgs(toolCall.args);
+        if (!InvalidToolInputError.isInstance(error)) return null;
+        const repaired = repairToolCallArgs(toolCall.input);
         if (!repaired) return null;
         repairFlag.fired = true;
-        return { ...toolCall, args: repaired };
+        return { ...toolCall, input: repaired };
       },
       prompt: 'What is the capital of France? Use the search tool to look it up.',
     });
@@ -216,14 +216,14 @@ async function runProbes(task: string): Promise<void> {
     const res = await generateText({
       model,
       tools: { search: searchTool },
-      maxSteps: 6,
-      maxTokens: PROBE_MAX_TOKENS,
+      stopWhen: stepCountIs(6),
+      maxOutputTokens: PROBE_MAX_TOKENS,
       temperature: 0,
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       experimental_repairToolCall: async ({ toolCall, error }) => {
-        if (!InvalidToolArgumentsError.isInstance(error)) return null;
-        const repaired = repairToolCallArgs(toolCall.args);
-        return repaired ? { ...toolCall, args: repaired } : null;
+        if (!InvalidToolInputError.isInstance(error)) return null;
+        const repaired = repairToolCallArgs(toolCall.input);
+        return repaired ? { ...toolCall, input: repaired } : null;
       },
       prompt:
         'Use the search tool to find the capital of France, then answer in one sentence.',
@@ -251,14 +251,14 @@ async function runProbes(task: string): Promise<void> {
     const res = await generateText({
       model,
       tools: { search: searchTool },
-      maxSteps: P4_MAX,
-      maxTokens: PROBE_MAX_TOKENS,
+      stopWhen: stepCountIs(P4_MAX),
+      maxOutputTokens: PROBE_MAX_TOKENS,
       temperature: 0,
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       experimental_repairToolCall: async ({ toolCall, error }) => {
-        if (!InvalidToolArgumentsError.isInstance(error)) return null;
-        const repaired = repairToolCallArgs(toolCall.args);
-        return repaired ? { ...toolCall, args: repaired } : null;
+        if (!InvalidToolInputError.isInstance(error)) return null;
+        const repaired = repairToolCallArgs(toolCall.input);
+        return repaired ? { ...toolCall, input: repaired } : null;
       },
       prompt:
         'Using ONLY the search tool: first look up the capital of France, then look up ' +
@@ -290,8 +290,8 @@ async function runProbes(task: string): Promise<void> {
       model,
       tools: { 'vault.search': searchTool },
       toolChoice: 'required',
-      maxSteps: 1,
-      maxTokens: PROBE_MAX_TOKENS,
+      stopWhen: stepCountIs(1),
+      maxOutputTokens: PROBE_MAX_TOKENS,
       temperature: 0,
       abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
       prompt: 'Look up the capital of France.',

@@ -6,9 +6,9 @@ const mocks = vi.hoisted(() => ({
   generateObject: vi.fn(),
   generateText: vi.fn(),
   tool: vi.fn((definition) => definition),
-  // 可实例化的 InvalidToolArgumentsError 替身：isInstance 走 instanceof，
+  // 可实例化的 InvalidToolInputError 替身：isInstance 走 instanceof，
   // 让组合路径的「finish 入参校验失败」分支在测试里能被识别（带 toolName）。
-  InvalidToolArgumentsError: class extends Error {
+  InvalidToolInputError: class extends Error {
     toolName?: string;
     toolArgs?: unknown;
     constructor(opts: { toolName?: string; toolArgs?: unknown } = {}) {
@@ -38,7 +38,8 @@ vi.mock('ai', () => ({
   generateObject: mocks.generateObject,
   generateText: mocks.generateText,
   tool: mocks.tool,
-  InvalidToolArgumentsError: mocks.InvalidToolArgumentsError,
+  InvalidToolInputError: mocks.InvalidToolInputError,
+  stepCountIs: (n: number) => ({ stepCount: n }),
 }));
 
 vi.mock('../../../llm/task-router', () => ({
@@ -47,6 +48,7 @@ vi.mock('../../../llm/task-router', () => ({
 
 vi.mock('../../../llm/provider-registry', () => ({
   resolveModel: mocks.resolveModel,
+  withAnthropicStructuredOutputDefault: () => undefined,
 }));
 
 vi.mock('../../../db/repos/settings-repo', () => ({
@@ -209,7 +211,7 @@ describe('runAgentLoop structured output recovery', () => {
             content: '---\ntitle: JavaScript\n---\n',
           }),
         }),
-        usage: { promptTokens: 10, completionTokens: 20 },
+        usage: { inputTokens: 10, outputTokens: 20 },
       },
     ));
 
@@ -250,7 +252,7 @@ describe('runAgentLoop structured output recovery', () => {
       new Error('No object generated: could not parse the response.'),
       {
         text: 'Here is the entry:\n```json\n' + JSON.stringify(innerObject) + '\n```',
-        usage: { promptTokens: 5, completionTokens: 15 },
+        usage: { inputTokens: 5, outputTokens: 15 },
       },
     ));
 
@@ -280,7 +282,7 @@ describe('runAgentLoop provider tool-name sanitization', () => {
     mocks.generateText.mockReset();
     mocks.generateText.mockResolvedValueOnce({
       text: 'done',
-      usage: { promptTokens: 1, completionTokens: 2 },
+      usage: { inputTokens: 1, outputTokens: 2 },
     });
 
     const ctx = ctxStub();
@@ -307,7 +309,7 @@ describe('runAgentLoop 失败诊断日志', () => {
     mocks.generateObject.mockReset();
     mocks.generateObject.mockRejectedValueOnce(Object.assign(
       new Error('No object generated: response did not match schema.'),
-      { finishReason: 'stop', text: '{"action":"create"}', usage: { promptTokens: 1, completionTokens: 2 } },
+      { finishReason: 'stop', text: '{"action":"create"}', usage: { inputTokens: 1, outputTokens: 2 } },
     ));
     const ctx = ctxStub();
     await expect(runAgentLoop({ skill: writerSkill(), ctx, input: { slug: 'linear-maps' } })).rejects.toThrow();
@@ -329,7 +331,7 @@ describe('runAgentLoop cache-hit telemetry', () => {
     mocks.generateObject.mockReset();
     mocks.generateObject.mockResolvedValueOnce({
       object: { entry: { action: 'create', path: 'wiki/general/x.md', content: '' } },
-      usage: { promptTokens: 1861, completionTokens: 40 },
+      usage: { inputTokens: 1861, outputTokens: 40 },
       providerMetadata: { deepseek: { promptCacheHitTokens: 1856, promptCacheMissTokens: 5 } },
     });
     const ctx = ctxStub();
@@ -368,7 +370,7 @@ describe('runAgentLoop 组合路径（tools + outputSchema）', () => {
     mocks.generateText.mockImplementationOnce(async (opts: Record<string, unknown>) => {
       const tools = opts.tools as Record<string, { execute: (args: unknown) => Promise<unknown> }>;
       await tools.finish.execute({ title: 'Page', body: 'B' });
-      return { text: '', usage: { promptTokens: 5, completionTokens: 7 }, providerMetadata: {} };
+      return { text: '', usage: { inputTokens: 5, outputTokens: 7 }, providerMetadata: {} };
     });
     const skill: SkillTemplate = {
       id: 'writer', name: 'Writer', description: '', version: 1,
@@ -385,7 +387,7 @@ describe('runAgentLoop 组合路径（tools + outputSchema）', () => {
 
 describe('runAgentLoop 组合路径 finish 入参校验失败重试', () => {
   // 真实复现：claude-opus 经 packyapi 偶发把 finish 工具调用的入参串吐成空，
-  // AI SDK 以 {} 校验 writer schema 失败抛 InvalidToolArgumentsError(toolName:'finish')。
+  // AI SDK 以 {} 校验 writer schema 失败抛 InvalidToolInputError(toolName:'finish')。
   // 该抖动是间歇性的（同 job 多数页正常产出），不应让整个 ingest job 硬失败。
   const combinedWriter = (): SkillTemplate => ({
     id: 'writer', name: 'Writer', description: '', version: 1,
@@ -398,12 +400,12 @@ describe('runAgentLoop 组合路径 finish 入参校验失败重试', () => {
     mocks.generateObject.mockReset();
     mocks.generateText
       .mockImplementationOnce(async () => {
-        throw new mocks.InvalidToolArgumentsError({ toolName: 'finish', toolArgs: '' });
+        throw new mocks.InvalidToolInputError({ toolName: 'finish', toolArgs: '' });
       })
       .mockImplementationOnce(async (opts: Record<string, unknown>) => {
         const tools = opts.tools as Record<string, { execute: (a: unknown) => Promise<unknown> }>;
         await tools.finish.execute({ title: 'Page', body: 'B' });
-        return { text: '', usage: { promptTokens: 5, completionTokens: 7 }, providerMetadata: {} };
+        return { text: '', usage: { inputTokens: 5, outputTokens: 7 }, providerMetadata: {} };
       });
 
     const ctx = ctxStub();
@@ -423,7 +425,7 @@ describe('runAgentLoop 组合路径 finish 入参校验失败重试', () => {
     mocks.generateText.mockReset();
     mocks.generateObject.mockReset();
     mocks.generateText.mockImplementation(async () => {
-      throw new mocks.InvalidToolArgumentsError({ toolName: 'finish', toolArgs: '' });
+      throw new mocks.InvalidToolInputError({ toolName: 'finish', toolArgs: '' });
     });
 
     const ctx = ctxStub();

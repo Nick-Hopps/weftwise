@@ -49,7 +49,7 @@ async function probeText(task: LLMTask) {
     const r = await generateText({
       model,
       prompt: 'Reply with exactly the word: pong',
-      maxTokens: 16,
+      maxOutputTokens: 16,
       abortSignal: withTimeout(),
     });
     return {
@@ -74,7 +74,7 @@ async function probeObject(task: LLMTask) {
       prompt:
         'Return a JSON object describing France: ok=true, its capital, ' +
         'meta.population_millions (number), meta.tags (array of 2 strings).',
-      maxTokens: 200,
+      maxOutputTokens: 200,
       abortSignal: withTimeout(),
     });
     return { ok: true, ms: Date.now() - t0, object: r.object };
@@ -124,7 +124,7 @@ async function main() {
 
     const text = await probeText(task);
     if (text.ok) {
-      console.log(`  [generateText]   ✅ ${text.ms}ms  → "${short(text.text, 60)}"  (in=${text.usage?.promptTokens} out=${text.usage?.completionTokens})`);
+      console.log(`  [generateText]   ✅ ${text.ms}ms  → "${short(text.text, 60)}"  (in=${text.usage?.inputTokens} out=${text.usage?.outputTokens})`);
     } else {
       console.log(`  [generateText]   ❌ ${text.ms}ms`);
       describeError(text.err);

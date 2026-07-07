@@ -1,5 +1,5 @@
-import { embedMany, generateObject, generateText, streamText } from 'ai';
-import type { CoreMessage, CoreTool, LanguageModel } from 'ai';
+import { embedMany, generateObject, generateText, stepCountIs, streamText } from 'ai';
+import type { ModelMessage, Tool, LanguageModel } from 'ai';
 import type { ZodType } from 'zod';
 import type { LLMRouteOverride, LLMTask, ResolvedTaskRoute } from './config-schema';
 import { getLLMConfig } from './config-loader';
@@ -38,6 +38,23 @@ export function resolveModel(route: ResolvedTaskRoute): LanguageModel {
 }
 
 /**
+ * anthropic 结构化输出默认走 `structuredOutputMode: 'auto'`（支持时用原生 output_format）。
+ * SDK 默认的 jsonTool 模式会以 tool_choice 强制自定义 'json' 工具，被 Claude Code 系中转
+ *（code.taluna.ai 等）整单拒绝；llm-config 里显式配置的 providerOptions 优先于此默认。
+ */
+export function withAnthropicStructuredOutputDefault(
+  route: ResolvedTaskRoute,
+): ResolvedTaskRoute['providerOptions'] {
+  if (route.provider.provider !== 'anthropic') return route.providerOptions;
+  const anthropic = route.providerOptions?.anthropic ?? {};
+  if (anthropic.structuredOutputMode !== undefined) return route.providerOptions;
+  return {
+    ...route.providerOptions,
+    anthropic: { ...anthropic, structuredOutputMode: 'auto' },
+  };
+}
+
+/**
  * Generate a structured JSON object validated against a Zod schema.
  *
  * The model is selected by resolving the task route:
@@ -68,7 +85,7 @@ export async function generateStructuredOutput<T>(
       schema,
       system: systemPrompt,
       prompt: userPrompt,
-      maxTokens: route.maxTokens,
+      maxOutputTokens: route.maxTokens,
       temperature: route.temperature,
       topP: route.topP,
       topK: route.topK,
@@ -77,13 +94,13 @@ export async function generateStructuredOutput<T>(
       seed: route.seed,
       maxRetries: route.maxRetries,
       headers: route.headers,
-      providerOptions: route.providerOptions,
+      providerOptions: withAnthropicStructuredOutputDefault(route),
       abortSignal: controller.signal,
     });
 
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(
-      `${prefix} done in ${elapsed}s | tokens: in=${result.usage?.promptTokens ?? 'n/a'} out=${result.usage?.completionTokens ?? 'n/a'}`,
+      `${prefix} done in ${elapsed}s | tokens: in=${result.usage?.inputTokens ?? 'n/a'} out=${result.usage?.outputTokens ?? 'n/a'}`,
     );
     return result.object;
   } catch (err) {
@@ -139,7 +156,7 @@ export function streamTextResponse(
     model: getLanguageModel(route),
     system: systemPrompt,
     prompt: userPrompt,
-    maxTokens: route.maxTokens,
+    maxOutputTokens: route.maxTokens,
     temperature: route.temperature,
     topP: route.topP,
     topK: route.topK,
@@ -163,8 +180,8 @@ export function streamTextWithTools(
   task: LLMTask,
   opts: {
     system: string;
-    messages: CoreMessage[];
-    tools: Record<string, CoreTool>;
+    messages: ModelMessage[];
+    tools: Record<string, Tool>;
     maxSteps: number;
     abortSignal?: AbortSignal;
     overrides?: LLMRouteOverride;
@@ -194,8 +211,8 @@ export function streamTextWithTools(
     messages: opts.messages,
     tools: opts.tools,
     toolChoice: 'auto',
-    maxSteps: opts.maxSteps,
-    maxTokens: route.maxTokens,
+    stopWhen: stepCountIs(opts.maxSteps),
+    maxOutputTokens: route.maxTokens,
     temperature: route.temperature,
     topP: route.topP,
     topK: route.topK,
@@ -217,8 +234,8 @@ export async function generateTextWithTools(
   task: LLMTask,
   opts: {
     system: string;
-    messages: CoreMessage[];
-    tools: Record<string, CoreTool>;
+    messages: ModelMessage[];
+    tools: Record<string, Tool>;
     maxSteps: number;
     overrides?: LLMRouteOverride;
     /** 每 2s 轮询一次；返回 true 时 abort 当前请求并抛出 AgentCancelled。 */
@@ -242,8 +259,8 @@ export async function generateTextWithTools(
       messages: opts.messages,
       tools: opts.tools,
       toolChoice: 'auto',
-      maxSteps: opts.maxSteps,
-      maxTokens: route.maxTokens,
+      stopWhen: stepCountIs(opts.maxSteps),
+      maxOutputTokens: route.maxTokens,
       temperature: route.temperature,
       topP: route.topP,
       topK: route.topK,
