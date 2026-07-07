@@ -5,7 +5,9 @@ const mockResolve = vi.fn();
 const mockHasContent = vi.fn();
 const mockAgentic = vi.fn();
 const mockAccessedToContext = vi.fn();
-const mockCitations = vi.fn();
+const mockExtractCitations = vi.fn();
+const mockRecordCoverageGap = vi.fn();
+const mockAssessCoverage = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
 const mockListMsgs = vi.fn();
@@ -21,10 +23,13 @@ vi.mock('@/server/services/query-service', () => ({
   streamAgenticQuery: (...a: unknown[]) => mockAgentic(...a),
   subjectHasContent: (...a: unknown[]) => mockHasContent(...a),
   accessedToContext: (...a: unknown[]) => mockAccessedToContext(...a),
-  generateQueryCitations: (...a: unknown[]) => mockCitations(...a),
   runQuery: vi.fn(),
-  recordCoverageGap: vi.fn(),
+  recordCoverageGap: (...a: unknown[]) => mockRecordCoverageGap(...a),
+  assessCoverageInBackground: (...a: unknown[]) => mockAssessCoverage(...a),
   NO_QUERY_CONTEXT_ANSWER: 'NO_CONTEXT',
+}));
+vi.mock('@/server/services/citation-extract', () => ({
+  extractCitationsFromAnswer: (...a: unknown[]) => mockExtractCitations(...a),
 }));
 vi.mock('@/server/services/conversation-title', () => ({
   deriveConversationTitle: (q: string) => `T:${q.slice(0, 5)}`,
@@ -67,8 +72,10 @@ beforeEach(() => {
   });
   mockAccessedToContext.mockReset();
   mockAccessedToContext.mockReturnValue([]);
-  mockCitations.mockReset();
-  mockCitations.mockResolvedValue([]);
+  mockExtractCitations.mockReset();
+  mockExtractCitations.mockReturnValue([]);
+  mockRecordCoverageGap.mockReset();
+  mockAssessCoverage.mockReset();
   mockCreate.mockReset();
   mockCreate.mockImplementation((s: string) => ({ id: 'new-conv', subjectId: s, title: 'T', createdAt: 't', updatedAt: 't' }));
   mockGet.mockReset();
@@ -115,13 +122,32 @@ describe('POST /api/query 流式持久化', () => {
     expect(sse).toContain('NO_CONTEXT');
     expect(sse).toContain('event: done');
     expect(mockAppend).toHaveBeenCalledTimes(2); // 仍落库一轮
+    expect(mockRecordCoverageGap).toHaveBeenCalledWith(
+      { id: 's1', slug: 'general' },
+      '随便问问',
+    );
+    expect(mockAssessCoverage).not.toHaveBeenCalled();
+    expect(mockExtractCitations).not.toHaveBeenCalled();
   });
 
-  it('工具循环路径 → 透传 answer-delta，最终 done', async () => {
+  it('工具循环路径 → 透传 answer-delta，citations 来自确定性解析，done 不带 coverageSufficient', async () => {
+    mockExtractCitations.mockReturnValue([{ pageSlug: 'foo', excerpt: 'bar' }]);
     const res = await call({ question: '你好', subjectId: 's1' });
     const sse = await readSSE(res);
     expect(mockAgentic).toHaveBeenCalledTimes(1);
     expect(sse).toContain('hello');
-    expect(sse).toContain('event: done');
+    expect(mockExtractCitations).toHaveBeenCalledWith('hello', expect.anything(), 'general');
+    expect(sse).toContain('event: citations');
+    expect(sse).toContain('"pageSlug":"foo"');
+
+    const doneEventBlock = sse.slice(sse.indexOf('event: done'));
+    expect(doneEventBlock).not.toContain('coverageSufficient');
+
+    expect(mockAssessCoverage).toHaveBeenCalledTimes(1);
+    expect(mockAssessCoverage).toHaveBeenCalledWith(
+      { id: 's1', slug: 'general' },
+      '你好',
+      'hello',
+    );
   });
 });
