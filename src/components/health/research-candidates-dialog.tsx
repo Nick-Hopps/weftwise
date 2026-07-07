@@ -7,14 +7,9 @@
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { ResearchCandidate } from '@/lib/contracts';
+import { defaultChecked } from '@/lib/research-plan';
 import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
-
-// 与 server/services/research-plan.ts::defaultChecked 语义一致的客户端镜像
-// （"server-only" 屏障：客户端组件不得 import src/server/**，故此处小函数本地复刻）。
-function defaultChecked(candidate: ResearchCandidate): boolean {
-  return candidate.score === 3;
-}
 
 export function ResearchCandidatesDialog({
   candidates,

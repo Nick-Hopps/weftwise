@@ -15,7 +15,7 @@ import { registerHandler } from '../jobs/worker';
 import * as queue from '../jobs/queue';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import { selectLatestFindings } from './lint-latest';
-import { isWebSearchConfigured, webSearch } from '../search/web-search';
+import { webSearch } from '../search/web-search';
 import { generateStructuredOutput } from '../llm/provider-registry';
 import {
   ResearchQueriesSchema,
@@ -32,7 +32,7 @@ import {
   applyTriage,
   fallbackTriage,
   type RawCandidate,
-} from './research-plan';
+} from '@/lib/research-plan';
 import type { Job, ResearchCandidate } from '@/lib/contracts';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 

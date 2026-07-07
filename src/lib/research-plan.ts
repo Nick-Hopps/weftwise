@@ -1,6 +1,7 @@
 /**
  * Research 纯函数：query 去重截断 / 候选 URL 归一化去重 / triage 降级排序 / 默认勾选派生。
- * 全部无副作用，供 research-service 编排与单测直接复用。
+ * 全部无副作用、零 server 依赖，放 lib 供 server（research-service）与客户端
+ * （research-candidates-dialog）两端复用——对齐 lib/slug.ts、lib/tool-activity.ts 惯例。
  */
 import type { ResearchCandidate } from '@/lib/contracts';
 
