@@ -87,4 +87,22 @@ describe('sources-repo.listUnreferencedSources / deleteSource', () => {
     expect(repo.getSource('src1')).toBeNull();
     expect(repo.getSource('src2')).not.toBeNull();
   });
+
+  it('全部已关联时返回空数组', async () => {
+    const repo = await setup();
+    expect(repo.listUnreferencedSources('s1')).toEqual([]);
+  });
+
+  it('其他 subject 的未引用 source 不泄漏进本 subject 查询', async () => {
+    const repo = await setup();
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    // s2 加一个零关联 source：s1 查询不得包含它，s2 查询恰好返回它
+    db.prepare(
+      `INSERT INTO sources (id, subject_id, filename, content_hash, parsed_at, metadata_json)
+       VALUES (?,?,?,?,?,?)`
+    ).run('src-orphan-2', 's2', 'other.md', 'h10', NOW, '{}');
+    expect(repo.listUnreferencedSources('s1')).toEqual([]);
+    expect(repo.listUnreferencedSources('s2').map((s) => s.id)).toEqual(['src-orphan-2']);
+  });
 });
