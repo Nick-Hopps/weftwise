@@ -5,18 +5,20 @@ const {
   mockGenerateTools,
   mockSubjectHasContent,
   mockBuildToolContext,
-  mockAccessedToContext,
+  mockCreateAccessedPages,
   mockCompileToolSet,
   mockGenerateStructured,
   mockBacklogCreate,
+  mockExtractCitations,
 } = vi.hoisted(() => ({
   mockGenerateTools: vi.fn(),
   mockSubjectHasContent: vi.fn(),
   mockBuildToolContext: vi.fn(() => ({})),
-  mockAccessedToContext: vi.fn(() => [] as unknown[]),
+  mockCreateAccessedPages: vi.fn(() => ({ meta: new Map(), bodies: new Map() })),
   mockCompileToolSet: vi.fn(() => ({})),
   mockGenerateStructured: vi.fn(),
   mockBacklogCreate: vi.fn(),
+  mockExtractCitations: vi.fn(() => [] as { pageSlug: string; excerpt: string }[]),
 }));
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
@@ -32,9 +34,12 @@ vi.mock('@/server/llm/provider-registry', () => ({
 }));
 vi.mock('../query-tools', () => ({
   buildQueryToolContext: mockBuildToolContext,
-  createAccessedPages: () => ({ meta: new Map(), bodies: new Map() }),
-  accessedToContext: mockAccessedToContext,
+  createAccessedPages: mockCreateAccessedPages,
+  accessedToContext: vi.fn(() => []),
   subjectHasContent: mockSubjectHasContent,
+}));
+vi.mock('../citation-extract', () => ({
+  extractCitationsFromAnswer: mockExtractCitations,
 }));
 vi.mock('@/server/agents/tools/builtin', () => ({
   createBuiltinToolRegistry: () => ({
@@ -55,12 +60,20 @@ const SUBJECT = {
   augmentationLevel: 'standard' as const, createdAt: 't', updatedAt: 't',
 };
 
+/** 异步 coverage 判定是 fire-and-forget（.then/.catch），需 flush 微任务队列后再断言。 */
+async function flushPromises(times = 4) {
+  for (let i = 0; i < times; i++) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
 beforeEach(() => {
   mockGenerateTools.mockReset();
   mockSubjectHasContent.mockReset();
-  mockAccessedToContext.mockReset().mockReturnValue([]);
-  mockGenerateStructured.mockReset();
+  mockCreateAccessedPages.mockReset().mockReturnValue({ meta: new Map(), bodies: new Map() });
+  mockGenerateStructured.mockReset().mockResolvedValue({ coverageSufficient: true });
   mockBacklogCreate.mockReset();
+  mockExtractCitations.mockReset().mockReturnValue([]);
 });
 
 describe('runQuery（agentic）', () => {
@@ -85,18 +98,33 @@ describe('runQuery（agentic）', () => {
     const res = await runQuery('问题', SUBJECT);
     expect(res.answer).toBe(NO_QUERY_CONTEXT_ANSWER);
   });
+
+  it('citations 来自答案内联 wikilink 的确定性解析，不再有第二次结构化输出产出 citations', async () => {
+    mockSubjectHasContent.mockReturnValue(true);
+    mockGenerateTools.mockResolvedValue({ text: '答案 [[sqlite]]。' });
+    mockExtractCitations.mockReturnValue([{ pageSlug: 'sqlite', excerpt: 'WAL 相关摘录' }]);
+    mockGenerateStructured.mockResolvedValue({ coverageSufficient: true });
+
+    const res = await runQuery('WAL 是什么', SUBJECT);
+
+    expect(res.citations.map((c) => c.pageSlug)).toEqual(['sqlite']);
+    expect(mockExtractCitations).toHaveBeenCalledWith('答案 [[sqlite]]。', expect.anything(), SUBJECT.slug);
+    // coverage 判定异步跑在 generateStructuredOutput 上，但不再有专门产出 citations 的结构化输出调用
+    await flushPromises();
+    expect(mockGenerateStructured).toHaveBeenCalledTimes(1);
+  });
 });
 
-describe('runQuery — coverage gap → research backlog', () => {
+describe('runQuery — coverage gap → research backlog（异步）', () => {
   it('coverageSufficient=false → create 恰一次，question 取 suggestedResearchQuestion', async () => {
     mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockResolvedValue({
-      citations: [],
       coverageSufficient: false,
       suggestedResearchQuestion: '建议的研究问题',
     });
     await runQuery('原始问题', SUBJECT);
+    await flushPromises();
     expect(mockBacklogCreate).toHaveBeenCalledTimes(1);
     expect(mockBacklogCreate).toHaveBeenCalledWith(SUBJECT.id, '建议的研究问题', 'ask-ai');
   });
@@ -105,15 +133,15 @@ describe('runQuery — coverage gap → research backlog', () => {
     mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockResolvedValue({
-      citations: [],
       coverageSufficient: false,
     });
     await runQuery('原始问题', SUBJECT);
+    await flushPromises();
     expect(mockBacklogCreate).toHaveBeenCalledTimes(1);
     expect(mockBacklogCreate).toHaveBeenCalledWith(SUBJECT.id, '原始问题', 'ask-ai');
   });
 
-  it('空库短路（NO_QUERY_CONTEXT_ANSWER）→ create 一次，question=用户原问题', async () => {
+  it('空库短路（NO_QUERY_CONTEXT_ANSWER）→ create 一次，question=用户原问题（同步，不经 coverage 判定）', async () => {
     mockSubjectHasContent.mockReturnValue(false);
     const res = await runQuery('原始问题', SUBJECT);
     expect(res.answer).toBe(NO_QUERY_CONTEXT_ANSWER);
@@ -125,11 +153,26 @@ describe('runQuery — coverage gap → research backlog', () => {
     mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockResolvedValue({
-      citations: [],
       coverageSufficient: true,
     });
     await runQuery('原始问题', SUBJECT);
+    await flushPromises();
     expect(mockBacklogCreate).not.toHaveBeenCalled();
+  });
+
+  it('coverage 判定抛错 → 不影响 runQuery 返回值，只 console.error', async () => {
+    mockSubjectHasContent.mockReturnValue(true);
+    mockGenerateTools.mockResolvedValue({ text: '答案正文' });
+    mockGenerateStructured.mockRejectedValue(new Error('llm 超时'));
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await runQuery('原始问题', SUBJECT);
+    expect(res.answer).toBe('答案正文');
+    await flushPromises();
+    expect(errSpy).toHaveBeenCalled();
+    expect(mockBacklogCreate).not.toHaveBeenCalled();
+
+    errSpy.mockRestore();
   });
 });
 
