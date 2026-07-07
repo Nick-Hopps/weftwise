@@ -52,9 +52,10 @@
 **`DELETE /api/sources/[id]`**
 
 1. 同上校验存在 + 归属 + 零关联守卫（有关联 409）。
-2. 获取 vault 写锁 → 删 raw 文件与 sidecar（best-effort，文件缺失不报错）→ 删 `sources` 表行 → git commit（message 含 `[subject:<slug>]`）→ 释放锁。
-3. 不动关联的 failed job 行（留着无害；reingest 端点靠"source 存在"校验兜底）。
-4. 200 + `{ deleted: true }`。
+2. 若存在同源 `pending`/`running` ingest job → 409（`in-flight`，对称于 reingest 端点：删除在途任务的 raw 文件会致 worker 读盘失败，甚至在 Saga 完成后插入指向已删 source 的悬挂 `page_sources` 行）。
+3. 获取 vault 写锁 → 删 raw 文件与 sidecar（best-effort，文件缺失不报错）→ 删 `sources` 表行 → git commit（message 含 `[subject:<slug>]`）→ 释放锁。
+4. 不动关联的 failed job 行（留着无害；reingest 端点靠"source 存在"校验兜底）。
+5. 200 + `{ deleted: true }`。
 
 ### 4. Health UI
 
