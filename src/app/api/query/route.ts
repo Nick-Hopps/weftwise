@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import {
-  generateQueryCitations,
+  assessCoverageInBackground,
   NO_QUERY_CONTEXT_ANSWER,
   runQuery,
   streamAgenticQuery,
   subjectHasContent,
-  accessedToContext,
   recordCoverageGap,
 } from '@/server/services/query-service';
+import { extractCitationsFromAnswer } from '@/server/services/citation-extract';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
@@ -179,7 +179,7 @@ export async function POST(request: NextRequest) {
           emit('citations', { citations: [] });
           persistTurn(NO_QUERY_CONTEXT_ANSWER, []);
           recordCoverageGap(subject, trimmedQuestion);
-          emit('done', { subjectId: subject.id, conversationId: activeConversationId, coverageSufficient: false });
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           closeStream();
           return;
         }
@@ -214,27 +214,11 @@ export async function POST(request: NextRequest) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
         }
 
-        let streamedCitations: { pageSlug: string; excerpt: string }[] = [];
-        let coverageSufficient = true;
-        try {
-          const result = await generateQueryCitations(
-            trimmedQuestion,
-            fullAnswer,
-            accessedToContext(subject, accessed),
-            subject,
-          );
-          streamedCitations = result.citations;
-          coverageSufficient = result.coverageSufficient;
-          if (!coverageSufficient) {
-            recordCoverageGap(subject, trimmedQuestion, result.suggestedResearchQuestion);
-          }
-        } catch {
-          streamedCitations = [];
-        }
-
-        emit('citations', { citations: streamedCitations });
-        persistTurn(fullAnswer, streamedCitations);
-        emit('done', { subjectId: subject.id, conversationId: activeConversationId, coverageSufficient });
+        const citations = extractCitationsFromAnswer(fullAnswer, accessed, subject.slug);
+        emit('citations', { citations });
+        persistTurn(fullAnswer, citations);
+        emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+        assessCoverageInBackground(subject, trimmedQuestion, fullAnswer);
       } catch (error) {
         if (!request.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error);

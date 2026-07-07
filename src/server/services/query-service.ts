@@ -17,19 +17,19 @@ import type { CoreMessage } from 'ai';
 import {
   buildQueryToolContext,
   createAccessedPages,
-  accessedToContext,
   subjectHasContent,
 } from './query-tools';
-import type { AccessedPages, QueryContextPage } from './query-tools';
+import type { AccessedPages } from './query-tools';
 import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
 import { compileToolSet } from '@/server/agents/tools/compile';
 import {
-  QueryResponseSchema,
-  QUERY_SYSTEM_PROMPT,
   QUERY_AGENTIC_SYSTEM_PROMPT,
-  buildQueryUserPrompt,
   buildAgenticUserContent,
+  CoverageSchema,
+  COVERAGE_SYSTEM_PROMPT,
+  buildCoverageUserPrompt,
 } from '../llm/prompts/query-prompt';
+import { extractCitationsFromAnswer } from './citation-extract';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 import {
@@ -54,12 +54,6 @@ export function resolveQueryTools() {
   const names = isWebSearchConfigured() ? [...BASE_QUERY_TOOL_NAMES, 'web.search'] : BASE_QUERY_TOOL_NAMES;
   return createBuiltinToolRegistry().resolve(names);
 }
-
-const QueryCitationsSchema = QueryResponseSchema.pick({
-  citations: true,
-  coverageSufficient: true,
-  suggestedResearchQuestion: true,
-});
 
 /**
  * best-effort 把"库内答不上"的问题写入待研究队列；写入失败只记日志，不影响问答响应。
@@ -87,51 +81,33 @@ function subjectCtxFrom(subject: Subject) {
   };
 }
 
-export interface QueryCitationsResult {
-  citations: { pageSlug: string; excerpt: string }[];
-  coverageSufficient: boolean;
-  suggestedResearchQuestion?: string;
-}
-
-export async function generateQueryCitations(
-  question: string,
-  fullAnswer: string,
-  context: QueryContextPage[],
+/**
+ * 异步 coverage 判定（fire-and-forget）：只喂问题+最终答案，
+ * 不足时 best-effort 写 research backlog；任何失败只记日志，不影响问答响应。
+ */
+export function assessCoverageInBackground(
   subject: Subject,
-): Promise<QueryCitationsResult> {
+  question: string,
+  answer: string,
+): void {
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(subject),
   };
-  const response = await generateStructuredOutput(
+  void generateStructuredOutput(
     'query',
-    QueryCitationsSchema,
-    QUERY_SYSTEM_PROMPT,
-    `${buildQueryUserPrompt(question, context, promptCtx)}
-
-## Draft answer to cite
-
-<draft_answer>
-${fullAnswer}
-</draft_answer>
-
-Return only the structured citations for the draft answer above. Do not rewrite the answer.`,
-  );
-
-  const citations = response.citations.map((c) => {
-    const page = context.find((p) => p.slug === c.pageSlug);
-    if (!page) return { ...c, excerpt: `[unverified] ${c.excerpt}` };
-    const normalizedContent = page.content.toLowerCase().replace(/\s+/g, ' ');
-    const normalizedExcerpt = c.excerpt.toLowerCase().replace(/\s+/g, ' ');
-    const isVerified = normalizedContent.includes(normalizedExcerpt);
-    return isVerified ? c : { ...c, excerpt: `[unverified] ${c.excerpt}` };
-  });
-
-  return {
-    citations,
-    coverageSufficient: response.coverageSufficient,
-    suggestedResearchQuestion: response.suggestedResearchQuestion,
-  };
+    CoverageSchema,
+    COVERAGE_SYSTEM_PROMPT,
+    buildCoverageUserPrompt(question, answer, promptCtx),
+  )
+    .then((r) => {
+      if (!r.coverageSufficient) {
+        recordCoverageGap(subject, question, r.suggestedResearchQuestion);
+      }
+    })
+    .catch((err) => {
+      console.error('[query] coverage assessment failed', err);
+    });
 }
 
 /**
@@ -194,22 +170,8 @@ export async function runQuery(
   });
 
   const answer = text.trim().length > 0 ? text : NO_QUERY_CONTEXT_ANSWER;
-
-  let citations: { pageSlug: string; excerpt: string }[] = [];
-  try {
-    const result = await generateQueryCitations(
-      question,
-      answer,
-      accessedToContext(subject, accessed),
-      subject,
-    );
-    citations = result.citations;
-    if (!result.coverageSufficient) {
-      recordCoverageGap(subject, question, result.suggestedResearchQuestion);
-    }
-  } catch {
-    citations = [];
-  }
+  const citations = extractCitationsFromAnswer(answer, accessed, subject.slug);
+  assessCoverageInBackground(subject, question, answer);
 
   return { answer, citations, savedAsPage: null };
 }
