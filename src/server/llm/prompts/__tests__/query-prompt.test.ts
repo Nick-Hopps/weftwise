@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildQueryUserPrompt, QUERY_AGENTIC_SYSTEM_PROMPT } from '../query-prompt';
+import { buildQueryUserPrompt, QUERY_AGENTIC_SYSTEM_PROMPT, QueryResponseSchema } from '../query-prompt';
 import type { PromptContext } from '../prompt-context';
 
 const ctxChinese: PromptContext = {
@@ -93,6 +93,35 @@ describe('buildAgenticUserContent', () => {
   it('不传 currentPageSlug 时不含 hint', () => {
     const out = buildAgenticUserContent('问题', ctx);
     expect(out).not.toMatch(/currently viewing/i);
+  });
+});
+
+describe('QueryResponseSchema — coverage 字段', () => {
+  it('coverageSufficient 必填，suggestedResearchQuestion 可选', () => {
+    const parsed = QueryResponseSchema.parse({
+      answer: 'a',
+      citations: [],
+      coverageSufficient: false,
+      suggestedResearchQuestion: '这是一个待研究问题？',
+    });
+    expect(parsed.coverageSufficient).toBe(false);
+    expect(parsed.suggestedResearchQuestion).toBe('这是一个待研究问题？');
+
+    const withoutSuggestion = QueryResponseSchema.parse({
+      answer: 'a', citations: [], coverageSufficient: true,
+    });
+    expect(withoutSuggestion.suggestedResearchQuestion).toBeUndefined();
+
+    expect(() =>
+      QueryResponseSchema.parse({ answer: 'a', citations: [] }),
+    ).toThrow();
+  });
+});
+
+describe('QUERY_AGENTIC_SYSTEM_PROMPT — web search 纪律', () => {
+  it('提到 web_search 工具与来源标注要求', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('web_search');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/not in your wiki/i);
   });
 });
 

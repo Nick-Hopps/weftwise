@@ -16,7 +16,10 @@ const {
 }));
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
-vi.mock('@/server/db/repos/settings-repo', () => ({ getWikiLanguage: () => 'English' }));
+vi.mock('@/server/db/repos/settings-repo', () => ({
+  getWikiLanguage: () => 'English',
+  getWebSearchConfig: () => ({ provider: 'tavily', apiKey: '', maxResults: 5 }),
+}));
 vi.mock('@/server/llm/provider-registry', () => ({
   generateStructuredOutput: vi.fn(),
   streamTextResponse: vi.fn(),

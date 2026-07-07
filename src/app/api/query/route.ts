@@ -12,8 +12,19 @@ import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
+import * as researchBacklogRepo from '@/server/db/repos/research-backlog-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
+import type { Subject } from '@/lib/contracts';
+
+/** best-effort：写入失败只记日志，不影响问答响应。 */
+function recordCoverageGap(subject: Subject, question: string, suggestedQuestion?: string): void {
+  try {
+    researchBacklogRepo.create(subject.id, suggestedQuestion?.trim() || question, 'ask-ai');
+  } catch (err) {
+    console.error('[query] failed to record research backlog entry', err);
+  }
+}
 
 export const runtime = 'nodejs';
 
@@ -177,7 +188,8 @@ export async function POST(request: NextRequest) {
           emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
           emit('citations', { citations: [] });
           persistTurn(NO_QUERY_CONTEXT_ANSWER, []);
-          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          recordCoverageGap(subject, trimmedQuestion);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId, coverageSufficient: false });
           closeStream();
           return;
         }
@@ -213,20 +225,26 @@ export async function POST(request: NextRequest) {
         }
 
         let streamedCitations: { pageSlug: string; excerpt: string }[] = [];
+        let coverageSufficient = true;
         try {
-          streamedCitations = await generateQueryCitations(
+          const result = await generateQueryCitations(
             trimmedQuestion,
             fullAnswer,
             accessedToContext(subject, accessed),
             subject,
           );
+          streamedCitations = result.citations;
+          coverageSufficient = result.coverageSufficient;
+          if (!coverageSufficient) {
+            recordCoverageGap(subject, trimmedQuestion, result.suggestedResearchQuestion);
+          }
         } catch {
           streamedCitations = [];
         }
 
         emit('citations', { citations: streamedCitations });
         persistTurn(fullAnswer, streamedCitations);
-        emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+        emit('done', { subjectId: subject.id, conversationId: activeConversationId, coverageSufficient });
       } catch (error) {
         if (!request.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error);

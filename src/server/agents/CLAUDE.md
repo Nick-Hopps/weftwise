@@ -139,6 +139,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面正文（`sideEffect:'update'`，仅 fix runner） |
 | `builtin/commit-changeset.ts` | `commit_changeset` — 薄包装 `commitPending`（已无 skill 引用，保留供工具面/测试用） |
 | `builtin/dispatch-skill.ts` | `dispatch_skill` — orchestrator fanout 用；触发子 skill 执行（writer × N）|
+| `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
 
 ---
 
@@ -296,6 +297,7 @@ src/server/agents/
 | 2026-06-30 | Curate tool-loop：新增 `tools/builtin/wiki-merge.ts`（`wiki.merge`，`sideEffect:'merge'`）+ `tools/builtin/wiki-split.ts`（`wiki.split`，`sideEffect:'split'`）；`ToolContext` 新增 `mergePages?(targetSlug, sourceSlug)` / `splitPage?(slug, hint?)` 写能力（仅 curate runner 注入）；`ToolDef.sideEffect` 联合类型扩展 `'merge'`/`'split'`；curate runner 经 `buildCurateToolContext`（`services/curate-tools.ts`）注入七工具（read/search/list/merge/split/delete/create）并驱动 `generateTextWithTools('curate')` tool-loop |
 | 2026-06-26 | 路由 key 统一：新增 `agent-loop::skillTaskKey(id)`（`ingest-planner`→`ingest:planner`），`resolveSkillModel` 改用之，task key 由 `skill:ingest-xxx` 改为 `ingest:xxx`（id/文件名不变）；配合移除内置 `ingest` task。文档修正：skill frontmatter 字段是 `model:`（非 `llm_override:`，schema `.strict()` 拒未知键）、router mode 值 `task-router-only`（非 `config-only`）|
 | 2026-06-30 | Fix tool-loop：新增 `tools/builtin/wiki-update.ts`（`wiki.update`，`sideEffect:'update'`，委托 `executePageUpdate`）；`ToolContext` 新增 `updatePage?`（仅 fix runner 注入）；`ToolDef.sideEffect` 扩 `'update'`（Spec 3）|
+| 2026-07-07 | T3.2：新增 `tools/builtin/web-search.ts`（`web.search`，`sideEffect:'none'`，只读，包装 `search/web-search.ts::webSearch`）；`ToolContext` 新增可选 `webSearch?(query)`（仅 query runner 在 `isWebSearchConfigured()` 为真时注入，未配置时工具不出现在解析结果中）|
 | 2026-07-01 | 新增 `supplement` step kind + `runtime/supplement-page.ts::runPageSupplement`（re-enrich 专用，画像探针驱动正文缺口补全，共用 fanout 骨架、4 项确定性护栏 + 重写一次 + 回落原文）；`supplement-guard.ts` 护栏纯函数；checkpoint 加 `supplement-page` kind |
 | 2026-07-06 | T1.5 token 预算预扣制：`BudgetTracker` 新增 `reserve(estimated)`/`settle(handle, actual)`，维持不变式 `tokensUsed+reserved<=maxTokensPerJob`（`assertWithin` 一并计入 reserved），修掉并发 fanout 击穿 `maxTokensPerJob` 的问题（原先所有并发实例都在任何一页记账前通过 assertWithin 闸门）；`orchestrator.ts` 的 fanout/verify/supplement 分支在派发每一项前 `reserve`、`finally` 里 `settle`（跳过检查点命中项）；单项预扣量取 `ctx.estimateFanoutReserve?.(itemCount)`（ingest 复用 `ingest-prep.ts::estimatePerPageTokens`，与 `reduceCostForResume` 共用 `FANOUT_SHARE` 常量），未注入时回退均分估算 |
 | 2026-07-06 | T1.6 WriterConflict 与检查点顺序修复：`orchestrator.ts` fanout/verify/supplement 分支用请求级 `claimedPaths`（path→slug）表把同 path 冲突检测提前到 `checkpoint.put` 之前——写入前撞见已认领 path 时不写自己且撤销先认领者已落盘条目；resume 读缓存命中同 path 冲突时丢弃后到者缓存条目（`emit('ingest:warn', ...)`）重新生成而非原样复现冲突。`IngestCheckpoint` 新增 `deleteStagePage(kind, slug)`（`checkpoint.ts` 内存+DB 双删，`checkpoints-repo.deleteCheckpoint` 新增）；`WriterConflictError` 抛出时机/分类不变，只消灭死锁重试 |

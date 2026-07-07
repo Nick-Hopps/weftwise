@@ -59,10 +59,12 @@ worker-entry.ts
   1. 调 `subjectHasContent(subject.id)` 空 subject 短路守卫；空库直接返回 `NO_QUERY_CONTEXT_ANSWER`；
   2. 同样走 `generateTextWithTools` 工具循环；
   3. 引用由 `generateQueryCitations` 从 `accessedToContext(subject, accessed)` 取页生成。
-- `generateQueryCitations(question, fullAnswer, context, subject)` — 对已有答案与访问页上下文做二次结构化输出，产出 `{ pageSlug, excerpt }[]` 引用列表；
+- `generateQueryCitations(question, fullAnswer, context, subject)` — 对已有答案与访问页上下文做二次结构化输出，产出 `{ citations, coverageSufficient, suggestedResearchQuestion? }`（T3.2：模型同时判断本轮回答是否被 wiki 内容充分支撑）；
+- `coverageSufficient === false`（或空库短路）时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'，question 取 `suggestedResearchQuestion` 回落用户原问题；`try/catch` 包裹，写入失败只 `console.error` 不影响问答响应）（T3.2）；
+- `resolveQueryTools()` — 导出函数：`web.search` 仅在 `isWebSearchConfigured()` 为真时才注入工具集，未配置时模型完全看不到该工具（T3.2，见下）；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue），走 changeset 写入对应 subject。
 
-`NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答。
+`NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答（同时触发 backlog 写入）。
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
 
 **`query-tools.ts`**（新增）— subject-scoped 工具定义，经共享 registry 的 `wiki.read/search/list`：
@@ -251,6 +253,7 @@ src/server/services/
 | 2026-07-01 | reenrich-service 加画像驱动正文补全 supplement 首阶段（`reenrich-supplement` skill + `runPageSupplement` 护栏 + `buildProfileHint` 探针提示 + `deriveMaturityUpdate` 并入正文增长）；流水线三步（supplement→enricher→verify），仅 re-enrich，ingest 不变 |
 | 2026-07-06 | T1.8 成熟度信号质量化：`nextMaturity` 新增 `qualityDelta`/`staleSource` 输入，质量优先——`qualityDelta<=0` 时体量信号（callout+正文增长折算）清零，纯长肉不再续命，直接走 saturation；`staleSource=true` 时前置阻断毕业（也不快进间隔，留在当前档）。新增 `page-quality-signal.ts`（IO 层，单页确定性 findings 计数 + 单页 stale 判定，均不跑全库）；`lint-deterministic.ts` 抽出可复用的 `checkStaleSourcesForPage`；`reenrich-service.ts::deriveMaturityUpdate` 改纯函数（qualityDelta/staleSource 由调用方在 handler 里用 `page-quality-signal` 算好传入），quality 分量 = 单页确定性 findings「修复前−修复后」+ 本轮 `ctx.citedSources` 新增证据条数（未接入 verify 结构化"修订计数"，因 apply 只回传最终正文不单独暴露修了几处——用引用证据数作确定性代理，零额外 LLM 调用）；`page_maturity` 表结构不动（质量信号现场重算，无迁移）|
 | 2026-07-06 | T1.4 统一保真护栏：`fix-tools.ts`（profile `fix`，floor 0.5→0.8）与 `reshape-service.ts`（profile `reshape`，新增长度 floor 0.8）改调 `wiki/rewrite-fidelity.ts::checkRewriteFidelity`；`fix-deterministic.ts::bodyShrankTooMuch` 退役（收编）；`supplement-guard.ts::checkSupplementFidelity` 收编为薄转发（profile `supplement`），链接规则由「禁止新增」改为「禁止丢失」（preserve）|
+| 2026-07-07 | T3.2 Ask AI 未命中 → 待研究队列 + 联网检索：`generateQueryCitations` 二次结构化输出 schema 加 `coverageSufficient`/`suggestedResearchQuestion`（`query-prompt.ts`），不足或空库短路时 best-effort 写入 `research-backlog-repo`；新增只读 `web.search` 工具（`agents/tools/builtin/web-search.ts`，包装 `search/web-search.ts::webSearch`，`sideEffect:'none'`），仅 `isWebSearchConfigured()` 为真时经新导出的 `resolveQueryTools()` 注入 query 工具集（未配置时模型不可见）；`ToolContext` 加可选 `webSearch?`，`query-tools.ts::buildQueryToolContext` 接入；`QUERY_AGENTIC_SYSTEM_PROMPT` 补 web 结果标注纪律（不得与 wiki 引用混淆）|
 | 2026-07-07 | 新增 `research-service.ts`（任务类型 `'research'`，T3.1）：缺口/主题→联网研究→候选清单，只发现不写入（零 vault/DB 写入）。三阶段：`generateStructuredOutput('research:queries')` 生成 query（失败→job 失败）→ `web-search.ts::webSearch` 逐条搜索（`allSettled`，单条失败只跳过）→ `generateStructuredOutput('research:triage')` 打分（失败降级为按排名取前 3 未评分）；纯函数收在 `src/lib/research-plan.ts`（零 server 依赖，与候选弹窗共用同一份 `defaultChecked` 等纯函数；query/候选去重截断、triage 应用/降级排序）。`resolveTopicsFromGapIds` 把 gapIds（最近 lint 快照 `findings[]` 数组下标）解析为 coverage-gap 描述文本。产出只落 job `resultJson.candidates`，确认后走现成 `POST /api/ingest { urls }`（零改动）|
 | 2026-07-06 | T2.1 ingest finalize 去 LLM 化：`finalizeIngest` 不再调 `ingest-indexer`，改用 `wiki/meta-pages.ts` 纯函数 `renderIndexPage`/`renderLogPage` 确定性渲染 index/log（按 tag 分组+标题排序+`[[slug\|Title]]`；log 保留最近 50 条、新条目在前，解析既有 log 正文 bullet 行还原历史）；`MIN_SKILL_VERSIONS` 去掉 `ingest-indexer` 项，skill 文件已删（`examples/skills/ingest-indexer.md`）；`llm-config.example.json` 去掉 `ingest:indexer` 路由项。索引每页 tags 优先取本次 `ctx.pending` 内容实际写入的 frontmatter，未触碰页沿用 DB 既有 tags。动机：原方案每次 ingest 都要把全 subject 页清单塞进 prompt，页数上几百后单调膨胀直至超上下文窗口且重复付费——目录/日志本质是数据库可确定性派生的数据 |
 

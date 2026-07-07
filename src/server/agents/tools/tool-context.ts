@@ -32,6 +32,8 @@ export interface ToolContext {
   /** fix 侧更新一页正文（Saga）；仅 fix runner 注入。 */
   updatePage?(input: { slug: string; body: string; summary?: string; tags?: string[] }):
     Promise<{ updatedSlug: string }>;
+  /** query 侧只读联网检索（Tavily）；工具集只在 web search 已配置时才含 web.search，未配置时不会被调用。 */
+  webSearch?(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
   agent?: AgentContext;
 }
