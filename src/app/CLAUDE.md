@@ -40,8 +40,9 @@
 | `/api/research` | POST | 入队 `research` 任务（缺口/主题→联网研究候选清单，只发现不写入）；body 二选一 `{ gapIds: string[] }`（校验命中最近 lint 快照的 coverage-gap）或 `{ topic: string }`；web search 未配置 → 422 |
 | `/api/research-backlog` | GET | 🆕 T3.2：列出当前 subject 待研究问题队列（`?status=open\|researched\|dismissed` 过滤，缺省返回全部） |
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
-| `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight` |
+| `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
 | `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源 ingest 在途 409 `in-flight`，对称于 reingest）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
+| `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试（`queue.requeue`，绕过 worker 的 `isRetryableError` 判定）：仅 `type==='ingest'` + `status==='failed'`；已被用户终结（`result.cancelled`）409；job 引用的 source 已被删除（如经 orphan-source 的 Delete source）409，避免 requeue 后 worker 读盘 "Source file not found" |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：从 preHead 重建 inverse changeset、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -113,7 +114,7 @@ src/app/
     ├── jobs/route.ts
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
-    ├── jobs/[id]/retry/route.ts         # 🆕 POST 重试
+    ├── jobs/[id]/retry/route.ts         # 🆕 POST 重试（含 source 存在性校验，防重试已删 source 的孤儿 job）
     ├── pages/route.ts
     ├── pages/[...slug]/route.ts
     ├── search/route.ts
@@ -146,6 +147,7 @@ src/app/
 | 2026-06-30 | `DELETE /api/pages/[...slug]` DRY 重构：改用 `services/page-write.ts::validateDeleteTarget`（守卫单一真实源）+ `executePageDelete`（Saga+embed 回填）；响应新增 `brokenBacklinks: number`（同-subject 内原指向被删页的链接数，供 chat UI 提示清理）。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-agentic-wiki-write-tools* |
 | 2026-07-03 | Ingest URL 输入：`POST /api/ingest` 新增 JSON `{ urls: string[] }` 批量分支（≤20，路由内同步抓取 HTML/Markdown/TXT 转 raw source），每 URL 独立 ingest job；202 部分成功/422 全失败；新增 sources/url-fetcher（协议/超时10s/5MB/content-type 守卫）+ url-ingest（校验+allSettled 编排）+ lib/url-list；workbench 加 URL tab；流水线逻辑零改动。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-03-ingest-url-input* |
 | 2026-07-07 | T3.2 Ask AI 未命中 → 待研究队列：新增 `GET /api/research-backlog`（列出当前 subject 待研究问题，可按 status 过滤）+ `PATCH /api/research-backlog/[id]`（更新状态/回填 researchJobId，requireAuth+CSRF+resolveSubject，跨 subject/不存在→404）；`(app)/health/page.tsx` 新增 "Research backlog" 区块（逐条 Research 复用现成 `POST /api/research` topic 分支 / Dismiss）；`POST /api/query` 流式 `done` 事件新增 `coverageSufficient` 透传 |
+| 2026-07-09 | 修复 orphan-source Delete 与 Retry 竞态：`POST /api/jobs/[id]/retry`（ingest workbench 通用重试，与 orphan-source 专用的 `/api/sources/[id]/reingest` 是两条独立路径）此前不校验 job 引用的 source 是否还在，Health 页删完源文件后若经此端点重试会立即 requeue、worker 在 `loadCleanText` 报 "Source file not found"；补上与 reingest 端点一致的存在性校验（解析 `job.paramsJson.sourceId` → `sourcesRepo.getSource` 查无则 409 友好提示，不 requeue）。 |
 
 ---
 

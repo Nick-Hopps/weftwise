@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mockGet = vi.fn();
 const mockRequeue = vi.fn();
 const mockEmit = vi.fn();
+const mockGetSource = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
   requireAuth: () => null,
@@ -15,6 +16,9 @@ vi.mock('@/server/jobs/queue', () => ({
 }));
 vi.mock('@/server/jobs/events', () => ({
   emit: (...args: Parameters<typeof mockEmit>) => mockEmit(...args),
+}));
+vi.mock('@/server/db/repos/sources-repo', () => ({
+  getSource: (...args: Parameters<typeof mockGetSource>) => mockGetSource(...args),
 }));
 
 import { POST } from '../route';
@@ -28,6 +32,7 @@ beforeEach(() => {
   mockGet.mockReset();
   mockRequeue.mockReset();
   mockEmit.mockReset();
+  mockGetSource.mockReset();
 });
 
 describe('POST /api/jobs/[id]/retry', () => {
@@ -74,5 +79,31 @@ describe('POST /api/jobs/[id]/retry', () => {
     expect(res.status).toBe(202);
     expect(mockRequeue).toHaveBeenCalledWith('j1');
     expect(mockEmit).toHaveBeenCalledWith('j1', 'job:retrying', expect.any(String), expect.objectContaining({ manual: true }));
+  });
+
+  it('409 当 job 引用的 source 已被删除（如经 Health 页 Delete source），不 requeue', async () => {
+    mockGet.mockReturnValue({
+      id: 'j1', type: 'ingest', status: 'failed',
+      paramsJson: JSON.stringify({ sourceId: 's1', filename: 'a.md', subjectId: 'sub1' }),
+    });
+    mockGetSource.mockReturnValue(null);
+    const res = await call();
+    expect(res.status).toBe(409);
+    expect(mockGetSource).toHaveBeenCalledWith('s1');
+    expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockEmit).not.toHaveBeenCalled();
+  });
+
+  it('202 当 job 引用的 source 仍存在', async () => {
+    mockGet
+      .mockReturnValueOnce({
+        id: 'j1', type: 'ingest', status: 'failed',
+        paramsJson: JSON.stringify({ sourceId: 's1', filename: 'a.md', subjectId: 'sub1' }),
+      })
+      .mockReturnValueOnce({ id: 'j1', type: 'ingest', status: 'pending' });
+    mockGetSource.mockReturnValue({ id: 's1', subjectId: 'sub1', filename: 'a.md' });
+    const res = await call();
+    expect(res.status).toBe(202);
+    expect(mockRequeue).toHaveBeenCalledWith('j1');
   });
 });

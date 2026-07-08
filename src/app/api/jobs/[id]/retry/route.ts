@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as queue from '@/server/jobs/queue';
 import * as events from '@/server/jobs/events';
+import * as sourcesRepo from '@/server/db/repos/sources-repo';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 
 export const runtime = 'nodejs';
@@ -40,6 +41,22 @@ export async function POST(
   if (cancelled) {
     return NextResponse.json(
       { error: 'This ingest was terminated and can no longer be resumed. Start a new ingest instead.' },
+      { status: 409 },
+    );
+  }
+
+  // source 已被删除（如通过 Health 页 orphan-source 的 Delete source）时不可重试：
+  // 原始文件已不在磁盘，requeue 会让 worker 在 loadCleanText 立即报 "Source file not found"。
+  // 与 POST /api/sources/[id]/reingest 的存在性校验保持一致，堵住这一条独立的重试路径。
+  let sourceId: string | undefined;
+  try {
+    sourceId = (JSON.parse(job.paramsJson ?? '{}') as { sourceId?: string }).sourceId;
+  } catch {
+    // params 不可解析 → 跳过校验（不太可能发生，ingest job 入队时总是写合法 JSON）
+  }
+  if (sourceId && !sourcesRepo.getSource(sourceId)) {
+    return NextResponse.json(
+      { error: 'The source file for this ingest was deleted. Start a new ingest instead.' },
       { status: 409 },
     );
   }
