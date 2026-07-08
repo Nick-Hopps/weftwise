@@ -13,7 +13,9 @@ export const runtime = 'nodejs';
  * DELETE /api/sources/[id] —— 删除孤儿 source（零 page_sources 关联才允许）。
  * 同源 ingest job 在途（pending/running）时 409 in-flight（对称于 reingest 端点）。
  * vault 锁内：删 raw 文件 + sidecar（best-effort）→ 删 sources 行 → git commit。
- * 关联的 failed job 行不动（留着无害；reingest 端点靠 source 存在性校验兜底）。
+ * 关联的 failed job 行不动（留着无害）：源摄入的重试入口——本孤儿 source 专用的
+ * `POST /api/sources/[id]/reingest` 与 ingest workbench 通用的 `POST /api/jobs/[id]/retry`——
+ * 都会在 requeue 前校验 sourceId 对应的 source 行是否还在，删除后若被点击重试统一 409。
  */
 export async function DELETE(
   request: NextRequest,
