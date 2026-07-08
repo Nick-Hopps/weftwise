@@ -1,6 +1,7 @@
 import * as queue from './queue';
 import * as events from './events';
 import type { Job } from '@/lib/contracts';
+import { describeErrorMessage } from '@/lib/error-format';
 import { runMaintenanceSweep } from '../services/maintenance-scheduler';
 import { pruneOldOperations } from '../db/repos/operations-repo';
 import {
@@ -103,17 +104,31 @@ const NON_RETRYABLE_ERROR_NAMES = new Set([
 function isRetryableError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   if (NON_RETRYABLE_ERROR_NAMES.has(error.name)) return false;
-  const msg = error.message.toLowerCase();
+  // AI SDK 的 RetryError：reason='maxRetriesExceeded' 说明 SDK 自己判定每次尝试都是
+  // 瞬时可重试错误（超时/网络/5xx），只是次数用完；job 级再给一次机会（更长退避）
+  // 经常能跨过去。reason='errorNotRetryable' 是遇到了明确的非瞬时错误，重试没有意义。
+  if (error.name === 'AI_RetryError') {
+    return (error as { reason?: string }).reason === 'maxRetriesExceeded';
+  }
+  // 部分瞬时网络错误的真实原因在 cause 里而不是 message（如 undici 的 "terminated"），
+  // 两处都搜一遍关键字。
+  const cause = (error as { cause?: unknown }).cause;
+  const causeText = typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : '';
+  const msg = `${error.message} ${causeText}`.toLowerCase();
   return (
     msg.includes('aborted') ||
     msg.includes('timeout') ||
     msg.includes('econnreset') ||
     msg.includes('econnrefused') ||
     msg.includes('fetch failed') ||
+    msg.includes('terminated') ||
+    msg.includes('other side closed') ||
+    msg.includes('failed to process successful response') ||
     msg.includes('rate limit') ||
     msg.includes('429') ||
+    msg.includes('502') ||
     msg.includes('503') ||
-    msg.includes('502')
+    msg.includes('524')
   );
 }
 
@@ -191,8 +206,7 @@ async function runJob(job: Job): Promise<void> {
     queue.complete(job.id, result);
     events.emit(job.id, 'job:completed', 'Job completed successfully', { result });
   } catch (error) {
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
+    const errorMessage = describeErrorMessage(error);
     const errorData: Record<string, unknown> = { error: errorMessage };
     if (error && typeof error === 'object') {
       const e = error as Record<string, unknown>;

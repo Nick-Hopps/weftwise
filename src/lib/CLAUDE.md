@@ -17,6 +17,7 @@
 | `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `subject-nav.ts` | 🆕 subject 切换的可记忆路径判定与 query 拼接：`isRememberablePath`（`/wiki/*` / `/sources/*` 判定）/ `withSubjectParam`（`?s=<subject-slug>` 拼接） + 单测 |
+| `error-format.ts` | 🆕 `describeErrorMessage(error)`：AI SDK `RetryError` 最后一次尝试自身 message 为空时，补上 `.lastError` 的 message/cause，避免真实原因丢失；`server/jobs/worker.ts` 与 `server/db/repos/jobs-repo.ts::failJob` 共用 |
 | `theme/read-theme-vars.ts` | 从 `document.documentElement` 读 CSS 变量（主题同步） |
 
 ## 对外接口（关键类型）
@@ -105,6 +106,7 @@ src/lib/
 ├── markdown-client.ts      # 客户端 markdown 渲染
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
 ├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨，`wiki.create` 映射 ➕，`wiki.update` 映射 ✏️，`wiki.delete` 映射 🗑，`wiki.merge` 映射 🔗，`wiki.split` 映射 ✂️）
+├── error-format.ts         # 🆕 describeErrorMessage：补全 RetryError 丢失的真实原因
 └── theme/
     └── read-theme-vars.ts  # 读取 CSS 变量
 ```
@@ -125,6 +127,7 @@ src/lib/
 | 2026-06-30 | 新增 `selection-text.ts`（选区文本归一化/截断/id 派生/最近标题提取纯函数 + `HeadingScanNode`），供选中正文文本悬浮追问按钮使用；spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-selection-ask-floating-button* |
 | 2026-06-30 | `tool-activity.ts` 补 `wiki_merge`(🔗)/`wiki_split`(✂️) 映射，供 curate tool-loop 工具活动的 chat UI 展示 |
 | 2026-06-30 | `tool-activity.ts` 补 `wiki_update`(✏️) 映射，供 fix tool-loop 工具活动展示 |
+| 2026-07-09 | 新增 `error-format.ts::describeErrorMessage`，修复 AI SDK `RetryError` 最后一次尝试 message 为空时真实原因丢失的问题（`server/jobs/worker.ts` + `server/db/repos/jobs-repo.ts::failJob` 接入） |
 
 ---
 

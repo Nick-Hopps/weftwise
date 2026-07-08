@@ -38,7 +38,7 @@ stopWorker()
 
 - **并发调度**：`runningJobs` Map 跟踪当前在跑任务（id→type）；每 tick 用纯函数 `decideClaim(runningTypes, ingestLimit)` 三态决策（可 claim ingest / 可 claim 非 ingest / 都不行）——非 ingest 类型独占（跑着任何非 ingest 任务时不再 claim）、ingest 之间允许并发但受 `app_settings.ingestConcurrency`（默认 2，范围 1-4，每 tick 实时读）上限约束；vault 写入安全靠 `vault-mutex`（进程内队列 + 跨进程文件锁）兜底，而非串行调度。
 - **心跳**：每 30s 调 `queue.updateHeartbeat` 续租。
-- **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / fetch failed / aborted / rate limit）；调 `queue.requeue(jobId)` 保持 job ID，前端 SSE 不会丢踪。
+- **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / 524 / terminated / other side closed / failed to process successful response / fetch failed / aborted / rate limit，关键字同时搜 `error.message` 和 `error.cause`）；AI SDK 的 `AI_RetryError` 按 `.reason` 精确判定（`maxRetriesExceeded`→retry，`errorNotRetryable`→fail，不猜关键字）；调 `queue.requeue(jobId)` 保持 job ID，前端 SSE 不会丢踪。
 
 ### `events.ts`
 
@@ -84,13 +84,15 @@ emit(jobId, type, message, data?): void
 
 - `__tests__/maintenance-tick.test.ts`：`shouldSweep` 节律闸门边界。
 - `job_events` 保留清扫（`pruneJobEvents`）与 jobs 表 CRUD/查询见 `db/repos/__tests__/jobs-repo.test.ts`（queue/worker 是对 jobs-repo 的薄封装）。
+- `__tests__/worker.test.ts::decideJobFailureAction`：`isRetryableError` 分类（含 `AI_RetryError.reason` 精确判定、cause 里才有真实原因的网络错误）。
+- `lib/__tests__/error-format.test.ts` + `db/repos/__tests__/jobs-repo-fail.test.ts`：`describeErrorMessage` 补全 `AI_RetryError` 因 lastError message 为空而丢失的真实原因（见下方 2026-07-09 变更）。
 
 仍待补充：
 
 - `claimNextJob` 并发原子性（用 `busy_timeout` + `BEGIN IMMEDIATE`）。
 - `reclaimExpired` 的边界：刚好等于过期时间戳是否回收。
 - `requeue` 对 `attempt_count` 的正确自增。
-- `worker.ts`：`isRetryableError` 分类 + 心跳续租。
+- `worker.ts`：心跳续租。
 
 ## 常见问题 (FAQ)
 
@@ -117,6 +119,7 @@ src/server/jobs/
 | 2026-04-22 | 初始化 |
 | 2026-06-24 | 新增 `job_events` 保留清扫（worker 维护 tick 调 `queue.pruneEvents` → `jobs-repo.pruneJobEvents`，独立于成熟度维护开关，启动清一次积压）|
 | 2026-07-06 | Ingest 多任务支持：worker 由单任务串行改并发调度——新增 `runningJobs` Map + 纯函数 `decideClaim(runningTypes, ingestLimit)`（ingest 之间并发、上限 `app_settings.ingestConcurrency` 默认 2、非 ingest 独占）；vault 写入安全改靠 `vault-mutex` 兜底。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |
+| 2026-07-09 | 修复瞬时中转层错误被误判为不可重试：日志分析发现 `bad response status code 524` / `Failed to process successful response`(cause:terminated) / `Cannot connect to API: other side closed` 等真实瞬时故障，都不命中 `isRetryableError` 旧关键字列表，直接一步到位判 fail，零重试。`isRetryableError` 补关键字（terminated / other side closed / failed to process successful response / 524）+ 同时搜 `error.cause`；新增 `error.name==='AI_RetryError'` 分支，按 `.reason`（`maxRetriesExceeded`/`errorNotRetryable`）精确判定而非猜关键字。另修复 `AI_RetryError` 最后一次尝试 message 为空时（`Failed after 3 attempts. Last error: ` 后面留白）真实原因被吞的问题：新增 `lib/error-format.ts::describeErrorMessage`（补 `lastError` 的 message/cause），`worker.ts` catch 块与 `jobs-repo.ts::failJob`（result_json 实际落库处）均改调此函数。|
 
 ---
 

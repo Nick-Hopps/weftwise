@@ -93,14 +93,14 @@ Route Handler / Worker Handler
 
 ## 测试与质量
 
-已覆盖（vitest，135 测试文件 / 821 用例，2026-07-06；各子模块 `__tests__/`）：
+已覆盖（vitest，122 测试文件 / 811 用例，2026-07-09；各子模块 `__tests__/`）：
 
-- 分布：services 13 / db 12 / llm 11 / agents 11 / wiki 9 / sources 4 / search 4 / jobs 1 / git 1。
-- 重点：wikilinks / wiki-transaction（validate·rollback·applyChangeset）/ frontmatter / relink / split-plan / curate-plan / revert / history；db repos + 热路径索引 EQP；task-router / prompts；agents runtime（budget / agent-loop / orchestrator / overlay-vault / checkpoint）；ingest 流水线（prep / service / chunker / cleaner / finalize-sources / augmentation）；search（vector-math / semantic / hybrid / web）。
+- 分布（按 `*.test.ts` 文件实测重新核对，此前分布行已过期未同步）：services 26 / agents 26 / db 20 / wiki 16 / llm 14 / sources 7 / search 5 / jobs 3 / profile 3 / git 1 / middleware 1。
+- 重点：wikilinks / wiki-transaction（validate·rollback·applyChangeset）/ frontmatter / relink / split-plan / curate-plan / revert / history；db repos + 热路径索引 EQP；task-router / prompts；agents runtime（budget / agent-loop / orchestrator / overlay-vault / checkpoint）；ingest 流水线（prep / service / chunker / cleaner / finalize-sources / augmentation）；search（vector-math / semantic / hybrid / web）；`jobs/worker.ts::isRetryableError` 分类（含 `AI_RetryError.reason` 精确判定）。
 
 仍待补充：
 
-1. `jobs/worker.ts`（`isRetryableError` 分类 + 租约心跳续租）
+1. `jobs/worker.ts`（租约心跳续租）
 2. `db/repos`（`jobs-repo.claimNextJob` 并发原子性、FTS 触发器一致性）
 
 ## 常见问题 (FAQ)
@@ -141,6 +141,7 @@ src/server/
 | 2026-06-22 | 新增 search/ 模块（vector-math/semantic-search/hybrid-retrieval）+ embeddings-repo + embed-index worker 任务（⑧ 向量语义检索）|
 | 2026-06-22 | 新增 `search/web-search.ts`（Tavily search+extract，⑨ verifier 联网核查）；`wiki-transaction::SourceLinkOps` 升级为多源 `{ links:[{sourceId,pageSlugs}], extraStagePaths? }`（向后兼容，网页源随同一 ingest commit 落地）；settings-repo 加 web 搜索 3 key（⑨）|
 | 2026-06-24 | 文档：测试与质量小节更新为实际覆盖（82 文件 / 519 用例） |
+| 2026-07-09 | `jobs/worker.ts::isRetryableError` 补瞬时中转层错误（524/terminated/other side closed/failed to process successful response）+ `AI_RetryError.reason` 精确判定；新增 `lib/error-format.ts::describeErrorMessage` 修复 `AI_RetryError` 真实原因被吞的问题，`jobs-repo.ts::failJob` 同步接入 |
 
 ---
 

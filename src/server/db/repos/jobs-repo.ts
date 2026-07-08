@@ -2,6 +2,7 @@ import { eq, and, asc } from 'drizzle-orm';
 import { getDb, getRawDb } from '../client';
 import { jobs, jobEvents } from '../schema';
 import type { Job, JobEvent, SubjectId } from '@/lib/contracts';
+import { describeErrorMessage } from '@/lib/error-format';
 
 export function enqueueJob(
   type: Job['type'],
@@ -259,7 +260,7 @@ export function completeJob(
 export function failJob(id: string, error: unknown): void {
   const errorObj: Record<string, unknown> =
     error instanceof Error
-      ? { message: error.message, stack: error.stack }
+      ? { message: describeErrorMessage(error), stack: error.stack }
       : { message: String(error) };
 
   if (error && typeof error === 'object') {
