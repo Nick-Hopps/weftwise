@@ -59,9 +59,11 @@ export function buildFixToolContext(
       if (!prot.ok) { emit('fix:skip', `Skip update ${input.slug}: ${prot.reason}`, { slug: input.slug, reason: prot.reason }); throw new Error(prot.reason); }
       const doc = readPageInSubject(subject.slug, input.slug);
       if (!doc) { const reason = `page "${input.slug}" not found`; emit('fix:skip', `Skip update ${input.slug}: ${reason}`, { slug: input.slug, reason }); throw new Error(reason); }
-      if (!checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix).ok) {
-        const reason = 'edit dropped too much content';
-        emit('fix:warn', `Rejected update ${input.slug}: ${reason}`, { slug: input.slug, reason });
+      const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix);
+      if (!fidelity.ok) {
+        // 通用短语保留（下游/测试据此识别忠实度拦截），后缀带上具体违规项让日志可诊断
+        const reason = `edit dropped too much content: ${fidelity.violations.join('; ')}`;
+        emit('fix:warn', `Rejected update ${input.slug}: ${reason}`, { slug: input.slug, reason, violations: fidelity.violations });
         throw new Error(reason);
       }
       const res = await executePageUpdate(jobId, subject, input);
