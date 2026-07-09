@@ -111,6 +111,9 @@ describe('renderMarkdown — GFM 表格渲染', () => {
     const html = toHtml(renderMarkdown(md));
     expect(html).toContain('<table');
     expect(html).toContain('Page');
+    // 更强断言：必须是真正的链接元素，而不只是原样保留的 `[[Page]]` 纯文本
+    // （纯文本形式同样包含字符串 "Page"，前两条断言无法区分两者）。
+    expect(html).toMatch(/<a[^>]*>Page<\/a>/);
   });
 
   it('删除线语法随 remark-gfm 一起生效', () => {
