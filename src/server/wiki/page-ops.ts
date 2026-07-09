@@ -9,7 +9,7 @@ import { readPageInSubject } from './wiki-store';
 import { serializeWikiDocument } from './markdown';
 import { serializeFrontmatter, stampSystemFrontmatter } from './frontmatter';
 import { buildWikiPath, deriveUniqueSlug } from './page-identity';
-import { repointLinksToPage } from './relink';
+import { repointLinksToPage, rewriteBacklinkText } from './relink';
 import { planSplitPages } from './split-plan';
 import { createChangeset, validateChangeset, applyChangeset } from './wiki-transaction';
 import { generateStructuredOutput } from '../llm/provider-registry';
@@ -235,25 +235,28 @@ export async function executePageCreate(
 }
 
 /**
- * 更新一页正文（可选 summary/tags）：保留原 title/created 与系统 frontmatter（stamp updated），
- * 替换正文 → validateChangeset → apply。无 emit / 无 enqueue，与 create/delete 内核同构。
+ * 更新一页（可选改标题）：替换正文、覆盖 tags/summary；改标题时联动重写本 subject 内
+ * 引用该页旧标题的文本（relink.ts::rewriteBacklinkText），与原页更新同一个 Saga 事务提交。
  * 坏链铁律：!valid（跨主题坏链 errors）或留下同主题 unresolved-wikilink 警告一律抛错、不落盘
  * （单页更新里残留 unresolved-wikilink 等同坏链；引导调用方「先建目标页再链接」）。
- * 供 fix tool-loop（与未来对话式 wiki.update）复用。
+ * 供 fix tool-loop 与对话式 wiki.update（fix + query 两个 runner）复用。
  */
 export async function executePageUpdate(
   jobId: string,
   subject: Subject,
-  params: { slug: string; body: string; summary?: string; tags?: string[] },
-): Promise<{ updatedSlug: string }> {
+  params: { slug: string; title?: string; body: string; summary?: string; tags?: string[] },
+): Promise<{ updatedSlug: string; referencesUpdated: number }> {
   const { slug, body } = params;
   const doc = readPageInSubject(subject.slug, slug);
   if (!doc) throw new Error(`page "${slug}" not found`);
 
+  const oldTitle = doc.frontmatter.title;
+  const newTitle = params.title?.trim() || oldTitle;
+
   const now = new Date().toISOString();
   const frontmatter: WikiFrontmatter = {
     ...doc.frontmatter,
-    title: doc.frontmatter.title,
+    title: newTitle,
     tags: params.tags ?? doc.frontmatter.tags,
     ...(params.summary !== undefined ? { summary: params.summary } : {}),
   };
@@ -265,6 +268,24 @@ export async function executePageUpdate(
   const entries: ChangesetEntry[] = [
     { action: 'update', path: buildWikiPath(subject.slug, slug), content },
   ];
+
+  let referencesUpdated = 0;
+  if (newTitle !== oldTitle) {
+    const backlinks = pagesRepo
+      .getBacklinks(subject.id, slug)
+      .filter((b) => b.subjectId === subject.id && b.slug !== slug);
+    for (const bl of backlinks) {
+      const backDoc = readPageInSubject(subject.slug, bl.slug);
+      if (!backDoc) continue;
+      const raw = serializeWikiDocument(backDoc);
+      const rewritten = rewriteBacklinkText(raw, oldTitle, newTitle, subject.slug);
+      if (rewritten !== raw) {
+        entries.push({ action: 'update', path: buildWikiPath(subject.slug, bl.slug), content: rewritten });
+        referencesUpdated += 1;
+      }
+    }
+  }
+
   const changeset = createChangeset(jobId, subject, entries);
   const validation = validateChangeset(changeset);
   if (!validation.valid) throw new Error(`update changeset invalid: ${validation.errors.join('; ')}`);
@@ -272,5 +293,5 @@ export async function executePageUpdate(
   if (unresolved.length > 0) throw new Error(`update would leave unresolved wikilink(s): ${unresolved.join('; ')}`);
   await applyChangeset(changeset);
 
-  return { updatedSlug: slug };
+  return { updatedSlug: slug, referencesUpdated };
 }
