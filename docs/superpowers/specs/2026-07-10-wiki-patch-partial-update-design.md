@@ -54,7 +54,7 @@ export async function patchPageInSubject(
 
 - `META_PAGE_SLUGS` 保护页（index/log）拒绝；
 - **断链豁免**：patch 的删链/重链修改在委托 `executePageUpdate` 时天然通过（该路径的 unresolved 检查只拦"改后残留的坏链"，不拦"删掉的坏链"）——与 `updatePageInSubject` 一致复用 `collectBrokenLinkTargets` 无需额外处理；确认实现时若 `executePageUpdate` 的 unresolved 拒绝逻辑对已确认断链误拦，则与 update 同款注入豁免集；
-- 成功后 `enqueueEmbedIndex(subject.id, [slug])`。
+- 成功后 `enqueueEmbedIndex(subject.id)`。
 
 **刻意不接忠实度护栏**（`checkRewriteFidelity` / 长度 floor）：护栏防的是 LLM 整页重写漏抄，patch 是确定性拼接，未提到的内容不可能变；长度 floor 反而会误杀"删除一段"的合法编辑。unresolved-wikilink 校验仍生效（新增链接必须可解析）。
 
