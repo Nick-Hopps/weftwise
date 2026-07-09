@@ -5,6 +5,7 @@ import { History as HistoryIcon } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
+import { cn } from '@/lib/cn';
 import { Tag } from '@/components/ui/tag';
 import type { HistoryEntry } from '@/lib/contracts';
 import { OperationDiff } from './operation-diff';
@@ -20,12 +21,20 @@ const TYPE_LABELS: Record<string, string> = {
   delete: '删除',
 };
 
+function entrySummary(entry: HistoryEntry) {
+  const shown = entry.affectedPages.slice(0, 5);
+  const extra = entry.affectedPages.length - shown.length;
+  return `${shown.map((p) => p.slug).join(', ') || '（无页面变更）'}${extra > 0 ? ` +${extra}` : ''}`;
+}
+
+function entryWhen(entry: HistoryEntry) {
+  return entry.date ? new Date(entry.date).toLocaleString() : '—';
+}
+
+/** 窄屏（md 以下）保留的内联展开行 */
 function Row({ entry }: { entry: HistoryEntry }) {
   const [open, setOpen] = useState(false);
   const typeLabel = TYPE_LABELS[entry.type] ?? entry.type;
-  const when = entry.date ? new Date(entry.date).toLocaleString() : '—';
-  const shown = entry.affectedPages.slice(0, 5);
-  const extra = entry.affectedPages.length - shown.length;
 
   return (
     <li className="rounded-md border border-border">
@@ -41,12 +50,11 @@ function Row({ entry }: { entry: HistoryEntry }) {
           {entry.status === 'reverted' && (
             <span className="text-xs text-foreground-tertiary">已回滚</span>
           )}
-          <span className="truncate text-sm text-foreground">
-            {shown.map((p) => p.slug).join(', ') || '（无页面变更）'}
-            {extra > 0 ? ` +${extra}` : ''}
-          </span>
+          <span className="truncate text-sm text-foreground">{entrySummary(entry)}</span>
         </span>
-        <span className="shrink-0 text-xs tabular-nums text-foreground-tertiary">{when}</span>
+        <span className="shrink-0 text-xs tabular-nums text-foreground-tertiary">
+          {entryWhen(entry)}
+        </span>
       </button>
       {open && (
         <div className="space-y-3 border-t border-border px-3 py-3">
@@ -58,9 +66,78 @@ function Row({ entry }: { entry: HistoryEntry }) {
   );
 }
 
+/** 宽屏左栏紧凑行 */
+function ListItem({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: HistoryEntry;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const typeLabel = TYPE_LABELS[entry.type] ?? entry.type;
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-current={selected || undefined}
+        className={cn(
+          'w-full rounded-md px-3 py-2 text-left transition-colors',
+          selected ? 'bg-accent-subtle' : 'hover:bg-subtle',
+        )}
+      >
+        <span className="flex items-center gap-2">
+          <Tag tone={entry.status === 'reverted' ? 'neutral' : 'accent'} size="sm">
+            {typeLabel}
+          </Tag>
+          {entry.status === 'reverted' && (
+            <span className="text-xs text-foreground-tertiary">已回滚</span>
+          )}
+          <span className="ml-auto shrink-0 text-xs tabular-nums text-foreground-tertiary">
+            {entryWhen(entry)}
+          </span>
+        </span>
+        <span className="mt-1 block truncate text-sm text-foreground">{entrySummary(entry)}</span>
+      </button>
+    </li>
+  );
+}
+
+/** 宽屏右栏详情 */
+function DetailPane({ entry }: { entry: HistoryEntry }) {
+  const typeLabel = TYPE_LABELS[entry.type] ?? entry.type;
+
+  return (
+    <div className="space-y-4">
+      <header className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Tag tone={entry.status === 'reverted' ? 'neutral' : 'accent'} size="sm">
+            {typeLabel}
+          </Tag>
+          {entry.status === 'reverted' && (
+            <span className="text-xs text-foreground-tertiary">已回滚</span>
+          )}
+          <span className="text-xs tabular-nums text-foreground-tertiary">{entryWhen(entry)}</span>
+        </div>
+        {entry.affectedPages.length > 0 && (
+          <p className="text-sm text-foreground-secondary">
+            {entry.affectedPages.map((p) => p.slug).join(', ')}
+          </p>
+        )}
+        <RevertButton entry={entry} />
+      </header>
+      <OperationDiff operationId={entry.id} />
+    </div>
+  );
+}
+
 export function OperationList() {
   const apiFetch = useApiFetch();
   const { id: subjectId } = useCurrentSubject();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ['history', subjectId],
@@ -73,33 +150,81 @@ export function OperationList() {
     staleTime: 10_000,
   });
 
-  return (
-    <div className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8">
-      <header>
-        <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
-          <HistoryIcon className="h-5 w-5 text-foreground-tertiary" />
-          History
-        </h1>
-        <p className="mt-1 text-sm text-foreground-secondary">
-          本主题的每一次写操作。展开查看 diff 或回滚。
-        </p>
-      </header>
+  const selected = entries.find((e) => e.id === selectedId) ?? null;
 
-      {!subjectId || isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-14 animate-pulse rounded-md bg-subtle" />
-          ))}
-        </div>
-      ) : entries.length === 0 ? (
-        <p className="text-sm italic text-foreground-tertiary">No operations yet.</p>
-      ) : (
-        <ul className="space-y-2">
-          {entries.map((entry) => (
-            <Row key={entry.id} entry={entry} />
-          ))}
-        </ul>
-      )}
+  const header = (
+    <header>
+      <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
+        <HistoryIcon className="h-5 w-5 text-foreground-tertiary" />
+        History
+      </h1>
+      <p className="mt-1 text-sm text-foreground-secondary">
+        本主题的每一次写操作。选中查看 diff 或回滚。
+      </p>
+    </header>
+  );
+
+  const loadingSkeleton = (
+    <div className="space-y-2">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="h-14 animate-pulse rounded-md bg-subtle" />
+      ))}
     </div>
+  );
+
+  const emptyList = <p className="text-sm italic text-foreground-tertiary">No operations yet.</p>;
+
+  return (
+    <>
+      {/* 窄屏：保留单列内联展开 */}
+      <div className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8 md:hidden">
+        {header}
+        {!subjectId || isLoading ? (
+          loadingSkeleton
+        ) : entries.length === 0 ? (
+          emptyList
+        ) : (
+          <ul className="space-y-2">
+            {entries.map((entry) => (
+              <Row key={entry.id} entry={entry} />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* 宽屏：两栏 */}
+      <div className="hidden h-full min-h-0 md:flex">
+        <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border px-4 py-6">
+          {header}
+          {!subjectId || isLoading ? (
+            loadingSkeleton
+          ) : entries.length === 0 ? (
+            emptyList
+          ) : (
+            <ul className="space-y-1">
+              {entries.map((entry) => (
+                <ListItem
+                  key={entry.id}
+                  entry={entry}
+                  selected={entry.id === selectedId}
+                  onSelect={() => setSelectedId(entry.id)}
+                />
+              ))}
+            </ul>
+          )}
+        </aside>
+        <section className="min-w-0 flex-1 overflow-y-auto px-6 py-6">
+          {selected ? (
+            <DetailPane entry={selected} />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <p className="text-sm italic text-foreground-tertiary">
+                Select an operation to view its diff
+              </p>
+            </div>
+          )}
+        </section>
+      </div>
+    </>
   );
 }

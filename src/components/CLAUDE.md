@@ -82,7 +82,7 @@
 
 ### `history/`
 
-- `operation-list.tsx` —— 🆕 操作时间线列表（rowid DESC，含类型/受影响页/时间，可点展开 diff）
+- `operation-list.tsx` —— 操作时间线（rowid DESC）：宽屏两栏（左紧凑记录列表可选中高亮 / 右 DetailPane 摘要+RevertButton+OperationDiff，初始空态提示），md 以下退化为原单列内联展开 Row；数据 query 一份两套渲染
 - `operation-diff.tsx` —— 🆕 单次操作 unified diff 渲染（preHead → postHead）
 - `revert-button.tsx` —— 🆕 回滚按钮 + 确认弹窗（前向 Saga 还原，**同步 POST 无 SSE/job**；确认文案告知覆盖式语义；成功后 invalidate `['history']`/`['pages']` + `router.refresh()`）
 
@@ -188,6 +188,7 @@ src/components/
 | 2026-07-06 | Ingest 多任务支持：`global-job-tracker.tsx` 改为轮询 running+pending 聚合追踪；新增 `shared/jobs-panel.tsx`（聚合任务面板：多行、每 running 行独立 SSE、pending 行不建连接、completed 5s 自动移除、failed 常驻，行级详情复用 `JobDetailDialog`）；`progress-toast.tsx` 保留组件但不再被 tracker 直接挂载。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |
 | 2026-07-06 | Settings 表单统一重设计 | 新增 `ui/{switch,segmented,select}` 原语（AugmentationField 复用 Segmented）；`settings-rows` 重写为 6 个即时保存行原语（blur/Enter 提交 + 行级 spinner/✓/错误）；七个 panel 换 Switch/分段控件、删全部 Save 按钮；`settings-dialog` 去 languageDraft。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-settings-form-redesign* |
 | 2026-07-09 | Ask AI 表格渲染 + 引用列表折叠 | `chat/message-list.tsx` 新增 `MessageCitations` 组件（引用列表支持展开/折叠，仿 `layout/sidebar.tsx` "Sources" 分组模式，>3 条默认折叠、≤3 条默认展开，各消息独立维护本地状态）；`MarkdownText` 消费的 `renderMarkdown()`（`lib/markdown-client.ts`）接入 `remark-gfm` 后同步获得表格渲染能力。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-09-ask-ai-table-citations-collapse* |
+| 2026-07-10 | History 页两栏布局：`operation-list.tsx` 重构为宽屏两栏（本地 selectedId state，选中高亮仿 settings-nav）+ 窄屏保留内联展开；`OperationDiff`/`RevertButton`/API 不动。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-10-history-two-column* |
 
 ---
 
