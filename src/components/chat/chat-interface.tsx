@@ -505,6 +505,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       )}
 
       <MessageList
+        key={currentConversationId ?? 'none'}
         messages={messages}
         isStreaming={isLoading}
         onSuggestionClick={(s) => {
