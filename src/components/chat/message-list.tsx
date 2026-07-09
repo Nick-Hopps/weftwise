@@ -1,7 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, memo, useMemo } from 'react';
-import { MessageCircleQuestion } from 'lucide-react';
+import { useEffect, useRef, useState, memo, useMemo } from 'react';
+import { ChevronDown, MessageCircleQuestion } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import { toolActivityIcon, toolActivityVerb } from '@/lib/tool-activity';
@@ -50,6 +50,52 @@ const MarkdownText = memo(function MarkdownText({ content }: { content: string }
   );
 });
 
+// Collapsible "Sources" block for a single message's citations.
+// citations.length > 3 → collapsed by default; <= 3 → expanded by default.
+// Each message keeps its own independent local state, mirrored after the
+// existing "Sources" group collapse pattern in layout/sidebar.tsx.
+const MessageCitations = memo(function MessageCitations({ citations }: { citations: Citation[] }) {
+  const router = useRouter();
+  const [expanded, setExpanded] = useState(citations.length <= 3);
+
+  return (
+    <div className="mt-3 pt-2 border-t border-border">
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        aria-expanded={expanded}
+        className="w-full flex items-center justify-between h-6 rounded-md text-[10px] font-medium uppercase tracking-wider text-foreground-tertiary hover:text-foreground transition-colors focus-ring"
+      >
+        <span className="flex items-center gap-1.5">
+          <ChevronDown className={cn('h-3 w-3 transition-transform', !expanded && '-rotate-90')} />
+          Sources
+        </span>
+        <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
+          {citations.length}
+        </span>
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1.5">
+          {citations.map((cite, cIdx) => (
+            <button
+              key={cIdx}
+              onClick={() => router.push(`/wiki/${cite.pageSlug}`)}
+              className="block w-full text-left rounded-sm px-2 py-1.5 bg-subtle hover:bg-accent-subtle transition-colors focus-ring"
+            >
+              <p className="text-xs font-medium text-accent-strong">{cite.pageSlug}</p>
+              {cite.excerpt && (
+                <p className="text-xs text-foreground-secondary mt-0.5 line-clamp-2">
+                  {cite.excerpt}
+                </p>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});
+
 function StreamingIndicator() {
   return (
     <span className="inline-flex gap-1 items-center ml-2 py-1">
@@ -71,7 +117,6 @@ const SUGGESTIONS = [
 ];
 
 export function MessageList({ messages, isStreaming = false, onSuggestionClick }: MessageListProps) {
-  const router = useRouter();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -148,25 +193,7 @@ export function MessageList({ messages, isStreaming = false, onSuggestionClick }
               {showStreaming && <StreamingIndicator />}
 
               {msg.citations && msg.citations.length > 0 && (
-                <div className="mt-3 pt-2 border-t border-border space-y-1.5">
-                  <p className="text-[10px] font-medium uppercase tracking-wider text-foreground-tertiary">
-                    Sources
-                  </p>
-                  {msg.citations.map((cite, cIdx) => (
-                    <button
-                      key={cIdx}
-                      onClick={() => router.push(`/wiki/${cite.pageSlug}`)}
-                      className="block w-full text-left rounded-sm px-2 py-1.5 bg-subtle hover:bg-accent-subtle transition-colors focus-ring"
-                    >
-                      <p className="text-xs font-medium text-accent-strong">{cite.pageSlug}</p>
-                      {cite.excerpt && (
-                        <p className="text-xs text-foreground-secondary mt-0.5 line-clamp-2">
-                          {cite.excerpt}
-                        </p>
-                      )}
-                    </button>
-                  ))}
-                </div>
+                <MessageCitations citations={msg.citations} />
               )}
             </div>
           </div>
