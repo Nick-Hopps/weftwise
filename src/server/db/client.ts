@@ -500,6 +500,23 @@ function migrateResearchBacklog(): void {
   `);
 }
 
+// LLM 用量明细表（设置页 Usage 统计）。
+function migrateLlmUsage(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('llm_usage')) return;
+  sqlite.exec(`
+    CREATE TABLE llm_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX idx_llm_usage_created_at ON llm_usage(created_at);
+  `);
+}
+
 // 特例：FTS5 虚拟表不支持 _new + INSERT FROM 重建（索引可由 pages 重建），缺列时直接 DROP 重建
 function ensurePagesFts(): void {
   const sqlite = rawSqlite!;
@@ -568,6 +585,7 @@ function ensureTables() {
     migratePageRenditions();
     migrateProfileSignals();
     migrateResearchBacklog();
+    migrateLlmUsage();
     ensurePagesFts();
     ensureIndexes();
   } finally {

@@ -404,3 +404,19 @@ export interface UserProfileDTO {
   version: number;
   onboardedAt: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// LLM 用量统计（设置页 Usage 面板）
+// ---------------------------------------------------------------------------
+
+/** Usage 统计时间窗。 */
+export type UsageWindow = '7d' | '30d' | 'all';
+
+/** GET /api/usage 聚合行：按 (task, model) 分组。 */
+export interface UsageSummaryRow {
+  task: string;
+  model: string;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+}

@@ -256,3 +256,13 @@ export const researchBacklog = sqliteTable('research_backlog', {
   researchJobId: text('research_job_id'),
   createdAt: text('created_at').notNull(),
 });
+
+// LLM 用量明细：一次 LLM 调用一行（app 级资源，非 subject-scoped，无 FK）。
+export const llmUsage = sqliteTable('llm_usage', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  task: text('task').notNull(),
+  model: text('model').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  createdAt: integer('created_at').notNull(), // epoch ms
+});
