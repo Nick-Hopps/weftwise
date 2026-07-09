@@ -1,10 +1,13 @@
 /**
  * 页面写操作的对话路径包装（供 query 工具循环调用）。
  * 删除规则纯函数化（validateDeleteTarget，路由与对话单一来源），执行复用
- * wiki/page-ops 内核，写后触发向量回填。语义沿用 DELETE /api/pages 路由 + executePageCreate。
+ * wiki/page-ops 内核，写后触发向量回填。update 额外过忠实度护栏（复用 fix 同档）。
+ * 语义沿用 DELETE /api/pages 路由 + executePageCreate/executePageUpdate。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
-import { executePageDelete, executePageCreate } from '../wiki/page-ops';
+import { executePageDelete, executePageCreate, executePageUpdate } from '../wiki/page-ops';
+import { readPageInSubject } from '../wiki/wiki-store';
+import { checkRewriteFidelity, FIDELITY_PROFILES } from '../wiki/rewrite-fidelity';
 import { enqueueEmbedIndex } from './embedding-service';
 import { META_PAGE_SLUGS } from '../wiki/page-identity';
 import type { Subject } from '@/lib/contracts';
@@ -45,6 +48,26 @@ export async function createPageInSubject(
     title,
     body: input.body ?? '',
   });
+  enqueueEmbedIndex(subject.id);
+  return result;
+}
+
+/**
+ * 校验目标页存在 + 忠实度护栏（FIDELITY_PROFILES.fix：正文不得缩水到原文 80% 以下、
+ * 不得丢失原有 wikilink）后同步更新（Saga，可选改标题联动 relink）+ 触发向量回填。
+ * 校验/护栏失败抛 Error（消息可直接转述）。
+ */
+export async function updatePageInSubject(
+  subject: Subject,
+  input: { slug: string; title?: string; body: string; summary?: string; tags?: string[] },
+): Promise<{ updatedSlug: string; referencesUpdated: number }> {
+  const doc = readPageInSubject(subject.slug, input.slug);
+  if (!doc) throw new Error(`Page "${input.slug}" not found in this subject.`);
+  const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix);
+  if (!fidelity.ok) {
+    throw new Error(`Edit dropped too much content: ${fidelity.violations.join('; ')}`);
+  }
+  const result = await executePageUpdate(crypto.randomUUID(), subject, input);
   enqueueEmbedIndex(subject.id);
   return result;
 }
