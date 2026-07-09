@@ -11,7 +11,7 @@ const storeMocks = vi.hoisted(() => ({ readPageInSubject: vi.fn(() => ({ frontma
 vi.mock('@/server/wiki/wiki-store', () => storeMocks);
 vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
 const opsMocks = vi.hoisted(() => ({
-  executePageUpdate: vi.fn(async (_j: string, _s: unknown, input: { slug: string }) => ({ updatedSlug: input.slug })),
+  executePageUpdate: vi.fn(async (_j: string, _s: unknown, input: { slug: string }) => ({ updatedSlug: input.slug, referencesUpdated: 0 })),
   executePageCreate: vi.fn(async () => ({ createdSlug: 'new-page' })),
 }));
 vi.mock('@/server/wiki/page-ops', () => opsMocks);
@@ -37,6 +37,16 @@ describe('buildFixToolContext', () => {
     expect(opsMocks.executePageUpdate).toHaveBeenCalledOnce();
     expect(guard.totals().update).toBe(1);
     expect(emit).toHaveBeenCalledWith('fix:page', expect.any(String), expect.objectContaining({ slug: 'eigen' }));
+  });
+
+  it('update：title 原样透传给内核（fix 侧无需改代码，接口扩展自动生效）', async () => {
+    const emit = vi.fn();
+    opsMocks.executePageUpdate.mockResolvedValueOnce({ updatedSlug: 'eigen', referencesUpdated: 3 });
+    const guard = createFixGuard({ caps: { writes: 5 } });
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
+    const res = await ctx.updatePage!({ slug: 'eigen', title: 'Eigen Value', body: `${LONG}, edited` });
+    expect(res.referencesUpdated).toBe(3);
+    expect(opsMocks.executePageUpdate).toHaveBeenCalledWith('j1', subject, { slug: 'eigen', title: 'Eigen Value', body: `${LONG}, edited` });
   });
 
   it('update：保护页 → fix:skip + 抛错，不调内核', async () => {
