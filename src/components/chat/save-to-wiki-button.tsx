@@ -65,6 +65,8 @@ export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButto
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // IME 组词确认的 Enter 不应触发保存（Safari 用 keyCode 229 兜底）
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter') handleSave();
     if (e.key === 'Escape') setIsOpen(false);
   };
