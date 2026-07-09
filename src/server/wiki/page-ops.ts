@@ -302,3 +302,51 @@ export async function executePageUpdate(
 
   return { updatedSlug: slug, referencesUpdated };
 }
+
+/**
+ * 纯函数：按顺序应用 old_string/new_string 精确替换。
+ * 每个 oldString 必须在「应用前序 edits 后的当前正文」中恰好出现一次；
+ * 任一组失败整批抛错（调用方不落盘）。仿 Claude Code Edit 工具语义。
+ */
+export function applyPatchEdits(
+  body: string,
+  edits: Array<{ oldString: string; newString: string }>,
+): string {
+  if (edits.length === 0) throw new Error('patch requires at least one edit');
+  let current = body;
+  edits.forEach((edit, i) => {
+    const n = i + 1;
+    if (!edit.oldString) throw new Error(`edit #${n}: old_string must not be empty`);
+    if (edit.oldString === edit.newString) {
+      throw new Error(`edit #${n}: old_string and new_string are identical`);
+    }
+    const first = current.indexOf(edit.oldString);
+    if (first === -1) {
+      throw new Error(`edit #${n}: old_string not found — quote the page text verbatim`);
+    }
+    let count = 0;
+    for (let at = first; at !== -1; at = current.indexOf(edit.oldString, at + 1)) count++;
+    if (count > 1) {
+      throw new Error(`edit #${n}: old_string matches ${count} locations — include more surrounding context`);
+    }
+    current = current.slice(0, first) + edit.newString + current.slice(first + edit.oldString.length);
+  });
+  return current;
+}
+
+/**
+ * 局部更新一页正文：edits 逐组精确唯一替换（applyPatchEdits），拼出完整新正文后
+ * 委托 executePageUpdate 走 Saga——坏链校验/unresolved-wikilink 拒绝/updated 时间戳
+ * /单 git commit 全部继承。只动 body；title/tags/summary 走 executePageUpdate。
+ */
+export async function executePagePatch(
+  jobId: string,
+  subject: Subject,
+  params: { slug: string; edits: Array<{ oldString: string; newString: string }> },
+): Promise<{ updatedSlug: string; appliedEdits: number }> {
+  const doc = readPageInSubject(subject.slug, params.slug);
+  if (!doc) throw new Error(`page "${params.slug}" not found`);
+  const newBody = applyPatchEdits(doc.body, params.edits);
+  const { updatedSlug } = await executePageUpdate(jobId, subject, { slug: params.slug, body: newBody });
+  return { updatedSlug, appliedEdits: params.edits.length };
+}
