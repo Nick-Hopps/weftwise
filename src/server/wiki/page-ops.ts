@@ -237,8 +237,12 @@ export async function executePageCreate(
 /**
  * 更新一页（可选改标题）：替换正文、覆盖 tags/summary；改标题时联动重写本 subject 内
  * 引用该页旧标题的文本（relink.ts::rewriteBacklinkText），与原页更新同一个 Saga 事务提交。
- * 坏链铁律：!valid（跨主题坏链 errors）或留下同主题 unresolved-wikilink 警告一律抛错、不落盘
- * （单页更新里残留 unresolved-wikilink 等同坏链；引导调用方「先建目标页再链接」）。
+ * 坏链铁律：!valid（跨主题坏链 errors）或留下**页面自身** entry 的 unresolved-wikilink
+ * 警告一律抛错、不落盘（单页更新里残留 unresolved-wikilink 等同坏链；引导调用方「先建目标页再链接」）；
+ * 该检查只看被更新页面自身 entry 的 path，不含改标题时自动生成的 backlink 重写 entry——
+ * 后者是机械重写产生、必然指向真实存在页面的文本，validateChangeset 在没有感知 pending rename
+ * 的情况下会误判为未解析（normalizeSlug 后既不匹配未变的 slug，也不匹配尚未落盘的新标题），
+ * 不应据此拒绝整个改标题操作。
  * 供 fix tool-loop 与对话式 wiki.update（fix + query 两个 runner）复用。
  */
 export async function executePageUpdate(
