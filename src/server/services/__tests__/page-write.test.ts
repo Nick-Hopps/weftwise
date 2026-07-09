@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const repoMocks = vi.hoisted(() => ({ getPageBySlug: vi.fn() }));
+const repoMocks = vi.hoisted(() => ({ getPageBySlug: vi.fn(), getAllPages: vi.fn(() => []) }));
 vi.mock('@/server/db/repos/pages-repo', () => repoMocks);
 
 const opsMocks = vi.hoisted(() => ({

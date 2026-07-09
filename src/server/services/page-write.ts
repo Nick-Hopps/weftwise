@@ -7,9 +7,10 @@
 import * as pagesRepo from '../db/repos/pages-repo';
 import { executePageDelete, executePageCreate, executePageUpdate } from '../wiki/page-ops';
 import { readPageInSubject } from '../wiki/wiki-store';
-import { checkRewriteFidelity, FIDELITY_PROFILES } from '../wiki/rewrite-fidelity';
+import { checkRewriteFidelity, collectMissingLinkTargets, FIDELITY_PROFILES } from '../wiki/rewrite-fidelity';
 import { enqueueEmbedIndex } from './embedding-service';
-import { META_PAGE_SLUGS } from '../wiki/page-identity';
+import { META_PAGE_SLUGS, normalizeSlug } from '../wiki/page-identity';
+import * as subjectsRepo from '../db/repos/subjects-repo';
 import type { Subject } from '@/lib/contracts';
 
 /** 纯校验：可删返回 null，否则返回面向用户的错误消息。page=null 表示该 subject 下未找到。 */
@@ -53,6 +54,26 @@ export async function createPageInSubject(
 }
 
 /**
+ * 计算正文中已确认断链的 wikilink targetKey 集合，作忠实度 preserve 规则的豁免集——
+ * 修断链（解链/重链）本质上要丢弃这些目标，不豁免则修复被护栏确定性拒绝。
+ * 同 subject：目标 slug ∈（页 slug 集 ∪ normalizeSlug(title) 集）即视为存在
+ * （无 titleResolver 时 extractWikiLinks 把 [[Title]] 归一为 slugFromTitle，与页
+ * 真实 slug 可能不一致，并入 title 派生形防止误豁免活链）；跨 subject：逐条查目标页。
+ */
+export function collectBrokenLinkTargets(subject: Subject, body: string): Set<string> {
+  const known = new Set<string>();
+  for (const p of pagesRepo.getAllPages(subject.id)) {
+    known.add(p.slug);
+    known.add(normalizeSlug(p.title));
+  }
+  return collectMissingLinkTargets(body, (targetSubjectSlug, targetSlug) => {
+    if (!targetSubjectSlug || targetSubjectSlug === subject.slug) return known.has(targetSlug);
+    const target = subjectsRepo.getBySlug(targetSubjectSlug);
+    return target ? Boolean(pagesRepo.getPageBySlug(target.id, targetSlug)) : false;
+  });
+}
+
+/**
  * 校验目标页存在 + 非保护页 + 忠实度护栏（FIDELITY_PROFILES.fix：正文不得缩水到原文
  * 80% 以下、不得丢失原有 wikilink）后同步更新（Saga，可选改标题联动 relink）+ 触发
  * 向量回填。校验/护栏失败抛 Error（消息可直接转述）。
@@ -68,7 +89,9 @@ export async function updatePageInSubject(
   }
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`Page "${input.slug}" not found in this subject.`);
-  const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix);
+  const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix, {
+    allowedDroppedTargets: collectBrokenLinkTargets(subject, doc.body),
+  });
   if (!fidelity.ok) {
     throw new Error(`Edit dropped too much content: ${fidelity.violations.join('; ')}`);
   }
