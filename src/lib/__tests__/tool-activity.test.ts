@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toolActivityIcon, toolActivityVerb, summarizeToolArgs } from '../tool-activity';
+import { toolActivityIcon, toolActivityVerb, summarizeToolArgs, toolActivityLine } from '../tool-activity';
 
 describe('tool-activity', () => {
   it('已知工具映射 icon/verb（含 wiki_reenrich）', () => {
@@ -57,5 +57,21 @@ describe('tool-activity - web_search', () => {
     expect(toolActivityIcon('web_search')).toBe('🌐');
     expect(toolActivityVerb('web_search')).toBe('Searching the web');
     expect(summarizeToolArgs('web_search', { query: 'foo' })).toBe('foo');
+  });
+});
+
+describe('toolActivityLine', () => {
+  it('拼装 icon + verb + 参数摘要', () => {
+    expect(toolActivityLine('wiki_read', { slug: 'some-page' })).toBe('📄 Reading "some-page"…');
+    expect(toolActivityLine('wiki_search', { query: 'panda diet' })).toBe('🔍 Searching "panda diet"…');
+    expect(toolActivityLine('wiki_merge', { sourceSlug: 'a', targetSlug: 'b' })).toBe('🔗 Merging "a → b"…');
+  });
+
+  it('无参数摘要时省略引号段', () => {
+    expect(toolActivityLine('wiki_list', {})).toBe('🗂 Listing pages…');
+  });
+
+  it('未知工具回落工具名', () => {
+    expect(toolActivityLine('mystery_tool', { x: 1 })).toBe('• mystery_tool…');
   });
 });
