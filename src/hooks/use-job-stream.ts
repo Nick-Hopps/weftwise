@@ -216,6 +216,8 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'reenrich:start',
         // Fix events
         'fix:start',
+        'fix:agent:start',
+        'fix:tool',
         'fix:deterministic',
         'fix:page',
         'fix:create',

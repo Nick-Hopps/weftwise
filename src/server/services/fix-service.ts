@@ -24,6 +24,7 @@ import { compileToolSet } from '@/server/agents/tools/compile';
 import { generateTextWithTools } from '../llm/provider-registry';
 import { FIX_AGENTIC_SYSTEM_PROMPT, buildFixAgenticUserPrompt } from '../llm/prompts/fix-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
+import { toolActivityLine } from '@/lib/tool-activity';
 import type { ChangesetEntry, Job } from '@/lib/contracts';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 FixGuard cap 真正兜底）。 */
@@ -105,12 +106,17 @@ export async function runFixJob(
       subject: { slug: subject.slug, name: subject.name, description: subject.description },
     };
 
+    emit('fix:agent:start', `Analyzing ${loop.length} finding(s) across ${new Set(loop.map((f) => f.pageSlug)).size} page(s) with the model…`, {
+      findings: loop.length,
+    });
+
     await generateTextWithTools('fix', {
       system: FIX_AGENTIC_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx) }],
       tools,
       maxSteps: FIX_MAX_STEPS,
       shouldCancel: () => queue.isCancelRequested(job.id),
+      onToolCall: (info) => emit('fix:tool', toolActivityLine(info.tool, info.args), { tool: info.tool }),
     });
 
     const totals = guard.totals();
