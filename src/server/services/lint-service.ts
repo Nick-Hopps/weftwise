@@ -16,12 +16,44 @@
 
 import { registerHandler } from '../jobs/worker';
 import * as subjectsRepo from '../db/repos/subjects-repo';
+import * as pagesRepo from '../db/repos/pages-repo';
+import { resolveTask } from '../llm/task-router';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { runSemanticChecksForSubject } from './lint-semantic';
 import type { LintFinding, Job, Subject } from '@/lib/contracts';
 
 interface LintParams {
   subjectId?: string;
+}
+
+/** findings 分类统计（severity/type 计数 + 单行文案），供 lint 事件与 result 附带。 */
+export function summarizeFindings(
+  findings: Pick<LintFinding, 'severity' | 'type'>[],
+): { bySeverity: Record<string, number>; byType: Record<string, number>; text: string } {
+  const bySeverity: Record<string, number> = {};
+  const byType: Record<string, number> = {};
+  for (const f of findings) {
+    bySeverity[f.severity] = (bySeverity[f.severity] ?? 0) + 1;
+    byType[f.type] = (byType[f.type] ?? 0) + 1;
+  }
+  const severityText = ['critical', 'warning', 'info']
+    .filter((s) => bySeverity[s])
+    .map((s) => `${bySeverity[s]} ${s}`)
+    .join(', ');
+  const typeText = Object.entries(byType)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, n]) => `${t}×${n}`)
+    .join(', ');
+  return { bySeverity, byType, text: [severityText, typeText].filter(Boolean).join('; ') };
+}
+
+/** lint task 的模型标签；配置解析失败时回落 null（不阻断 lint 主流程）。 */
+function lintModelLabel(): string | null {
+  try {
+    return resolveTask('lint').logLabel;
+  } catch {
+    return null;
+  }
 }
 
 async function runLintJob(
@@ -62,16 +94,23 @@ async function runLintJob(
       { findings: deterministicFindings, subject: subject.slug }
     );
 
-    emit('lint:semantic:start', `Subject "${subject.slug}": running LLM semantic analysis...`);
+    const pageCount = pagesRepo.getAllPages(subject.id).filter((p) => !pagesRepo.isMetaPage(p)).length;
+    const model = lintModelLabel();
+    emit(
+      'lint:semantic:start',
+      `Subject "${subject.slug}": running LLM semantic analysis on ${pageCount} page(s)${model ? ` with ${model}` : ''} (single pass, may take a few minutes)…`,
+      { pageCount, model },
+    );
     try {
       const semanticFindings = await runSemanticChecksForSubject(subject);
       allFindings.push(
         ...semanticFindings.map((f) => ({ ...f, subjectId: subject.id, subjectSlug: subject.slug })),
       );
+      const semanticStats = summarizeFindings(semanticFindings);
       emit(
         'lint:semantic:done',
-        `Subject "${subject.slug}": ${semanticFindings.length} semantic finding(s)`,
-        { findings: semanticFindings, subject: subject.slug }
+        `Subject "${subject.slug}": ${semanticFindings.length} semantic finding(s)${semanticStats.text ? ` (${semanticStats.text})` : ''}`,
+        { findings: semanticFindings, subject: subject.slug, ...semanticStats },
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -88,17 +127,11 @@ async function runLintJob(
     );
   }
 
+  const stats = summarizeFindings(allFindings);
   emit(
     'lint:complete',
-    `Lint complete: ${allFindings.length} total finding(s)`,
-    {
-      totalFindings: allFindings.length,
-      bySeverity: {
-        critical: allFindings.filter((f) => f.severity === 'critical').length,
-        warning: allFindings.filter((f) => f.severity === 'warning').length,
-        info: allFindings.filter((f) => f.severity === 'info').length,
-      },
-    },
+    `Lint complete: ${allFindings.length} total finding(s)${stats.text ? ` (${stats.text})` : ''}`,
+    { totalFindings: allFindings.length, bySeverity: stats.bySeverity, byType: stats.byType },
   );
 
   return { findings: allFindings };
