@@ -11,6 +11,7 @@ import { apiFetch, useApiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
+import { isImeComposing } from '@/lib/keyboard';
 import type { ChatMessage, Citation } from './message-list';
 import type { ConversationMessage } from '@/lib/contracts';
 
@@ -458,8 +459,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // IME 组词确认的 Enter 不应触发发送（Safari 用 keyCode 229 兜底）
-    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (isImeComposing(e)) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();

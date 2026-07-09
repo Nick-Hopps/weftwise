@@ -25,6 +25,7 @@ import { AugmentationField } from '@/components/subjects/augmentation-field';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { IconButton } from '@/components/ui/icon-button';
+import { blockImeEnterSubmit } from '@/lib/keyboard';
 
 const SUBJECTS_QUERY_KEY = ['subjects'] as const;
 
@@ -157,7 +158,7 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
   return (
     <>
       <DialogHeader title="New subject" onClose={onClose} />
-      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <form onSubmit={handleSubmit} onKeyDown={blockImeEnterSubmit} className="p-4 space-y-4">
         <Field label="Name">
           <Input
             autoFocus
@@ -322,7 +323,7 @@ function EditSubjectBody({
   return (
     <>
       <DialogHeader title="Subject settings" onClose={onClose} />
-      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <form onSubmit={handleSubmit} onKeyDown={blockImeEnterSubmit} className="p-4 space-y-4">
         <Field label="Name">
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
         </Field>

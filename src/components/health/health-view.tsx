@@ -14,6 +14,7 @@ import { groupBySeverity, SEVERITY_TONE } from './lint-findings';
 import { FindingRow } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
 import { ResearchBacklogSection } from './research-backlog-section';
+import { blockImeEnterSubmit } from '@/lib/keyboard';
 import type { LintFinding, ResearchCandidate } from '@/lib/contracts';
 
 type Scope = 'subject' | 'all';
@@ -372,6 +373,7 @@ export function HealthView() {
       {!allSubjects && (
         <form
           className="flex items-center gap-2"
+          onKeyDown={blockImeEnterSubmit}
           onSubmit={(e) => {
             e.preventDefault();
             const t = topicInput.trim();
