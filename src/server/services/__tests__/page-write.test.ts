@@ -86,6 +86,7 @@ describe('updatePageInSubject', () => {
   beforeEach(() => {
     opsMocks.executePageUpdate.mockClear();
     embedMocks.enqueueEmbedIndex.mockClear();
+    storeMocks.readPageInSubject.mockClear();
     storeMocks.readPageInSubject.mockReturnValue({ frontmatter: { title: 'Eigen' }, body: LONG });
   });
 
@@ -95,6 +96,13 @@ describe('updatePageInSubject', () => {
     expect(opsMocks.executePageUpdate).toHaveBeenCalledOnce();
     expect(embedMocks.enqueueEmbedIndex).toHaveBeenCalledWith('s1');
     expect(out).toEqual({ updatedSlug: 'eigen', referencesUpdated: 3 });
+  });
+
+  it('保护页 index/log → 抛错，不执行、不 enqueue', async () => {
+    await expect(updatePageInSubject(subject, { slug: 'index', body: 'x' })).rejects.toThrow(/protected/);
+    expect(opsMocks.executePageUpdate).not.toHaveBeenCalled();
+    expect(embedMocks.enqueueEmbedIndex).not.toHaveBeenCalled();
+    expect(storeMocks.readPageInSubject).not.toHaveBeenCalled();
   });
 
   it('目标页不存在 → 抛错，不执行、不 enqueue', async () => {
