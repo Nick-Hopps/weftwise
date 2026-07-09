@@ -35,6 +35,15 @@ export const FIDELITY_PROFILES = {
 
 export type FidelityProfileName = keyof typeof FIDELITY_PROFILES;
 
+export interface RewriteFidelityOptions {
+  /**
+   * 'preserve' 规则的例外集合：这些 targetKey（`${targetSubjectSlug}:${targetSlug}`，
+   * 由 collectMissingLinkTargets 用同一套 key 派生）允许被改写丢弃——调用方须先确认
+   * 它们确实是断链（目标页不存在）。活链保护不受影响。
+   */
+  allowedDroppedTargets?: ReadonlySet<string>;
+}
+
 const HEADING_RE = /^#{1,6}\s+.*$/gm;
 
 function targetKey(l: { targetSubjectSlug: string; target: string }): string {
@@ -63,10 +72,27 @@ function stableStringify(v: unknown): string {
  * 校验一次"改写"是否保真。original/revised 允许是纯正文，也允许是带 frontmatter 的完整内容——
  * 两者都先经 parseFrontmatter 剥离，长度/链接/heading 一律在 body 上比较。
  */
+/**
+ * 收集正文中"目标页不存在"的 wikilink targetKey 集合（与 preserve 检查同一 key 派生），
+ * 供作 checkRewriteFidelity 的 allowedDroppedTargets——存在性判定经 pageExists 注入，
+ * 本函数保持纯函数。
+ */
+export function collectMissingLinkTargets(
+  body: string,
+  pageExists: (targetSubjectSlug: string, targetSlug: string) => boolean,
+): Set<string> {
+  const missing = new Set<string>();
+  for (const link of extractWikiLinks(body)) {
+    if (!pageExists(link.targetSubjectSlug, link.target)) missing.add(targetKey(link));
+  }
+  return missing;
+}
+
 export function checkRewriteFidelity(
   original: string,
   revised: string,
   profile: FidelityProfile,
+  options?: RewriteFidelityOptions,
 ): { ok: boolean; violations: string[] } {
   const origParsed = parseFrontmatter(original);
   const revParsed = parseFrontmatter(revised);
@@ -84,7 +110,8 @@ export function checkRewriteFidelity(
   if (profile.linkRule === 'preserve') {
     const origLinks = linkTargets(origBody);
     const revLinks = linkTargets(revBody);
-    const missing = [...origLinks].filter((t) => !revLinks.has(t));
+    const allowed = options?.allowedDroppedTargets;
+    const missing = [...origLinks].filter((t) => !revLinks.has(t) && !allowed?.has(t));
     if (missing.length > 0) {
       violations.push(`dropped existing wikilink target(s): ${missing.join(', ')}`);
     }
