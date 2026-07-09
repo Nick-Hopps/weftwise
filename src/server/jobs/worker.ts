@@ -4,6 +4,7 @@ import type { Job } from '@/lib/contracts';
 import { describeErrorMessage } from '@/lib/error-format';
 import { runMaintenanceSweep } from '../services/maintenance-scheduler';
 import { pruneOldOperations } from '../db/repos/operations-repo';
+import { pruneOldUsage, USAGE_RETENTION_MS } from '../db/repos/usage-repo';
 import {
   getMaintenanceEnabled,
   getMaintenanceSweepIntervalHours,
@@ -49,6 +50,15 @@ function pruneOldJobEvents(): void {
 function pruneOldOperationsTick(): void {
   const removed = pruneOldOperations(OPERATIONS_KEEP_PER_SUBJECT);
   if (removed > 0) console.log(`[maintenance] pruned ${removed} expired operations`);
+}
+
+/**
+ * llm_usage 保留清扫：删除 90 天前的用量明细，止住该表无界增长。
+ * 独立于成熟度维护开关——基础卫生操作必须始终执行。
+ */
+function pruneOldUsageTick(): void {
+  const removed = pruneOldUsage(Date.now() - USAGE_RETENTION_MS);
+  if (removed > 0) console.log(`[maintenance] pruned ${removed} expired llm_usage rows`);
 }
 
 /** 维护节律闸门：从未扫描或距上次 ≥ intervalHours 则应扫。 */
@@ -252,6 +262,11 @@ export function startWorker(pollIntervalMs = 2000): () => void {
   } catch (err) {
     console.error('[maintenance] operations prune failed', err);
   }
+  try {
+    pruneOldUsageTick();
+  } catch (err) {
+    console.error('[maintenance] llm_usage prune failed', err);
+  }
 
   const intervalId = setInterval(() => {
     // 并发调度：仅 ingest 之间可并发（上限实时读设置）；非 ingest 独占。
@@ -279,6 +294,11 @@ export function startWorker(pollIntervalMs = 2000): () => void {
       pruneOldOperationsTick();
     } catch (err) {
       console.error('[maintenance] operations prune failed', err);
+    }
+    try {
+      pruneOldUsageTick();
+    } catch (err) {
+      console.error('[maintenance] llm_usage prune failed', err);
     }
     try {
       maintenanceTick();

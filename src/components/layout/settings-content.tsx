@@ -7,12 +7,15 @@
  * 本文件只负责渲染与本地交互。服务端 app_settings 表是唯一真实源，不写 Zustand。
  */
 
+import { useState } from 'react';
 import { RotateCcw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { SIDEBAR_WIDTH_DEFAULT } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
+import { Segmented } from '@/components/ui/segmented';
 import { apiFetch } from '@/lib/api-fetch';
-import type { AppSettings, MaintenanceStatus, StylePrefs } from '@/lib/contracts';
+import { formatTokenCount } from '@/lib/format';
+import type { AppSettings, MaintenanceStatus, StylePrefs, UsageWindow, UsageSummaryRow } from '@/lib/contracts';
 import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
 import {
   SettingRow,
@@ -110,6 +113,8 @@ export function SettingsContent(props: SettingsContentProps) {
         {props.active === 'maintenance' && (
           <MaintenancePanel settings={props.settings} savePartial={props.savePartial} />
         )}
+
+        {props.active === 'usage' && <UsagePanel />}
 
         {props.active === 'about' && <AboutPanel />}
       </div>
@@ -433,6 +438,85 @@ function MaintenancePanel({
         onSave={(v) => savePartial.mutate({ maintenanceMaxPagesPerSweep: v })}
         save={save}
       />
+    </div>
+  );
+}
+
+const USAGE_WINDOW_OPTIONS = [
+  { value: '7d', label: '7 days' },
+  { value: '30d', label: '30 days' },
+  { value: 'all', label: 'All time' },
+] as const;
+
+/** Usage 面板：LLM 用量统计（app 级，不随 subject；弹窗打开时取数，无轮询）。 */
+function UsagePanel() {
+  const [timeWindow, setTimeWindow] = useState<UsageWindow>('30d');
+  const { data, isLoading } = useQuery({
+    queryKey: ['usage', timeWindow],
+    queryFn: async () => {
+      const res = await apiFetch(`/api/usage?window=${timeWindow}`);
+      if (!res.ok) throw new Error('Failed to load usage');
+      return (await res.json()) as { window: UsageWindow; rows: UsageSummaryRow[] };
+    },
+    staleTime: 30_000,
+  });
+
+  const rows = data?.rows ?? [];
+  const totals = rows.reduce(
+    (acc, r) => ({
+      calls: acc.calls + r.calls,
+      inputTokens: acc.inputTokens + r.inputTokens,
+      outputTokens: acc.outputTokens + r.outputTokens,
+    }),
+    { calls: 0, inputTokens: 0, outputTokens: 0 },
+  );
+
+  return (
+    <div className="space-y-4">
+      <Segmented
+        value={timeWindow}
+        options={[...USAGE_WINDOW_OPTIONS]}
+        onChange={setTimeWindow}
+        aria-label="Usage time window"
+      />
+      {isLoading ? (
+        <p className="text-xs text-foreground-tertiary">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="text-xs text-foreground-tertiary">No usage recorded yet.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs text-foreground-tertiary">
+              <th className="py-1.5 pr-2 font-medium">Task</th>
+              <th className="py-1.5 pr-2 font-medium">Model</th>
+              <th className="py-1.5 pr-2 text-right font-medium">Calls</th>
+              <th className="py-1.5 pr-2 text-right font-medium">Input</th>
+              <th className="py-1.5 text-right font-medium">Output</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={`${r.task}:${r.model}`} className="border-b border-border/50">
+                <td className="py-1.5 pr-2 font-mono text-xs">{r.task}</td>
+                <td className="py-1.5 pr-2 truncate max-w-[10rem] text-xs text-foreground-secondary" title={r.model}>
+                  {r.model}
+                </td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">{r.calls}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">{formatTokenCount(r.inputTokens)}</td>
+                <td className="py-1.5 text-right tabular-nums">{formatTokenCount(r.outputTokens)}</td>
+              </tr>
+            ))}
+            <tr className="font-medium">
+              <td className="py-1.5 pr-2 text-xs">Total</td>
+              <td className="py-1.5 pr-2" />
+              <td className="py-1.5 pr-2 text-right tabular-nums">{totals.calls}</td>
+              <td className="py-1.5 pr-2 text-right tabular-nums">{formatTokenCount(totals.inputTokens)}</td>
+              <td className="py-1.5 text-right tabular-nums">{formatTokenCount(totals.outputTokens)}</td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      <p className="text-xs text-foreground-tertiary">Usage data is retained for 90 days.</p>
     </div>
   );
 }
