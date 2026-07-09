@@ -32,6 +32,9 @@ export interface ToolContext {
   /** 更新一页（可选改标题+正文，Saga）；fix runner 与 query runner 均注入。 */
   updatePage?(input: { slug: string; title?: string; body: string; summary?: string; tags?: string[] }):
     Promise<{ updatedSlug: string; referencesUpdated: number }>;
+  /** 局部更新一页正文（edits 精确唯一替换，Saga）；fix runner 与 query runner 均注入。 */
+  patchPage?(input: { slug: string; edits: Array<{ oldString: string; newString: string }> }):
+    Promise<{ updatedSlug: string; appliedEdits: number }>;
   /** query 侧只读联网检索（Tavily）；工具集只在 web search 已配置时才含 web.search，未配置时不会被调用。 */
   webSearch?(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
