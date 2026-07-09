@@ -20,8 +20,6 @@ export interface TrackedJob {
   reconnectKey: number;
 }
 
-const COMPLETED_LINGER_MS = 5_000;
-
 function jobTypeVerb(type: string): string {
   switch (type) {
     case 'ingest':
@@ -70,13 +68,6 @@ function JobRow({ job, onRemove }: { job: TrackedJob; onRemove: (id: string) => 
     queryClient.invalidateQueries({ queryKey: ['pages'] });
     queryClient.invalidateQueries({ queryKey: ['page-detail'] });
   }, [isCompleted, queryClient]);
-
-  // completed 行驻留几秒后自动移除；failed 行驻留到用户手动关闭
-  useEffect(() => {
-    if (!isCompleted) return;
-    const t = setTimeout(() => onRemove(job.id), COMPLETED_LINGER_MS);
-    return () => clearTimeout(t);
-  }, [isCompleted, job.id, onRemove]);
 
   const handleCancel = async () => {
     if (cancelling) return;
