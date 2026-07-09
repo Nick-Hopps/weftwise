@@ -50,10 +50,9 @@ const MarkdownText = memo(function MarkdownText({ content }: { content: string }
   );
 });
 
-// Collapsible "Sources" block for a single message's citations.
-// citations.length > 3 → collapsed by default; <= 3 → expanded by default.
-// Each message keeps its own independent local state, mirrored after the
-// existing "Sources" group collapse pattern in layout/sidebar.tsx.
+// 单条消息引用列表的可折叠区块。
+// citations.length > 3 → 默认折叠；<= 3 → 默认展开。
+// 每条消息独立维护本地折叠状态，交互模式仿 layout/sidebar.tsx 现有的 "Sources" 分组折叠。
 const MessageCitations = memo(function MessageCitations({ citations }: { citations: Citation[] }) {
   const router = useRouter();
   const [expanded, setExpanded] = useState(citations.length <= 3);
