@@ -137,6 +137,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `builtin/wiki-search.ts` | `wiki.search` — 通过 `ToolContext.search` 做 FTS5 搜索（取代旧 `vault-search.ts`） |
 | `builtin/wiki-list.ts` | `wiki.list` — 通过 `ToolContext.listPages` 枚举本 subject 页标题/slug |
 | `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面标题/正文，改标题联动 relink（`sideEffect:'update'`，fix + query runner） |
+| `builtin/wiki-patch.ts` | `wiki.patch` — 通过 `ToolContext.patchPage` 对页面正文做 old_string/new_string 精确唯一替换的局部更新（`edits[]` 全成或全败，`sideEffect:'update'`，委托 `executePageUpdate`，**不接忠实度护栏**，fix + query runner） |
 | `builtin/commit-changeset.ts` | `commit_changeset` — 薄包装 `commitPending`（已无 skill 引用，保留供工具面/测试用） |
 | `builtin/dispatch-skill.ts` | `dispatch_skill` — orchestrator fanout 用；触发子 skill 执行（writer × N）|
 | `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
@@ -268,6 +269,7 @@ src/server/agents/
         ├── wiki-search.ts          # wiki.search（取代旧 vault-search.ts）
         ├── wiki-list.ts            # wiki.list
         ├── wiki-update.ts          # wiki.update（写动作工具，sideEffect:'update'，改标题联动 relink，fix + query runner）
+        ├── wiki-patch.ts           # 🆕 wiki.patch（写动作工具，sideEffect:'update'，old_string/new_string 精确唯一替换，edits[] 全成或全败，委托 executePageUpdate，不接忠实度护栏，fix + query runner）
         ├── commit-changeset.ts     # commit_changeset（薄包装 commitPending，已无 skill 引用）
         ├── dispatch-skill.ts       # dispatch_skill (fanout)
         ├── wiki-reenrich.ts        # wiki.reenrich（写动作工具，sideEffect:'enqueue'，仅对话循环调用）
@@ -305,6 +307,7 @@ src/server/agents/
 | 2026-07-06 | T1.4 ingest merge-update 接入统一保真护栏：新增 `runtime/merge-update-fidelity.ts::reconcileMergeUpdateFidelity`，`orchestrator.ts` writer fanout 分支在 `injectExistingPageForUpdate` 命中且注入了 `existingPageContent` 时接入——writer 产物违规（相对现有正文丢链接/丢标题/塌缩超 15%，`wiki/rewrite-fidelity.ts` profile `merge-update`）→ 把 violations 拼进指令重写一次 → 仍违规 → 保守回落：保留现有正文 + 文末追加整段重写草稿（`---` 分隔，确定性拼接、零 token）+ emit `ingest:warn`；create 语义（无 existingPageContent）不受影响 |
 | 2026-07-06 | T2.1 index/log 去 LLM 化：移除 `ingest-indexer` skill（`examples/skills/ingest-indexer.md` 已删）+ `MIN_SKILL_VERSIONS` 去掉该项；`finalizeIngest` 改调 `wiki/meta-pages.ts` 纯函数 `renderIndexPage`/`renderLogPage` 确定性渲染。原因：原方案每次 ingest 都要把全 subject 页清单塞进 indexer prompt，页数上几百后单调膨胀直至超上下文窗口，且目录/日志本质是数据库可确定性派生的数据。finalize 阶段现在零 LLM 调用 |
 | 2026-07-06 | T2.2 fanout existingPages 检索式子集注入：`orchestrator.ts::buildFanoutInput` 不再把**全量** existingPages 塞进每一个 writer/enricher/verify fanout 调用（O(N·M) token，N=现有页数、M=本次 fanout 页数），改为经新纯函数 `selectRelevantExistingPagesForFanout` 每页裁剪为「检索 top-K（默认 `EXISTING_PAGES_FANOUT_TOP_K=20`）∪ 该页 title/summary/上一阶段草稿中出现的 wikilink 目标（`wikilinks.ts::extractWikiLinks` 单一真实源）∪ 自身条目（update 语义必在）」；检索经新增 `AgentContext.retrieveRelevantPages?` 依赖注入（ingest-service 注入 `search/hybrid-retrieval.ts::hybridRankSlugs`，FTS+向量 RRF，未配置嵌入自动回落纯 FTS），未注入/抛错/零命中时优雅降级为最小集合（自身+wikilink 目标），不使 fanout 失败。**不变**：planner（sequence 阶段）仍拿全量 existingPages（判定复用哪个已有 slug 需要全局视野）；本次 fanout 内的兄弟页信息本就经 `plan: carry.plan` 整体透传给每页，未重复放进 existingPages 子集，无需改动。**已知代价**：existingPages 自此按页裁剪、不再跨页恒定，此前"共享前缀在前"设计给 DeepSeek 前缀缓存带来的 existingPages 部分复用收益让位于 token 节省（`plan` 字段仍恒定，该部分前缀缓存收益不受影响）。skill 输入契约形状不变（仍是 slug/title/summary/tags 数组），未 bump 各 ingest skill 版本 |
+| 2026-07-10 | 新增 `wiki.patch` 局部更新工具：`ToolContext.patchPage`（fix + query runner 均注入）→ `services/page-write.ts::patchPageInSubject` → `wiki/page-ops.ts::executePagePatch`（纯函数 `applyPatchEdits` 逐组 old_string/new_string 精确唯一替换，任一组失败整批不落盘，仿 Claude Code Edit 工具语义）委托 `executePageUpdate` 继承 Saga/坏链拒绝/单 commit；`sideEffect:'update'`；**不接忠实度护栏**（局部替换天然受限，风险面小于整页重写）；prompt 指导优先 `wiki.patch`、仅整页重写时才用 `wiki.update` |
 | 2026-07-09 | `wiki.update` 支持改标题：`executePageUpdate` 新增 `title?` 参数，改标题时联动 `relink.ts::rewriteBacklinkText` 重写本 subject 内引用旧标题的文本（新增返回字段 `referencesUpdated`）；`ToolContext.updatePage` 注入范围从"仅 fix runner"扩展为"fix + query runner"——问答（Ask AI）首次获得 `wiki_update` 能力（经 `services/page-write.ts::updatePageInSubject` 包装：忠实度护栏复用 `FIDELITY_PROFILES.fix` + `enqueueEmbedIndex`）；`QUERY_AGENTIC_SYSTEM_PROMPT` 补 "Updating a page" 确认纪律（与 `wiki_delete` 一致，须后续轮确认）。spec 见 `docs/superpowers/specs/2026-07-09-wiki-update-title-query-tool-design.md` |
 
 ---
