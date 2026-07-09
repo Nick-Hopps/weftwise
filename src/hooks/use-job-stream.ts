@@ -204,6 +204,8 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'save:complete',
         // Curate events
         'curate:start',
+        'curate:agent:start',
+        'curate:tool',
         'curate:plan',
         'curate:merge',
         'curate:split',
