@@ -7,9 +7,30 @@ import { getEmbeddingModel, getLanguageModel } from './provider-factory';
 import { resolveTask } from './task-router';
 import { LLMConfigError } from './errors';
 import { AgentCancelled } from '../agents/runtime/errors';
+import { recordUsage } from '../db/repos/usage-repo';
 
 /** shouldCancel 轮询间隔（ms）——固定 2s，兼顾及时性与开销。 */
 const CANCEL_POLL_INTERVAL_MS = 2000;
+
+/**
+ * 记一次调用用量（best-effort 双保险：repo 内部已 try/catch，这里再兜一层
+ * 保证 mock/异常场景下也绝不影响 LLM 调用返回）。usage 缺失守卫在 repo 层。
+ */
+function recordCallUsage(
+  route: { task: string; model: string },
+  usage: { inputTokens?: number; outputTokens?: number } | undefined,
+): void {
+  try {
+    recordUsage({
+      task: route.task,
+      model: route.model,
+      inputTokens: usage?.inputTokens,
+      outputTokens: usage?.outputTokens,
+    });
+  } catch (err) {
+    console.warn('[usage] record failed (ignored)', err);
+  }
+}
 
 /**
  * 若传入 shouldCancel，则以固定间隔轮询该函数；一旦返回 true 就 abort 传入的
@@ -102,6 +123,7 @@ export async function generateStructuredOutput<T>(
     console.log(
       `${prefix} done in ${elapsed}s | tokens: in=${result.usage?.inputTokens ?? 'n/a'} out=${result.usage?.outputTokens ?? 'n/a'}`,
     );
+    recordCallUsage(route, result.usage);
     return result.object;
   } catch (err) {
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
@@ -168,6 +190,9 @@ export function streamTextResponse(
     headers: route.headers,
     providerOptions: route.providerOptions,
     abortSignal: mergedSignal,
+    onFinish: ({ usage, totalUsage }) => {
+      recordCallUsage(route, totalUsage ?? usage);
+    },
   });
 }
 
@@ -224,6 +249,9 @@ export function streamTextWithTools(
     headers: route.headers,
     providerOptions: route.providerOptions,
     abortSignal: mergedSignal,
+    onFinish: ({ usage, totalUsage }) => {
+      recordCallUsage(route, totalUsage ?? usage);
+    },
   });
 }
 
@@ -286,6 +314,7 @@ export async function generateTextWithTools(
       abortSignal: controller.signal,
     });
     if (cancelledRef.current) throw new AgentCancelled();
+    recordCallUsage(route, result.totalUsage ?? result.usage);
     return { text: result.text };
   } catch (err) {
     if (cancelledRef.current) throw new AgentCancelled();
@@ -332,9 +361,10 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
     throw new LLMConfigError('Embedding model not configured (set tasks.embedding.model in llm-config.json)');
   }
   const route = resolveTask('embedding');
-  const { embeddings } = await embedMany({
+  const { embeddings, usage } = await embedMany({
     model: getEmbeddingModel(route),
     values: texts,
   });
+  recordCallUsage(route, { inputTokens: usage?.tokens, outputTokens: 0 });
   return embeddings;
 }
