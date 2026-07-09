@@ -52,6 +52,15 @@ describe('tool-activity - wiki_merge/wiki_split', () => {
   });
 });
 
+describe('tool-activity - wiki_patch', () => {
+  it('图标/动词/参数摘要（slug）', () => {
+    expect(toolActivityIcon('wiki_patch')).toBe('✏️');
+    expect(toolActivityVerb('wiki_patch')).toBe('Patching');
+    expect(summarizeToolArgs('wiki_patch', { slug: 'eigen' })).toBe('eigen');
+    expect(summarizeToolArgs('wiki_patch', {})).toBe('');
+  });
+});
+
 describe('tool-activity - web_search', () => {
   it('图标/动词/参数摘要', () => {
     expect(toolActivityIcon('web_search')).toBe('🌐');
