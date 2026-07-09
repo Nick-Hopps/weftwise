@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CircleDashed,
   Clock,
+  FileMinus,
   FileWarning,
   FileX,
   Link2,
@@ -30,6 +31,7 @@ const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
   'missing-crossref': Link2,
   'coverage-gap': CircleDashed,
   'orphan-source': FileX,
+  'thin-page': FileMinus,
 };
 
 const TYPE_LABEL: Record<LintFinding['type'], string> = {
@@ -41,6 +43,7 @@ const TYPE_LABEL: Record<LintFinding['type'], string> = {
   'missing-crossref': 'Missing cross-ref',
   'coverage-gap': 'Coverage gap',
   'orphan-source': 'Orphan source',
+  'thin-page': 'Thin page',
 };
 
 export function FindingRow({
@@ -54,7 +57,7 @@ export function FindingRow({
 }: {
   finding: EnrichedLintFinding;
   showSubject?: boolean;
-  /** coverage-gap 专属：触发针对本条 gap 的 research job。未传则不渲染按钮。 */
+  /** coverage-gap / thin-page 专属：触发针对本条 finding 的 research job。未传则不渲染按钮。 */
   onResearch?: () => void;
   researching?: boolean;
   /** orphan-source 专属：重新触发 ingest / 删除 source。未传则不渲染按钮。 */
@@ -101,10 +104,10 @@ export function FindingRow({
             <span className="font-medium">Fix:</span> {finding.suggestedFix}
           </p>
         )}
-        {finding.type === 'coverage-gap' && onResearch && (
+        {(finding.type === 'coverage-gap' || finding.type === 'thin-page') && onResearch && (
           <Button intent="secondary" size="sm" onClick={onResearch} loading={researching} className="mt-1">
             {!researching && <Search className="h-3 w-3" />}
-            Research this gap
+            {finding.type === 'coverage-gap' ? 'Research this gap' : 'Research this topic'}
           </Button>
         )}
         {finding.type === 'orphan-source' && (onReingestSource || onDeleteSource) && (

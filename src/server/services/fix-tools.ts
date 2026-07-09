@@ -1,14 +1,15 @@
 /**
  * fix tool-loop 的 worker 侧 ToolContext。
  * 只读：已提交 vault（readPageInSubject）+ 混合检索（hybridRankSlugs）+ 列举（过滤 meta）——与 curate-tools 读侧同构。
- * 写：update/create 各先过 FixGuard（写 cap + 保护页）；update 再过忠实度（checkRewriteFidelity，profile 'fix'）；
- *     allow→调 page-ops 内核（坏链/残链由内核确定性拒绝）→guard.record→emit fix:page/fix:create；
+ * 写：仅 update（不注入 createPage——断链只允许重链/解链，禁止补建 stub 页）；
+ *     先过 FixGuard（写 cap + 保护页）再过忠实度（checkRewriteFidelity，profile 'fix'）；
+ *     allow→调 page-ops 内核（坏链/残链由内核确定性拒绝）→guard.record→emit fix:page；
  *     deny→emit fix:skip/fix:warn + 抛错（工具层 catch 成 ok:false，把 reason 透传给模型）。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import { executePageUpdate, executePageCreate } from '../wiki/page-ops';
+import { executePageUpdate } from '../wiki/page-ops';
 import type { FixGuard } from './fix-deterministic';
 import { checkRewriteFidelity, FIDELITY_PROFILES } from '@/server/wiki/rewrite-fidelity';
 import type { Subject } from '@/lib/contracts';
@@ -69,14 +70,6 @@ export function buildFixToolContext(
       const res = await executePageUpdate(jobId, subject, input);
       guard.record('update');
       emit('fix:page', `Repaired "${res.updatedSlug}".`, { slug: res.updatedSlug });
-      return res;
-    },
-    async createPage(input) {
-      const cap = guard.canWrite();
-      if (!cap.ok) { emit('fix:skip', `Skip create "${input.title}": ${cap.reason}`, { title: input.title, reason: cap.reason }); throw new Error(cap.reason); }
-      const res = await executePageCreate(jobId, subject, input);
-      guard.record('create');
-      emit('fix:create', `Created "${res.createdSlug}".`, { slug: res.createdSlug });
       return res;
     },
   };
