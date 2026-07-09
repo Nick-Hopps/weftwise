@@ -51,3 +51,10 @@ export function summarizeToolArgs(tool: string, args: unknown): string {
   if (tool === 'web_search') return typeof a.query === 'string' ? a.query : '';
   return '';
 }
+
+/** 组装单行日志文案（供 job 事件日志用），如 `📄 Reading "some-page"…`。 */
+export function toolActivityLine(tool: string, args: unknown): string {
+  const summary = summarizeToolArgs(tool, args);
+  const head = `${toolActivityIcon(tool)} ${toolActivityVerb(tool)}`;
+  return summary ? `${head} "${summary}"…` : `${head}…`;
+}
