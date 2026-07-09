@@ -94,3 +94,33 @@ describe('renderMarkdown — Mermaid 渲染', () => {
     expect(html).not.toContain('mermaid-diagram');
   });
 });
+
+describe('renderMarkdown — GFM 表格渲染', () => {
+  it('管道语法表格渲染为 table/th/td 结构', () => {
+    const md = '| Name | Age |\n| --- | --- |\n| Alice | 30 |\n| Bob | 25 |';
+    const html = toHtml(renderMarkdown(md));
+    expect(html).toContain('<table');
+    expect(html).toContain('<th');
+    expect(html).toContain('<td');
+    expect(html).toContain('Alice');
+    expect(html).toContain('Bob');
+  });
+
+  it('表格单元格内的 [[wikilink]] 仍正确渲染（验证插件顺序无冲突）', () => {
+    const md = '| Name | Ref |\n| --- | --- |\n| foo | [[Page]] |';
+    const html = toHtml(renderMarkdown(md));
+    expect(html).toContain('<table');
+    expect(html).toContain('Page');
+  });
+
+  it('删除线语法随 remark-gfm 一起生效', () => {
+    const html = toHtml(renderMarkdown('~~deleted~~'));
+    expect(html).toContain('<del');
+  });
+
+  it('未启用表格语法前的普通竖线文本不受影响（非表格场景不误判）', () => {
+    const html = toHtml(renderMarkdown('a | b | c'));
+    expect(html).not.toContain('<table');
+    expect(html).toContain('a | b | c');
+  });
+});

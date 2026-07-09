@@ -4,6 +4,7 @@ import React, { createElement } from 'react';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkFrontmatter from 'remark-frontmatter';
+import remarkGfm from 'remark-gfm';
 import remarkRehype from 'remark-rehype';
 import remarkMath from 'remark-math';
 import rehypeReact from 'rehype-react';
@@ -294,7 +295,7 @@ export function renderMarkdown(
 
   // mdast 阶段：remark-math（可选）必须先于 wikilink 扫描，
   // 这样 $…$ 先被切成 math 节点，wikilink 扫描器（只处理 [[…]] 文本）碰不到公式内部。
-  let remark = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']);
+  let remark = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']).use(remarkGfm);
   if (enableMath) remark = remark.use(remarkMath);
   remark = remark.use(createRemarkCallouts()).use(createRemarkMermaid()).use(createRemarkWikiLinks(resolver));
 
