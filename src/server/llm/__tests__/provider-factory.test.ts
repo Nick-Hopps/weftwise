@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { injectMissingThinkingSignatures } from '../provider-factory';
+import {
+  ensureExplicitStreamFlag,
+  injectMissingThinkingSignatures,
+} from '../provider-factory';
 
 /**
  * 兼容代理（packyapi）的 Anthropic 端点返回的 thinking 块缺 signature 字段，
@@ -58,5 +61,33 @@ describe('injectMissingThinkingSignatures', () => {
     expect(injectMissingThinkingSignatures('str')).toBe(false);
     expect(injectMissingThinkingSignatures({})).toBe(false);
     expect(injectMissingThinkingSignatures({ content: 'nope' })).toBe(false);
+  });
+});
+
+/**
+ * 兼容代理（taluna）要求非流式 messages 请求显式携带 stream:false，否则整个
+ * 请求被拒（"messages request must explicitly set stream:false for non-stream
+ * calls"）。AI SDK 的 generateObject/generateText 非流式调用不带 stream 字段——
+ * ensureExplicitStreamFlag 在请求体缺失 stream 时补 false。
+ */
+describe('ensureExplicitStreamFlag', () => {
+  it('缺失 stream 字段时补 stream:false', () => {
+    const out = ensureExplicitStreamFlag(JSON.stringify({ model: 'm', messages: [] }));
+    expect(out).not.toBeNull();
+    expect(JSON.parse(out!)).toMatchObject({ model: 'm', stream: false });
+  });
+
+  it('已显式 stream:true（流式调用）不改写', () => {
+    expect(ensureExplicitStreamFlag(JSON.stringify({ stream: true }))).toBeNull();
+  });
+
+  it('已显式 stream:false 不改写', () => {
+    expect(ensureExplicitStreamFlag(JSON.stringify({ stream: false }))).toBeNull();
+  });
+
+  it('非 JSON / 非对象 body → 安全返回 null', () => {
+    expect(ensureExplicitStreamFlag('not json')).toBeNull();
+    expect(ensureExplicitStreamFlag(JSON.stringify([1, 2]))).toBeNull();
+    expect(ensureExplicitStreamFlag(JSON.stringify('str'))).toBeNull();
   });
 });

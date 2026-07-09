@@ -99,9 +99,11 @@ function buildFactory(
         const p = createAnthropic({
           apiKey: requireApiKey(profileName, profile.apiKeyEnv),
           baseURL: profile.baseURL,
-          // 兼容代理（如 packyapi）的 Anthropic 端点：其 thinking 块缺 signature 字段，
-          // 会被 @ai-sdk/anthropic 响应 schema 拒绝；自定义 fetch 给缺失项补占位值。
-          fetch: createAnthropicSignatureRepairFetch(),
+          // 兼容代理（如 packyapi / taluna）的 Anthropic 端点：请求侧补显式
+          // stream:false（非流式调用缺失该字段会被中转拒绝），响应侧给缺
+          // signature 的 thinking 块补占位值（否则被 @ai-sdk/anthropic 响应
+          // schema 拒绝）。
+          fetch: createAnthropicCompatRepairFetch(),
         });
         return (id) => p(id);
       }
@@ -195,8 +197,14 @@ function buildFactory(
  * 也随之失败。这里给缺失 signature 的 thinking 块补占位空串使响应过校验；仅在缺失时
  * 改写（真 Anthropic 自带 signature → no-op）。流式响应（text/event-stream）原样透传。
  */
-function createAnthropicSignatureRepairFetch(baseFetch: typeof fetch = fetch): typeof fetch {
+function createAnthropicCompatRepairFetch(baseFetch: typeof fetch = fetch): typeof fetch {
   return async (input, init) => {
+    // 请求侧：非流式 messages 请求缺 stream 字段时补显式 stream:false
+    //（taluna 中转硬性要求；官方 API 对多余的 stream:false 无感知，安全）。
+    if (init && typeof init.body === 'string') {
+      const patched = ensureExplicitStreamFlag(init.body);
+      if (patched !== null) init = { ...init, body: patched };
+    }
     const res = await baseFetch(input, init);
     const contentType = res.headers.get('content-type') ?? '';
     if (!contentType.includes('application/json')) return res; // SSE 流式透传
@@ -213,6 +221,24 @@ function createAnthropicSignatureRepairFetch(baseFetch: typeof fetch = fetch): t
     if (!injectMissingThinkingSignatures(body)) return res;
     return rebuildJsonResponse(JSON.stringify(body), res);
   };
+}
+
+/**
+ * 请求体缺失 `stream` 字段时补 `stream:false`，返回改写后的 body 文本；
+ * 已显式携带 stream（true/false）或 body 不是 JSON 对象时返回 null（不改写）。
+ * 背景：taluna 等中转要求非流式 messages 请求显式 stream:false，而 AI SDK
+ * 的 generateObject/generateText 非流式调用不带该字段。
+ */
+export function ensureExplicitStreamFlag(bodyText: string): string | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return null;
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  if ('stream' in body) return null;
+  return JSON.stringify({ ...body, stream: false });
 }
 
 /** 给响应 body 里所有缺失 signature 的 thinking 块补空串；返回是否改动过。 */
