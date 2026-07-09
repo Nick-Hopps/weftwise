@@ -60,7 +60,7 @@
 
 - `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key；接入会话载入/保存/切换（`useEffect` 载历史 + `loadedConversationIdRef` 守卫防自身覆盖 + done 设 ref/id+invalidate）；embedded 变体消费 `ui-store.pendingChatReference`（选区追问信箱）→ pin 为引用 chip（section 兜底 `Selection`）+ 聚焦输入框；「换页清空 refs」effect 用 `prevPageSlugRef` 守卫**仅在 slug 真正变化时清**，避免 StrictMode 双挂载清掉刚 pin 的选区引用
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
-- `message-list.tsx`
+- `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`，body 带 `subjectId`
 
 ### `search/`
@@ -187,6 +187,7 @@ src/components/
 | 2026-06-30 | Per-subject 上次页面记忆：`hooks/use-switch-subject` 改为切换边界「记录离开页 + 恢复目标页 + 选中当前 subject no-op」；消费 `lib/subject-nav` 与 `ui-store.lastPageBySubject`/`rememberPage`；`subject-switcher`/`subjects` 卡片/`subject-dialog` 调用点无需改动。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-per-subject-last-page-restore* |
 | 2026-07-06 | Ingest 多任务支持：`global-job-tracker.tsx` 改为轮询 running+pending 聚合追踪；新增 `shared/jobs-panel.tsx`（聚合任务面板：多行、每 running 行独立 SSE、pending 行不建连接、completed 5s 自动移除、failed 常驻，行级详情复用 `JobDetailDialog`）；`progress-toast.tsx` 保留组件但不再被 tracker 直接挂载。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |
 | 2026-07-06 | Settings 表单统一重设计 | 新增 `ui/{switch,segmented,select}` 原语（AugmentationField 复用 Segmented）；`settings-rows` 重写为 6 个即时保存行原语（blur/Enter 提交 + 行级 spinner/✓/错误）；七个 panel 换 Switch/分段控件、删全部 Save 按钮；`settings-dialog` 去 languageDraft。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-settings-form-redesign* |
+| 2026-07-09 | Ask AI 表格渲染 + 引用列表折叠 | `chat/message-list.tsx` 新增 `MessageCitations` 组件（引用列表支持展开/折叠，仿 `layout/sidebar.tsx` "Sources" 分组模式，>3 条默认折叠、≤3 条默认展开，各消息独立维护本地状态）；`MarkdownText` 消费的 `renderMarkdown()`（`lib/markdown-client.ts`）接入 `remark-gfm` 后同步获得表格渲染能力。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-09-ask-ai-table-citations-collapse* |
 
 ---
 
