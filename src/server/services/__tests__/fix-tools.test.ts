@@ -13,6 +13,7 @@ vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(asyn
 const opsMocks = vi.hoisted(() => ({
   executePageUpdate: vi.fn(async (_j: string, _s: unknown, input: { slug: string }) => ({ updatedSlug: input.slug, referencesUpdated: 0 })),
   executePageCreate: vi.fn(async () => ({ createdSlug: 'new-page' })),
+  executePagePatch: vi.fn(async (_j: string, _s: unknown, input: { slug: string; edits: unknown[] }) => ({ updatedSlug: input.slug, appliedEdits: input.edits.length })),
 }));
 vi.mock('@/server/wiki/page-ops', () => opsMocks);
 
@@ -25,6 +26,7 @@ describe('buildFixToolContext', () => {
   beforeEach(() => {
     opsMocks.executePageUpdate.mockClear();
     opsMocks.executePageCreate.mockClear();
+    opsMocks.executePagePatch.mockClear();
     storeMocks.readPageInSubject.mockReturnValue({ frontmatter: { title: 'Eigen' }, body: LONG });
   });
 
@@ -82,6 +84,36 @@ describe('buildFixToolContext', () => {
     await expect(ctx.updatePage!({ slug: 'ghost', body: `${LONG}, edited` })).rejects.toThrow(/not found/);
     expect(opsMocks.executePageUpdate).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('fix:skip', expect.any(String), expect.objectContaining({ slug: 'ghost' }));
+  });
+
+  it('patchPage：允许时调 executePagePatch 并 record/emit（不做忠实度检查）', async () => {
+    const emit = vi.fn();
+    const guard = createFixGuard({ caps: { writes: 5 } });
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
+    const res = await ctx.patchPage!({ slug: 'eigen', edits: [{ oldString: 'a', newString: 'b' }] });
+    expect(res.updatedSlug).toBe('eigen');
+    expect(res.appliedEdits).toBe(1);
+    expect(opsMocks.executePagePatch).toHaveBeenCalledWith('j1', subject, { slug: 'eigen', edits: [{ oldString: 'a', newString: 'b' }] });
+    expect(guard.totals().update).toBe(1);
+    expect(emit).toHaveBeenCalledWith('fix:page', expect.any(String), expect.objectContaining({ slug: 'eigen' }));
+  });
+
+  it('patchPage：写 cap 耗尽 → fix:skip + 抛错，不触内核', async () => {
+    const emit = vi.fn();
+    const guard = createFixGuard({ caps: { writes: 1 } });
+    guard.record('update');
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
+    await expect(ctx.patchPage!({ slug: 'eigen', edits: [{ oldString: 'a', newString: 'b' }] })).rejects.toThrow(/limit of 1 edits/);
+    expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('fix:skip', expect.any(String), expect.objectContaining({ slug: 'eigen' }));
+  });
+
+  it('patchPage：保护页 → fix:skip + 抛错，不触内核', async () => {
+    const emit = vi.fn();
+    const ctx = buildFixToolContext(subject, { guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit });
+    await expect(ctx.patchPage!({ slug: 'index', edits: [{ oldString: 'a', newString: 'b' }] })).rejects.toThrow(/protected/);
+    expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith('fix:skip', expect.any(String), expect.objectContaining({ slug: 'index' }));
   });
 
   it('不注入 createPage（fix 禁止补建 stub 页）', () => {

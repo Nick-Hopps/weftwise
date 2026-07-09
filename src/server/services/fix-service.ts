@@ -32,7 +32,7 @@ import type { ChangesetEntry, Job } from '@/lib/contracts';
 export const FIX_MAX_STEPS = 60;
 
 const fixToolDefs = createBuiltinToolRegistry().resolve([
-  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.update',
+  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.update', 'wiki.patch',
 ]);
 
 interface FixParams {

@@ -5,7 +5,7 @@
  * 语义沿用 DELETE /api/pages 路由 + executePageCreate/executePageUpdate。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
-import { executePageDelete, executePageCreate, executePageUpdate } from '../wiki/page-ops';
+import { executePageDelete, executePageCreate, executePageUpdate, executePagePatch } from '../wiki/page-ops';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { checkRewriteFidelity, collectMissingLinkTargets, FIDELITY_PROFILES } from '../wiki/rewrite-fidelity';
 import { enqueueEmbedIndex } from './embedding-service';
@@ -96,6 +96,24 @@ export async function updatePageInSubject(
     throw new Error(`Edit dropped too much content: ${fidelity.violations.join('; ')}`);
   }
   const result = await executePageUpdate(crypto.randomUUID(), subject, input);
+  enqueueEmbedIndex(subject.id);
+  return result;
+}
+
+/**
+ * 局部更新一页正文（对话/fix 工具路径包装）：META 保护页拒绝后委托 executePagePatch
+ * （edits 精确唯一替换 + Saga）+ 触发向量回填。
+ * 刻意不接忠实度护栏：patch 是确定性拼接，未被 edits 提到的内容不可能变；
+ * unresolved-wikilink 校验由内核委托的 executePageUpdate 继承（新增链接必须可解析）。
+ */
+export async function patchPageInSubject(
+  subject: Subject,
+  input: { slug: string; edits: Array<{ oldString: string; newString: string }> },
+): Promise<{ updatedSlug: string; appliedEdits: number }> {
+  if (META_PAGE_SLUGS.has(input.slug)) {
+    throw new Error(`Cannot update protected system page "${input.slug}".`);
+  }
+  const result = await executePagePatch(crypto.randomUUID(), subject, input);
   enqueueEmbedIndex(subject.id);
   return result;
 }
