@@ -144,5 +144,6 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 写工具纪律', () => {
   it('更新段存在，要求后续轮确认、禁止同轮更新', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Updating a page/i);
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/ALWAYS confirm before updat/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/LATER turn|later turn/);
   });
 });
