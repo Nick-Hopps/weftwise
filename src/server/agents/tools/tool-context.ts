@@ -29,9 +29,9 @@ export interface ToolContext {
   /** curate 侧拆分一页（Saga）；仅 worker curate runner 注入。 */
   splitPage?(slug: string, hint?: string):
     Promise<{ primarySlug: string; pageSlugs: string[]; referencesRepointed: number }>;
-  /** fix 侧更新一页正文（Saga）；仅 fix runner 注入。 */
-  updatePage?(input: { slug: string; body: string; summary?: string; tags?: string[] }):
-    Promise<{ updatedSlug: string }>;
+  /** 更新一页（可选改标题+正文，Saga）；fix runner 与 query runner 均注入。 */
+  updatePage?(input: { slug: string; title?: string; body: string; summary?: string; tags?: string[] }):
+    Promise<{ updatedSlug: string; referencesUpdated: number }>;
   /** query 侧只读联网检索（Tavily）；工具集只在 web search 已配置时才含 web.search，未配置时不会被调用。 */
   webSearch?(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;
   /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
