@@ -509,12 +509,19 @@ export function HealthView() {
                 <div className="space-y-0.5">
                   {group.findings.map((f, i) => {
                     const gapId = f.type === 'coverage-gap' ? String(allFindings.indexOf(f)) : null;
+                    // thin-page：复用 topic research（以页 slug 为主题），引导补内容
+                    const onResearch =
+                      gapId && !allSubjects
+                        ? () => startResearch({ gapIds: [gapId] })
+                        : f.type === 'thin-page' && !allSubjects
+                          ? () => startResearch({ topic: f.pageSlug })
+                          : undefined;
                     return (
                       <FindingRow
                         key={`${f.subjectId}:${f.type}:${f.pageSlug}:${i}`}
                         finding={f}
                         showSubject={allSubjects}
-                        onResearch={gapId && !allSubjects ? () => startResearch({ gapIds: [gapId] }) : undefined}
+                        onResearch={onResearch}
                         researching={researching}
                         onReingestSource={
                           f.type === 'orphan-source' && f.sourceId && !allSubjects

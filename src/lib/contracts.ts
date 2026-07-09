@@ -192,7 +192,7 @@ export interface ResearchBacklogEntry {
 }
 
 export interface LintFinding {
-  type: 'broken-link' | 'orphan' | 'missing-frontmatter' | 'stale-source' | 'contradiction' | 'missing-crossref' | 'coverage-gap' | 'orphan-source';
+  type: 'broken-link' | 'orphan' | 'missing-frontmatter' | 'stale-source' | 'contradiction' | 'missing-crossref' | 'coverage-gap' | 'orphan-source' | 'thin-page';
   severity: 'critical' | 'warning' | 'info';
   pageSlug: string;
   description: string;
