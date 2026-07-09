@@ -239,6 +239,7 @@ src/server/llm/
 | 2026-06-30 | `fix-prompt.ts` 重写为 agentic tool-loop 版本：新增 `FIX_AGENTIC_SYSTEM_PROMPT` + `buildFixAgenticUserPrompt`；退休 `FixPageSchema`/`FIX_SYSTEM_PROMPT`/`buildFixPageUserPrompt`（Spec 3 fix→tool-loop）|
 | 2026-07-07 | Ask AI 内联引用 + 确定性解析：`QUERY_AGENTIC_SYSTEM_PROMPT` 新增 CITE INLINE 纪律（要求模型答案正文内联标注 `[[slug]]` 作依据，引用改由 `query-service.ts::extractCitationsFromAnswer` 流后确定性解析，不再需要模型二次结构化输出）；新增 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（独立 coverage 判定小调用，只喂问题+答案，供 `assessCoverageInBackground` 异步 fire-and-forget 调用）；退役 `generateQueryCitations`/`QueryCitationsSchema`/`QueryCitationsResult` 与 `[unverified]` 前缀机制 |
 | 2026-07-09 | `generateTextWithTools` 新增可选 `onToolCall?: (info: { tool, args }) => void`（经 `onStepFinish` 每次工具调用同步触发）；供 `fix-service`/`curate-service` emit 可读任务日志事件（任务日志可读性改进）|
+| 2026-07-10 | `provider-registry.ts` 新增内部 `recordCallUsage` helper（薄封装 `usage-repo.recordUsage`，二次 try/catch 兜底、绝不影响调用返回），接入五个入口成功路径：`generateStructuredOutput`/`generateTextWithTools`/`streamTextResponse`/`streamTextWithTools`/`generateEmbeddings`（`inputTokens`/`outputTokens: 0`）；`agent-loop.ts` 同步接入 ingest 各阶段（plan/write/enrich/verify/index 等）调用成功路径记账，供 `GET /api/usage` 聚合展示 |
 
 ---
 
