@@ -63,6 +63,11 @@ CommonMark），未接入 GFM 扩展——模型如果在回答里写 `| a | b |
 - 不涉及后端 / 数据库 / API / Saga 事务，不涉及 vault 或 git 提交语义。
 - 表格渲染的改动是共享渲染函数级别的，副作用范围覆盖 Wiki 阅读页正文，
   已确认属于预期范围而非意外扩散。
+- `renderMarkdown()` 的其他调用方——`source-viewer.tsx`、
+  `wiki-reading-view.tsx`（渲染 `source.text` 的分支）、以及经
+  `PageRenderer` 间接消费的 `editor-preview.tsx`——同样会一并获得 GFM
+  能力（表格/删除线/任务列表/自动链接），这同样是预期且一致的行为，
+  不是意外扩散。
 
 ## 测试计划
 
