@@ -458,6 +458,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME 组词确认的 Enter 不应触发发送（Safari 用 keyCode 229 兜底）
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
