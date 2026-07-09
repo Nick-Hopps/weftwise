@@ -1,11 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { Hash } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
-import { aggregateTags } from '@/lib/tags';
-import { TagLink } from '@/components/wiki/tag-link';
+import { aggregateTags, tagCloudWeights, shuffleTagsDeterministic } from '@/lib/tags';
 import type { WikiPage } from '@/lib/contracts';
 
 export function TagsIndexView() {
@@ -23,7 +23,7 @@ export function TagsIndexView() {
     staleTime: 30_000,
   });
 
-  const tags = aggregateTags(pages);
+  const tags = shuffleTagsDeterministic(tagCloudWeights(aggregateTags(pages)));
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 w-full space-y-6">
@@ -46,11 +46,20 @@ export function TagsIndexView() {
       ) : tags.length === 0 ? (
         <p className="text-sm text-foreground-tertiary italic">No tags yet.</p>
       ) : (
-        <ul className="flex flex-wrap gap-2">
-          {tags.map(({ tag, count }) => (
-            <li key={tag} className="inline-flex items-center gap-1">
-              <TagLink tag={tag} subjectSlug={subjectSlug} size="base" />
-              <span className="text-xs text-foreground-tertiary tabular-nums">{count}</span>
+        <ul className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-2 py-4">
+          {tags.map(({ tag, count, weight }) => (
+            <li key={tag}>
+              <Link
+                href={`/tags/${encodeURIComponent(tag)}${subjectSlug ? `?s=${encodeURIComponent(subjectSlug)}` : ''}`}
+                title={`${count} page${count === 1 ? '' : 's'}`}
+                className="text-accent hover:underline whitespace-nowrap leading-tight"
+                style={{
+                  fontSize: `${(0.875 + weight * 1.625).toFixed(3)}rem`,
+                  opacity: 0.45 + weight * 0.55,
+                }}
+              >
+                {tag}
+              </Link>
             </li>
           ))}
         </ul>
