@@ -240,6 +240,8 @@ export async function generateTextWithTools(
     overrides?: LLMRouteOverride;
     /** 每 2s 轮询一次；返回 true 时 abort 当前请求并抛出 AgentCancelled。 */
     shouldCancel?: () => boolean;
+    /** 每步结束时对该步每个 tool call 回调一次；回调抛错被吞掉，不影响主流程。 */
+    onToolCall?: (info: { tool: string; args: unknown }) => void;
   },
 ): Promise<{ text: string }> {
   const route = resolveTask(task, opts.overrides ?? {});
@@ -270,6 +272,17 @@ export async function generateTextWithTools(
       maxRetries: route.maxRetries,
       headers: route.headers,
       providerOptions: route.providerOptions,
+      onStepFinish: opts.onToolCall
+        ? (step) => {
+            for (const tc of step.toolCalls) {
+              try {
+                opts.onToolCall!({ tool: tc.toolName, args: tc.input });
+              } catch {
+                // 观测回调不得影响 LLM 循环
+              }
+            }
+          }
+        : undefined,
       abortSignal: controller.signal,
     });
     if (cancelledRef.current) throw new AgentCancelled();
