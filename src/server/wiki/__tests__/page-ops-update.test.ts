@@ -135,8 +135,61 @@ describe('executePageUpdate', () => {
   });
 
   it('留下同主题 unresolved-wikilink → 抛错不 apply', async () => {
-    txMocks.validateChangeset.mockReturnValueOnce({ valid: true, errors: [], warnings: ['Unresolved wikilink: [[Ghost]]'] });
+    txMocks.validateChangeset.mockReturnValueOnce({ valid: true, errors: [], warnings: ['[wiki/general/eigenvalue.md] Unresolved wikilink: [[Ghost]]'] });
     await expect(executePageUpdate('j1', subject, { slug: 'eigenvalue', body: '[[Ghost]]' })).rejects.toThrow(/unresolved wikilink/i);
+    expect(txMocks.applyChangeset).not.toHaveBeenCalled();
+  });
+
+  it('改标题：backlink entry 的 unresolved warning 不应该拒绝更新', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    storeMocks.readPageInSubject.mockImplementation((_subjectSlug: string, slug: string): any => {
+      if (slug === 'eigenvalue') {
+        return {
+          frontmatter: { title: 'Eigenvalue', created: '2020-01-01T00:00:00.000Z', updated: '2020-01-01T00:00:00.000Z', tags: ['math'], sources: [] },
+          body: 'original body',
+        };
+      }
+      if (slug === 'linear-algebra-notes') {
+        return {
+          frontmatter: { title: 'Linear Algebra Notes', created: '2021-01-01T00:00:00.000Z', updated: '2021-01-01T00:00:00.000Z', tags: [], sources: [] },
+          body: 'See [[Eigenvalue]] for details.',
+        };
+      }
+      return null;
+    });
+    repoMocks.getBacklinks.mockReturnValue([{ subjectId: 's1', slug: 'linear-algebra-notes' }]);
+    txMocks.validateChangeset.mockReturnValueOnce({
+      valid: true,
+      errors: [],
+      warnings: ['[wiki/general/linear-algebra-notes.md] Unresolved wikilink: [[Eigen Value]]'],
+    });
+
+    const out = await executePageUpdate('j1', subject, { slug: 'eigenvalue', title: 'Eigen Value', body: 'new body' });
+
+    expect(out.updatedSlug).toBe('eigenvalue');
+    expect(out.referencesUpdated).toBe(1);
+    expect(txMocks.applyChangeset).toHaveBeenCalledOnce();
+  });
+
+  it('改标题：self entry 的 unresolved warning 仍然要拒绝', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    storeMocks.readPageInSubject.mockImplementation((_subjectSlug: string, slug: string): any => {
+      if (slug === 'eigenvalue') {
+        return {
+          frontmatter: { title: 'Eigenvalue', created: '2020-01-01T00:00:00.000Z', updated: '2020-01-01T00:00:00.000Z', tags: ['math'], sources: [] },
+          body: 'original body',
+        };
+      }
+      return null;
+    });
+    repoMocks.getBacklinks.mockReturnValue([]);
+    txMocks.validateChangeset.mockReturnValueOnce({
+      valid: true,
+      errors: [],
+      warnings: ['[wiki/general/eigenvalue.md] Unresolved wikilink: [[Ghost]]'],
+    });
+
+    await expect(executePageUpdate('j1', subject, { slug: 'eigenvalue', title: 'Eigen Value', body: '[[Ghost]]' })).rejects.toThrow(/unresolved wikilink/i);
     expect(txMocks.applyChangeset).not.toHaveBeenCalled();
   });
 });

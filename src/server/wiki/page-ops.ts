@@ -265,8 +265,9 @@ export async function executePageUpdate(
     existingCreated: doc.frontmatter.created,
   });
 
+  const selfPath = buildWikiPath(subject.slug, slug);
   const entries: ChangesetEntry[] = [
-    { action: 'update', path: buildWikiPath(subject.slug, slug), content },
+    { action: 'update', path: selfPath, content },
   ];
 
   let referencesUpdated = 0;
@@ -289,7 +290,9 @@ export async function executePageUpdate(
   const changeset = createChangeset(jobId, subject, entries);
   const validation = validateChangeset(changeset);
   if (!validation.valid) throw new Error(`update changeset invalid: ${validation.errors.join('; ')}`);
-  const unresolved = (validation.warnings ?? []).filter((w) => w.includes('Unresolved wikilink:'));
+  const unresolved = (validation.warnings ?? []).filter(
+    (w) => w.startsWith(`[${selfPath}]`) && w.includes('Unresolved wikilink:'),
+  );
   if (unresolved.length > 0) throw new Error(`update would leave unresolved wikilink(s): ${unresolved.join('; ')}`);
   await applyChangeset(changeset);
 
