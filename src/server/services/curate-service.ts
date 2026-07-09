@@ -19,6 +19,7 @@ import { compileToolSet } from '@/server/agents/tools/compile';
 import { generateTextWithTools } from '../llm/provider-registry';
 import { CURATE_AGENTIC_SYSTEM_PROMPT, buildCurateAgenticUserPrompt } from '../llm/prompts/curate-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
+import { toolActivityLine } from '@/lib/tool-activity';
 import type { Job } from '@/lib/contracts';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
@@ -86,6 +87,12 @@ export async function runCurateJob(
     subject: { slug: subject.slug, name: subject.name, description: subject.description },
   };
 
+  emit('curate:agent:start', `Reviewing ${metas.length} candidate page(s) (mode: ${seedSet === null ? 'manual' : 'auto'}, caps: ${Object.entries(CURATE_CAPS).map(([k, v]) => `${k}≤${v}`).join(' ')})…`, {
+    candidates: metas.length,
+    mode: seedSet === null ? 'manual' : 'auto',
+    caps: CURATE_CAPS,
+  });
+
   // 4. 驱动工具循环
   await generateTextWithTools('curate', {
     system: CURATE_AGENTIC_SYSTEM_PROMPT,
@@ -93,6 +100,7 @@ export async function runCurateJob(
     tools,
     maxSteps: CURATE_MAX_STEPS,
     shouldCancel: () => queue.isCancelRequested(job.id),
+    onToolCall: (info) => emit('curate:tool', toolActivityLine(info.tool, info.args), { tool: info.tool }),
   });
 
   const totals = guard.totals();
