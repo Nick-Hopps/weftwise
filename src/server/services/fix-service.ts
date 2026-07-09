@@ -3,7 +3,8 @@
  * 工作清单 = 新鲜重扫确定性（missing-frontmatter / broken-link）∪ 最近 lint 快照语义
  *   （missing-crossref / contradiction）。
  * 阶段1（pre-pass，确定性）：所有 missing-frontmatter 合并为一个 Saga commit。
- * 阶段2（tool-loop）：generateTextWithTools('fix') 驱动，模型自驱读页 + wiki.update/create 修复；
+ * 阶段2（tool-loop）：generateTextWithTools('fix') 驱动，模型自驱读页 + wiki.update 修复
+ *   （不提供 wiki.create——断链只允许重链/解链，禁止补建占位 stub 页）；
  *   写能力经 FixGuard（写 cap + 保护页）+ 忠实度护栏把守，坏链/残链由内核确定性拒绝。每写一次一个 commit。
  * side-effect import：worker-entry import 本文件即完成 registerHandler('fix', ...)。
  */
@@ -31,7 +32,7 @@ import type { ChangesetEntry, Job } from '@/lib/contracts';
 export const FIX_MAX_STEPS = 60;
 
 const fixToolDefs = createBuiltinToolRegistry().resolve([
-  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.update', 'wiki.create',
+  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.update',
 ]);
 
 interface FixParams {

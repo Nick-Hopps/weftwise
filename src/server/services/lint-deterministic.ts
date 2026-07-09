@@ -1,7 +1,7 @@
 /**
  * Lint Phase 1 — deterministic 检查（无需 LLM）。
  *
- * 覆盖：broken wikilinks / orphan pages / missing frontmatter / stale sources / orphan sources。
+ * 覆盖：broken wikilinks / orphan pages / missing frontmatter / stale sources / orphan sources / thin pages。
  * 全部按 subject 维度扫描。
  */
 
@@ -32,6 +32,7 @@ export function runDeterministicChecksForSubject(subject: Subject): LintFinding[
   findings.push(...checkMissingFrontmatter(subject));
   findings.push(...checkStaleSources(subject, allPages));
   findings.push(...checkOrphanSources(subject));
+  findings.push(...checkThinPages(subject));
   return findings;
 }
 
@@ -136,6 +137,39 @@ function checkMissingFrontmatter(subject: Subject): LintFinding[] {
     }
   }
 
+  return findings;
+}
+
+/** thin-page 判定阈值：正文（去 frontmatter、trim 后）字符数下限。 */
+export const THIN_PAGE_MIN_BODY_CHARS = 500;
+
+/**
+ * thin-page 检测：正文过短且零来源的页——典型来源是 fix 为消 broken-link 补建的占位 stub。
+ * 不自动修（fix ignored 桶）；Health 页可据此引导 research/摄入资料补内容。
+ * frontmatter 解析失败的页已由 missing-frontmatter 报，此处跳过不重复报。
+ */
+export function checkThinPages(subject: Subject): LintFinding[] {
+  const findings: LintFinding[] = [];
+  for (const file of scanWikiPages(subject.slug)) {
+    if (META_PAGE_SLUGS.has(file.slug)) continue;
+    try {
+      const { data, body } = parseFrontmatter(file.content);
+      const tags = Array.isArray(data.tags) ? data.tags : [];
+      if (tags.includes('meta')) continue;
+      const sources = Array.isArray(data.sources) ? data.sources : [];
+      if (sources.length > 0) continue;
+      if (body.trim().length >= THIN_PAGE_MIN_BODY_CHARS) continue;
+      findings.push({
+        type: 'thin-page',
+        severity: 'info',
+        pageSlug: file.slug,
+        description: `Thin page: "${file.slug}" (subject: ${subject.slug}) has a very short body and no sources — likely a placeholder stub that was never fleshed out.`,
+        suggestedFix: `Ingest source material covering this topic, run a research job on it, or merge it into a related page.`,
+      });
+    } catch {
+      // 解析失败 → missing-frontmatter 已报
+    }
+  }
   return findings;
 }
 

@@ -22,3 +22,10 @@ describe('FIX_AGENTIC_SYSTEM_PROMPT', () => {
     expect(FIX_AGENTIC_SYSTEM_PROMPT).toMatch(/[Ff]aithful/);
   });
 });
+
+describe('FIX_AGENTIC_SYSTEM_PROMPT — 无建页能力', () => {
+  it('不再提及 wiki_create，并明令禁止为断链造页', () => {
+    expect(FIX_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_create');
+    expect(FIX_AGENTIC_SYSTEM_PROMPT).toMatch(/NEVER invent a new page/);
+  });
+});

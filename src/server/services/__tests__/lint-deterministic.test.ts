@@ -165,3 +165,59 @@ describe('checkOrphanSources', () => {
     expect(all.filter((x) => x.type === 'orphan-source').length).toBe(3); // failed + nojob + done
   });
 });
+
+describe('checkThinPages', () => {
+  const FM = (sources: string[]) => [
+    '---',
+    'title: T',
+    "created: '2026-01-01T00:00:00.000Z'",
+    "updated: '2026-01-01T00:00:00.000Z'",
+    'tags: []',
+    sources.length ? `sources:\n${sources.map((s) => `  - ${s}`).join('\n')}` : 'sources: []',
+    '---',
+    '',
+  ].join('\n');
+
+  async function setupThin() {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const s = subjectsRepo.create({ slug: 's-thin', name: 'S' });
+    const wikiDir = join(process.env.VAULT_PATH!, 'wiki', 's-thin');
+    mkdirSync(wikiDir, { recursive: true });
+    const write = (slug: string, fm: string, body: string) =>
+      writeFileSync(join(wikiDir, `${slug}.md`), `${fm}${body}\n`);
+
+    write('stub', FM([]), '# 短 stub\n\n一小段占位内容。');
+    write('short-but-sourced', FM(['a.md']), '# 短但有来源\n\n一小段内容。');
+    write('long-enough', FM([]), `# 长页\n\n${'内容充实。'.repeat(200)}`);
+    write('index', FM([]), '# 目录\n\n- 短。');
+
+    const { checkThinPages, runDeterministicChecksForSubject } = await import(
+      '@/server/services/lint-deterministic'
+    );
+    return { s, checkThinPages, runDeterministicChecksForSubject };
+  }
+
+  it('正文过短且零来源 → 报 thin-page（info）', async () => {
+    const { s, checkThinPages } = await setupThin();
+    const f = checkThinPages(s).find((x) => x.pageSlug === 'stub');
+    expect(f).toBeDefined();
+    expect(f!.type).toBe('thin-page');
+    expect(f!.severity).toBe('info');
+  });
+
+  it('短但有来源的页不报；正文足长的页不报；meta 页（index）跳过', async () => {
+    const { s, checkThinPages } = await setupThin();
+    const slugs = checkThinPages(s).map((f) => f.pageSlug);
+    expect(slugs).not.toContain('short-but-sourced');
+    expect(slugs).not.toContain('long-enough');
+    expect(slugs).not.toContain('index');
+  });
+
+  it('并入 runDeterministicChecksForSubject 输出', async () => {
+    const { s, runDeterministicChecksForSubject } = await setupThin();
+    const all = runDeterministicChecksForSubject(s);
+    expect(all.some((f) => f.type === 'thin-page' && f.pageSlug === 'stub')).toBe(true);
+  });
+});

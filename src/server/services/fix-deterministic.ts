@@ -7,7 +7,7 @@
  * 忠实度护栏已收编到 `wiki/rewrite-fidelity.ts::checkRewriteFidelity`（profile 'fix'），
  * 调用点见 `fix-tools.ts`，不在本文件重复实现。
  * broken-link / missing-crossref / contradiction 交给 **fix tool-loop** 修复（非逐页结构化输出）。
- * orphan / stale-source / coverage-gap 不修。
+ * orphan / stale-source / coverage-gap / orphan-source / thin-page 不修（ignored 桶）。
  */
 import { serializeFrontmatter, stampSystemFrontmatter } from '../wiki/frontmatter';
 import { META_PAGE_SLUGS } from '../wiki/page-identity';
