@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({
   generateObject: vi.fn(),
   generateText: vi.fn(),
+  streamText: vi.fn(),
   embedMany: vi.fn(),
   recordUsage: vi.fn(),
   resolveTask: vi.fn(() => ({
@@ -29,7 +30,7 @@ vi.mock('ai', () => ({
   embedMany: mocks.embedMany,
   generateObject: mocks.generateObject,
   generateText: mocks.generateText,
-  streamText: vi.fn(),
+  streamText: mocks.streamText,
   stepCountIs: (n: number) => ({ stepCount: n }),
 }));
 
@@ -46,12 +47,19 @@ vi.mock('../config-loader', () => ({
 
 vi.mock('../../db/repos/usage-repo', () => ({ recordUsage: mocks.recordUsage }));
 
-import { generateStructuredOutput, generateTextWithTools, generateEmbeddings } from '../provider-registry';
+import {
+  generateStructuredOutput,
+  generateTextWithTools,
+  generateEmbeddings,
+  streamTextResponse,
+  streamTextWithTools,
+} from '../provider-registry';
 import { z } from 'zod';
 
 beforeEach(() => {
   mocks.generateObject.mockReset();
   mocks.generateText.mockReset();
+  mocks.streamText.mockReset();
   mocks.embedMany.mockReset();
   mocks.recordUsage.mockReset();
 });
@@ -128,6 +136,40 @@ describe('provider-registry usage 记账', () => {
       model: 'test-model',
       inputTokens: 77,
       outputTokens: 0,
+    });
+  });
+
+  it('streamTextResponse 的 onFinish 触发时记账（totalUsage 优先）', () => {
+    mocks.streamText.mockReturnValue({} as unknown);
+    streamTextResponse('query', 'sys', 'user');
+    // 从传给 streamText 的 options 里取出 onFinish 手动触发，模拟流结束
+    const opts = mocks.streamText.mock.calls[0][0] as {
+      onFinish: (e: { usage?: unknown; totalUsage?: unknown }) => void;
+    };
+    opts.onFinish({
+      usage: { inputTokens: 1, outputTokens: 1 },
+      totalUsage: { inputTokens: 200, outputTokens: 80 },
+    });
+    expect(mocks.recordUsage).toHaveBeenCalledWith({
+      task: 'query',
+      model: 'test-model',
+      inputTokens: 200,
+      outputTokens: 80,
+    });
+  });
+
+  it('streamTextWithTools 的 onFinish 无 totalUsage 时回落 usage', () => {
+    mocks.streamText.mockReturnValue({} as unknown);
+    streamTextWithTools('query', { system: 's', messages: [], tools: {}, maxSteps: 3 });
+    const opts = mocks.streamText.mock.calls[0][0] as {
+      onFinish: (e: { usage?: unknown; totalUsage?: unknown }) => void;
+    };
+    opts.onFinish({ usage: { inputTokens: 30, outputTokens: 12 } });
+    expect(mocks.recordUsage).toHaveBeenCalledWith({
+      task: 'query',
+      model: 'test-model',
+      inputTokens: 30,
+      outputTokens: 12,
     });
   });
 });
