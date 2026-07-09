@@ -15,6 +15,7 @@ import { Select } from '@/components/ui/select';
 import { Input, Textarea } from '@/components/ui/input';
 import { validateIntInRange } from '@/lib/settings-validation';
 import { cn } from '@/lib/cn';
+import { isImeComposing } from '@/lib/keyboard';
 
 export interface RowSaveState {
   pending: boolean;
@@ -254,7 +255,7 @@ export function NumberRow(props: {
             }}
             onBlur={commit}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Enter' && !isImeComposing(e)) e.currentTarget.blur();
             }}
             className={cn('h-7 w-24 px-2 text-xs text-right', invalid && 'border-danger')}
           />
@@ -305,7 +306,7 @@ export function TextRow(props: {
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commit}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') e.currentTarget.blur();
+              if (e.key === 'Enter' && !isImeComposing(e)) e.currentTarget.blur();
             }}
             className="h-7 w-44 px-2 text-xs"
           />
