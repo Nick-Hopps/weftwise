@@ -138,4 +138,11 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 写工具纪律', () => {
   it('创建段存在', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Creating a page/i);
   });
+  it('工具清单含 wiki_update', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_update');
+  });
+  it('更新段存在，要求后续轮确认、禁止同轮更新', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Updating a page/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/ALWAYS confirm before updat/i);
+  });
 });
