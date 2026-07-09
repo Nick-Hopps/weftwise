@@ -85,6 +85,8 @@ worker-entry.ts
 
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
+**事件补充统计**（纯函数 `summarizeFindings`，按 severity/type 计数 + 拼一句可读摘要文本）：`lint:semantic:start` 携带 `pageCount`/`model`（本次将跑语义分析的页数 + 模型标签）；`lint:semantic:done`/`lint:complete` 携带 `bySeverity`/`byType`（`lint:complete` 另带 `totalFindings`），日志文案附带形如 `(2 critical, 3 warning; missing-crossref×2)` 的分类摘要。
+
 ### `curate-service.ts` 🆕 — 任务类型 `'curate'`
 
 **Tool-loop 驱动**的 subject 结构策展。`params { scope: 'pages'|'subject'; slugs?: string[]; subjectId }`。
@@ -103,7 +105,7 @@ worker-entry.ts
 - auto 禁 create：auto 模式（`seedSet !== null`）直接不解析 `wiki.create` 工具（模型见不到）；即便绕过，`guard.canCreate` 仍 ok:false 兜底（`wiki.create` 仅 manual 全库模式可用）。
 - 保护页：index/log 不可 merge/split/delete（slug 集合 = `page-identity::META_PAGE_SLUGS` 单一源）。
 
-**事件**：`curate:start` / `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
+**事件**：`curate:start` / `curate:agent:start`（进入工具循环前，报候选页数/mode/caps）/ `curate:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
 
 **`curate-tools.ts`**（新增）— worker 侧 `ToolContext` 构造：
 - `buildCurateToolContext(subject, { guard, jobId, emit })` — 只读走已提交 vault（`readPageInSubject`）+ 混合检索（`hybridRankSlugs`）+ 列举（过滤 meta，上限200）；写能力（merge/split/delete/create）各先过 `CurateGuard`，allow → 调 `page-ops` 内核 → `guard.record` → emit 事件；deny → emit `curate:skip` + 抛错（工具层 catch 成 ok:false，reason 透传模型）。
@@ -126,7 +128,7 @@ worker-entry.ts
    - 模型自驱读页后调 `wiki.update`（破损/缺引用）或 `wiki.create`（新页）；每次写操作一个 commit。
    - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
 
-**事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:complete`。
+**事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:agent:start`（进入阶段2 工具循环前，报 finding 数/受影响页数）/ `fix:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:complete`。
 
 完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发）。
 
@@ -263,6 +265,7 @@ src/server/services/
 | 2026-07-06 | T2.1 ingest finalize 去 LLM 化：`finalizeIngest` 不再调 `ingest-indexer`，改用 `wiki/meta-pages.ts` 纯函数 `renderIndexPage`/`renderLogPage` 确定性渲染 index/log（按 tag 分组+标题排序+`[[slug\|Title]]`；log 保留最近 50 条、新条目在前，解析既有 log 正文 bullet 行还原历史）；`MIN_SKILL_VERSIONS` 去掉 `ingest-indexer` 项，skill 文件已删（`examples/skills/ingest-indexer.md`）；`llm-config.example.json` 去掉 `ingest:indexer` 路由项。索引每页 tags 优先取本次 `ctx.pending` 内容实际写入的 frontmatter，未触碰页沿用 DB 既有 tags。动机：原方案每次 ingest 都要把全 subject 页清单塞进 prompt，页数上几百后单调膨胀直至超上下文窗口且重复付费——目录/日志本质是数据库可确定性派生的数据 |
 | 2026-07-07 | Ask AI 内联引用 + 确定性解析：引用生成从"模型二次结构化输出 `generateQueryCitations`"改为"prompt 纪律要求模型正文内联 `[[slug]]` + 流后确定性解析"——新增 `citation-extract.ts::extractCitationsFromAnswer`（`extractWikiLinks` 解析答案 ∩ `accessed.bodies` 已读页，过滤幻觉链接）+ `pickExcerpt`（词重叠定位 + 原文偏移切片，excerpt 恒为页面原文字面子串），零额外 LLM 调用；`streamAgenticQuery`/`runQuery` 流末同步调用。coverage 判定与引用解耦为独立异步小调用：新增 `assessCoverageInBackground(subject, question, answer)`（fire-and-forget，只喂问题+答案，走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`），`false` 时仍走 `recordCoverageGap` 写 backlog；退役 `generateQueryCitations`/`QueryCitationsSchema`/`[unverified]` 前缀机制；`done` 事件不再携带 `coverageSufficient` |
 | 2026-07-09 | 新增 `page-write.ts::updatePageInSubject`（校验目标页存在 + 非保护页 `META_PAGE_SLUGS`（终审发现的保护不对称补丁，对齐 `validateDeleteTarget`/fix 的 `createFixGuard`）+ 忠实度护栏 `FIDELITY_PROFILES.fix` + 调 `executePageUpdate`（支持改标题）+ `enqueueEmbedIndex`）；`query-tools.ts::buildQueryToolContext` 接入 `updatePage`（委托上述函数）；`query-service.ts::BASE_QUERY_TOOL_NAMES` 追加 `'wiki.update'`——问答（Ask AI）首次获得改写页面标题+正文的能力；`QUERY_AGENTIC_SYSTEM_PROMPT` 补 "Updating a page" 确认纪律（与 `wiki_delete` 一致，须后续轮确认）|
+| 2026-07-09 | 任务日志可读性改进：`fix-service`/`curate-service` 新增 `fix:agent:start`/`fix:tool`、`curate:agent:start`/`curate:tool` 事件（`generateTextWithTools` 新增 `onToolCall?` 回调，配合新增 `lib/tool-activity.ts::toolActivityLine` 把工具调用渲染成可读一行）；`lint-service` 新增导出 `summarizeFindings`，`lint:semantic:start` 补 `pageCount`/`model`，`lint:semantic:done`/`lint:complete` 补 `bySeverity`/`byType` 分类统计。spec/plan 见 `docs/superpowers/{specs,plans}/2026-07-09-job-log-clarity*` |
 
 ---
 
