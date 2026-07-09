@@ -147,6 +147,7 @@
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 | `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
+| `llm_usage` | `id`（自增） | app 级资源，非 subject-scoped，无 FK；一次 LLM 调用一行：`task` + `model` + `input_tokens` + `output_tokens` + `created_at`（epoch ms）；90 天 GC（`pruneOldUsage`，worker 低频 sweep） |
 
 ## 扩展指南
 
@@ -193,7 +194,8 @@ src/server/db/
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
     ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
-    └── maturity-repo.ts       # 页面成熟度 CRUD（get / ensureRow / listDue / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
+    ├── maturity-repo.ts       # 页面成熟度 CRUD（get / ensureRow / listDue / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
+    └── usage-repo.ts          # LLM 用量明细：recordUsage（best-effort 记账）/ summarizeUsage（按 task+model 聚合）/ pruneOldUsage（90 天 GC）
 ```
 
 ## 变更记录 (Changelog)
@@ -215,6 +217,7 @@ src/server/db/
 | 2026-06-27 | Cognitive Lens：新增 `user_profiles`（账户层画像，单例 user_id='local'）/ `page_renditions`（重塑缓存，一页一行，**故意不挂 subjects FK**，由 deleteBySubject+命中校验自洽）/ `profile_signals`（append-only 反馈）三表（`ensureTables` 加 3 个 `migrateXxx`）；新增 `profiles-repo`(getProfile/getProfileOrDefault/upsertProfile 自增 version) / `renditions-repo`(getRendition 按 hash+version 命中 / upsertRendition / deleteBySubject) / `signals-repo`(appendSignal/recentSignals) |
 | 2026-06-29 | Subject 级联删除：subjects-repo 新增 `deleteWithContents(id)`（单事务按子→父清全部 subject-scoped 表 + subject 行，原生 SQL 同 reset 风格）与 `listInboundReferences(id)`（入站跨主题引用守卫）；`SubjectError` code 去 `not-empty`、加 `protected`/`has-inbound-refs`；删除旧 `deleteIfEmpty`。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 | 2026-07-07 | T3.2：新增 `research_backlog` 表（subject-scoped，id PK，FK subject_id CASCADE）+ `research-backlog-repo`（create 按归一化 question 去重 open 项 / listForSubject / updateStatus）；`deleteWithContents` 级联清单补该表；`lib/research-question.ts::normalizeResearchQuestion` 纯函数供去重复用 |
+| 2026-07-10 | 新增 `llm_usage` 明细表（app 级，非 subject-scoped，无 FK）+ `usage-repo`（`recordUsage` best-effort 记账、`summarizeUsage` 按 task+model 聚合、`pruneOldUsage` 90 天 GC 常量 `USAGE_RETENTION_MS`）；provider-registry 五入口（generateStructuredOutput/generateTextWithTools/streamTextResponse/streamTextWithTools/generateEmbeddings）与 agent-loop ingest 各阶段成功路径记账；worker 低频 sweep 挂 GC；`GET /api/usage?window=7d\|30d\|all` 供设置弹窗 Usage 面板读取 |
 
 ---
 

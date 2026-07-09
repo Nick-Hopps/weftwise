@@ -5,6 +5,7 @@ import type { AgentContext, SkillTemplate } from '../types';
 import { resolveTask } from '../../llm/task-router';
 import { resolveModel, withAnthropicStructuredOutputDefault } from '../../llm/provider-registry';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';
+import { recordUsage } from '../../db/repos/usage-repo';
 import { createRunStepTracker } from './budget';
 import { agentToolContext } from '../tools/tool-context';
 import { compileToolSet, synthesizeFinishTool, FINISH_TOOL_NAME } from '../tools/compile';
@@ -93,6 +94,13 @@ export async function runAgentLoop(opts: {
   // 事后登记：token 超限由下一个 run 开始时的 assertWithin 拦截
   //（结合 ingest 预检 fail-fast，事后防线足够）。
   ctx.budget.chargeTokens(inputTokens + outputTokens);
+
+  // 用量统计（设置页 Usage 面板）：ingest 各阶段绕过 provider-registry，这里单独记账。
+  try {
+    recordUsage({ task: route.task, model: route.model, inputTokens, outputTokens });
+  } catch (err) {
+    console.warn('[usage] record failed (ignored)', err);
+  }
 
   ctx.emit('agent:step', `${skill.name} produced final output${label ? `: ${label}` : ''}`, {
     runId,

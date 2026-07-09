@@ -4,7 +4,7 @@
  * settings-content（分类标题）共用，避免三者循环依赖与漂移。
  */
 
-import { Palette, Languages, Bot, Globe, Info, RefreshCw, Brain, type LucideIcon } from 'lucide-react';
+import { Palette, Languages, Bot, Globe, Info, RefreshCw, Brain, BarChart3, type LucideIcon } from 'lucide-react';
 
 export type CategoryId =
   | 'appearance'
@@ -13,6 +13,7 @@ export type CategoryId =
   | 'agents'
   | 'web-search'
   | 'maintenance'
+  | 'usage'
   | 'about';
 
 export interface SettingsCategory {
@@ -28,6 +29,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
   { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'web-search', label: 'Web search', icon: Globe },
   { id: 'maintenance', label: 'Maintenance', icon: RefreshCw },
+  { id: 'usage', label: 'Usage', icon: BarChart3 },
   { id: 'about', label: 'About', icon: Info },
 ];
 
