@@ -12,6 +12,7 @@ import { readPageInSubject } from '../wiki/wiki-store';
 import { executePageUpdate } from '../wiki/page-ops';
 import type { FixGuard } from './fix-deterministic';
 import { checkRewriteFidelity, FIDELITY_PROFILES } from '@/server/wiki/rewrite-fidelity';
+import { collectBrokenLinkTargets } from './page-write';
 import type { Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 
@@ -60,7 +61,10 @@ export function buildFixToolContext(
       if (!prot.ok) { emit('fix:skip', `Skip update ${input.slug}: ${prot.reason}`, { slug: input.slug, reason: prot.reason }); throw new Error(prot.reason); }
       const doc = readPageInSubject(subject.slug, input.slug);
       if (!doc) { const reason = `page "${input.slug}" not found`; emit('fix:skip', `Skip update ${input.slug}: ${reason}`, { slug: input.slug, reason }); throw new Error(reason); }
-      const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix);
+      // 断链豁免：已确认目标页不存在的 wikilink 允许被解链/重链丢弃（活链仍不许丢）
+      const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix, {
+        allowedDroppedTargets: collectBrokenLinkTargets(subject, doc.body),
+      });
       if (!fidelity.ok) {
         // 通用短语保留（下游/测试据此识别忠实度拦截），后缀带上具体违规项让日志可诊断
         const reason = `edit dropped too much content: ${fidelity.violations.join('; ')}`;

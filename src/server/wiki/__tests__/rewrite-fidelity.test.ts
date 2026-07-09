@@ -156,3 +156,40 @@ describe('checkRewriteFidelity — 多项违规同时报告', () => {
     expect(r.violations.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+describe('checkRewriteFidelity — allowedDroppedTargets（断链豁免）', () => {
+  const orig = `见 [[normal-mapping]] 与 [[shader-programming]]。`;
+
+  it('豁免集内的目标允许被丢弃', () => {
+    const r = checkRewriteFidelity(orig, `见法线贴图（该页暂缺，链接已解除）与 [[shader-programming]]。`, FIDELITY_PROFILES.fix, {
+      allowedDroppedTargets: new Set([':normal-mapping']),
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('豁免集外的活链仍不许丢', () => {
+    const r = checkRewriteFidelity(orig, `见法线贴图（该页暂缺，链接已解除）与 shader 编程（这条链接是活的，不该被丢弃）。`, FIDELITY_PROFILES.fix, {
+      allowedDroppedTargets: new Set([':normal-mapping']),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.violations[0]).toContain(':shader-programming');
+    expect(r.violations[0]).not.toContain(':normal-mapping');
+  });
+
+  it('跨主题目标同样按 key 豁免', () => {
+    const o = `见 [[other:dead-page]]。`;
+    const r = checkRewriteFidelity(o, `见别的主题里那一页（已确认不存在，链接解除）。`, FIDELITY_PROFILES.fix, {
+      allowedDroppedTargets: new Set(['other:dead-page']),
+    });
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe('collectMissingLinkTargets', () => {
+  it('按注入的存在性判定收集断链 targetKey', async () => {
+    const { collectMissingLinkTargets } = await import('../rewrite-fidelity');
+    const body = `见 [[alive]] 与 [[dead-one]]，跨主题 [[other:dead-two]]。`;
+    const missing = collectMissingLinkTargets(body, (subjectSlug, slug) => slug === 'alive');
+    expect(missing).toEqual(new Set([':dead-one', 'other:dead-two']));
+  });
+});
