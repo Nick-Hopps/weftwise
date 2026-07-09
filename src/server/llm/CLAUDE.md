@@ -56,8 +56,9 @@ streamTextResponse(task, systemPrompt, userPrompt, overrides?): StreamTextResult
 
 streamTextWithTools(task, opts: { system, messages, tools, maxSteps, abortSignal? }): StreamTextResult
 
-generateTextWithTools(task, opts: { system, messages, tools, maxSteps, shouldCancel? }): Promise<{ text: string }>
+generateTextWithTools(task, opts: { system, messages, tools, maxSteps, shouldCancel?, onToolCall? }): Promise<{ text: string }>
 // shouldCancel?: () => boolean — 传入时每 2s 轮询一次，为真则 abort 并抛出 AgentCancelled（复用 agents/runtime/agent-loop.ts）；不传则零开销、行为不变。curate/fix 传 () => queue.isCancelRequested(jobId)。
+// onToolCall?: (info: { tool: string; args: unknown }) => void — 经 `onStepFinish` 在每次工具调用落地时同步触发（每个 toolCall 一次），供调用方（fix/curate service）emit 可读的任务日志事件；不传则零开销、行为不变。
 
 generateEmbeddings(texts: string[]): Promise<number[][]>
 
@@ -237,6 +238,7 @@ src/server/llm/
 | 2026-06-27 | Cognitive Lens：新增 `prompts/reshape-prompt.ts`（`RESHAPE_PAGE/SECTION_SYSTEM_PROMPT` 纯呈现硬约束=不改事实/不新增 wikilink/新增脚手架包 callout + `buildReshape{Page,Section}UserPrompt` 注入双维画像与语言指令）；`provider-registry` 加 `isReshapeConfigured()`（`resolveTask('reshape:page').model` 含 defaults 兜底，未配置 false 供优雅降级）；`reshape:page`/`reshape:section` 走开放 `<pipeline>:<stage>` 路由（无需改 schema），`llm-config.example.json` 加两条参考配置 |
 | 2026-06-30 | `fix-prompt.ts` 重写为 agentic tool-loop 版本：新增 `FIX_AGENTIC_SYSTEM_PROMPT` + `buildFixAgenticUserPrompt`；退休 `FixPageSchema`/`FIX_SYSTEM_PROMPT`/`buildFixPageUserPrompt`（Spec 3 fix→tool-loop）|
 | 2026-07-07 | Ask AI 内联引用 + 确定性解析：`QUERY_AGENTIC_SYSTEM_PROMPT` 新增 CITE INLINE 纪律（要求模型答案正文内联标注 `[[slug]]` 作依据，引用改由 `query-service.ts::extractCitationsFromAnswer` 流后确定性解析，不再需要模型二次结构化输出）；新增 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（独立 coverage 判定小调用，只喂问题+答案，供 `assessCoverageInBackground` 异步 fire-and-forget 调用）；退役 `generateQueryCitations`/`QueryCitationsSchema`/`QueryCitationsResult` 与 `[unverified]` 前缀机制 |
+| 2026-07-09 | `generateTextWithTools` 新增可选 `onToolCall?: (info: { tool, args }) => void`（经 `onStepFinish` 每次工具调用同步触发）；供 `fix-service`/`curate-service` emit 可读任务日志事件（任务日志可读性改进）|
 
 ---
 
