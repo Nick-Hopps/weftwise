@@ -47,7 +47,7 @@ import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
-const BASE_QUERY_TOOL_NAMES = ['wiki.read', 'wiki.search', 'wiki.list', 'wiki.reenrich', 'wiki.create', 'wiki.delete'];
+const BASE_QUERY_TOOL_NAMES = ['wiki.read', 'wiki.search', 'wiki.list', 'wiki.reenrich', 'wiki.create', 'wiki.update', 'wiki.delete'];
 
 /** query 工具集：`web.search` 仅在联网检索已配置时注入——未配置时模型完全看不到该工具。导出供单测直接校验。 */
 export function resolveQueryTools() {
