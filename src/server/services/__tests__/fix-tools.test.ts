@@ -84,13 +84,8 @@ describe('buildFixToolContext', () => {
     expect(emit).toHaveBeenCalledWith('fix:skip', expect.any(String), expect.objectContaining({ slug: 'ghost' }));
   });
 
-  it('create：成功调内核 + record + emit fix:create', async () => {
-    const emit = vi.fn();
-    const guard = createFixGuard({ caps: { writes: 5 } });
-    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
-    const res = await ctx.createPage!({ title: 'New Page', body: 'content' });
-    expect(res.createdSlug).toBe('new-page');
-    expect(guard.totals().create).toBe(1);
-    expect(emit).toHaveBeenCalledWith('fix:create', expect.any(String), expect.objectContaining({ slug: 'new-page' }));
+  it('不注入 createPage（fix 禁止补建 stub 页）', () => {
+    const ctx = buildFixToolContext(subject, { guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit: vi.fn() });
+    expect(ctx.createPage).toBeUndefined();
   });
 });
