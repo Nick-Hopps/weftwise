@@ -16,6 +16,7 @@ import { META_PAGE_SLUGS } from '../wiki/page-identity';
 import { buildCurateToolContext } from './curate-tools';
 import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
 import { compileToolSet } from '@/server/agents/tools/compile';
+import { createToolExecutionPolicy, resolveToolProfile } from '@/server/agents/tools/profiles';
 import { generateTextWithTools } from '../llm/provider-registry';
 import { CURATE_AGENTIC_SYSTEM_PROMPT, buildCurateAgenticUserPrompt } from '../llm/prompts/curate-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
@@ -76,11 +77,13 @@ export async function runCurateJob(
   // 3. 装配 guard + worker ToolContext + 工具集
   const guard = createCurateGuard({ seedSet, caps: CURATE_CAPS });
   const ctx = buildCurateToolContext(subject, { guard, jobId: job.id, emit });
-  // wiki.create 仅手动全库模式（seedSet===null）可用：auto 模式不解析它，
-  // 省得模型反复试探一个永远 ok:false 的工具浪费步数（guard.canCreate 仍兜底）。
-  const toolNames = ['wiki.read', 'wiki.search', 'wiki.list', 'wiki.merge', 'wiki.split', 'wiki.delete'];
-  if (seedSet === null) toolNames.push('wiki.create');
-  const tools = compileToolSet(createBuiltinToolRegistry().resolve(toolNames), ctx);
+  const profile = resolveToolProfile(seedSet === null ? 'curate:manual' : 'curate:auto');
+  const tools = compileToolSet(createBuiltinToolRegistry().resolve([...profile.tools]), ctx, {
+    policy: createToolExecutionPolicy(profile, subject.id, {
+      allowedPageSlugs: new Set(scopeSlugs),
+      jobCapability: { jobId: job.id, jobType: job.type },
+    }),
+  });
 
   const promptCtx = {
     language: getWikiLanguage(),

@@ -52,7 +52,7 @@
 - 产出：`compileToolSet(toolDefs, ctx, { policy, chargeStep?, onToolCall? })`；`policy` 必传。
 - 消费：现有 `ToolDef`、`ToolContext.subject` 和 runner 的 subject/scope。
 
-- [ ] **步骤 1：先写 profile 和 compile policy 的失败测试**
+- [x] **步骤 1：先写 profile 和 compile policy 的失败测试**
 
 ```ts
 it('query:read 不暴露实际写工具，并按联网配置移除 web.search', () => {
@@ -75,7 +75,7 @@ it('profile 允许但 runner policy 禁止的副作用在编译期报错', () =>
 });
 ```
 
-- [ ] **步骤 2：运行测试，确认因模块/接口尚不存在而失败**
+- [x] **步骤 2：运行测试，确认因模块/接口尚不存在而失败**
 
 运行：
 
@@ -85,7 +85,7 @@ npx vitest run src/server/agents/tools/__tests__/profiles.test.ts src/server/age
 
 预期：FAIL，错误包含无法解析 `../profiles`，或 `compileToolSet` 尚未要求 `policy`。
 
-- [ ] **步骤 3：实现 profile、policy 与 scope 包装**
+- [x] **步骤 3：实现 profile、policy 与 scope 包装**
 
 `profiles.ts` 必须定义八个 profile，并保留后续阶段的工具名：
 
@@ -128,7 +128,7 @@ export type ToolSideEffect =
   | 'create' | 'update' | 'merge' | 'split';
 ```
 
-- [ ] **步骤 4：更新全部 compile 调用点，保证 policy 必传**
+- [x] **步骤 4：更新全部 compile 调用点，保证 policy 必传**
 
 ```ts
 const profile = resolveToolProfile('query:read', {
@@ -140,7 +140,7 @@ const tools = compileToolSet(registry.resolve([...profile.tools]), ctx, { policy
 
 规则：agent-loop 用 `profileForIngestSkill(skill.id)`；Fix 暂按 findings 选择 `fix:links` 或 `fix:contradiction`；Curate 按 `seedSet === null` 选择 manual/auto，并把 `scopeSlugs` 作为 `allowedPageSlugs`。
 
-- [ ] **步骤 5：运行定向测试与类型检查**
+- [x] **步骤 5：运行定向测试与类型检查**
 
 运行：
 
@@ -151,7 +151,7 @@ npx vitest run src/server/agents/tools/__tests__/profiles.test.ts src/server/age
 
 预期：所有定向测试 PASS，TypeScript 退出码 0。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```bash
 git add src/server/agents src/server/services

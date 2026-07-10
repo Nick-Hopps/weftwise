@@ -45,7 +45,7 @@ describe('runFixJob (tool-loop)', () => {
     latestMock.selectLatestFindings.mockReturnValue({ findings: [] });
   });
 
-  it('有 loop findings → 驱动 generateTextWithTools(fix) + 工具集含 wiki_update、不含 wiki_create + emit start/complete', async () => {
+  it('只有链接 finding 时使用 fix:links，只提供 read/search/patch', async () => {
     lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([{ type: 'broken-link', pageSlug: 'a', description: '[[Ghost]] missing', suggestedFix: null }]);
     const emit = vi.fn();
     const res = await runFixJob(job(), emit);
@@ -55,7 +55,9 @@ describe('runFixJob (tool-loop)', () => {
     expect(calls[0][0]).toBe('fix');
     const opts = calls[0][1];
     const toolKeys = Object.keys(opts.tools);
-    expect(toolKeys).toEqual(expect.arrayContaining(['wiki_read', 'wiki_search', 'wiki_list', 'wiki_update']));
+    expect(toolKeys).toEqual(expect.arrayContaining(['wiki_read', 'wiki_search', 'wiki_patch']));
+    expect(toolKeys).not.toContain('wiki_list');
+    expect(toolKeys).not.toContain('wiki_update');
     expect(toolKeys).not.toContain('wiki_create');
     expect(emit).toHaveBeenCalledWith('fix:start', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('fix:complete', expect.any(String), expect.any(Object));

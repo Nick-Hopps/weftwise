@@ -168,15 +168,15 @@ function toolDefStub(name: string): import('../../types').ToolDef {
   } as unknown as import('../../types').ToolDef;
 }
 
-// A reviewer-like skill: no outputSchema → agent-loop uses generateText with tools.
+// 无 outputSchema 的 ingest skill → agent-loop 使用 generateText + 只读工具。
 const reviewerSkill = (): SkillTemplate => ({
-  id: 'ingest-reviewer',
-  name: 'Ingest Reviewer',
-  description: 'Reviews and commits',
+  id: 'ingest-writer',
+  name: 'Ingest Reader',
+  description: 'Reads related pages',
   version: 1,
-  tools: ['vault.read', 'vault.search', 'commit_changeset'],
+  tools: ['wiki.read', 'wiki.search'],
   canDispatch: [],
-  systemPrompt: 'Review the drafts.',
+  systemPrompt: 'Read related pages.',
 });
 
 const writerSkill = (): SkillTemplate => ({
@@ -287,9 +287,8 @@ describe('runAgentLoop provider tool-name sanitization', () => {
 
     const ctx = ctxStub();
     (ctx.toolRegistry.resolve as ReturnType<typeof vi.fn>).mockReturnValue([
-      toolDefStub('vault.read'),
-      toolDefStub('vault.search'),
-      toolDefStub('commit_changeset'),
+      toolDefStub('wiki.read'),
+      toolDefStub('wiki.search'),
     ]);
 
     await runAgentLoop({ skill: reviewerSkill(), ctx, input: {} });
@@ -297,7 +296,7 @@ describe('runAgentLoop provider tool-name sanitization', () => {
     expect(mocks.generateText).toHaveBeenCalledTimes(1);
     const arg = mocks.generateText.mock.calls[0][0] as { tools: Record<string, unknown> };
     const names = Object.keys(arg.tools);
-    expect(names).toEqual(['vault_read', 'vault_search', 'commit_changeset']);
+    expect(names).toEqual(['wiki_read', 'wiki_search']);
     for (const n of names) {
       expect(n).toMatch(/^[a-zA-Z0-9_-]{1,64}$/);
     }

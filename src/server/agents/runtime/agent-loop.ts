@@ -9,6 +9,11 @@ import { recordUsage } from '../../db/repos/usage-repo';
 import { createRunStepTracker } from './budget';
 import { agentToolContext } from '../tools/tool-context';
 import { compileToolSet, synthesizeFinishTool, FINISH_TOOL_NAME } from '../tools/compile';
+import {
+  createToolExecutionPolicy,
+  profileForIngestSkill,
+  resolveToolProfile,
+} from '../tools/profiles';
 
 // 下沉到 errors.ts（叶子模块）以打破与 provider-registry 的循环依赖；此处 re-export 兼容既有调用方。
 export { AgentCancelled } from './errors';
@@ -46,7 +51,11 @@ export async function runAgentLoop(opts: {
   const { model, route } = resolveSkillModel(skill);
   const toolDefs = ctx.toolRegistry.resolve(skill.tools);
   const toolCtx = agentToolContext(ctx);
+  const profile = resolveToolProfile(profileForIngestSkill(skill.id));
   const toolSet = compileToolSet(toolDefs, toolCtx, {
+    policy: createToolExecutionPolicy(profile, ctx.subject.id, {
+      jobCapability: { jobId: ctx.job.id, jobType: ctx.job.type },
+    }),
     chargeStep: () => runSteps.chargeStep(),
     onToolCall: (info) => ctx.emit('agent:step', `${skill.name} called ${info.tool}`, {
       runId,
