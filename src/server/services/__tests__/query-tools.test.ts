@@ -17,20 +17,6 @@ vi.mock('@/server/wiki/wiki-store', () => ({
   readPageInSubject: (...a: unknown[]) => mockReadPage(...a),
 }));
 
-const mockEnqueue = vi.fn();
-vi.mock('@/server/jobs/queue', () => ({
-  enqueue: (...a: unknown[]) => mockEnqueue(...a),
-}));
-
-const mockDeletePage = vi.fn();
-const mockCreatePage = vi.fn();
-const mockUpdatePage = vi.fn();
-vi.mock('../page-write', () => ({
-  deletePageInSubject: (...a: unknown[]) => mockDeletePage(...a),
-  createPageInSubject: (...a: unknown[]) => mockCreatePage(...a),
-  updatePageInSubject: (...a: unknown[]) => mockUpdatePage(...a),
-}));
-
 const mockWebSearch = vi.fn();
 vi.mock('@/server/search/web-search', () => ({
   webSearch: (...a: unknown[]) => mockWebSearch(...a),
@@ -73,7 +59,6 @@ beforeEach(() => {
   mockGetPageBySlug.mockReset();
   mockHybrid.mockReset();
   mockReadPage.mockReset();
-  mockEnqueue.mockReset();
 });
 
 describe('buildQueryToolContext - listPages', () => {
@@ -194,51 +179,12 @@ describe('buildQueryToolContext - onAccess 路由', () => {
   });
 });
 
-describe('buildQueryToolContext - reenrich', () => {
-  it('校验通过 → enqueue re-enrich 并返回 jobId', async () => {
-    mockGetPageBySlug.mockReturnValue(page('eigen'));
-    mockEnqueue.mockReturnValue({ id: 'job-7' });
+describe('buildQueryToolContext - 只读能力面', () => {
+  it('不注入任何写入、删除或入队能力', () => {
     const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
-    const out = await ctx.reenrich!('eigen');
-    expect(out).toEqual({ jobId: 'job-7' });
-    expect(mockEnqueue).toHaveBeenCalledWith('re-enrich', { slug: 'eigen', subjectId: 's1' }, 's1');
-  });
-  it('meta 页 → 抛错（不 enqueue）', async () => {
-    mockGetPageBySlug.mockReturnValue(null);
-    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
-    await expect(ctx.reenrich!('index')).rejects.toThrow(/meta/);
-    expect(mockEnqueue).not.toHaveBeenCalled();
-  });
-});
-
-describe('buildQueryToolContext - delete/create', () => {
-  beforeEach(() => {
-    mockDeletePage.mockReset();
-    mockCreatePage.mockReset();
-    mockUpdatePage.mockReset();
-  });
-  it('deletePage 委托 deletePageInSubject(subject, slug)', async () => {
-    mockDeletePage.mockResolvedValue({ deletedSlug: 'eigen', brokenBacklinks: 1 });
-    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
-    const out = await ctx.deletePage!('eigen');
-    expect(mockDeletePage).toHaveBeenCalledWith(SUBJECT, 'eigen');
-    expect(out).toEqual({ deletedSlug: 'eigen', brokenBacklinks: 1 });
-  });
-  it('createPage 委托 createPageInSubject(subject, input)', async () => {
-    mockCreatePage.mockResolvedValue({ createdSlug: 'foo' });
-    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
-    const input = { title: 'Foo', body: 'x' };
-    const out = await ctx.createPage!(input);
-    expect(mockCreatePage).toHaveBeenCalledWith(SUBJECT, input);
-    expect(out).toEqual({ createdSlug: 'foo' });
-  });
-  it('updatePage 委托 updatePageInSubject(subject, input)', async () => {
-    mockUpdatePage.mockResolvedValue({ updatedSlug: 'eigen', referencesUpdated: 1 });
-    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
-    const input = { slug: 'eigen', title: 'Eigen Value', body: 'x' };
-    const out = await ctx.updatePage!(input);
-    expect(mockUpdatePage).toHaveBeenCalledWith(SUBJECT, input);
-    expect(out).toEqual({ updatedSlug: 'eigen', referencesUpdated: 1 });
+    for (const capability of ['reenrich', 'deletePage', 'createPage', 'updatePage', 'patchPage']) {
+      expect(capability in ctx).toBe(false);
+    }
   });
 });
 

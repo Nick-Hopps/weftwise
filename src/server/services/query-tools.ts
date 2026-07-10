@@ -10,8 +10,6 @@ import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
 import type { Subject, SubjectId } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
-import { enqueueReenrich } from './reenrich-enqueue';
-import { deletePageInSubject, createPageInSubject, updatePageInSubject, patchPageInSubject } from './page-write';
 import { webSearch } from '@/server/search/web-search';
 
 /** list_pages 单次返回的页数上限（超大 subject 截断）。 */
@@ -86,21 +84,6 @@ export function buildQueryToolContext(subject: Subject, accessed: AccessedPages)
       } else if (!accessed.bodies.has(slug)) {
         accessed.meta.set(slug, { title, summary: '' });
       }
-    },
-    async reenrich(slug) {
-      return enqueueReenrich(subject.id, slug);
-    },
-    async deletePage(slug) {
-      return deletePageInSubject(subject, slug);
-    },
-    async createPage(input) {
-      return createPageInSubject(subject, input);
-    },
-    async updatePage(input) {
-      return updatePageInSubject(subject, input);
-    },
-    async patchPage(input) {
-      return patchPageInSubject(subject, input);
     },
     async webSearch(query) {
       return webSearch(query);
