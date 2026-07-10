@@ -22,7 +22,7 @@ vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(asyn
 import { runCurateJob } from '../curate-service';
 
 function job(params: object) {
-  return { id: 'j1', subjectId: 's1', paramsJson: JSON.stringify(params) } as never;
+  return { id: 'j1', type: 'curate', subjectId: 's1', paramsJson: JSON.stringify(params) } as never;
 }
 
 describe('runCurateJob (tool-loop)', () => {

@@ -33,7 +33,7 @@ vi.mock('@/server/jobs/queue', () => ({ list: vi.fn(() => []) }));
 import { runFixJob } from '../fix-service';
 
 function job() {
-  return { id: 'j1', subjectId: 's1', paramsJson: JSON.stringify({ subjectId: 's1' }) } as never;
+  return { id: 'j1', type: 'fix', subjectId: 's1', paramsJson: JSON.stringify({ subjectId: 's1' }) } as never;
 }
 
 describe('runFixJob (tool-loop)', () => {
@@ -73,6 +73,16 @@ describe('runFixJob (tool-loop)', () => {
     expect(emit).toHaveBeenCalledWith('fix:deterministic', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('fix:complete', expect.any(String), expect.any(Object));
     expect(embedMock.enqueueEmbedIndex).toHaveBeenCalled();
+  });
+
+  it('含 contradiction 时使用 fix:contradiction，额外提供 wiki_update', async () => {
+    latestMock.selectLatestFindings.mockReturnValueOnce({
+      findings: [{ type: 'contradiction', pageSlug: 'a', description: 'A 与 B 冲突', suggestedFix: null }],
+    });
+    await runFixJob(job(), vi.fn());
+    const opts = (genMock.generateTextWithTools.mock.calls[0] as unknown[])[1] as { tools: Record<string, unknown> };
+    expect(Object.keys(opts.tools)).toContain('wiki_update');
+    expect(Object.keys(opts.tools)).not.toContain('wiki_list');
   });
 
   it('worklist 空 → 不调 LLM、不 commit，仍 emit complete', async () => {

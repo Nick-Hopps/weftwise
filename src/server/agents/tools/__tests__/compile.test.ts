@@ -30,6 +30,12 @@ const scopedReadTool: ToolDef = {
       : { found: false, title: null, markdown: null };
   },
 };
+const updateTool: ToolDef = {
+  name: 'wiki.update', source: 'builtin', description: 'd',
+  inputSchema: z.object({ slug: z.string(), body: z.string() }),
+  outputSchema: z.object({ ok: z.boolean() }),
+  sideEffect: 'update', handler: async () => ({ ok: true }),
+};
 
 describe('toProviderToolName', () => {
   it('点号转下划线、冲突加后缀', () => {
@@ -69,6 +75,30 @@ describe('compileToolSet', () => {
         allowedSideEffects: new Set(['none']),
       },
     })).toThrow(/SIDE_EFFECT_NOT_ALLOWED/);
+  });
+
+  it('worker 写工具缺少匹配的 job capability 时拒绝编译', () => {
+    const profile = resolveToolProfile('fix:contradiction');
+    expect(() => compileToolSet([updateTool], ctx, {
+      policy: createToolExecutionPolicy(profile, 's'),
+    })).toThrow(/TOOL_NOT_ALLOWED.*job capability/i);
+  });
+
+  it('审计输入不记录页面正文', async () => {
+    const onToolCall = vi.fn();
+    const profile = resolveToolProfile('fix:contradiction');
+    const set = compileToolSet([updateTool], ctx, {
+      policy: createToolExecutionPolicy(profile, 's', {
+        jobCapability: { jobId: 'job-fix', jobType: 'fix' },
+      }),
+      onToolCall,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_update as any).execute({ slug: 'a', body: '完整秘密正文' });
+    expect(onToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      input: { slug: 'a', body: '[REDACTED]' },
+    }));
   });
 
   it('scope 外 read 返回 missing，search 结果被过滤', async () => {
