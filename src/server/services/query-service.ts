@@ -23,6 +23,10 @@ import type { AccessedPages } from './query-tools';
 import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
 import { compileToolSet } from '@/server/agents/tools/compile';
 import {
+  createToolExecutionPolicy,
+  resolveToolProfile,
+} from '@/server/agents/tools/profiles';
+import {
   QUERY_AGENTIC_SYSTEM_PROMPT,
   buildAgenticUserContent,
   CoverageSchema,
@@ -47,12 +51,17 @@ import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
-const BASE_QUERY_TOOL_NAMES = ['wiki.read', 'wiki.search', 'wiki.list', 'wiki.reenrich', 'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete'];
-
 /** query 工具集：`web.search` 仅在联网检索已配置时注入——未配置时模型完全看不到该工具。导出供单测直接校验。 */
 export function resolveQueryTools() {
-  const names = isWebSearchConfigured() ? [...BASE_QUERY_TOOL_NAMES, 'web.search'] : BASE_QUERY_TOOL_NAMES;
-  return createBuiltinToolRegistry().resolve(names);
+  const profile = resolveToolProfile('query:read', { webSearchConfigured: isWebSearchConfigured() });
+  return createBuiltinToolRegistry().resolve([...profile.tools]);
+}
+
+function compileQueryTools(subject: Subject, accessed: AccessedPages) {
+  const profile = resolveToolProfile('query:read', { webSearchConfigured: isWebSearchConfigured() });
+  return compileToolSet(resolveQueryTools(), buildQueryToolContext(subject, accessed), {
+    policy: createToolExecutionPolicy(profile, subject.id),
+  });
 }
 
 /**
@@ -122,7 +131,7 @@ export function streamAgenticQuery(opts: {
   abortSignal?: AbortSignal;
 }): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
   const accessed = createAccessedPages();
-  const tools = compileToolSet(resolveQueryTools(), buildQueryToolContext(opts.subject, accessed));
+  const tools = compileQueryTools(opts.subject, accessed);
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(opts.subject),
@@ -155,7 +164,7 @@ export async function runQuery(
   }
 
   const accessed = createAccessedPages();
-  const tools = compileToolSet(resolveQueryTools(), buildQueryToolContext(subject, accessed));
+  const tools = compileQueryTools(subject, accessed);
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(subject),

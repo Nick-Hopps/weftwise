@@ -20,7 +20,8 @@ describe('resolveQueryTools', () => {
     const names = resolveQueryTools().map((t) => t.name);
     expect(names).not.toContain('web.search');
     expect(names).toContain('wiki.read');
-    expect(names).toContain('wiki.update');
+    expect(names).not.toContain('wiki.update');
+    expect(names).not.toContain('wiki.delete');
   });
 
   it('includes web.search when web search is configured', async () => {
@@ -28,6 +29,6 @@ describe('resolveQueryTools', () => {
     const { resolveQueryTools } = await import('../query-service');
     const names = resolveQueryTools().map((t) => t.name);
     expect(names).toContain('web.search');
-    expect(names).toContain('wiki.update');
+    expect(names).not.toContain('wiki.update');
   });
 });
