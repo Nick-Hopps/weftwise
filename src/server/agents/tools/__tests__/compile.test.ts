@@ -6,6 +6,11 @@ import { toProviderToolName, compileToolSet, synthesizeFinishTool, FINISH_TOOL_N
 import { createToolExecutionPolicy, resolveToolProfile } from '../profiles';
 import type { ToolContext } from '../tool-context';
 import type { ToolDef } from '../../types';
+import { wikiInspectTool } from '../builtin/wiki-inspect';
+import { sourceSearchTool } from '../builtin/source-search';
+import { sourceReadTool } from '../builtin/source-read';
+import { wikiListTool } from '../builtin/wiki-list';
+import { emptyWikiInspection } from '../evidence-results';
 
 const ctx = { subject: { id: 's', slug: 'general' } } as ToolContext;
 const echoTool: ToolDef = {
@@ -119,6 +124,89 @@ describe('compileToolSet', () => {
     const outside = await (set.wiki_read as any).execute({ slug: 'outside' });
     expect(outside).toEqual({ found: false, title: null, markdown: null });
     expect(readPage).not.toHaveBeenCalled();
+  });
+
+  it('scope 外 inspect 返回空结果，source.pageSlug 拒绝，list 在分页前注入 allowedSet', async () => {
+    const allowed = new Set(['inside']);
+    const inspectPage = vi.fn(async () => ({
+      ...emptyWikiInspection(), found: true,
+    }));
+    const searchSources = vi.fn(async () => ({ hits: [] }));
+    const listPages = vi.fn(async () => ({ pages: [], nextCursor: null }));
+    const scopedCtx = { ...ctx, inspectPage, searchSources, listPages } as ToolContext;
+
+    const curateSet = compileToolSet([wikiInspectTool as ToolDef], scopedCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('curate:auto'), 's', {
+        allowedPageSlugs: allowed,
+      }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(await (curateSet.wiki_inspect as any).execute({ slug: 'outside' }))
+      .toEqual(emptyWikiInspection());
+    expect(inspectPage).not.toHaveBeenCalled();
+
+    const fixSet = compileToolSet([sourceSearchTool as ToolDef], scopedCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('fix:links'), 's', {
+        allowedPageSlugs: allowed,
+        jobCapability: { jobId: 'j1', jobType: 'fix' },
+      }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect((fixSet.source_search as any).execute({ query: 'q', pageSlug: 'outside' }))
+      .rejects.toThrow(/PAGE_OUT_OF_SCOPE/);
+    expect(searchSources).not.toHaveBeenCalled();
+
+    const querySet = compileToolSet([wikiListTool as ToolDef], scopedCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('query:read'), 's', {
+        allowedPageSlugs: allowed,
+      }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (querySet.wiki_list as any).execute({ limit: 1 });
+    expect(listPages).toHaveBeenCalledWith({ limit: 1 }, { allowedPageSlugs: allowed });
+  });
+
+  it('来源正文和 excerpt 在审计输出中脱敏但保留来源标识', async () => {
+    const onToolCall = vi.fn();
+    const auditCtx = {
+      ...ctx,
+      searchSources: vi.fn(async () => ({
+        hits: [{
+          sourceId: 'src1', filename: 'a.md', chunkId: 'c0', heading: 'H',
+          excerpt: '检索秘密', score: 1,
+        }],
+      })),
+      readSource: vi.fn(async () => ({
+        sourceId: 'src1', filename: 'a.md', chunkId: 'c0', content: '完整秘密',
+        nextOffset: null, truncated: false,
+      })),
+    } as ToolContext;
+    const set = compileToolSet([
+      sourceSearchTool as ToolDef,
+      sourceReadTool as ToolDef,
+    ], auditCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('query:read'), 's'),
+      onToolCall,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.source_search as any).execute({ query: '秘密' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.source_read as any).execute({ sourceId: 'src1', chunkId: 'c0' });
+
+    expect(onToolCall).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      output: {
+        hits: [{
+          sourceId: 'src1', filename: 'a.md', chunkId: 'c0', heading: 'H',
+          excerpt: '[REDACTED]', score: 1,
+        }],
+      },
+    }));
+    expect(onToolCall).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      output: expect.objectContaining({
+        sourceId: 'src1', chunkId: 'c0', content: '[REDACTED]',
+      }),
+    }));
   });
 });
 
