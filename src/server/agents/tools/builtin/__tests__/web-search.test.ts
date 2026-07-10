@@ -7,7 +7,7 @@ function fakeCtx(over: Partial<ToolContext> = {}): ToolContext {
     subject: { id: 's1', slug: 'general' } as ToolContext['subject'],
     readPage: vi.fn(async () => null),
     search: vi.fn(async () => []),
-    listPages: vi.fn(async () => []),
+    listPages: vi.fn(async () => ({ pages: [], nextCursor: null })),
     ...over,
   };
 }

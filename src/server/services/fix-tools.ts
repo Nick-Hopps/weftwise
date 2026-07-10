@@ -17,8 +17,8 @@ import { checkRewriteFidelity, FIDELITY_PROFILES } from '@/server/wiki/rewrite-f
 import { collectBrokenLinkTargets } from './page-write';
 import type { Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
+import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
 
-const LIST_CAP = 200;
 const SEARCH_LIMIT_DEFAULT = 8;
 
 export function buildFixToolContext(
@@ -30,6 +30,7 @@ export function buildFixToolContext(
   },
 ): ToolContext {
   const { guard, jobId, emit } = deps;
+  const evidence = createSubjectEvidenceReader(subject);
   return {
     subject,
     async readPage(slug) {
@@ -48,12 +49,17 @@ export function buildFixToolContext(
       }
       return hits;
     },
-    async listPages() {
-      return pagesRepo
-        .getAllPages(subject.id)
-        .filter((p) => !pagesRepo.isMetaPage(p))
-        .slice(0, LIST_CAP)
-        .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary ?? '', tags: (p.tags ?? []).filter((t) => t !== 'meta') }));
+    async inspectPage(slug, include) {
+      return evidence.inspectPage(slug, include);
+    },
+    async searchSources(input) {
+      return evidence.searchSources(input);
+    },
+    async readSource(input) {
+      return evidence.readSource(input);
+    },
+    async listPages(input, options) {
+      return evidence.listPages(input, options);
     },
     emit,
     async updatePage(input) {

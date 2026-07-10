@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 const repoMocks = vi.hoisted(() => ({
   getAllPages: vi.fn(() => [
-    { slug: 'b', title: 'B', summary: 'sb', tags: ['x'] },
-    { slug: 'm', title: 'Meta', summary: '', tags: ['meta'] },
+    { slug: 'b', title: 'B', summary: 'sb', tags: ['x'], updatedAt: '2026-01-01' },
+    { slug: 'm', title: 'Meta', summary: '', tags: ['meta'], updatedAt: '2026-01-01' },
   ]),
   isMetaPage: vi.fn((p: { tags?: string[] }) => (p.tags ?? []).includes('meta')),
 }));
@@ -38,8 +38,9 @@ describe('agentToolContext', () => {
 
   it('listPages 排除 meta 页', async () => {
     const ctx = agentToolContext(fakeAgent());
-    const pages = await ctx.listPages();
-    expect(pages.map((p) => p.slug)).toEqual(['b']);
+    const result = await ctx.listPages();
+    expect(result.pages.map((p) => p.slug)).toEqual(['b']);
+    expect(result.nextCursor).toBeNull();
   });
 
   it('不暴露原 AgentContext 逃生舱；onAccess 不设置', () => {

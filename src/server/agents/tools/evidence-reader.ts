@@ -16,6 +16,9 @@ import * as sourcesRepo from '@/server/db/repos/sources-repo';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import { getSourceMetadata } from '@/server/sources/source-store';
 import { isSourceStale } from '@/server/sources/source-staleness';
+import { emptyWikiInspection } from './evidence-results';
+
+export { emptyWikiInspection } from './evidence-results';
 
 const ALL_INSPECT_SECTIONS: InspectSection[] = [
   'links',
@@ -52,22 +55,6 @@ export interface SubjectEvidenceReader {
     input?: PageListInput,
     options?: { allowedPageSlugs?: ReadonlySet<string> },
   ): PageListResult;
-}
-
-export function emptyWikiInspection(): WikiInspection {
-  return {
-    found: false,
-    page: null,
-    outgoing: [],
-    backlinks: [],
-    sources: [],
-    health: {
-      brokenLinks: 0,
-      inboundCount: 0,
-      outboundCount: 0,
-      sourceCount: 0,
-    },
-  };
 }
 
 /** 读取页面关系、来源和轻量健康信息，不暴露页面正文。 */

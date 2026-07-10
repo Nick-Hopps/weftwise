@@ -11,9 +11,8 @@ import { readPageInSubject } from '../wiki/wiki-store';
 import type { Subject, SubjectId } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
+import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
 
-/** list_pages 单次返回的页数上限（超大 subject 截断）。 */
-const LIST_PAGES_CAP = 200;
 /** search_wiki 默认返回条数。 */
 const SEARCH_LIMIT_DEFAULT = 8;
 
@@ -28,10 +27,11 @@ export interface QueryContextPage {
 export interface AccessedPages {
   meta: Map<string, { title: string; summary: string }>;
   bodies: Map<string, { title: string; body: string }>;
+  sourceRefs: Map<string, { sourceId: string; chunkId?: string }>;
 }
 
 export function createAccessedPages(): AccessedPages {
-  return { meta: new Map(), bodies: new Map() };
+  return { meta: new Map(), bodies: new Map(), sourceRefs: new Map() };
 }
 
 /** 当前 subject 是否有任何非 meta 页（空 subject 守卫用）。 */
@@ -48,6 +48,7 @@ export function subjectHasContent(subjectId: SubjectId): boolean {
  *   - 若 slug 已在 bodies 中，meta 写入被跳过（去重、不降级）
  */
 export function buildQueryToolContext(subject: Subject, accessed: AccessedPages): ToolContext {
+  const evidence = createSubjectEvidenceReader(subject);
   return {
     subject,
     async readPage(slug) {
@@ -66,17 +67,17 @@ export function buildQueryToolContext(subject: Subject, accessed: AccessedPages)
       }
       return hits;
     },
-    async listPages() {
-      const all = pagesRepo
-        .getAllPages(subject.id)
-        .filter((p) => !pagesRepo.isMetaPage(p))
-        .sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : a.updatedAt < b.updatedAt ? 1 : 0));
-      return all.slice(0, LIST_PAGES_CAP).map((p) => ({
-        slug: p.slug,
-        title: p.title,
-        summary: p.summary ?? '',
-        tags: (p.tags ?? []).filter((t) => t !== 'meta'),
-      }));
+    async inspectPage(slug, include) {
+      return evidence.inspectPage(slug, include);
+    },
+    async searchSources(input) {
+      return evidence.searchSources(input);
+    },
+    async readSource(input) {
+      return evidence.readSource(input);
+    },
+    async listPages(input, options) {
+      return evidence.listPages(input, options);
     },
     onAccess({ slug, title, body }) {
       if (body !== undefined && body.trim().length > 0) {
@@ -84,6 +85,9 @@ export function buildQueryToolContext(subject: Subject, accessed: AccessedPages)
       } else if (!accessed.bodies.has(slug)) {
         accessed.meta.set(slug, { title, summary: '' });
       }
+    },
+    onSourceAccess({ sourceId, chunkId }) {
+      accessed.sourceRefs.set(`${sourceId}\u0000${chunkId ?? ''}`, { sourceId, chunkId });
     },
     async webSearch(query) {
       return webSearch(query);
