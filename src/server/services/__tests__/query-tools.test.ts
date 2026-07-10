@@ -62,7 +62,7 @@ beforeEach(() => {
 });
 
 describe('buildQueryToolContext - listPages', () => {
-  it('过滤 meta、按 updatedAt 倒序、onAccess 写入 accessed.meta', async () => {
+  it('委托 evidence reader，过滤 meta 并按默认 title 排序', async () => {
     mockGetAllPages.mockReturnValue([
       page('a', { updatedAt: '2026-01-01T00:00:00Z' }),
       page('idx', { tags: ['meta'], updatedAt: '2026-09-09T00:00:00Z' }),
@@ -70,9 +70,10 @@ describe('buildQueryToolContext - listPages', () => {
     ]);
     const accessed = createAccessedPages();
     const ctx = buildQueryToolContext(SUBJECT, accessed);
-    const pages = await ctx.listPages();
-    expect(pages.map((p) => p.slug)).toEqual(['b', 'a']); // meta 排除，b 更新更晚在前
-    expect(pages.find((p) => p.slug === 'idx')).toBeUndefined();
+    const result = await ctx.listPages();
+    expect(result.pages.map((p) => p.slug)).toEqual(['a', 'b']);
+    expect(result.pages.find((p) => p.slug === 'idx')).toBeUndefined();
+    expect(result.nextCursor).toBeNull();
     // wiki.list tool 会对每个页调用 onAccess({ slug, title })（无 body）→ meta
     ctx.onAccess?.({ slug: 'b', title: 'B' });
     expect(accessed.meta.has('b')).toBe(true);
@@ -177,6 +178,19 @@ describe('buildQueryToolContext - onAccess 路由', () => {
     ctx.onAccess?.({ slug: 'd', title: 'D' }); // 无 body，但 bodies 已有
     expect(accessed.meta.has('d')).toBe(false); // 不应降级写 meta
   });
+
+  it('onSourceAccess 对相同 source/chunk 去重且不保存正文', () => {
+    const accessed = createAccessedPages();
+    const ctx = buildQueryToolContext(SUBJECT, accessed);
+    ctx.onSourceAccess?.({ sourceId: 'src1', chunkId: 'c0' });
+    ctx.onSourceAccess?.({ sourceId: 'src1', chunkId: 'c0' });
+    ctx.onSourceAccess?.({ sourceId: 'src1', chunkId: 'c1' });
+
+    expect([...accessed.sourceRefs.values()]).toEqual([
+      { sourceId: 'src1', chunkId: 'c0' },
+      { sourceId: 'src1', chunkId: 'c1' },
+    ]);
+  });
 });
 
 describe('buildQueryToolContext - 只读能力面', () => {
@@ -185,6 +199,9 @@ describe('buildQueryToolContext - 只读能力面', () => {
     for (const capability of ['reenrich', 'deletePage', 'createPage', 'updatePage', 'patchPage']) {
       expect(capability in ctx).toBe(false);
     }
+    expect(ctx.inspectPage).toBeTypeOf('function');
+    expect(ctx.searchSources).toBeTypeOf('function');
+    expect(ctx.readSource).toBeTypeOf('function');
   });
 });
 

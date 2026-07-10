@@ -52,7 +52,7 @@ worker-entry.ts
 
 - `streamAgenticQuery(opts)` — 流式 agentic 问答：
   1. 调 `createAccessedPages()` 创建访问页收集器；
-  2. 调 `resolveToolProfile('query:read')` 解析只读 allowlist，`buildQueryToolContext(subject, accessed)` 只注入 read/search/list/webSearch，再由必传 `ToolExecutionPolicy` 的 `compileToolSet` 编译；
+  2. 调 `resolveToolProfile('query:read')` 解析只读 allowlist，`buildQueryToolContext(subject, accessed)` 注入 read/search/list/inspect/source evidence 与可选 webSearch，再由必传 `ToolExecutionPolicy` 的 `compileToolSet` 编译；
   3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
   4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
@@ -66,15 +66,15 @@ worker-entry.ts
 - `extractCitationsFromAnswer(answer, accessed, subjectSlug)`（`citation-extract.ts`，纯函数）：`extractWikiLinks` 解析答案全文（标题也可兜底解析到 slug）→ 目标 slug ∩ `accessed.bodies`（真正 `wiki_read` 过的页，过滤幻觉链接/未读页）→ 按 slug 去重（取首次出现锚点句）；`pickExcerpt(anchorText, pageBody)` 用词重叠打分（中英通用分词：latin 词 + CJK 双字 bigram）在页面正文按句界切出 1-3 句作 excerpt，**恒为页面原文字面子串**（按偏移切片，不重新生成文本）；
 - 流式分支（`streamAgenticQuery` + `/api/query`）与 `runQuery` 均在**流结束后**同步调用此解析，聊天 UI 正文内联 `[[slug]]` 由前端渲染层直接渲染成 wikilink，不再需要模型额外产出 citations 数组；
 - coverage 判定与引用解析解耦，改为**流后异步 fire-and-forget 小调用**：`assessCoverageInBackground(subject, question, answer)` 只喂问题+答案（不喂 accessed 上下文），走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（`query-prompt.ts`）判定 `coverageSufficient`；`false` 时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'；`try/catch` 包裹，写入失败/异常只 `console.error` 不影响已返回的问答响应，也不阻塞响应本身）；`done` 事件不再携带 `coverageSufficient`（T3.2 引入时曾同步携带，现已异步化）；
-- `resolveQueryTools()` — 只解析 `query:read` profile；实际工具为 `wiki.read/search/list` 与可选 `web.search`。Query 不再注入 reenrich/create/update/patch/delete，也不依赖对话历史里的口头确认授权；
+- `resolveQueryTools()` — 只解析 `query:read` profile；实际工具为 `wiki.list/search/read/inspect`、`source.search/read` 与可选 `web.search`。Query 不注入 reenrich/create/update/patch/delete，也不依赖对话历史里的口头确认授权；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue），走 changeset 写入对应 subject。
 
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答（同时触发 backlog 写入）。
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
 
-**`query-tools.ts`**（新增）— subject-scoped 工具定义，经共享 registry 的 `wiki.read/search/list`：
-- `buildQueryToolContext(subject, accessed)` — 构造严格只读 `ToolContext`（readPage/search/listPages/onAccess/webSearch），不含任何写入、删除或入队方法；交给 `compileToolSet(..., { policy })`。工具定义的单一源仍在 `agents/tools/builtin/`。
-- `createAccessedPages()` — 创建 `AccessedPages` 对象（`{ meta: Map<slug, {title, summary}>, bodies: Map<slug, {title, body}> }`），调用方直接向两个 Map 中写入访问记录。
+**`query-tools.ts`**（新增）— subject-scoped 工具上下文，经共享 registry 解析实际 ToolDef：
+- `buildQueryToolContext(subject, accessed)` — 构造严格只读 `ToolContext`（readPage/search/listPages/inspectPage/searchSources/readSource/onAccess/onSourceAccess/webSearch），不含任何写入、删除或入队方法；证据读取委托 `agents/tools/evidence-reader.ts`，再交给 `compileToolSet(..., { policy })`。
+- `createAccessedPages()` — 创建 `AccessedPages` 对象（页面 `meta/bodies` 两个 Map + 仅保存 `{sourceId,chunkId?}` 的 `sourceRefs` Map）；来源正文/excerpt 不进入引用上下文。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
 - `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.getAllPages(subjectId).some(p => !pagesRepo.isMetaPage(p))`；只计非 meta 页，空 subject 或仅含 meta 页时返 false，消灭"宏观问题报不存在文档"误报。
 
@@ -84,6 +84,8 @@ worker-entry.ts
 `broken-link` / `orphan` / `missing-frontmatter` / `stale-source` / `contradiction` / `missing-crossref` / `coverage-gap`（见 `contracts.ts`）。
 
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
+
+`stale-source` 的缺失/哈希变化规则统一由 `sources/source-staleness.ts::isSourceStale` 提供，lint 与 `wiki.inspect` 共用，避免两份判定漂移。
 
 **事件补充统计**（纯函数 `summarizeFindings`，按 severity/type 计数 + 拼一句可读摘要文本）：`lint:semantic:start` 携带 `pageCount`/`model`（本次将跑语义分析的页数 + 模型标签）；`lint:semantic:done`/`lint:complete` 携带 `bySeverity`/`byType`（`lint:complete` 另带 `totalFindings`），日志文案附带形如 `(2 critical, 3 warning; missing-crossref×2)` 的分类摘要。
 
@@ -108,7 +110,7 @@ worker-entry.ts
 **事件**：`curate:start` / `curate:agent:start`（进入工具循环前，报候选页数/mode/caps）/ `curate:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
 
 **`curate-tools.ts`**（新增）— worker 侧 `ToolContext` 构造：
-- `buildCurateToolContext(subject, { guard, jobId, emit })` — read/search/list 先经 `guard.isAllowed` 过滤；写能力（merge/split/delete/create）再经 Guard 判定后调用 page-ops。compile policy 使用同一 allowedSet 包装上下文，Guard 与编译层形成双重硬边界。
+- `buildCurateToolContext(subject, { guard, jobId, emit })` — read/search 与写能力保留既有 Guard；同时注入 subject evidence reader。当前 profile 只暴露 `wiki.inspect`，compile policy 用同一 allowedSet 令 scope 外 inspect 返回空结果；Auto 仍无 list/create/delete。
 
 ### `fix-service.ts` 🆕 — 任务类型 `'fix'`
 
@@ -123,7 +125,7 @@ worker-entry.ts
 
 1. **阶段1（确定性补 frontmatter）**：`fixMissingFrontmatter(slug, doc, now)` 纯函数批量填补缺失 frontmatter 字段（title/summary/tags/created），一次 Saga commit 提交所有受影响页（1 commit）。broken-link 在此阶段跳过（需 LLM 判断语义意图）。
 2. **阶段2（LLM 工具循环修复）**：对剩余 findings 按页分组→按 `buildSubjectReportLines` 格式组装诊断清单，调 `generateTextWithTools('fix', { system: FIX_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: FIX_MAX_STEPS (60) })`：
-   - 工具集按 finding 选择最小 profile：只有 broken-link/missing-crossref 时使用 `fix:links`（read/search/patch）；含 contradiction 时使用 `fix:contradiction`，额外开放 update。两者都无 list/create，页面 roster 已直接注入 Prompt。
+   - 工具集按 finding 选择最小 profile：只有 broken-link/missing-crossref 时使用 `fix:links`（read/search/inspect、source.search/read、patch）；含 contradiction 时使用 `fix:contradiction`，额外开放 update。两者都无 list/create，页面 roster 已直接注入 Prompt。
    - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `checkRewriteFidelity(…, FIDELITY_PROFILES.fix)`（`wiki/rewrite-fidelity.ts`，需现有正文，护栏不读盘；floor 0.8）。
    - 模型自驱读页后优先调 `wiki.patch` 精确修复链接；只有 contradiction profile 才能整页 `wiki.update`。每次写操作一个 commit。
    - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
@@ -215,14 +217,14 @@ src/server/services/
 ├── ingest-service.ts    # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts       # 预检/预算/常量纯函数
 ├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆（agentic 工具循环）
-├── query-tools.ts       # 🆕 subject-scoped 工具 ToolContext（wiki.read/search/list + wiki.reenrich 触发能力）+ AccessedPages + subjectHasContent
+├── query-tools.ts       # subject-scoped 只读 ToolContext（wiki/source evidence + 可选 web.search）+ AccessedPages + subjectHasContent
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：tool-loop 驱动，generateTextWithTools + buildCurateToolContext + CurateGuard）
-├── curate-tools.ts      # 🆕 worker 侧 ToolContext：buildCurateToolContext（只读 vault + 写能力经 guard 把守）
+├── curate-tools.ts      # worker 侧 ToolContext：evidence reader + 写能力经 guard 把守
 ├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2 tool-loop）
 ├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / buildSubjectReportLines / createFixGuard（写 cap + 保护页；忠实度已收编到 wiki/rewrite-fidelity.ts）
-├── fix-tools.ts         # 🆕 worker 侧 ToolContext：buildFixToolContext（只读 vault + 写能力经 guard 鉴权后调 page-ops；含 patchPage，委托 executePagePatch，不接忠实度护栏）
+├── fix-tools.ts         # worker 侧 ToolContext：evidence reader + 写能力经 guard 鉴权后调 page-ops
 ├── reenrich-enqueue.ts  # 🆕 纯函数 validateReenrichTarget + enqueueReenrich 入队 helper（供对话工具触发）
 ├── page-write.ts        # 共享写工具内核：validateDeleteTarget（删除守卫单一真实源）+ deletePageInSubject / createPageInSubject / updatePageInSubject / patchPageInSubject（Saga + embed 回填，供 DELETE 路由与 wiki.delete/wiki.create/wiki.update/wiki.patch 对话工具复用；update 接忠实度护栏，patch 委托 executePagePatch 不接）
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
@@ -236,6 +238,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-10 | Wiki 证据工具 Phase 1A：Query 实际只读工具补齐 `wiki.inspect/source.search/source.read` 与可继续 `wiki.list`；Fix links/contradiction 获得页面和来源证据；Curate Auto/Manual 获得 scope 内 inspect；三类 context 复用 subject evidence reader，stale-source 判定迁入 `sources/source-staleness.ts` 供 lint/inspect 共用 |
 | 2026-07-10 | 工具治理 Phase 0：Query 固定 query:read 且 ToolContext 不含写能力；Fix 按 finding 选择 links/contradiction profile 并移除 list/create；Curate 使用 mode profile + allowedSet，Auto 无 list/create/delete，读写 scope 由 compile policy 与 Guard 双重强制；ingest/re-enrich 的 commitPending 统一从 agents/runtime 导入 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：三类 service 强校验 subjectId / prompt 注入 SubjectContext / lint 默认 subject-scoped |

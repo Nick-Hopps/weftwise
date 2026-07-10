@@ -3,6 +3,7 @@ import type { ZodSchema } from 'zod';
 import type { ToolDef } from '../types';
 import type { ToolContext } from './tool-context';
 import { resolveToolProfile, type ToolExecutionPolicy } from './profiles';
+import { emptyWikiInspection } from './evidence-results';
 
 export const FINISH_TOOL_NAME = 'finish';
 
@@ -145,8 +146,18 @@ function scopeToolContext(ctx: ToolContext, policy: ToolExecutionPolicy): ToolCo
     async search(query, limit) {
       return (await ctx.search(query, limit)).filter((page) => allowed.has(page.slug));
     },
-    async listPages() {
-      return (await ctx.listPages()).filter((page) => allowed.has(page.slug));
+    inspectPage: ctx.inspectPage && (async (slug, include) => {
+      if (!allowed.has(slug)) return emptyWikiInspection();
+      return ctx.inspectPage!(slug, include);
+    }),
+    searchSources: ctx.searchSources && (async (input) => {
+      if (input.pageSlug && !allowed.has(input.pageSlug)) {
+        throw new Error(`[PAGE_OUT_OF_SCOPE] ${input.pageSlug} is outside ${policy.profileId}`);
+      }
+      return ctx.searchSources!(input);
+    }),
+    async listPages(input) {
+      return ctx.listPages(input, { allowedPageSlugs: allowed });
     },
     mergePages: ctx.mergePages && (async (targetSlug, sourceSlug) => {
       assertAllowed([targetSlug, sourceSlug]);

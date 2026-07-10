@@ -80,4 +80,12 @@ describe('buildCurateToolContext write capabilities', () => {
     expect(opsMocks.executePageSplit).not.toHaveBeenCalled();
     expect(opsMocks.executePageDelete).not.toHaveBeenCalled();
   });
+
+  it('注入当前 Subject 的 inspect/source/list 证据能力', () => {
+    const { ctx } = ctxWith(null);
+    expect(ctx.inspectPage).toBeTypeOf('function');
+    expect(ctx.searchSources).toBeTypeOf('function');
+    expect(ctx.readSource).toBeTypeOf('function');
+    expect(ctx.listPages).toBeTypeOf('function');
+  });
 });

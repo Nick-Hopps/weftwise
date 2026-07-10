@@ -35,7 +35,9 @@ describe('runCurateJob (tool-loop)', () => {
     const call = (genMock.generateTextWithTools.mock.calls as any[][])[0];
     const [task, opts] = call as [string, { tools: Record<string, unknown> }];
     expect(task).toBe('curate');
-    expect(Object.keys(opts.tools)).toEqual(expect.arrayContaining(['wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read']));
+    expect(Object.keys(opts.tools)).toEqual(expect.arrayContaining([
+      'wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read', 'wiki_inspect',
+    ]));
     expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('curate:complete', expect.any(String), expect.any(Object));
     expect(res).toHaveProperty('writes');
@@ -55,7 +57,9 @@ describe('runCurateJob (tool-loop)', () => {
     const opts = (genMock.generateTextWithTools.mock.calls[0] as any[])[1];
     // auto 模式只保留 scope 内 read/search/merge/split，无 list/create/delete
     const toolKeys = Object.keys(opts.tools);
-    expect(toolKeys).toEqual(expect.arrayContaining(['wiki_merge', 'wiki_split', 'wiki_read']));
+    expect(toolKeys).toEqual(expect.arrayContaining([
+      'wiki_merge', 'wiki_split', 'wiki_read', 'wiki_inspect',
+    ]));
     expect(toolKeys).not.toContain('wiki_create');
     expect(toolKeys).not.toContain('wiki_delete');
     expect(toolKeys).not.toContain('wiki_list');
