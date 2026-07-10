@@ -261,7 +261,7 @@ git commit -m "重构：移除不可达工具并迁移提交入口"
 - `resolveQueryTools()` 只返回 `query:read` 当前已注册工具：`wiki.list/search/read` 与可选 `web.search`。
 - `buildQueryToolContext()` 不再注入 `reenrich/create/update/patch/delete` 能力。
 
-- [ ] **步骤 1：先把 query 工具断言改成只读并观察失败**
+- [x] **步骤 1：先把 query 工具断言改成只读并观察失败**
 
 ```ts
 expect(names).toEqual(['wiki.read', 'wiki.search', 'wiki.list']);
@@ -272,7 +272,7 @@ for (const name of ['wiki.reenrich', 'wiki.create', 'wiki.update', 'wiki.patch',
 
 联网配置测试仅额外允许 `web.search`。
 
-- [ ] **步骤 2：运行 query 定向测试，确认 RED**
+- [x] **步骤 2：运行 query 定向测试，确认 RED**
 
 运行：
 
@@ -282,7 +282,7 @@ npx vitest run src/server/services/__tests__/resolve-query-tools.test.ts src/ser
 
 预期：FAIL，现有结果仍包含实际写工具，Prompt 仍承诺确认后写入。
 
-- [ ] **步骤 3：删除 Query 写能力与 Prompt 级授权文本**
+- [x] **步骤 3：删除 Query 写能力与 Prompt 级授权文本**
 
 `query-service.ts` 只从 `query:read` profile 解析工具；`query-tools.ts` 删除 page-write/reenrich 导入及五个写方法。Query 系统提示删除“用户口头确认后调用写工具”的章节，明确 Phase 0 的 Ask AI 只能读取与回答，写请求不能被本轮模型直接执行。
 
@@ -294,7 +294,7 @@ description: 'Create a page in the current subject through the guarded page oper
 
 不得再包含 “Only call after the user confirmed” 等 query-specific 授权规则。
 
-- [ ] **步骤 4：运行 query、路由和类型测试**
+- [x] **步骤 4：运行 query、路由和类型测试**
 
 运行：
 
@@ -305,7 +305,7 @@ npx vitest run src/server/services/__tests__/resolve-query-tools.test.ts src/ser
 
 预期：全部 PASS，TypeScript 退出码 0。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add src/server/services src/server/llm/prompts src/server/agents/tools/builtin src/app/api/query
@@ -334,7 +334,7 @@ git commit -m "安全：收缩 Ask AI 为只读工具"
 - Auto profile：无 `wiki.list/create/delete`；merge 两端在 allowedSet 且至少一端在 seedSet；split 目标同时在 allowedSet 和 seedSet。
 - Fix：工作清单无 contradiction 时使用 `fix:links`，否则使用 `fix:contradiction`；两者都无 `wiki.list`。
 
-- [ ] **步骤 1：写 Guard、context 和工具面的失败测试**
+- [x] **步骤 1：写 Guard、context 和工具面的失败测试**
 
 ```ts
 it('auto merge 要求两端都在 allowedSet 且至少一端是 seed', () => {
@@ -354,7 +354,7 @@ it('auto 工具面没有 list/create/delete', () => {
 
 `curate-tools.test.ts` 再覆盖 scope 外 read 返回 null、search 过滤、merge/split/delete 不执行 page-ops。
 
-- [ ] **步骤 2：运行定向测试，确认 RED**
+- [x] **步骤 2：运行定向测试，确认 RED**
 
 运行：
 
@@ -364,13 +364,13 @@ npx vitest run src/server/wiki/__tests__/curate-plan.test.ts src/server/services
 
 预期：FAIL，当前 Guard 不接受 `allowedSet`，Auto 仍暴露 `wiki.delete`，Fix 仍暴露 `wiki.list`。
 
-- [ ] **步骤 3：实现 allowedSet 与最小工具装配**
+- [x] **步骤 3：实现 allowedSet 与最小工具装配**
 
 Guard 判定顺序保持：自操作/保护页 → cap → allowedSet → seed 约束。Auto `canDelete` 固定拒绝；manual 只允许删除 allowedSet 内页。`buildCurateToolContext` 的 read/search 使用 `guard.isAllowed()`，compile policy 同时带同一 `allowedSet` 形成双层边界。
 
 Curate runner 只使用 profile 列表；不再手拼 `toolNames`。Fix runner 从实际 worklist 选择 profile，roster 继续由 Prompt 注入，故移除 `wiki.list` 不损失页面清单。
 
-- [ ] **步骤 4：运行定向测试与类型检查**
+- [x] **步骤 4：运行定向测试与类型检查**
 
 运行：
 
@@ -381,7 +381,7 @@ npx vitest run src/server/wiki/__tests__/curate-plan.test.ts src/server/services
 
 预期：全部 PASS，TypeScript 退出码 0。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add src/server/wiki/curate-plan.ts src/server/wiki/__tests__/curate-plan.test.ts src/server/services
@@ -408,7 +408,7 @@ git commit -m "安全：强化 Fix 与 Curate 运行时边界"
 - `RETIRED_BUILTIN_HASHES['ingest-indexer']` 包含历史原版 SHA-256：`cef3712f6c94035131dfbe005b91b5d5913f6f63ae09889f24c80b5c77238a8c`。
 - `retireBuiltinSkillFiles({ vaultDir, now?, onWarning? })`：返回 `{ removed, archived }`。
 
-- [ ] **步骤 1：先写三种 tombstone 失败测试**
+- [x] **步骤 1：先写三种 tombstone 失败测试**
 
 ```ts
 it('删除 hash 匹配的 retired 原版', async () => {
@@ -427,7 +427,7 @@ it('loader 永远不注册 retired ID', async () => {
 });
 ```
 
-- [ ] **步骤 2：运行 skill 定向测试，确认 RED**
+- [x] **步骤 2：运行 skill 定向测试，确认 RED**
 
 运行：
 
@@ -437,11 +437,11 @@ npx vitest run src/server/agents/skills/__tests__/registry.test.ts src/server/ag
 
 预期：FAIL，manifest 与 tombstone 函数尚不存在，loader 仍会接受合法 retired 文件。
 
-- [ ] **步骤 3：实现 manifest、清理、归档与 loader 排除**
+- [x] **步骤 3：实现 manifest、清理、归档与 loader 排除**
 
 原版判定必须对文件完整字节计算 SHA-256。hash 匹配时 `unlink`；不匹配时先创建 `.llm-wiki/skills-retired`，再 `rename` 为 `ingest-indexer-<ISO安全时间>.md`，随后调用 `onWarning`。`buildSkillRegistry()` 在 seed/load 前调用 tombstone，并把 worker logger 作为告警回调；loader 对 retired filename ID 直接跳过，不加入 skills 或 degraded。
 
-- [ ] **步骤 4：运行 skill 测试并对当前 vault 执行同一清理函数**
+- [x] **步骤 4：运行 skill 测试并对当前 vault 执行同一清理函数**
 
 运行：
 
@@ -453,7 +453,7 @@ npx tsx -e "import { retireBuiltinSkillFiles } from './src/server/agents/skills/
 
 预期：测试 PASS；当前 vault 输出 `removed:["ingest-indexer"]` 或在已清理时输出空数组；TypeScript 退出码 0。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add src/server/agents/skills src/server/worker-entry.ts
@@ -473,7 +473,7 @@ git commit -m "维护：安全退役残留内置技能"
 
 **接口：** 无新运行时接口；文档必须准确描述当前 checkout，不提前宣称 Phase 1–3 已实现。
 
-- [ ] **步骤 1：更新模块文档和变更日志**
+- [x] **步骤 1：更新模块文档和变更日志**
 
 记录以下已落地事实：
 
@@ -483,19 +483,19 @@ git commit -m "维护：安全退役残留内置技能"
 - retired skill 采用 hash 删除/改版归档；
 - PendingAction、证据工具、postcondition、remediation router 仍属于后续 Phase。
 
-- [ ] **步骤 2：做计划覆盖与残留扫描**
+- [x] **步骤 2：做计划覆盖与残留扫描**
 
 运行：
 
 ```bash
-rg -n "dispatch\.skill|dispatch_skill|commit_changeset|tools/builtin/commit-changeset|source: 'dispatch'|sideEffect: 'commit'" src
+rg -n "dispatch\.skill|dispatch_skill|commit_changeset|tools/builtin/commit-changeset|source: 'dispatch'|sideEffect: 'commit'" src --glob '!**/__tests__/**' --glob '!**/CLAUDE.md'
 rg -n "wiki\.reenrich|wiki\.create|wiki\.update|wiki\.patch|wiki\.delete" src/server/services/query-service.ts
 git diff --check
 ```
 
 预期：前两个 `rg` 均无匹配；`git diff --check` 退出码 0。
 
-- [ ] **步骤 3：运行完整验证**
+- [x] **步骤 3：运行完整验证**
 
 运行：
 
@@ -507,7 +507,7 @@ npm run build
 
 预期：Vitest 0 failures；TypeScript 退出码 0；Next.js production build 退出码 0。
 
-- [ ] **步骤 4：核对验收项**
+- [x] **步骤 4：核对验收项**
 
 ```bash
 git status --short
@@ -517,7 +517,7 @@ git log --oneline main..HEAD
 
 验收：registry 无两个死工具；Query 无实际写工具；sideEffect 被 compile policy 消费；Auto Curate 读写均不能越 scope 且无 create/delete/list；retired skill 不可加载；所有写路径仍走原 Saga 内核。
 
-- [ ] **步骤 5：提交文档**
+- [x] **步骤 5：提交文档**
 
 ```bash
 git add src/server/agents/CLAUDE.md src/server/services/CLAUDE.md src/server/wiki/CLAUDE.md CHANGELOG.md

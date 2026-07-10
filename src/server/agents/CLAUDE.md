@@ -71,12 +71,13 @@ ingest-service.ts
                     (validate → fs → SQLite → git)
 ```
 
-**写入边界**：流水线内的 agent（Planner / Writer / Enricher / Verifier）**全部为结构化输出，无任何写盘工具**——它们只把页面暂存进 `ctx.pending`。真正的 commit 由 **service 层**（`finalizeIngest` → `commitPending`）在流水线结束后执行，符合"写操作经 services → wiki-transaction"的 Saga 契约。`commit_changeset` tool 仍注册但已无 skill 引用（薄包装 `commitPending`，保留作工具面/测试用）。
+**写入边界**：流水线内的 agent（Planner / Writer / Enricher / Verifier）**全部为结构化输出，无任何写盘工具**——它们只把页面暂存进 `ctx.pending`。真正的 commit 由 **service 层**（`finalizeIngest` → `runtime/commit-pending.ts::commitPending`）在流水线结束后执行，符合"写操作经 services → wiki-transaction"的 Saga 契约。builtin registry 不再注册任何通用 commit 或动态 dispatch 工具。
 
 **执行路径分支**（`compile.ts` + `agent-loop.ts`）：
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
 - **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
 - **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
+- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装读写上下文。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/patch 字符串。Query 固定使用 `query:read`，ingest 只使用 planner/writer 只读 profile。
 
 **暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。`index.md` / `log.md`（meta 页）由 `wiki/meta-pages.ts` 纯函数渲染，所有内容页随 `pending` 自动提交——T2.1 起索引/日志根本不再有 LLM 调用（此前是无 tools 结构化输出，不接触页正文；现在连该调用也去掉了），从根本上杜绝巨量提示词随页数增长与工具循环风险。
 
@@ -122,24 +123,24 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 
 | 文件 | 职责 |
 |------|------|
+| `builtin-manifest.ts` | 当前内置 skill 文件清单 + retired ID/历史 SHA-256；worker 启动时原版残留删除、用户改版归档，loader 对 retired ID 永久 tombstone |
 | `schema.ts` | `SkillFrontmatterSchema`（zod，`.strict()`）：定义 skill YAML frontmatter 合法结构（id / name / description / version / tools / canDispatch / model? / outputSchema? / budget?；system prompt 是 markdown 正文，非 frontmatter 字段）|
-| `loader.ts` | `loadSkill(id)` — 从 `vault/.llm-wiki/skills/<id>.yaml` 读取并 parse；`seedSkillFiles()` — worker 启动时从 `examples/skills/` 播种，不覆盖已有文件 |
-| `registry.ts` | `SkillRegistry` — 内存缓存 + `get(id)` / `list()` / `register(def)`；agent-loop 通过 registry 拿到 skill 配置 |
+| `loader.ts` | `loadSkillsFromDir(dir)` — 解析 vault skill，并在读取前跳过 retired ID |
+| `registry.ts` | `buildSkillRegistry` 按 manifest 播种、不覆盖用户文件；`retireBuiltinSkillFiles` 对 retired 文件执行 hash 删除或改版归档；内存 registry 供 agent-loop 查 skill |
 
 ### `tools/`
 
 | 文件 | 职责 |
 |------|------|
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
-| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit / agent`，以及可选写能力：`reenrich?`（query runner）/ `deletePage?`（query runner）/ `createPage?`（query runner）/ `updatePage?`（fix + query runner）/ `mergePages?(targetSlug, sourceSlug)`（curate runner）/ `splitPage?(slug, hint?)`（curate runner））；所有 `ToolDef` 通过此接口消费 vault/db，差异下沉到调用方注入的实现；`ToolDef.sideEffect` 联合类型支持 `'read'|'enqueue'|'destructive'|'create'|'update'|'merge'|'split'` |
-| `compile.ts` | `compileToolSet(toolDefs, ctx, opts?)` — 把 `ToolDef[]` + `ToolContext` 编译为 AI SDK 可用的工具对象；`synthesizeFinishTool(schema, capture)` — 合成 `finish` 收尾工具，使 planner/writer 能在工具循环末步产出结构化输出（组合路径收口）；`FINISH_TOOL_NAME` 常量 |
+| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit` + worker 可选写能力）；不再暴露原始 `AgentContext` 逃生舱。Query 构造只注入 read/search/list/webSearch，Fix/Curate 按 profile 注入受 Guard 保护的写能力 |
+| `profiles.ts` | 八个 `ToolProfile` + `resolveToolProfile/createToolExecutionPolicy/profileForIngestSkill`；集中声明 runner 工具 allowlist、允许 sideEffect、审批标记与可选 page scope/job capability |
+| `compile.ts` | `compileToolSet(toolDefs, ctx, { policy, ... })` — policy 必传；过滤工具、校验 sideEffect/subject/job capability、包装 page scope，并把脱敏后的 profile/sideEffect/subject/pageSlugs 送入审计回调。`synthesizeFinishTool` 仍仅作为 provider 收尾适配器 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
 | `builtin/wiki-search.ts` | `wiki.search` — 通过 `ToolContext.search` 做 FTS5 搜索（取代旧 `vault-search.ts`） |
 | `builtin/wiki-list.ts` | `wiki.list` — 通过 `ToolContext.listPages` 枚举本 subject 页标题/slug |
-| `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面标题/正文，改标题联动 relink（`sideEffect:'update'`，fix + query runner） |
-| `builtin/wiki-patch.ts` | `wiki.patch` — 通过 `ToolContext.patchPage` 对页面正文做 old_string/new_string 精确唯一替换的局部更新（`edits[]` 全成或全败，`sideEffect:'update'`，委托 `executePageUpdate`，**不接忠实度护栏**，fix + query runner） |
-| `builtin/commit-changeset.ts` | `commit_changeset` — 薄包装 `commitPending`（已无 skill 引用，保留供工具面/测试用） |
-| `builtin/dispatch-skill.ts` | `dispatch_skill` — orchestrator fanout 用；触发子 skill 执行（writer × N）|
+| `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面标题/正文，改标题联动 relink（`sideEffect:'update'`，仅 `fix:contradiction` profile） |
+| `builtin/wiki-patch.ts` | `wiki.patch` — 通过 `ToolContext.patchPage` 做 old_string/new_string 精确替换（`sideEffect:'update'`，`fix:links/fix:contradiction` profile） |
 | `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
 
 ---
@@ -219,7 +220,7 @@ src/server/agents/tools/builtin/__tests__/
 
 - `BudgetTracker`：step 超限抛 `BudgetExceededError`；token 累加准确。
 - `OverlayVault`：读取命中内存 diff；commit 时 diff 正确合并到真实 vault。
-- `commitPending`（及其薄包装 `commit_changeset` tool）：合并 `pending ∪ supplied` 调用 Saga；重复提交 / 空集报错。
+- `runtime/commit-pending.ts::commitPending`：合并 `pending ∪ supplied` 调用 Saga；重复提交 / 空集报错；它是 service-level 内部函数，不进入模型工具注册表。
 - Orchestrator step 顺序：planner 输出传入 writer context；writer 扁平 entry 累积进 `ctx.pending`。
 
 ---
@@ -254,27 +255,28 @@ src/server/agents/
 │   ├── verify-page.ts              # runPageVerification（⑨ 联网核查）
 │   ├── supplement-page.ts          # 🆕 runPageSupplement（re-enrich 专用，画像探针驱动正文补全 + 护栏 + 重写一次 + 回落原文）
 │   ├── supplement-guard.ts         # 🆕 checkSupplementFidelity 纯函数（4 项确定性护栏：不缩水/不臆造wikilink/标题不减/frontmatter不变）
+│   ├── commit-pending.ts           # service-level 暂存提交入口（非模型工具）
 │   └── __tests__/
 ├── skills/
+│   ├── builtin-manifest.ts         # 当前内置清单 + retired ID/历史 hash tombstone
 │   ├── schema.ts                   # SkillSchema (zod)
 │   ├── loader.ts                   # loadSkill + seedSkillFiles
 │   ├── registry.ts                 # SkillRegistry
 │   └── __tests__/
 └── tools/
     ├── registry.ts                 # ToolRegistry + createBuiltinToolRegistry()
-    ├── tool-context.ts             # ToolContext 接口（readPage/search/listPages/onAccess/emit/agent）
-    ├── compile.ts                  # compileToolSet / synthesizeFinishTool / FINISH_TOOL_NAME
+    ├── tool-context.ts             # ToolContext 接口（不暴露 AgentContext）
+    ├── profiles.ts                 # runner allowlist + ToolExecutionPolicy
+    ├── compile.ts                  # policy 强制编译 / synthesizeFinishTool
     └── builtin/
         ├── wiki-read.ts            # wiki.read（取代旧 vault-read.ts）
         ├── wiki-search.ts          # wiki.search（取代旧 vault-search.ts）
         ├── wiki-list.ts            # wiki.list
-        ├── wiki-update.ts          # wiki.update（写动作工具，sideEffect:'update'，改标题联动 relink，fix + query runner）
-        ├── wiki-patch.ts           # 🆕 wiki.patch（写动作工具，sideEffect:'update'，old_string/new_string 精确唯一替换，edits[] 全成或全败，委托 executePageUpdate，不接忠实度护栏，fix + query runner）
-        ├── commit-changeset.ts     # commit_changeset（薄包装 commitPending，已无 skill 引用）
-        ├── dispatch-skill.ts       # dispatch_skill (fanout)
-        ├── wiki-reenrich.ts        # wiki.reenrich（写动作工具，sideEffect:'enqueue'，仅对话循环调用）
-        ├── wiki-delete.ts          # 🆕 wiki.delete（写动作工具，sideEffect:'destructive'，需后续轮确认，仅 query runner）
-        ├── wiki-create.ts          # 🆕 wiki.create（写动作工具，sideEffect:'create'，仅 query runner）
+        ├── wiki-update.ts          # wiki.update（sideEffect:'update'，仅 fix:contradiction）
+        ├── wiki-patch.ts           # wiki.patch（sideEffect:'update'，fix:links/fix:contradiction）
+        ├── wiki-reenrich.ts        # wiki.reenrich（兼容定义；Phase 0 profile 不暴露）
+        ├── wiki-delete.ts          # wiki.delete（sideEffect:'destructive'，仅 curate:manual）
+        ├── wiki-create.ts          # wiki.create（sideEffect:'create'，仅 curate:manual）
         ├── wiki-merge.ts           # 🆕 wiki.merge（写动作工具，sideEffect:'merge'，仅 curate runner）
         ├── wiki-split.ts           # 🆕 wiki.split（写动作工具，sideEffect:'split'，仅 curate runner）
         └── __tests__/
@@ -286,6 +288,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-10 | 工具治理 Phase 0：新增八个 ToolProfile 与必传 ToolExecutionPolicy；compileToolSet 开始过滤 allowlist、校验 sideEffect/subject、强制 page scope 并输出审计字段；Query 收缩为只读；删除不可达的通用提交和动态 dispatch ToolDef，commitPending 迁到 runtime 内部函数；新增 builtin skill manifest 与 hash tombstone，原版 retired 文件删除、用户改版归档 |
 | 2026-04-27 | 初始化（Phase 1）：orchestrator + skill loader + tool registry + MCP client pool；ingest 切换为 planner→writer×N→reviewer 流水线 |
 | 2026-06-20 | 断点续传：新增 `checkpoint.ts`（IngestCheckpoint 句柄）；`AgentContext.checkpoint?` 可选字段；`PipelineStep.checkpointAs` 逐页续传（命中检查点跳过 LLM，writer 完成即落盘）|
 | 2026-06-20 | P2 双层增益：新增 enricher（`[!type]` callout 增益层）+ verifier（参数化自检，结构化输出无 tools）fanout 步骤；orchestrator pending last-write-wins upsert + 跨阶段 injectPriorPageAs 注入；checkpoint 扩展 enricher-page/verifier-page 类型；DEFAULT_AGENT_MAX_TOKENS_PER_JOB 500k→1.2M（CONTENT_STAGE_FACTOR=3）|
