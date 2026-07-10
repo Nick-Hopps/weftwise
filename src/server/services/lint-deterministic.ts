@@ -5,17 +5,15 @@
  * 全部按 subject 维度扫描。
  */
 
-import { createHash } from 'crypto';
-import fs from 'fs';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as jobsRepo from '../db/repos/jobs-repo';
 import { scanWikiPages } from '../wiki/wiki-store';
-import { vaultPath } from '../config/env';
 import { parseFrontmatter, validateFrontmatter } from '../wiki/frontmatter';
 import type { LintFinding, Subject, WikiPage, WikiLink } from '@/lib/contracts';
 import { META_PAGE_SLUGS } from '../wiki/page-identity';
+import { isSourceStale } from '../sources/source-staleness';
 
 export function runDeterministicChecksForSubject(subject: Subject): LintFinding[] {
   // 一次性取数后传给各 check，避免重复全表扫描：
@@ -173,13 +171,6 @@ export function checkThinPages(subject: Subject): LintFinding[] {
   return findings;
 }
 
-function rawSourcePathsToCheck(subjectSlug: string, filename: string): string[] {
-  return [
-    vaultPath('raw', subjectSlug, filename),
-    vaultPath('raw', filename), // legacy flat layout
-  ];
-}
-
 /**
  * 单页 stale-source 判定（供 T1.8 re-enrich 质量信号复用，避免为一页触发全库扫描）。
  */
@@ -187,34 +178,14 @@ export function checkStaleSourcesForPage(subject: Subject, page: WikiPage): Lint
   const findings: LintFinding[] = [];
   const sources = sourcesRepo.getSourcesForPage(subject.id, page.slug);
   for (const source of sources) {
-    const candidates = rawSourcePathsToCheck(subject.slug, source.filename);
-    const found = candidates.find((p) => fs.existsSync(p));
-    if (!found) {
-      findings.push({
-        type: 'stale-source',
-        severity: 'info',
-        pageSlug: page.slug,
-        description: `Source file "${source.filename}" linked to "${page.slug}" (subject: ${subject.slug}) no longer exists on disk.`,
-        suggestedFix: `Re-ingest the source or remove the association from the database.`,
-      });
-      continue;
-    }
-
-    const diskContent = fs.readFileSync(found);
-    const diskHash = createHash('sha256')
-      .update(diskContent)
-      .digest('hex')
-      .slice(0, 16);
-
-    if (diskHash !== source.contentHash) {
-      findings.push({
-        type: 'stale-source',
-        severity: 'info',
-        pageSlug: page.slug,
-        description: `Source file "${source.filename}" for page "${page.slug}" (subject: ${subject.slug}) has changed on disk (stored hash: ${source.contentHash}, current hash: ${diskHash}).`,
-        suggestedFix: `Re-ingest the source file to update the wiki page content.`,
-      });
-    }
+    if (!isSourceStale(subject.slug, source)) continue;
+    findings.push({
+      type: 'stale-source',
+      severity: 'info',
+      pageSlug: page.slug,
+      description: `Source file "${source.filename}" linked to "${page.slug}" (subject: ${subject.slug}) is missing or changed on disk.`,
+      suggestedFix: 'Re-ingest the source file to update the wiki page content.',
+    });
   }
   return findings;
 }

@@ -3,7 +3,11 @@ import { extractCitationsFromAnswer, pickExcerpt } from '../citation-extract';
 import type { AccessedPages } from '../query-tools';
 
 function accessedWith(bodies: Record<string, { title: string; body: string }>): AccessedPages {
-  return { meta: new Map(), bodies: new Map(Object.entries(bodies)) };
+  return {
+    meta: new Map(),
+    bodies: new Map(Object.entries(bodies)),
+    sourceRefs: new Map(),
+  };
 }
 
 describe('extractCitationsFromAnswer', () => {

@@ -20,7 +20,7 @@
     },
     "tasks": {
       "type": "object",
-      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Keys are either built-in tasks (query/lint/merge/split/curate/fix/embedding) or '<pipeline>:<stage>' routes that override the model for a single agent-pipeline stage. Known ingest stages: ingest:planner, ingest:chunk-summarizer, ingest:writer, ingest:enricher, ingest:verifier, ingest:verifier-triage, ingest:verifier-apply, ingest:indexer. A stage entry is optional — without it the stage inherits the 'defaults' route (skill frontmatter may further override). Note: there is no standalone 'ingest' task; the pipeline routes per stage via 'ingest:<stage>'.",
+      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Known routes include built-in query/lint/merge/split/curate/fix/embedding, Research, Re-enrich, Reshape, and seven ingest stages. A stage entry is optional — without it the stage inherits the defaults route (skill frontmatter may further override). Tool Profile IDs such as query:read are not LLM task routes.",
       "propertyNames": {
         "pattern": "^(query|lint|merge|split|curate|fix|embedding|[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*)$"
       },
@@ -34,7 +34,19 @@
         "split": { "$ref": "#/$defs/taskRoute", "description": "Split one page into several (invoked by page curation, not a standalone job)." },
         "curate": { "$ref": "#/$defs/taskRoute", "description": "Agent-driven page curation: triage then confirm merge/split candidates." },
         "fix": { "$ref": "#/$defs/taskRoute", "description": "Health fix: repair lint findings page by page." },
-        "embedding": { "$ref": "#/$defs/taskRoute", "description": "Vector embeddings for semantic search. Only openai / openai-compatible / ollama providers are supported." }
+        "embedding": { "$ref": "#/$defs/taskRoute", "description": "Vector embeddings for semantic search. Only openai / openai-compatible / ollama providers are supported." },
+        "research:queries": { "$ref": "#/$defs/taskRoute", "description": "Research: generate web search queries." },
+        "research:triage": { "$ref": "#/$defs/taskRoute", "description": "Research: score and select candidate evidence." },
+        "ingest:planner": { "$ref": "#/$defs/taskRoute", "description": "Ingest: plan page structure." },
+        "ingest:chunk-summarizer": { "$ref": "#/$defs/taskRoute", "description": "Ingest: summarize large source chunks." },
+        "ingest:writer": { "$ref": "#/$defs/taskRoute", "description": "Ingest: write or merge page bodies." },
+        "ingest:enricher": { "$ref": "#/$defs/taskRoute", "description": "Ingest: add the augmentation layer." },
+        "ingest:verifier": { "$ref": "#/$defs/taskRoute", "description": "Ingest: verify generated pages." },
+        "ingest:verifier-triage": { "$ref": "#/$defs/taskRoute", "description": "Ingest: select claims that need web verification." },
+        "ingest:verifier-apply": { "$ref": "#/$defs/taskRoute", "description": "Ingest: apply evidence-driven verification edits." },
+        "reenrich:supplement": { "$ref": "#/$defs/taskRoute", "description": "Re-enrich: supplement gaps in an existing page." },
+        "reshape:page": { "$ref": "#/$defs/taskRoute", "description": "Cognitive Lens: reshape a full-page reading rendition." },
+        "reshape:section": { "$ref": "#/$defs/taskRoute", "description": "Cognitive Lens: reshape a section reading rendition." }
       }
     },
     "providers": {
@@ -177,20 +189,36 @@
       "description": "@ai-sdk/anthropic providerOptions.",
       "properties": {
         "thinking": {
-          "type": "object",
           "description": "Anthropic extended thinking configuration.",
-          "required": ["type"],
-          "additionalProperties": false,
-          "properties": {
-            "type": {
-              "enum": ["enabled", "disabled"]
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["type"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "adaptive" }
+              }
             },
-            "budgetTokens": {
-              "type": "number",
-              "minimum": 1
+            {
+              "type": "object",
+              "required": ["type", "budgetTokens"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "enabled" },
+                "budgetTokens": { "type": "number", "minimum": 1024 }
+              }
+            },
+            {
+              "type": "object",
+              "required": ["type"],
+              "additionalProperties": false,
+              "properties": {
+                "type": { "const": "disabled" }
+              }
             }
-          }
-        }
+          ]
+        },
+        "effort": { "enum": ["low", "medium", "high", "xhigh", "max"] }
       },
       "additionalProperties": { "$ref": "#/$defs/jsonValue" }
     },

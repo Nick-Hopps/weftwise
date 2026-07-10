@@ -14,4 +14,11 @@ describe('createBuiltinToolRegistry', () => {
       expect(registry.get(name)?.description).not.toMatch(/confirm|prior turn/i);
     }
   });
+
+  it('注册 Phase 1A 证据工具', () => {
+    const registry = createBuiltinToolRegistry();
+    expect(registry.get('wiki.inspect')).toBeDefined();
+    expect(registry.get('source.search')).toBeDefined();
+    expect(registry.get('source.read')).toBeDefined();
+  });
 });

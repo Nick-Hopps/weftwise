@@ -1,24 +1,32 @@
 import { z } from 'zod';
 import type { ToolDef } from '../../types';
 
-const InputSchema = z.object({});
+const InputSchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+  tag: z.string().min(1).optional(),
+  sort: z.enum(['title', 'updated']).optional(),
+});
 const OutputSchema = z.object({
   pages: z.array(z.object({
     slug: z.string(), title: z.string(), summary: z.string(), tags: z.array(z.string()),
+    updatedAt: z.string(),
   })),
-  total: z.number().int(),
+  nextCursor: z.string().nullable(),
 });
 
 export const wikiListTool: ToolDef<z.infer<typeof InputSchema>, z.infer<typeof OutputSchema>> = {
   name: 'wiki.list',
   source: 'builtin',
-  description: 'List all pages in the current subject (slug, title, summary, tags). Use for broad/overview questions.',
+  description: 'List pages in the current subject with bounded keyset pagination, filters, and stable sorting.',
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'none',
-  async handler(_input, ctx) {
-    const pages = await ctx.listPages();
-    for (const p of pages) ctx.onAccess?.({ slug: p.slug, title: p.title });
-    return { pages, total: pages.length };
+  async handler(input, ctx) {
+    const result = await ctx.listPages(input);
+    for (const page of result.pages) {
+      ctx.onAccess?.({ slug: page.slug, title: page.title });
+    }
+    return result;
   },
 };

@@ -11,6 +11,9 @@ import { wikiPatchTool } from './wiki-patch';
 import { wikiMergeTool } from './wiki-merge';
 import { wikiSplitTool } from './wiki-split';
 import { webSearchTool } from './web-search';
+import { wikiInspectTool } from './wiki-inspect';
+import { sourceSearchTool } from './source-search';
+import { sourceReadTool } from './source-read';
 
 /** 进程无关：worker 与 Next.js（query 流式）两进程各自构造（ToolDef 无状态纯对象）。 */
 export function createBuiltinToolRegistry(): ToolRegistry {
@@ -26,5 +29,8 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(wikiMergeTool as ToolDef);
   r.register(wikiSplitTool as ToolDef);
   r.register(webSearchTool as ToolDef);
+  r.register(wikiInspectTool as ToolDef);
+  r.register(sourceSearchTool as ToolDef);
+  r.register(sourceReadTool as ToolDef);
   return r;
 }

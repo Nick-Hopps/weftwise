@@ -77,7 +77,7 @@ ingest-service.ts
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
 - **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
 - **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
-- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装读写上下文。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/patch 字符串。Query 固定使用 `query:read`，ingest 只使用 planner/writer 只读 profile。
+- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装 read/search/inspect/source-page-filter/list 与写上下文，list 在分页前注入 allowedSet。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/patch 字符串。Query 固定使用 `query:read`，ingest 只使用 planner/writer 只读 profile。
 
 **暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。`index.md` / `log.md`（meta 页）由 `wiki/meta-pages.ts` 纯函数渲染，所有内容页随 `pending` 自动提交——T2.1 起索引/日志根本不再有 LLM 调用（此前是无 tools 结构化输出，不接触页正文；现在连该调用也去掉了），从根本上杜绝巨量提示词随页数增长与工具循环风险。
 
@@ -133,12 +133,17 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | 文件 | 职责 |
 |------|------|
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
-| `tool-context.ts` | `ToolContext` 接口定义（`readPage / search / listPages / onAccess / emit` + worker 可选写能力）；不再暴露原始 `AgentContext` 逃生舱。Query 构造只注入 read/search/list/webSearch，Fix/Curate 按 profile 注入受 Guard 保护的写能力 |
+| `evidence-reader.ts` | subject-scoped 确定性证据读取层：页面关系/来源/健康、source chunk 检索与窗口读取、keyset page list；可 import repos/source store，不依赖 AI SDK |
+| `evidence-results.ts` | 纯契约 helper：scope 外与不存在页共用的空 `WikiInspection`，不加载 DB |
+| `tool-context.ts` | `ToolContext` 接口定义（`readPage/search/inspectPage/searchSources/readSource/listPages/onAccess/onSourceAccess/emit` + worker 可选写能力）；不再暴露原始 `AgentContext` 逃生舱。Query/Fix/Curate 注入 evidence reader，写能力仍按 profile 与 Guard 限制 |
 | `profiles.ts` | 八个 `ToolProfile` + `resolveToolProfile/createToolExecutionPolicy/profileForIngestSkill`；集中声明 runner 工具 allowlist、允许 sideEffect、审批标记与可选 page scope/job capability |
 | `compile.ts` | `compileToolSet(toolDefs, ctx, { policy, ... })` — policy 必传；过滤工具、校验 sideEffect/subject/job capability、包装 page scope，并把脱敏后的 profile/sideEffect/subject/pageSlugs 送入审计回调。`synthesizeFinishTool` 仍仅作为 provider 收尾适配器 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
 | `builtin/wiki-search.ts` | `wiki.search` — 通过 `ToolContext.search` 做 FTS5 搜索（取代旧 `vault-search.ts`） |
-| `builtin/wiki-list.ts` | `wiki.list` — 通过 `ToolContext.listPages` 枚举本 subject 页标题/slug |
+| `builtin/wiki-list.ts` | `wiki.list` — title/updated keyset cursor 分页，默认 50、最大 100，支持 tag 筛选 |
+| `builtin/wiki-inspect.ts` | `wiki.inspect` — 页面元数据、出链/反链、关联来源与轻量健康摘要；不返回正文 |
+| `builtin/source-search.ts` | `source.search` — 当前 subject 解析后 chunks 的确定性检索，excerpt 单条/总量受限 |
+| `builtin/source-read.ts` | `source.read` — 按 chunk 或逻辑文本 offset/limit 读取解析后来源窗口，不读取原始二进制 |
 | `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面标题/正文，改标题联动 relink（`sideEffect:'update'`，仅 `fix:contradiction` profile） |
 | `builtin/wiki-patch.ts` | `wiki.patch` — 通过 `ToolContext.patchPage` 做 old_string/new_string 精确替换（`sideEffect:'update'`，`fix:links/fix:contradiction` profile） |
 | `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
@@ -266,12 +271,17 @@ src/server/agents/
 └── tools/
     ├── registry.ts                 # ToolRegistry + createBuiltinToolRegistry()
     ├── tool-context.ts             # ToolContext 接口（不暴露 AgentContext）
+    ├── evidence-reader.ts          # subject-scoped 页面/来源证据读取 + page keyset 分页
+    ├── evidence-results.ts         # 纯空结果契约 helper
     ├── profiles.ts                 # runner allowlist + ToolExecutionPolicy
     ├── compile.ts                  # policy 强制编译 / synthesizeFinishTool
     └── builtin/
         ├── wiki-read.ts            # wiki.read（取代旧 vault-read.ts）
         ├── wiki-search.ts          # wiki.search（取代旧 vault-search.ts）
         ├── wiki-list.ts            # wiki.list
+        ├── wiki-inspect.ts         # wiki.inspect
+        ├── source-search.ts        # source.search
+        ├── source-read.ts          # source.read
         ├── wiki-update.ts          # wiki.update（sideEffect:'update'，仅 fix:contradiction）
         ├── wiki-patch.ts           # wiki.patch（sideEffect:'update'，fix:links/fix:contradiction）
         ├── wiki-reenrich.ts        # wiki.reenrich（兼容定义；Phase 0 profile 不暴露）
@@ -288,6 +298,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-10 | Wiki 证据工具 Phase 1A：builtin registry 新增 `wiki.inspect`、`source.search`、`source.read`；`evidence-reader` 统一 subject-scoped 页面/来源证据与 `wiki.list` keyset 分页；compile policy 在分页前注入 allowedSet、scope 外 inspect 返回空结果、source page filter 越界报错；审计递归脱敏 `content/excerpt` |
 | 2026-07-10 | 工具治理 Phase 0：新增八个 ToolProfile 与必传 ToolExecutionPolicy；compileToolSet 开始过滤 allowlist、校验 sideEffect/subject、强制 page scope 并输出审计字段；Query 收缩为只读；删除不可达的通用提交和动态 dispatch ToolDef，commitPending 迁到 runtime 内部函数；新增 builtin skill manifest 与 hash tombstone，原版 retired 文件删除、用户改版归档 |
 | 2026-04-27 | 初始化（Phase 1）：orchestrator + skill loader + tool registry + MCP client pool；ingest 切换为 planner→writer×N→reviewer 流水线 |
 | 2026-06-20 | 断点续传：新增 `checkpoint.ts`（IngestCheckpoint 句柄）；`AgentContext.checkpoint?` 可选字段；`PipelineStep.checkpointAs` 逐页续传（命中检查点跳过 LLM，writer 完成即落盘）|

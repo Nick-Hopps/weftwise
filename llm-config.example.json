@@ -5,7 +5,6 @@
     "profile": "anthropic-default",
     "model": "claude-sonnet-4-6",
     "maxTokens": 4096,
-    "temperature": 0.2,
     "timeoutMs": 480000,
     "maxRetries": 2
   },
@@ -14,12 +13,10 @@
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
       "maxTokens": 4096,
-      "topP": 0.9,
-      "presencePenalty": 0.1,
-      "frequencyPenalty": 0.1,
       "providerOptions": {
         "anthropic": {
-          "thinking": { "type": "enabled", "budgetTokens": 5000 }
+          "thinking": { "type": "adaptive" },
+          "effort": "medium"
         }
       }
     },
@@ -69,21 +66,25 @@
     },
     "ingest:planner": {
       "profile": "anthropic-default",
-      "model": "claude-sonnet-4-6"
+      "model": "claude-sonnet-4-6",
+      "temperature": 0.2
     },
     "ingest:chunk-summarizer": {
       "profile": "openai-default",
-      "model": "gpt-4o-mini"
+      "model": "gpt-4o-mini",
+      "temperature": 0
     },
     "ingest:writer": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "temperature": 0.2
     },
     "ingest:enricher": {
       "profile": "anthropic-default",
       "model": "claude-sonnet-4-6",
-      "maxTokens": 16384
+      "maxTokens": 16384,
+      "temperature": 0.2
     },
     "ingest:verifier": {
       "profile": "anthropic-default",

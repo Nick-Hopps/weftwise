@@ -120,4 +120,14 @@ describe('buildFixToolContext', () => {
     const ctx = buildFixToolContext(subject, { guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit: vi.fn() });
     expect(ctx.createPage).toBeUndefined();
   });
+
+  it('注入当前 Subject 的 inspect/source/list 证据能力', () => {
+    const ctx = buildFixToolContext(subject, {
+      guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit: vi.fn(),
+    });
+    expect(ctx.inspectPage).toBeTypeOf('function');
+    expect(ctx.searchSources).toBeTypeOf('function');
+    expect(ctx.readSource).toBeTypeOf('function');
+    expect(ctx.listPages).toBeTypeOf('function');
+  });
 });

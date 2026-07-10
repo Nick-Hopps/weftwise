@@ -11,8 +11,8 @@ import { executePageMerge, executePageSplit, executePageDelete, executePageCreat
 import type { CurateGuard } from '../wiki/curate-plan';
 import type { Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
+import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
 
-const LIST_CAP = 200;
 const SEARCH_LIMIT_DEFAULT = 8;
 
 export function buildCurateToolContext(
@@ -24,6 +24,7 @@ export function buildCurateToolContext(
   },
 ): ToolContext {
   const { guard, jobId, emit } = deps;
+  const evidence = createSubjectEvidenceReader(subject);
   return {
     subject,
     async readPage(slug) {
@@ -44,12 +45,17 @@ export function buildCurateToolContext(
       }
       return hits;
     },
-    async listPages() {
-      return pagesRepo
-        .getAllPages(subject.id)
-        .filter((p) => guard.isAllowed(p.slug) && !pagesRepo.isMetaPage(p))
-        .slice(0, LIST_CAP)
-        .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary ?? '', tags: (p.tags ?? []).filter((t) => t !== 'meta') }));
+    async inspectPage(slug, include) {
+      return evidence.inspectPage(slug, include);
+    },
+    async searchSources(input) {
+      return evidence.searchSources(input);
+    },
+    async readSource(input) {
+      return evidence.readSource(input);
+    },
+    async listPages(input, options) {
+      return evidence.listPages(input, options);
     },
     emit,
     async mergePages(targetSlug, sourceSlug) {

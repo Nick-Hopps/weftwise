@@ -87,6 +87,96 @@ export interface WikiLink {
   targetSubjectId: SubjectId;
 }
 
+export type InspectSection = 'links' | 'backlinks' | 'sources' | 'health';
+
+export interface WikiInspection {
+  found: boolean;
+  page: null | {
+    slug: string;
+    title: string;
+    summary: string;
+    tags: string[];
+    updatedAt: string;
+  };
+  outgoing: Array<{
+    subjectSlug: string;
+    slug: string;
+    title: string | null;
+    context: string;
+    resolved: boolean;
+  }>;
+  backlinks: Array<{
+    subjectSlug: string;
+    slug: string;
+    title: string;
+  }>;
+  sources: Array<{
+    id: string;
+    filename: string;
+    originUrl: string | null;
+    parsedAt: string | null;
+    stale: boolean;
+  }>;
+  health: {
+    brokenLinks: number;
+    inboundCount: number;
+    outboundCount: number;
+    sourceCount: number;
+  };
+}
+
+export interface SourceSearchInput {
+  query: string;
+  pageSlug?: string;
+  sourceIds?: string[];
+  limit?: number;
+}
+
+export interface SourceSearchResult {
+  hits: Array<{
+    sourceId: string;
+    filename: string;
+    chunkId: string;
+    heading: string;
+    excerpt: string;
+    score: number;
+  }>;
+}
+
+export interface SourceReadInput {
+  sourceId: string;
+  chunkId?: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface SourceReadResult {
+  sourceId: string;
+  filename: string;
+  chunkId: string | null;
+  content: string;
+  nextOffset: number | null;
+  truncated: boolean;
+}
+
+export interface PageListInput {
+  cursor?: string;
+  limit?: number;
+  tag?: string;
+  sort?: 'title' | 'updated';
+}
+
+export interface PageListResult {
+  pages: Array<{
+    slug: string;
+    title: string;
+    summary: string;
+    tags: string[];
+    updatedAt: string;
+  }>;
+  nextCursor: string | null;
+}
+
 export interface Job {
   id: string;
   type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research';

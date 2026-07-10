@@ -19,7 +19,9 @@ describe('resolveQueryTools', () => {
     const { resolveQueryTools } = await import('../query-service');
     const names = resolveQueryTools().map((t) => t.name);
     expect(names).not.toContain('web.search');
-    expect(names).toContain('wiki.read');
+    expect(names).toEqual(expect.arrayContaining([
+      'wiki.list', 'wiki.search', 'wiki.read', 'wiki.inspect', 'source.search', 'source.read',
+    ]));
     expect(names).not.toContain('wiki.update');
     expect(names).not.toContain('wiki.delete');
   });
@@ -29,6 +31,7 @@ describe('resolveQueryTools', () => {
     const { resolveQueryTools } = await import('../query-service');
     const names = resolveQueryTools().map((t) => t.name);
     expect(names).toContain('web.search');
+    expect(names).toEqual(expect.arrayContaining(['wiki.inspect', 'source.search', 'source.read']));
     expect(names).not.toContain('wiki.update');
   });
 });

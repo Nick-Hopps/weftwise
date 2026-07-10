@@ -1,7 +1,17 @@
-import type { Subject } from '@/lib/contracts';
+import type {
+  InspectSection,
+  PageListInput,
+  PageListResult,
+  SourceReadInput,
+  SourceReadResult,
+  SourceSearchInput,
+  SourceSearchResult,
+  Subject,
+  WikiInspection,
+} from '@/lib/contracts';
 import type { AgentContext } from '../types';
 import { parseFrontmatter } from '@/server/wiki/frontmatter';
-import * as pagesRepo from '@/server/db/repos/pages-repo';
+import { createSubjectEvidenceReader } from './evidence-reader';
 
 /**
  * 工具执行上下文（DI 接缝）：工具只声明 schema + 记录访问，数据源由 ctx 注入。
@@ -11,9 +21,17 @@ export interface ToolContext {
   subject: Subject;
   readPage(slug: string): Promise<{ title: string; markdown: string } | null>;
   search(query: string, limit: number): Promise<Array<{ slug: string; title: string; summary: string }>>;
-  listPages(): Promise<Array<{ slug: string; title: string; summary: string; tags: string[] }>>;
+  inspectPage?(slug: string, include?: InspectSection[]): Promise<WikiInspection>;
+  searchSources?(input: SourceSearchInput): Promise<SourceSearchResult>;
+  readSource?(input: SourceReadInput): Promise<SourceReadResult>;
+  listPages(
+    input?: PageListInput,
+    options?: { allowedPageSlugs?: ReadonlySet<string> },
+  ): Promise<PageListResult>;
   /** query 累积访问页用于引用核查；ingest 不传。 */
   onAccess?(page: { slug: string; title: string; body?: string }): void;
+  /** 只记录来源标识，禁止把来源正文写入访问收集器。 */
+  onSourceAccess?(access: { sourceId: string; chunkId?: string }): void;
   /** 可选 job 事件（ingest 经 agentCtx.emit）；query 不传（工具活动由流式响应携带）。 */
   emit?(type: string, message: string, data?: Record<string, unknown>): void;
   /** query 侧触发 re-enrich 任务（入队）；ingest 不传 → 工具在 ingest 中调用会优雅报错。 */
@@ -42,6 +60,7 @@ export interface ToolContext {
 /** 从 AgentContext 构造 ingest 侧 ToolContext：读/搜走 overlay（含本 job 暂存页），列举走 pagesRepo。 */
 export function agentToolContext(agentCtx: AgentContext): ToolContext {
   const subjectSlug = agentCtx.subject.slug;
+  const evidence = createSubjectEvidenceReader(agentCtx.subject);
   return {
     subject: agentCtx.subject,
     async readPage(slug) {
@@ -54,11 +73,8 @@ export function agentToolContext(agentCtx: AgentContext): ToolContext {
       const hits = await agentCtx.overlay.search(subjectSlug, query);
       return hits.slice(0, limit).map((h) => ({ slug: h.slug, title: h.title, summary: h.summary }));
     },
-    async listPages() {
-      return pagesRepo
-        .getAllPages(agentCtx.subject.id)
-        .filter((p) => !pagesRepo.isMetaPage(p))
-        .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary ?? '', tags: (p.tags ?? []).filter((t) => t !== 'meta') }));
+    async listPages(input, options) {
+      return evidence.listPages(input, options);
     },
     emit: (type, message, data) => agentCtx.emit(type, message, data),
   };
