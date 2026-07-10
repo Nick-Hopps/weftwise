@@ -62,13 +62,12 @@ import {
 } from '../query-prompt';
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
-  it('说明四工具、subject 隔离与 re-enrich 确认守则', () => {
+  it('只说明只读工具与 subject 隔离', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_list');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_search');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_read');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_reenrich');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_reenrich');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/other subject/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/confirm before triggering/i);
   });
 });
 
@@ -125,25 +124,11 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT — web search 纪律', () => {
   });
 });
 
-describe('QUERY_AGENTIC_SYSTEM_PROMPT - 写工具纪律', () => {
-  it('工具清单含 wiki_create / wiki_delete', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_create');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_delete');
-  });
-  it('删除段要求后续轮确认、禁止同轮删除', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Deleting a page/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/ALWAYS confirm before delet/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/LATER turn|later turn/);
-  });
-  it('创建段存在', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Creating a page/i);
-  });
-  it('工具清单含 wiki_update', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_update');
-  });
-  it('更新段存在，要求后续轮确认、禁止同轮更新', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Updating a page/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/ALWAYS confirm before updat/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/LATER turn|later turn/);
+describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
+  it('不宣称 Ask AI 可直接执行写操作或口头确认授权', () => {
+    for (const tool of ['wiki_create', 'wiki_update', 'wiki_patch', 'wiki_delete', 'wiki_reenrich']) {
+      expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain(tool);
+    }
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toMatch(/LATER turn|prior turn|confirm before/i);
   });
 });

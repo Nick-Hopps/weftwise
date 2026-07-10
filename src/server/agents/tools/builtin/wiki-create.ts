@@ -21,8 +21,7 @@ export const wikiCreateTool: ToolDef<z.infer<typeof InputSchema>, z.infer<typeof
   description:
     'Create a NEW wiki page in the current subject from a title and markdown body. This CHANGES the wiki. ' +
     'The slug is derived from the title automatically (a numeric suffix is added on conflict). ' +
-    'Use [[Page Title]] wikilinks only to pages that already exist; broken links are rejected. ' +
-    'Only call after the user has explicitly confirmed they want the page created.',
+    'Use [[Page Title]] wikilinks only to pages that already exist; broken links are rejected.',
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'create',

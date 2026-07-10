@@ -13,8 +13,7 @@ export const wikiReenrichTool: ToolDef<z.infer<typeof InputSchema>, z.infer<type
   source: 'builtin',
   description:
     'Start a background job that re-runs the augmentation pass on ONE wiki page by slug in the current subject ' +
-    '(layers fresh learning callouts onto its existing prose, then verifies). This CHANGES the page. ' +
-    'Only call after the user has explicitly confirmed which page to re-enrich. Runs asynchronously.',
+    '(layers fresh learning callouts onto its existing prose, then verifies). This CHANGES the page and runs asynchronously.',
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'enqueue',

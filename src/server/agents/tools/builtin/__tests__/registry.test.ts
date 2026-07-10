@@ -7,4 +7,11 @@ describe('createBuiltinToolRegistry', () => {
     expect(registry.get('dispatch.skill')).toBeUndefined();
     expect(registry.get('commit_changeset')).toBeUndefined();
   });
+
+  it('共享写工具描述不包含 Query 专属的口头确认授权', () => {
+    const registry = createBuiltinToolRegistry();
+    for (const name of ['wiki.reenrich', 'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete']) {
+      expect(registry.get(name)?.description).not.toMatch(/confirm|prior turn/i);
+    }
+  });
 });
