@@ -52,7 +52,7 @@ worker-entry.ts
 
 - `streamAgenticQuery(opts)` — 流式 agentic 问答：
   1. 调 `createAccessedPages()` 创建访问页收集器；
-  2. 调 `buildQueryToolContext(subject, accessed)` 构造 query 侧 `ToolContext`，经 `createBuiltinToolRegistry().resolve(['wiki.read','wiki.search','wiki.list'])` + `compileToolSet` 编译为工具集（来自共享 registry 的 wiki.read/search/list）；
+  2. 调 `resolveToolProfile('query:read')` 解析只读 allowlist，`buildQueryToolContext(subject, accessed)` 只注入 read/search/list/webSearch，再由必传 `ToolExecutionPolicy` 的 `compileToolSet` 编译；
   3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
   4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
@@ -66,14 +66,14 @@ worker-entry.ts
 - `extractCitationsFromAnswer(answer, accessed, subjectSlug)`（`citation-extract.ts`，纯函数）：`extractWikiLinks` 解析答案全文（标题也可兜底解析到 slug）→ 目标 slug ∩ `accessed.bodies`（真正 `wiki_read` 过的页，过滤幻觉链接/未读页）→ 按 slug 去重（取首次出现锚点句）；`pickExcerpt(anchorText, pageBody)` 用词重叠打分（中英通用分词：latin 词 + CJK 双字 bigram）在页面正文按句界切出 1-3 句作 excerpt，**恒为页面原文字面子串**（按偏移切片，不重新生成文本）；
 - 流式分支（`streamAgenticQuery` + `/api/query`）与 `runQuery` 均在**流结束后**同步调用此解析，聊天 UI 正文内联 `[[slug]]` 由前端渲染层直接渲染成 wikilink，不再需要模型额外产出 citations 数组；
 - coverage 判定与引用解析解耦，改为**流后异步 fire-and-forget 小调用**：`assessCoverageInBackground(subject, question, answer)` 只喂问题+答案（不喂 accessed 上下文），走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（`query-prompt.ts`）判定 `coverageSufficient`；`false` 时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'；`try/catch` 包裹，写入失败/异常只 `console.error` 不影响已返回的问答响应，也不阻塞响应本身）；`done` 事件不再携带 `coverageSufficient`（T3.2 引入时曾同步携带，现已异步化）；
-- `resolveQueryTools()` — 导出函数：`web.search` 仅在 `isWebSearchConfigured()` 为真时才注入工具集，未配置时模型完全看不到该工具（T3.2，见下）；
+- `resolveQueryTools()` — 只解析 `query:read` profile；实际工具为 `wiki.read/search/list` 与可选 `web.search`。Query 不再注入 reenrich/create/update/patch/delete，也不依赖对话历史里的口头确认授权；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue），走 changeset 写入对应 subject。
 
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答（同时触发 backlog 写入）。
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
 
 **`query-tools.ts`**（新增）— subject-scoped 工具定义，经共享 registry 的 `wiki.read/search/list`：
-- `buildQueryToolContext(subject, accessed)` — 构造 query 侧 `ToolContext`（`readPage`=读已提交正文 / `search`=`hybridRankSlugs` 混合 FTS5+向量，未配置 embedding 降级纯 FTS / `listPages`=过滤 meta / `onAccess`=累积访问页供引用）；交给 `compileToolSet(queryToolDefs, ...)` 注入（`queryToolDefs` 来自共享 `createBuiltinToolRegistry().resolve([...])`）。三工具定义 `wiki.read/search/list` 单一源在 `agents/tools/builtin/`。
+- `buildQueryToolContext(subject, accessed)` — 构造严格只读 `ToolContext`（readPage/search/listPages/onAccess/webSearch），不含任何写入、删除或入队方法；交给 `compileToolSet(..., { policy })`。工具定义的单一源仍在 `agents/tools/builtin/`。
 - `createAccessedPages()` — 创建 `AccessedPages` 对象（`{ meta: Map<slug, {title, summary}>, bodies: Map<slug, {title, body}> }`），调用方直接向两个 Map 中写入访问记录。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
 - `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.getAllPages(subjectId).some(p => !pagesRepo.isMetaPage(p))`；只计非 meta 页，空 subject 或仅含 meta 页时返 false，消灭"宏观问题报不存在文档"误报。
@@ -95,20 +95,20 @@ worker-entry.ts
 
 1. 解析 scope + seedSet：`scope:'pages'`（auto）→ seed = params.slugs，再用 `expandScopeWithNeighbors` 扩展本-subject 邻居；`scope:'subject'`（manual）→ 全 subject 非 meta 页，seedSet=null（无 seed 过滤）。
 2. 读取 scope 内每页元数据（slug/title/summary/tags/bodyChars，不喂正文——模型用 `wiki.read` 自取）。
-3. 装配 `createCurateGuard`（硬护栏）+ `buildCurateToolContext(subject, { guard, jobId, emit })`（worker 侧读写 ToolContext）+ `compileToolSet(...)`：manual 七工具 `wiki.read/search/list/merge/split/delete/create`；**auto 仅六工具，不解析 `wiki.create`**（按 `seedSet===null` 条件化 `resolve`，省得模型反复试探一个永远 ok:false 的工具）。
+3. 令 `allowedSet = seed + 本 subject 一跳邻居`，装配 `createCurateGuard({ seedSet, allowedSet, caps })` + `buildCurateToolContext`，按 mode 解析 profile 后将同一 allowedSet 交给 `ToolExecutionPolicy`：manual 为 read/search/inspect/merge/split/create/delete；auto 仅 read/search/inspect/merge/split，无 list/create/delete。
 4. 调 `generateTextWithTools('curate', { system: CURATE_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: 40 })` 驱动工具循环；模型自驱读页、自行决策并调写工具；每次写工具调用经 guard 鉴权后调 page-ops 内核 + emit 事件。
 5. guard.totals() 非零则 enqueue embed-index。
 
 **护栏（`createCurateGuard`，`wiki/curate-plan.ts`）**：
 - caps 计数器：merge≤5 / split≤5 / delete≤5 / create≤5；超限时工具返回 ok:false + reason，模型物理越不过。
-- seed 强制（auto）：merge/split/delete 必须涉及至少一个 seed 页；防止自动策展无边界扩散。
-- auto 禁 create：auto 模式（`seedSet !== null`）直接不解析 `wiki.create` 工具（模型见不到）；即便绕过，`guard.canCreate` 仍 ok:false 兜底（`wiki.create` 仅 manual 全库模式可用）。
+- allowedSet 强制：read/search 过滤 scope 外页；merge 两端都必须在 allowedSet 且至少一端是 seed；split 必须同时位于 allowedSet 与 seedSet；manual 删除也不得越过 allowedSet。
+- auto 禁 list/create/delete：三个工具均不进入 profile；Guard 另外固定拒绝 auto delete/create，形成纵深防御。
 - 保护页：index/log 不可 merge/split/delete（slug 集合 = `page-identity::META_PAGE_SLUGS` 单一源）。
 
 **事件**：`curate:start` / `curate:agent:start`（进入工具循环前，报候选页数/mode/caps）/ `curate:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
 
 **`curate-tools.ts`**（新增）— worker 侧 `ToolContext` 构造：
-- `buildCurateToolContext(subject, { guard, jobId, emit })` — 只读走已提交 vault（`readPageInSubject`）+ 混合检索（`hybridRankSlugs`）+ 列举（过滤 meta，上限200）；写能力（merge/split/delete/create）各先过 `CurateGuard`，allow → 调 `page-ops` 内核 → `guard.record` → emit 事件；deny → emit `curate:skip` + 抛错（工具层 catch 成 ok:false，reason 透传模型）。
+- `buildCurateToolContext(subject, { guard, jobId, emit })` — read/search/list 先经 `guard.isAllowed` 过滤；写能力（merge/split/delete/create）再经 Guard 判定后调用 page-ops。compile policy 使用同一 allowedSet 包装上下文，Guard 与编译层形成双重硬边界。
 
 ### `fix-service.ts` 🆕 — 任务类型 `'fix'`
 
@@ -123,9 +123,9 @@ worker-entry.ts
 
 1. **阶段1（确定性补 frontmatter）**：`fixMissingFrontmatter(slug, doc, now)` 纯函数批量填补缺失 frontmatter 字段（title/summary/tags/created），一次 Saga commit 提交所有受影响页（1 commit）。broken-link 在此阶段跳过（需 LLM 判断语义意图）。
 2. **阶段2（LLM 工具循环修复）**：对剩余 findings 按页分组→按 `buildSubjectReportLines` 格式组装诊断清单，调 `generateTextWithTools('fix', { system: FIX_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: FIX_MAX_STEPS (60) })`：
-   - 工具集（经 `createFixGuard` 把守）：`wiki.read` / `wiki.search` / `wiki.list`（读）+ `wiki.update` / `wiki.create`（写）。
+   - 工具集按 finding 选择最小 profile：只有 broken-link/missing-crossref 时使用 `fix:links`（read/search/patch）；含 contradiction 时使用 `fix:contradiction`，额外开放 update。两者都无 list/create，页面 roster 已直接注入 Prompt。
    - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `checkRewriteFidelity(…, FIDELITY_PROFILES.fix)`（`wiki/rewrite-fidelity.ts`，需现有正文，护栏不读盘；floor 0.8）。
-   - 模型自驱读页后调 `wiki.update`（破损/缺引用）或 `wiki.create`（新页）；每次写操作一个 commit。
+   - 模型自驱读页后优先调 `wiki.patch` 精确修复链接；只有 contradiction profile 才能整页 `wiki.update`。每次写操作一个 commit。
    - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
 
 **事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:agent:start`（进入阶段2 工具循环前，报 finding 数/受影响页数）/ `fix:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:complete`。
@@ -236,6 +236,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-10 | 工具治理 Phase 0：Query 固定 query:read 且 ToolContext 不含写能力；Fix 按 finding 选择 links/contradiction profile 并移除 list/create；Curate 使用 mode profile + allowedSet，Auto 无 list/create/delete，读写 scope 由 compile policy 与 Guard 双重强制；ingest/re-enrich 的 commitPending 统一从 agents/runtime 导入 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：三类 service 强校验 subjectId / prompt 注入 SubjectContext / lint 默认 subject-scoped |
 | 2026-04-27 | ingest-service 切换为 multi-agent runtime；旧多阶段 LLM 直调与 buildLogContent helper 移除 |
