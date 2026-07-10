@@ -37,8 +37,6 @@ export interface ToolContext {
     Promise<{ updatedSlug: string; appliedEdits: number }>;
   /** query 侧只读联网检索（Tavily）；工具集只在 web search 已配置时才含 web.search，未配置时不会被调用。 */
   webSearch?(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;
-  /** 逃生舱：仅 ingest-only 工具（commit_changeset / dispatch.skill）使用。 */
-  agent?: AgentContext;
 }
 
 /** 从 AgentContext 构造 ingest 侧 ToolContext：读/搜走 overlay（含本 job 暂存页），列举走 pagesRepo。 */
@@ -63,6 +61,5 @@ export function agentToolContext(agentCtx: AgentContext): ToolContext {
         .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary ?? '', tags: (p.tags ?? []).filter((t) => t !== 'meta') }));
     },
     emit: (type, message, data) => agentCtx.emit(type, message, data),
-    agent: agentCtx,
   };
 }

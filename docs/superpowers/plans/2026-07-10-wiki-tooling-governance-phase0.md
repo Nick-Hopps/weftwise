@@ -181,7 +181,7 @@ git commit -m "功能：引入工具配置与运行时策略"
 - 产出：`commitPending(ctx, supplied, sourceOps?) => Promise<IngestResult>`，签名与行为保持不变。
 - 删除：`commitChangesetTool`、`dispatchSkillTool`、`ToolContext.agent`、`ToolSource` 的 `'dispatch'`、`ToolSideEffect` 的 `'commit'`。
 
-- [ ] **步骤 1：写 registry 与新导入路径的失败测试**
+- [x] **步骤 1：写 registry 与新导入路径的失败测试**
 
 ```ts
 it('builtin registry 不注册不可达工具', () => {
@@ -197,7 +197,7 @@ it('builtin registry 不注册不可达工具', () => {
 import { commitPending } from '../commit-pending';
 ```
 
-- [ ] **步骤 2：运行测试，确认 RED**
+- [x] **步骤 2：运行测试，确认 RED**
 
 运行：
 
@@ -207,7 +207,7 @@ npx vitest run src/server/agents/tools/builtin/__tests__/registry.test.ts src/se
 
 预期：registry 测试因两个工具仍存在而 FAIL；runtime 测试因 `commit-pending.ts` 不存在而 FAIL。
 
-- [ ] **步骤 3：迁移纯函数并删除 ToolDef 包装**
+- [x] **步骤 3：迁移纯函数并删除 ToolDef 包装**
 
 移动 `commitPending` 及其内部 helpers 到 `runtime/commit-pending.ts`，保留：pending/supplied 按 path 合并、system frontmatter、changeset validate/apply、source links、extra stage paths、`committed` 幂等守卫。删除两个 ToolDef 文件与 registry 注册。
 
@@ -219,7 +219,7 @@ import { commitPending } from '../agents/runtime/commit-pending';
 
 `ToolContext` 删除 `agent?: AgentContext`，`agentToolContext()` 不再暴露 AgentContext 逃生舱。
 
-- [ ] **步骤 4：运行定向测试与死代码扫描**
+- [x] **步骤 4：运行定向测试与死代码扫描**
 
 运行：
 
@@ -231,7 +231,7 @@ rg -n "dispatch\.skill|dispatch_skill|commit_changeset|commitChangesetTool|tools
 
 预期：测试 PASS；`rg` 无匹配并以 1 退出；TypeScript 退出码 0。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add -A src/server/agents src/server/services

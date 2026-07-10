@@ -58,7 +58,7 @@ const mockCommitPending = vi.fn(async (): Promise<IngestResult> => ({
   linksAdded: 0,
   commitSha: 'sha-1',
 }));
-vi.mock('../../agents/tools/builtin/commit-changeset', () => ({
+vi.mock('../../agents/runtime/commit-pending', () => ({
   commitPending: (...args: unknown[]) => mockCommitPending(...args as []),
 }));
 
