@@ -159,6 +159,24 @@ export interface SourceReadResult {
   truncated: boolean;
 }
 
+export interface PageListInput {
+  cursor?: string;
+  limit?: number;
+  tag?: string;
+  sort?: 'title' | 'updated';
+}
+
+export interface PageListResult {
+  pages: Array<{
+    slug: string;
+    title: string;
+    summary: string;
+    tags: string[];
+    updatedAt: string;
+  }>;
+  nextCursor: string | null;
+}
+
 export interface Job {
   id: string;
   type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research';
