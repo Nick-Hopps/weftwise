@@ -125,6 +125,40 @@ export interface WikiInspection {
   };
 }
 
+export interface SourceSearchInput {
+  query: string;
+  pageSlug?: string;
+  sourceIds?: string[];
+  limit?: number;
+}
+
+export interface SourceSearchResult {
+  hits: Array<{
+    sourceId: string;
+    filename: string;
+    chunkId: string;
+    heading: string;
+    excerpt: string;
+    score: number;
+  }>;
+}
+
+export interface SourceReadInput {
+  sourceId: string;
+  chunkId?: string;
+  offset?: number;
+  limit?: number;
+}
+
+export interface SourceReadResult {
+  sourceId: string;
+  filename: string;
+  chunkId: string | null;
+  content: string;
+  nextOffset: number | null;
+  truncated: boolean;
+}
+
 export interface Job {
   id: string;
   type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research';

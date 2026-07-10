@@ -1,4 +1,13 @@
-import type { InspectSection, Subject, WikiInspection } from '@/lib/contracts';
+import type {
+  InspectSection,
+  Source,
+  SourceReadInput,
+  SourceReadResult,
+  SourceSearchInput,
+  SourceSearchResult,
+  Subject,
+  WikiInspection,
+} from '@/lib/contracts';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import * as sourcesRepo from '@/server/db/repos/sources-repo';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
@@ -11,6 +20,18 @@ const ALL_INSPECT_SECTIONS: InspectSection[] = [
   'sources',
   'health',
 ];
+const SOURCE_SEARCH_DEFAULT = 5;
+const SOURCE_SEARCH_MAX = 10;
+const SOURCE_EXCERPT_MAX = 2_000;
+const SOURCE_EXCERPT_TOTAL_MAX = 12_000;
+const SOURCE_READ_DEFAULT = 8_000;
+const SOURCE_READ_MAX = 20_000;
+
+interface SourceChunk {
+  id: string;
+  heading: string;
+  text: string;
+}
 
 export function emptyWikiInspection(): WikiInspection {
   return {
@@ -106,6 +127,206 @@ export function inspectPageEvidence(
           sourceCount: 0,
         },
   };
+}
+
+/** 在当前 Subject 的解析后来源块中执行确定性词项检索。 */
+export function searchSourceEvidence(
+  subject: Subject,
+  input: SourceSearchInput,
+): SourceSearchResult {
+  const terms = termsOf(input.query);
+  if (terms.length === 0) return { hits: [] };
+
+  const candidates = resolveSourceCandidates(subject, input);
+  const hits: SourceSearchResult['hits'] = [];
+  for (const source of candidates) {
+    const chunks = readValidChunks(getSourceMetadata(source.id));
+    for (const chunk of chunks) {
+      const score = terms.reduce(
+        (total, term) => total
+          + occurrences(chunk.heading, term) * 2
+          + occurrences(chunk.text, term),
+        0,
+      );
+      if (score === 0) continue;
+      hits.push({
+        sourceId: source.id,
+        filename: source.filename,
+        chunkId: chunk.id,
+        heading: chunk.heading,
+        excerpt: excerptAroundFirstMatch(chunk.text, terms),
+        score,
+      });
+    }
+  }
+
+  hits.sort(compareSourceHits);
+  const limit = Math.min(
+    SOURCE_SEARCH_MAX,
+    Math.max(1, Math.floor(input.limit ?? SOURCE_SEARCH_DEFAULT)),
+  );
+  const bounded: SourceSearchResult['hits'] = [];
+  let excerptTotal = 0;
+  for (const hit of hits) {
+    if (bounded.length >= limit || excerptTotal >= SOURCE_EXCERPT_TOTAL_MAX) break;
+    const remaining = SOURCE_EXCERPT_TOTAL_MAX - excerptTotal;
+    const excerpt = hit.excerpt.slice(0, remaining);
+    bounded.push({ ...hit, excerpt });
+    excerptTotal += excerpt.length;
+  }
+  return { hits: bounded };
+}
+
+/** 按 chunk 或拼接后的逻辑文本读取受限窗口。 */
+export function readSourceEvidence(
+  subject: Subject,
+  input: SourceReadInput,
+): SourceReadResult {
+  const source = sourcesRepo.getSource(input.sourceId);
+  if (!source || source.subjectId !== subject.id) {
+    throw sourceError(
+      'SOURCE_OUT_OF_SCOPE',
+      'Source is not available in the current subject.',
+    );
+  }
+
+  const chunks = readValidChunks(getSourceMetadata(source.id));
+  if (chunks.length === 0) {
+    throw sourceError(
+      'SOURCE_CONTENT_UNAVAILABLE',
+      `Source "${source.id}" has no parsed chunks.`,
+    );
+  }
+
+  const selected = input.chunkId
+    ? chunks.find((chunk) => chunk.id === input.chunkId)?.text
+    : chunks.map((chunk) => chunk.text).join('\n\n');
+  if (selected === undefined) {
+    throw sourceError(
+      'SOURCE_CONTENT_UNAVAILABLE',
+      `Chunk "${input.chunkId}" is unavailable.`,
+    );
+  }
+
+  const offset = Math.max(0, Math.floor(input.offset ?? 0));
+  const limit = Math.min(
+    SOURCE_READ_MAX,
+    Math.max(1, Math.floor(input.limit ?? SOURCE_READ_DEFAULT)),
+  );
+  const content = selected.slice(offset, offset + limit);
+  const end = offset + content.length;
+  const truncated = end < selected.length;
+  return {
+    sourceId: source.id,
+    filename: source.filename,
+    chunkId: input.chunkId ?? null,
+    content,
+    nextOffset: truncated ? end : null,
+    truncated,
+  };
+}
+
+function resolveSourceCandidates(subject: Subject, input: SourceSearchInput): Source[] {
+  const explicit = input.sourceIds === undefined
+    ? null
+    : input.sourceIds.map((sourceId) => {
+        const source = sourcesRepo.getSource(sourceId);
+        if (!source || source.subjectId !== subject.id) {
+          throw sourceError(
+            'SOURCE_OUT_OF_SCOPE',
+            'Source is not available in the current subject.',
+          );
+        }
+        return source;
+      });
+  const pageSources = input.pageSlug === undefined
+    ? null
+    : sourcesRepo.getSourcesForPage(subject.id, input.pageSlug);
+
+  let candidates: Source[];
+  if (explicit && pageSources) {
+    const explicitIds = new Set(explicit.map((source) => source.id));
+    candidates = pageSources.filter((source) => explicitIds.has(source.id));
+  } else if (explicit) {
+    candidates = explicit;
+  } else if (pageSources) {
+    candidates = pageSources;
+  } else {
+    candidates = sourcesRepo.listSourcesForSubject(subject.id);
+  }
+
+  return [...new Map(
+    candidates
+      .filter((source) => source.subjectId === subject.id)
+      .map((source) => [source.id, source]),
+  ).values()];
+}
+
+function termsOf(query: string): string[] {
+  return query.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function occurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  const text = haystack.toLocaleLowerCase();
+  let count = 0;
+  let index = 0;
+  while ((index = text.indexOf(needle, index)) >= 0) {
+    count += 1;
+    index += needle.length;
+  }
+  return count;
+}
+
+function excerptAroundFirstMatch(text: string, terms: string[]): string {
+  if (text.length <= SOURCE_EXCERPT_MAX) return text;
+  const lower = text.toLocaleLowerCase();
+  const firstMatch = terms.reduce((first, term) => {
+    const index = lower.indexOf(term);
+    return index >= 0 && (first < 0 || index < first) ? index : first;
+  }, -1);
+  const centeredStart = firstMatch < 0
+    ? 0
+    : Math.max(0, firstMatch - Math.floor(SOURCE_EXCERPT_MAX / 2));
+  const start = Math.min(centeredStart, text.length - SOURCE_EXCERPT_MAX);
+  return text.slice(start, start + SOURCE_EXCERPT_MAX);
+}
+
+function compareSourceHits(
+  a: SourceSearchResult['hits'][number],
+  b: SourceSearchResult['hits'][number],
+): number {
+  if (a.score !== b.score) return b.score - a.score;
+  return compareText(a.filename, b.filename)
+    || compareText(a.sourceId, b.sourceId)
+    || compareText(a.chunkId, b.chunkId);
+}
+
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+function readValidChunks(metadata: Record<string, unknown> | null): SourceChunk[] {
+  if (!Array.isArray(metadata?.chunks)) return [];
+  return metadata.chunks.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const chunk = value as Record<string, unknown>;
+    if (
+      typeof chunk.id !== 'string'
+      || typeof chunk.heading !== 'string'
+      || typeof chunk.text !== 'string'
+    ) {
+      return [];
+    }
+    return [{ id: chunk.id, heading: chunk.heading, text: chunk.text }];
+  });
+}
+
+function sourceError(
+  code: 'SOURCE_OUT_OF_SCOPE' | 'SOURCE_CONTENT_UNAVAILABLE',
+  message: string,
+): Error {
+  return new Error(`[${code}] ${message}`);
 }
 
 function readOriginUrl(metadata: Record<string, unknown> | null): string | null {
