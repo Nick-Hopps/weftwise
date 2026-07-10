@@ -78,4 +78,24 @@ describe('热路径查询走索引（非全表扫描）', () => {
     );
     expect(detail).toMatch(/USING (COVERING )?INDEX/);
   });
+
+  it('pending_actions 按会话恢复与按状态过期清理均走索引', async () => {
+    const db = await bootstrap();
+    const conversation = planDetail(
+      db,
+      `SELECT id FROM pending_actions
+       WHERE conversation_id = ? AND status = ? ORDER BY created_at DESC`,
+      'c1',
+      'pending',
+    );
+    expect(conversation).toMatch(/USING (COVERING )?INDEX/);
+
+    const expiry = planDetail(
+      db,
+      `SELECT id FROM pending_actions WHERE status = ? AND expires_at < ?`,
+      'pending',
+      '2026-07-11T00:00:00.000Z',
+    );
+    expect(expiry).toMatch(/USING (COVERING )?INDEX/);
+  });
 });
