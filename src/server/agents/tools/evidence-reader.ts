@@ -1,5 +1,7 @@
 import type {
   InspectSection,
+  PageListInput,
+  PageListResult,
   Source,
   SourceReadInput,
   SourceReadResult,
@@ -7,6 +9,7 @@ import type {
   SourceSearchResult,
   Subject,
   WikiInspection,
+  WikiPage,
 } from '@/lib/contracts';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import * as sourcesRepo from '@/server/db/repos/sources-repo';
@@ -31,6 +34,24 @@ interface SourceChunk {
   id: string;
   heading: string;
   text: string;
+}
+
+interface PageCursor {
+  version: 1;
+  sort: 'title' | 'updated';
+  tag: string | null;
+  lastValue: string;
+  lastSlug: string;
+}
+
+export interface SubjectEvidenceReader {
+  inspectPage(slug: string, include?: InspectSection[]): WikiInspection;
+  searchSources(input: SourceSearchInput): SourceSearchResult;
+  readSource(input: SourceReadInput): SourceReadResult;
+  listPages(
+    input?: PageListInput,
+    options?: { allowedPageSlugs?: ReadonlySet<string> },
+  ): PageListResult;
 }
 
 export function emptyWikiInspection(): WikiInspection {
@@ -226,6 +247,58 @@ export function readSourceEvidence(
   };
 }
 
+/** 使用版本化 keyset cursor 列举当前 Subject 页面。 */
+export function listPageEvidence(
+  subject: Subject,
+  input: PageListInput = {},
+  options: { allowedPageSlugs?: ReadonlySet<string> } = {},
+): PageListResult {
+  const sort = input.sort ?? 'title';
+  const tag = input.tag ?? null;
+  const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)));
+  const cursor = input.cursor ? decodeCursor(input.cursor, sort, tag) : null;
+
+  const candidates = pagesRepo
+    .getAllPages(subject.id)
+    .filter((page) => !pagesRepo.isMetaPage(page))
+    .filter((page) => tag === null || page.tags.includes(tag))
+    .filter((page) => !options.allowedPageSlugs || options.allowedPageSlugs.has(page.slug))
+    .sort((a, b) => comparePages(a, b, sort))
+    .filter((page) => !cursor || isAfterCursor(page, cursor));
+
+  const window = candidates.slice(0, limit + 1);
+  const pageWindow = window.slice(0, limit);
+  const hasMore = window.length > limit;
+  const lastPage = pageWindow.at(-1);
+  return {
+    pages: pageWindow.map((page) => ({
+      slug: page.slug,
+      title: page.title,
+      summary: page.summary ?? '',
+      tags: page.tags.filter((pageTag) => pageTag !== 'meta'),
+      updatedAt: page.updatedAt,
+    })),
+    nextCursor: hasMore && lastPage
+      ? encodeCursor({
+          version: 1,
+          sort,
+          tag,
+          lastValue: sort === 'title' ? lastPage.title : lastPage.updatedAt,
+          lastSlug: lastPage.slug,
+        })
+      : null,
+  };
+}
+
+export function createSubjectEvidenceReader(subject: Subject): SubjectEvidenceReader {
+  return {
+    inspectPage: (slug, include) => inspectPageEvidence(subject, slug, include),
+    searchSources: (input) => searchSourceEvidence(subject, input),
+    readSource: (input) => readSourceEvidence(subject, input),
+    listPages: (input, options) => listPageEvidence(subject, input, options),
+  };
+}
+
 function resolveSourceCandidates(subject: Subject, input: SourceSearchInput): Source[] {
   const explicit = input.sourceIds === undefined
     ? null
@@ -260,6 +333,61 @@ function resolveSourceCandidates(subject: Subject, input: SourceSearchInput): So
       .filter((source) => source.subjectId === subject.id)
       .map((source) => [source.id, source]),
   ).values()];
+}
+
+function encodeCursor(cursor: PageCursor): string {
+  return Buffer.from(JSON.stringify(cursor)).toString('base64url');
+}
+
+function decodeCursor(
+  raw: string,
+  sort: PageCursor['sort'],
+  tag: string | null,
+): PageCursor {
+  try {
+    const value = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('shape');
+    const cursor = value as Record<string, unknown>;
+    if (
+      cursor.version !== 1
+      || (cursor.sort !== 'title' && cursor.sort !== 'updated')
+      || cursor.sort !== sort
+      || (cursor.tag !== null && typeof cursor.tag !== 'string')
+      || cursor.tag !== tag
+      || typeof cursor.lastValue !== 'string'
+      || typeof cursor.lastSlug !== 'string'
+    ) {
+      throw new Error('mismatch');
+    }
+    return cursor as unknown as PageCursor;
+  } catch {
+    throw new Error(
+      '[INVALID_CURSOR] Cursor is invalid or does not match the requested filters.',
+    );
+  }
+}
+
+function comparePages(
+  a: WikiPage,
+  b: WikiPage,
+  sort: PageCursor['sort'],
+): number {
+  const aValue = sort === 'title' ? a.title : a.updatedAt;
+  const bValue = sort === 'title' ? b.title : b.updatedAt;
+  const valueOrder = sort === 'title'
+    ? compareText(aValue, bValue)
+    : compareText(bValue, aValue);
+  return valueOrder || compareText(a.slug, b.slug);
+}
+
+function isAfterCursor(page: WikiPage, cursor: PageCursor): boolean {
+  const value = cursor.sort === 'title' ? page.title : page.updatedAt;
+  if (cursor.sort === 'title') {
+    return value > cursor.lastValue
+      || (value === cursor.lastValue && page.slug > cursor.lastSlug);
+  }
+  return value < cursor.lastValue
+    || (value === cursor.lastValue && page.slug > cursor.lastSlug);
 }
 
 function termsOf(query: string): string[] {
