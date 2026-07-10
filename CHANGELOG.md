@@ -1,5 +1,6 @@
 | 日期 | 变更 | 说明 |
 |------|------|------|
+| 2026-07-10 | Wiki 工具治理 Phase 0 | 新增八个 ToolProfile 与必传 ToolExecutionPolicy，compileToolSet 开始过滤 allowlist、校验 sideEffect/subject/job capability、强制 page scope，并输出不含正文/patch 片段的脱敏审计字段；Ask AI 收缩为 query:read 且移除隐藏写 ToolContext/口头确认 Prompt；Fix 按 finding 选择最小 profile；Auto Curate 以 allowedSet 限制 read/search/merge/split 且无 list/create/delete；删除不可达的通用提交与动态 dispatch ToolDef，commitPending 迁为 runtime 内部函数；builtin skill manifest 对 retired 文件执行历史 hash 删除或用户改版归档。Phase 1 的证据工具、PendingAction 与 preview/approve 尚未实现。 |
 | 2026-04-27 | Phase 1 multi-agent runtime | 引入 `src/server/agents/`（orchestrator + skill loader + tool registry + MCP client pool）；`ingest` 切换为 planner→writer×N→reviewer 流水线；新增 5 项 agent 设置；spec 见 `docs/superpowers/specs/2026-04-27-multi-agent-runtime-design.md` |
 | 2026-04-22 | 初始化架构文档 | 自动扫描生成根级与 11 个模块级 `CLAUDE.md`，建立模块索引与架构图 |
 | 2026-04-22 | 接入 `.context/` | 启用决策审计链，团队共享编码规范与工作流规则 |

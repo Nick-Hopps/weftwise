@@ -14,7 +14,6 @@ export const wikiDeleteTool: ToolDef<z.infer<typeof InputSchema>, z.infer<typeof
   source: 'builtin',
   description:
     'Permanently delete ONE wiki page by slug in the current subject. This CHANGES the wiki and removes the page. ' +
-    'Only call after the user has explicitly confirmed which page to delete in a PRIOR turn. ' +
     'Other pages that link to it are left with broken links (count reported back). ' +
     'The deletion is recorded in History and can be reverted.',
   inputSchema: InputSchema,

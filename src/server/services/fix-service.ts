@@ -22,6 +22,7 @@ import { buildWikiPath } from '../wiki/page-identity';
 import { createChangeset, validateChangeset, applyChangeset } from '../wiki/wiki-transaction';
 import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
 import { compileToolSet } from '@/server/agents/tools/compile';
+import { createToolExecutionPolicy, resolveToolProfile } from '@/server/agents/tools/profiles';
 import { generateTextWithTools } from '../llm/provider-registry';
 import { FIX_AGENTIC_SYSTEM_PROMPT, buildFixAgenticUserPrompt } from '../llm/prompts/fix-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
@@ -30,10 +31,6 @@ import type { ChangesetEntry, Job } from '@/lib/contracts';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 FixGuard cap 真正兜底）。 */
 export const FIX_MAX_STEPS = 60;
-
-const fixToolDefs = createBuiltinToolRegistry().resolve([
-  'wiki.read', 'wiki.search', 'wiki.list', 'wiki.update', 'wiki.patch',
-]);
 
 interface FixParams {
   subjectId?: string;
@@ -95,7 +92,14 @@ export async function runFixJob(
     const writeCap = Math.max(20, new Set(loop.map((f) => f.pageSlug)).size * 2);
     const guard = createFixGuard({ caps: { writes: writeCap } });
     const ctx = buildFixToolContext(subject, { guard, jobId: job.id, emit });
-    const tools = compileToolSet(fixToolDefs, ctx);
+    const profile = resolveToolProfile(
+      loop.some((finding) => finding.type === 'contradiction') ? 'fix:contradiction' : 'fix:links',
+    );
+    const tools = compileToolSet(createBuiltinToolRegistry().resolve([...profile.tools]), ctx, {
+      policy: createToolExecutionPolicy(profile, subject.id, {
+        jobCapability: { jobId: job.id, jobType: job.type },
+      }),
+    });
 
     const reportLines = buildSubjectReportLines(loop);
     const roster = pagesRepo

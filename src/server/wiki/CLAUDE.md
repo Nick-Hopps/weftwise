@@ -55,7 +55,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
 | `page-ops.ts` | `executePageMerge(jobId, subject, {targetSlug, sourceSlug})` / `executePageSplit(jobId, subject, {sourceSlug, hint?})` / `executePageDelete(jobId, subject, slug)` / `executePageCreate(jobId, subject, {title, body?, tags?})` / `executePageUpdate(jobId, subject, {slug, title?, body, summary?, tags?})` / `executePagePatch(jobId, subject, {slug, edits})` + 纯函数 `applyPatchEdits(body, edits)` | merge/split/delete/create/update/patch 执行内核（LLM 调用 + Saga 事务）；无 emit / 无 embed enqueue —— 调用方自持；供 `curate-service` 与 query 工具复用。update 支持改标题（联动 `relink.ts::rewriteBacklinkText` 重写本 subject 内引用旧标题的文本，返回 `referencesUpdated`），坏链与残留 unresolved-wikilink 一律拒绝落盘。patch 是 update 的局部包装：`applyPatchEdits` 逐组 old_string/new_string 精确唯一替换拼出完整新正文后委托 `executePageUpdate`，继承其全部校验/Saga 语义，只动 body |
-| `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, caps })` | 纯函数：scope 扩展（含邻居）；`createCurateGuard` 工具层硬护栏——caps 计数器（merge/split/delete/create 各≤5）+ seed 强制（auto，seedSet≠null 时 merge/split/delete 必须涉及至少一个 seed 页）+ auto 禁 create + 保护页（共用 `META_PAGE_SLUGS`=index/log 单一源）；`applyDecisionCaps`/`restrictToSeed` 已退休 |
+| `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, allowedSet, caps })` | 纯函数：scope 扩展（含邻居）；Guard 提供 `isAllowed` 并强制 allowedSet：merge 两端均在 scope 且至少一端为 seed，split 同时在 scope/seed，manual delete 也不能越界，auto delete/create 固定拒绝，meta 页与 caps 规则保持 |
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
@@ -140,6 +140,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-10 | Curate allowedSet 硬边界：createCurateGuard 新增 allowedSet/isAllowed；merge 两端、split、manual delete 均受 scope 限制，Auto delete/create 固定拒绝；services/curate-tools 的 read/search/list 同步过滤 allowedSet，compile policy 再以同一集合包装上下文 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：Saga 全链路注入 subjectId / `[[subject:page]]` 语法 / 跨主题校验 / commit message `[subject:<slug>]` 前缀 |
 | 2026-06-22 | 新增 `relink.ts::rewriteBacklinkText`（改标题→重写同-subject backlink 文本）；接入 `PUT /api/pages` 同事务联动（④a）|

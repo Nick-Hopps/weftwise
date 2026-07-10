@@ -42,10 +42,9 @@ describe('agentToolContext', () => {
     expect(pages.map((p) => p.slug)).toEqual(['b']);
   });
 
-  it('agent 逃生舱指回原 AgentContext；onAccess 不设置', () => {
-    const agent = fakeAgent();
-    const ctx = agentToolContext(agent);
-    expect(ctx.agent).toBe(agent);
+  it('不暴露原 AgentContext 逃生舱；onAccess 不设置', () => {
+    const ctx = agentToolContext(fakeAgent());
+    expect('agent' in ctx).toBe(false);
     expect(ctx.onAccess).toBeUndefined();
   });
 });
