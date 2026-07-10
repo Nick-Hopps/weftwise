@@ -29,8 +29,8 @@ export interface SkillTemplate {
   budget?: Partial<AgentBudget>;
 }
 
-export type ToolSource = 'builtin' | 'dispatch';
-export type ToolSideEffect = 'none' | 'commit' | 'enqueue' | 'destructive' | 'create' | 'update' | 'merge' | 'split';
+export type ToolSource = 'builtin';
+export type ToolSideEffect = 'none' | 'propose' | 'enqueue' | 'destructive' | 'create' | 'update' | 'merge' | 'split';
 
 export interface ToolDef<I = unknown, O = unknown> {
   name: string;

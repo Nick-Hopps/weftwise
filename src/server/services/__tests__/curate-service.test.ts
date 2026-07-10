@@ -22,7 +22,7 @@ vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(asyn
 import { runCurateJob } from '../curate-service';
 
 function job(params: object) {
-  return { id: 'j1', subjectId: 's1', paramsJson: JSON.stringify(params) } as never;
+  return { id: 'j1', type: 'curate', subjectId: 's1', paramsJson: JSON.stringify(params) } as never;
 }
 
 describe('runCurateJob (tool-loop)', () => {
@@ -53,10 +53,12 @@ describe('runCurateJob (tool-loop)', () => {
     await runCurateJob(job({ scope: 'pages', slugs: ['a', 'b'], subjectId: 's1' }), emit);
     expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
     const opts = (genMock.generateTextWithTools.mock.calls[0] as any[])[1];
-    // auto 模式不解析 wiki.create 工具（follow-up A）：仍有结构工具，但无 create
+    // auto 模式只保留 scope 内 read/search/merge/split，无 list/create/delete
     const toolKeys = Object.keys(opts.tools);
-    expect(toolKeys).toEqual(expect.arrayContaining(['wiki_merge', 'wiki_split', 'wiki_delete']));
+    expect(toolKeys).toEqual(expect.arrayContaining(['wiki_merge', 'wiki_split', 'wiki_read']));
     expect(toolKeys).not.toContain('wiki_create');
+    expect(toolKeys).not.toContain('wiki_delete');
+    expect(toolKeys).not.toContain('wiki_list');
     const userMsg = String(opts.messages[0].content);
     expect(userMsg).toMatch(/AUTOMATIC/);        // 证明 {auto:true} 传入 → seedSet!==null
     expect(userMsg).toMatch(/do NOT create/i);   // auto 禁建页提示

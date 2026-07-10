@@ -39,6 +39,7 @@ async function bootRuntime(): Promise<void> {
   const skillRegistry = await buildSkillRegistry({
     vaultDir: vaultPath(),
     examplesDir: join(process.cwd(), 'examples', 'skills'),
+    onWarning: (message, detail) => log.warn(message, detail),
   });
   const degraded = skillRegistry.degraded();
   if (degraded.length) {

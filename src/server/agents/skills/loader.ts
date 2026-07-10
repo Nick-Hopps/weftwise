@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { convertJsonSchemaToZod } from 'zod-from-json-schema';
 import { SkillFrontmatterSchema } from './schema';
 import type { SkillTemplate } from '../types';
+import { isRetiredBuiltinSkill } from './builtin-manifest';
 
 export interface LoadResult {
   skills: SkillTemplate[];
@@ -26,6 +27,7 @@ export async function loadSkillsFromDir(dir: string): Promise<LoadResult> {
     if (extname(entry) !== '.md') continue;
     const path = join(dir, entry);
     const filenameId = basename(entry, '.md');
+    if (isRetiredBuiltinSkill(filenameId)) continue;
     let raw: string;
     try {
       raw = await readFile(path, 'utf8');

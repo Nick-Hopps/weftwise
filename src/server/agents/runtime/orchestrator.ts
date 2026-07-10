@@ -236,7 +236,7 @@ export async function runPipeline(opts: {
         merged.push(r.output);
       }
       // 每个 writer 的 entry 既并入父 overlay（供后续 read 隔离），也暂存进 pending——
-      // commit_changeset 直接提交 pending，reviewer 不必逐字重发未改动页（消除巨量工具参数）。
+      // service finalize 会直接提交 pending，后续阶段不必逐字重发未改动页（消除巨量参数）。
       for (const r of results) {
         const entry = r.output as { action: 'create' | 'update' | 'delete'; path: string; content: string } | undefined;
         if (entry?.path) {

@@ -6,22 +6,27 @@ const opsMocks = vi.hoisted(() => ({
   executePageDelete: vi.fn(async () => ({ deletedSlug: 'x', brokenBacklinks: 0 })),
   executePageCreate: vi.fn(async () => ({ createdSlug: 'new' })),
 }));
+const pagesMocks = vi.hoisted(() => ({
+  getPageBySlug: vi.fn(() => ({ slug: 'inside', title: 'Inside', summary: '', tags: [] })),
+  getAllPages: vi.fn(() => []),
+  isMetaPage: vi.fn(() => false),
+}));
+const searchMock = vi.hoisted(() => vi.fn(async () => ['inside', 'outside']));
+const readMock = vi.hoisted(() => vi.fn(() => ({ body: '正文' })));
 vi.mock('@/server/wiki/page-ops', () => opsMocks);
 // 读侧依赖（本测试只测写侧，给最小桩）
-vi.mock('@/server/db/repos/pages-repo', () => ({
-  getPageBySlug: vi.fn(() => null), getAllPages: vi.fn(() => []), isMetaPage: () => false,
-}));
-vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
-vi.mock('@/server/wiki/wiki-store', () => ({ readPageInSubject: vi.fn(() => null) }));
+vi.mock('@/server/db/repos/pages-repo', () => pagesMocks);
+vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: searchMock }));
+vi.mock('@/server/wiki/wiki-store', () => ({ readPageInSubject: readMock }));
 
 import { buildCurateToolContext } from '../curate-tools';
 import { createCurateGuard } from '@/server/wiki/curate-plan';
 
 const subject = { id: 's1', slug: 'general', name: 'G', description: '', createdAt: '', updatedAt: '' } as never;
 
-function ctxWith(seedSet: Set<string> | null) {
+function ctxWith(seedSet: Set<string> | null, allowedSet = new Set(['a', 'b', 'x', 'inside'])) {
   const emit = vi.fn();
-  const guard = createCurateGuard({ seedSet, caps: { merge: 5, split: 5, delete: 5, create: 5 } });
+  const guard = createCurateGuard({ seedSet, allowedSet, caps: { merge: 5, split: 5, delete: 5, create: 5 } });
   return { ctx: buildCurateToolContext(subject, { guard, jobId: 'j1', emit }), emit };
 }
 
@@ -57,5 +62,22 @@ describe('buildCurateToolContext write capabilities', () => {
     await ctx.deletePage!('x');
     expect(opsMocks.executePageDelete).toHaveBeenCalledWith('j1', subject, 'x');
     expect(emit).toHaveBeenCalledWith('curate:delete', expect.any(String), expect.any(Object));
+  });
+
+  it('scope 外 read 返回 null，search 过滤 scope 外结果', async () => {
+    const { ctx } = ctxWith(new Set(['inside']), new Set(['inside']));
+    expect(await ctx.readPage('outside')).toBeNull();
+    expect(await ctx.readPage('inside')).toEqual({ title: 'Inside', markdown: '正文' });
+    expect((await ctx.search('q', 8)).map((hit) => hit.slug)).toEqual(['inside']);
+  });
+
+  it('scope 外 merge/split/delete 均不执行 page-ops', async () => {
+    const { ctx } = ctxWith(null, new Set(['inside']));
+    await expect(ctx.mergePages!('inside', 'outside')).rejects.toThrow(/allowed scope/);
+    await expect(ctx.splitPage!('outside')).rejects.toThrow(/allowed scope/);
+    await expect(ctx.deletePage!('outside')).rejects.toThrow(/allowed scope/);
+    expect(opsMocks.executePageMerge).not.toHaveBeenCalled();
+    expect(opsMocks.executePageSplit).not.toHaveBeenCalled();
+    expect(opsMocks.executePageDelete).not.toHaveBeenCalled();
   });
 });
