@@ -62,6 +62,7 @@ export function compileToolSet(
     if (!opts.policy.allowedSideEffects.has(t.sideEffect)) {
       throw new Error(`[SIDE_EFFECT_NOT_ALLOWED] ${t.name} (${t.sideEffect}) is not allowed by ${opts.policy.profileId}`);
     }
+    assertJobCapability(t, opts.policy);
     const providerName = toProviderToolName(t.name, used);
     used.add(providerName);
     toolSet[providerName] = tool({
@@ -76,11 +77,11 @@ export function compileToolSet(
           sideEffect: t.sideEffect,
           subjectId: opts.policy.subjectId,
           pageSlugs: extractPageSlugs(t.name, args),
-          input: args,
+          input: sanitizeAuditValue(args),
         };
         try {
           const out = await t.handler(args, policyCtx);
-          opts.onToolCall?.({ ...audit, output: out, durationMs: Date.now() - start });
+          opts.onToolCall?.({ ...audit, output: sanitizeAuditValue(out), durationMs: Date.now() - start });
           return out;
         } catch (err) {
           opts.onToolCall?.({ ...audit, error: (err as Error).message, durationMs: Date.now() - start });
@@ -90,6 +91,40 @@ export function compileToolSet(
     });
   }
   return toolSet;
+}
+
+function assertJobCapability(toolDef: ToolDef, policy: ToolExecutionPolicy): void {
+  const expectedJobType = policy.profileId.startsWith('fix:')
+    ? 'fix'
+    : policy.profileId.startsWith('curate:')
+      ? 'curate'
+      : null;
+  if (!expectedJobType || toolDef.sideEffect === 'none' || toolDef.sideEffect === 'propose') return;
+  if (!policy.jobCapability || policy.jobCapability.jobType !== expectedJobType) {
+    throw new Error(
+      `[TOOL_NOT_ALLOWED] ${toolDef.name} requires a ${expectedJobType} job capability for ${policy.profileId}`,
+    );
+  }
+}
+
+const SENSITIVE_AUDIT_KEYS = new Set([
+  'body',
+  'content',
+  'markdown',
+  'text',
+  'excerpt',
+  'oldString',
+  'newString',
+]);
+
+function sanitizeAuditValue(value: unknown, key?: string): unknown {
+  if (key && SENSITIVE_AUDIT_KEYS.has(key)) return '[REDACTED]';
+  if (Array.isArray(value)) return value.map((item) => sanitizeAuditValue(item));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .map(([entryKey, entryValue]) => [entryKey, sanitizeAuditValue(entryValue, entryKey)]),
+  );
 }
 
 function scopeToolContext(ctx: ToolContext, policy: ToolExecutionPolicy): ToolContext {

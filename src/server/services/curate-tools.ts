@@ -27,6 +27,7 @@ export function buildCurateToolContext(
   return {
     subject,
     async readPage(slug) {
+      if (!guard.isAllowed(slug)) return null;
       const page = pagesRepo.getPageBySlug(subject.id, slug);
       const doc = readPageInSubject(subject.slug, slug);
       if (!page || !doc) return null;
@@ -36,6 +37,7 @@ export function buildCurateToolContext(
       const slugs = await hybridRankSlugs(subject.id, query, limit ?? SEARCH_LIMIT_DEFAULT);
       const hits: Array<{ slug: string; title: string; summary: string }> = [];
       for (const slug of slugs) {
+        if (!guard.isAllowed(slug)) continue;
         const p = pagesRepo.getPageBySlug(subject.id, slug);
         if (!p || pagesRepo.isMetaPage(p)) continue;
         hits.push({ slug, title: p.title, summary: p.summary ?? '' });
@@ -45,7 +47,7 @@ export function buildCurateToolContext(
     async listPages() {
       return pagesRepo
         .getAllPages(subject.id)
-        .filter((p) => !pagesRepo.isMetaPage(p))
+        .filter((p) => guard.isAllowed(p.slug) && !pagesRepo.isMetaPage(p))
         .slice(0, LIST_CAP)
         .map((p) => ({ slug: p.slug, title: p.title, summary: p.summary ?? '', tags: (p.tags ?? []).filter((t) => t !== 'meta') }));
     },

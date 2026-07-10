@@ -75,12 +75,13 @@ export async function runCurateJob(
   }
 
   // 3. 装配 guard + worker ToolContext + 工具集
-  const guard = createCurateGuard({ seedSet, caps: CURATE_CAPS });
+  const allowedSet = new Set(scopeSlugs);
+  const guard = createCurateGuard({ seedSet, allowedSet, caps: CURATE_CAPS });
   const ctx = buildCurateToolContext(subject, { guard, jobId: job.id, emit });
   const profile = resolveToolProfile(seedSet === null ? 'curate:manual' : 'curate:auto');
   const tools = compileToolSet(createBuiltinToolRegistry().resolve([...profile.tools]), ctx, {
     policy: createToolExecutionPolicy(profile, subject.id, {
-      allowedPageSlugs: new Set(scopeSlugs),
+      allowedPageSlugs: allowedSet,
       jobCapability: { jobId: job.id, jobType: job.type },
     }),
   });
