@@ -60,7 +60,7 @@ import { BudgetExceededError } from '../budget';
 
 describe('repairToolCallArgs', () => {
   it('剥离合法 JSON 后的尾随字符（DeepSeek 典型多吐一个 }）', () => {
-    // 真实复现：reviewer 的 commit_changeset 参数在完整 JSON 后多了一个 }
+    // 真实复现：模型工具参数在完整 JSON 后多了一个 }
     expect(repairToolCallArgs('{"entries":[{"action":"create","path":"a.md","content":"x"}],"summary":"s"}}'))
       .toBe('{"entries":[{"action":"create","path":"a.md","content":"x"}],"summary":"s"}');
   });

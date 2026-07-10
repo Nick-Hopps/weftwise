@@ -11,7 +11,7 @@ export const FINISH_TOOL_NAME = 'finish';
  *
  * Provider APIs (OpenAI / DeepSeek / xAI / Mistral / …) require tool names to
  * match `^[a-zA-Z0-9_-]{1,64}$`. Our internal names use dots for namespacing
- * (`vault.read`, `dispatch.skill`), so any non-conforming
+ * (`wiki.read`, `source.search`), so any non-conforming
  * character becomes `_`, the result is capped at 64 chars, and collisions are
  * disambiguated with a numeric suffix.
  */

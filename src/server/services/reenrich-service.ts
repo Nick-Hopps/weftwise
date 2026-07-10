@@ -22,7 +22,7 @@ import { LOCAL_USER_ID } from '../middleware/user';
 import { createBudgetTracker } from '../agents/runtime/budget';
 import { createOverlayVault } from '../agents/runtime/overlay-vault';
 import { loadCheckpoint } from '../agents/runtime/checkpoint';
-import { commitPending } from '../agents/tools/builtin/commit-changeset';
+import { commitPending } from '../agents/runtime/commit-pending';
 import {
   getAgentMaxSteps,
   getAgentMaxTokensPerJob,
