@@ -7,13 +7,15 @@ import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
+import { PendingActionCard } from './pending-action-card';
+import { replacePendingActions, upsertPendingAction } from './pending-action-state';
 import { apiFetch, useApiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
 import type { ChatMessage, Citation } from './message-list';
-import type { ConversationMessage } from '@/lib/contracts';
+import type { ConversationMessage, PendingActionView } from '@/lib/contracts';
 
 interface Passage {
   id: string;
@@ -61,7 +63,7 @@ function parsePassages(content: string, title: string): Passage[] {
   return out.slice(0, 40);
 }
 
-type PendingAction = { kind: 'reset' } | null;
+type PendingResetConfirmation = { kind: 'reset' } | null;
 
 const RESET_INTENT_PATTERNS: RegExp[] = [
   /重置.*(当前)?.*(wiki|知识库|数据|内容|页面)/i,
@@ -221,44 +223,72 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [pendingResetConfirmation, setPendingResetConfirmation] =
+    useState<PendingResetConfirmation>(null);
+  const [pendingActions, setPendingActions] = useState<PendingActionView[]>([]);
+  const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
   // 记录「当前内存消息所属的会话 id」——防止 done 设置新 id 后再重拉覆盖流式消息
   const loadedConversationIdRef = useRef<string | null>(null);
+  const loadedSubjectIdRef = useRef<string | null>(null);
 
-  // 监听 currentConversationId 变化：非 null 则从服务端载入历史消息，null 则清空
+  // 监听 conversation/subject 变化：并行恢复消息与审批操作；切换时取消旧请求。
   // 注意：done 事件会先把 loadedConversationIdRef 设为新 id，再 setCurrentConversation
   // 这样 useEffect 进来时 ref === currentConversationId，跳过重拉，避免覆盖流式消息
   useEffect(() => {
-    let cancelled = false;
-    if (currentConversationId === loadedConversationIdRef.current) return; // 自身 done 设置/未变，跳过重拉
+    const controller = new AbortController();
+    if (
+      currentConversationId === loadedConversationIdRef.current
+      && ctxSubjectId === loadedSubjectIdRef.current
+    ) return; // 自身 done 设置/未变，跳过重拉
     if (!currentConversationId) {
       setMessages([]);
+      setPendingActions([]);
       loadedConversationIdRef.current = null;
+      loadedSubjectIdRef.current = ctxSubjectId ?? null;
       return;
     }
     (async () => {
       try {
-        const res = await apiFetchClient(`/api/conversations/${currentConversationId}`);
-        if (!res.ok) { if (!cancelled) { setMessages([]); loadedConversationIdRef.current = currentConversationId; } return; }
-        const data = (await res.json()) as { messages: ConversationMessage[] };
-        if (cancelled) return;
+        const [messagesResponse, actionsResponse] = await Promise.all([
+          apiFetchClient(`/api/conversations/${currentConversationId}`, {
+            signal: controller.signal,
+          }),
+          apiFetchClient(
+            `/api/pending-actions?conversationId=${encodeURIComponent(currentConversationId)}`,
+            { signal: controller.signal },
+          ),
+        ]);
+        if (controller.signal.aborted) return;
+        const messagesData = messagesResponse.ok
+          ? await messagesResponse.json() as { messages: ConversationMessage[] }
+          : { messages: [] };
+        const actionsData = actionsResponse.ok
+          ? await actionsResponse.json() as { actions: PendingActionView[] }
+          : { actions: [] };
+        if (controller.signal.aborted) return;
         setMessages(
-          data.messages.map((m) => ({
+          messagesData.messages.map((m) => ({
             role: m.role,
             content: m.content,
             citations: m.citations ?? [],
           })),
         );
+        setPendingActions(replacePendingActions(actionsData.actions));
         loadedConversationIdRef.current = currentConversationId;
-      } catch {
-        if (!cancelled) { setMessages([]); loadedConversationIdRef.current = currentConversationId; }
+        loadedSubjectIdRef.current = ctxSubjectId ?? null;
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') return;
+        setMessages([]);
+        setPendingActions([]);
+        loadedConversationIdRef.current = currentConversationId;
+        loadedSubjectIdRef.current = ctxSubjectId ?? null;
       }
     })();
-    return () => { cancelled = true; };
-  }, [currentConversationId, apiFetchClient]);
+    return () => controller.abort();
+  }, [currentConversationId, ctxSubjectId, apiFetchClient]);
 
   const lastAssistantMessage =
     [...messages].reverse().find((m) => m.role === 'assistant') ?? null;
@@ -311,22 +341,72 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     }
   }, [queryClient, router]);
 
+  const handlePendingAction = useCallback(async (
+    actionId: string,
+    decision: 'approve' | 'reject',
+  ) => {
+    const subjectId = useUIStore.getState().currentSubjectId;
+    if (!subjectId || busyActionId) return;
+    setBusyActionId(actionId);
+    try {
+      const response = await apiFetchClient(`/api/pending-actions/${actionId}/${decision}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        action?: PendingActionView;
+        error?: string;
+        code?: string;
+      };
+      if (data.action) {
+        setPendingActions((current) => upsertPendingAction(current, data.action!));
+      }
+      if (!response.ok) {
+        throw new Error(data.error ?? `HTTP ${response.status}`);
+      }
+      if (!data.action) return;
+
+      if (data.action.jobId) {
+        window.dispatchEvent(new CustomEvent('wiki:job-started', {
+          detail: { jobId: data.action.jobId },
+        }));
+      }
+      if (decision === 'approve' && data.action.kind === 'page-change') {
+        await Promise.all(
+          ['pages', 'page-detail', 'graph', 'search', 'backlinks', 'context', 'frontmatter', 'history']
+            .map((key) => queryClient.invalidateQueries({ queryKey: [key] })),
+        );
+        router.refresh();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Action request failed.';
+      setPendingActions((current) => current.map((action) =>
+        action.actionId === actionId
+          ? { ...action, error: { code: 'ACTION_REQUEST_FAILED', message } }
+          : action,
+      ));
+    } finally {
+      setBusyActionId(null);
+    }
+  }, [apiFetchClient, busyActionId, queryClient, router]);
+
   const sendMessage = useCallback(async () => {
     const question = input.trim();
     if (!question || isLoading) return;
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    if (pendingAction?.kind === 'reset') {
+    if (pendingResetConfirmation?.kind === 'reset') {
       setMessages((prev) => [...prev, { role: 'user', content: question }]);
       const decision = detectConfirmation(question);
       if (decision === 'yes') {
-        setPendingAction(null);
+        setPendingResetConfirmation(null);
         await performReset();
         return;
       }
       if (decision === 'no') {
-        setPendingAction(null);
+        setPendingResetConfirmation(null);
         setMessages((prev) => [...prev, { role: 'assistant', content: '好的，已取消重置，wiki 保持不变。' }]);
         return;
       }
@@ -351,7 +431,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             '⚠️ 你确定要 **重置当前 wiki** 吗？\n\n这会 **清空所有页面、数据源和任务记录**，且 **无法恢复**。\n\n请回复 **“是”** 确认执行，或 **“否”** 取消。',
         },
       ]);
-      setPendingAction({ kind: 'reset' });
+      setPendingResetConfirmation({ kind: 'reset' });
       return;
     }
 
@@ -416,11 +496,16 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             } else if (event === 'citations') {
               const citations = (data as { citations: Citation[] }).citations;
               updateLastAssistant((msg) => ({ ...msg, citations }));
+            } else if (event === 'pending-action') {
+              setPendingActions((current) =>
+                upsertPendingAction(current, data as PendingActionView),
+              );
             } else if (event === 'done') {
               const convId = (data as { conversationId?: string }).conversationId;
               if (convId) {
                 // 先同步 ref，使随后 useEffect 因 ref === currentConversationId 而跳过重拉
                 loadedConversationIdRef.current = convId;
+                loadedSubjectIdRef.current = subjectId ?? null;
                 if (convId !== useUIStore.getState().currentConversationId) {
                   setCurrentConversation(convId);
                 }
@@ -447,7 +532,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, pendingAction, performReset, currentPageSlug, refs, pageContent, setCurrentConversation, queryClient]);
+  }, [input, isLoading, pendingResetConfirmation, performReset, currentPageSlug, refs, pageContent, setCurrentConversation, queryClient]);
 
   // Abort any in-flight SSE stream when the component unmounts to avoid
   // leaking work and stale setState calls after the panel closes.
@@ -476,7 +561,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const handleClear = () => {
     if (isLoading) handleStop();
     setMessages([]);
-    setPendingAction(null);
+    setPendingResetConfirmation(null);
   };
 
   const containerClass =
@@ -515,6 +600,20 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
           textareaRef.current?.focus();
         }}
       />
+
+      {pendingActions.length > 0 && (
+        <div className="max-h-72 space-y-2 overflow-y-auto border-t border-border px-3 py-2">
+          {pendingActions.map((action) => (
+            <PendingActionCard
+              key={action.actionId}
+              action={action}
+              busy={busyActionId === action.actionId}
+              onApprove={(actionId) => void handlePendingAction(actionId, 'approve')}
+              onReject={(actionId) => void handlePendingAction(actionId, 'reject')}
+            />
+          ))}
+        </div>
+      )}
 
       {lastAssistantMessage && !isLoading && lastAssistantMessage.content && (
         <div className="px-3 pb-2">
