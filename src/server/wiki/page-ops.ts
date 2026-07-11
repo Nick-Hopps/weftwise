@@ -8,15 +8,24 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { readPageInSubject } from './wiki-store';
 import { serializeWikiDocument } from './markdown';
 import { serializeFrontmatter, stampSystemFrontmatter } from './frontmatter';
-import { buildWikiPath, deriveUniqueSlug } from './page-identity';
-import { repointLinksToPage, rewriteBacklinkText } from './relink';
+import { buildWikiPath } from './page-identity';
+import { repointLinksToPage } from './relink';
 import { planSplitPages } from './split-plan';
 import { createChangeset, validateChangeset, applyChangeset } from './wiki-transaction';
+import {
+  applyPlannedPageOperation,
+  planPageCreate,
+  planPageDelete,
+  planPagePatch,
+  planPageUpdate,
+} from './page-operation-plan';
 import { generateStructuredOutput } from '../llm/provider-registry';
 import { MergeResultSchema, MERGE_SYSTEM_PROMPT, buildMergeUserPrompt } from '../llm/prompts/merge-prompt';
 import { SplitResultSchema, SPLIT_SYSTEM_PROMPT, buildSplitUserPrompt } from '../llm/prompts/split-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { ChangesetEntry, Subject, TitleResolver, WikiFrontmatter } from '@/lib/contracts';
+
+export { applyPatchEdits } from './page-operation-plan';
 
 function unionArr(a: string[] | undefined, b: string[] | undefined): string[] {
   return [...new Set([...(a ?? []), ...(b ?? [])])];
@@ -183,20 +192,12 @@ export async function executePageDelete(
   subject: Subject,
   slug: string,
 ): Promise<{ deletedSlug: string; brokenBacklinks: number }> {
-  // getBacklinks 已排除 meta 源页（pages-repo 内部过滤），故 brokenBacklinks 仅计内容页的入站链接。
-  const brokenBacklinks = pagesRepo
-    .getBacklinks(subject.id, slug)
-    .filter((b) => b.slug !== slug).length;
-
-  const entries: ChangesetEntry[] = [
-    { action: 'delete', path: buildWikiPath(subject.slug, slug), content: null },
-  ];
-  const changeset = createChangeset(jobId, subject, entries);
-  const validation = validateChangeset(changeset);
-  if (!validation.valid) throw new Error(`delete changeset invalid: ${validation.errors.join('; ')}`);
-  await applyChangeset(changeset);
-
-  return { deletedSlug: slug, brokenBacklinks };
+  const plan = await planPageDelete(jobId, subject, {
+    slug,
+    effectiveAt: new Date().toISOString(),
+  });
+  const result = await applyPlannedPageOperation(plan);
+  return { deletedSlug: result.deletedSlug, brokenBacklinks: result.brokenBacklinks };
 }
 
 /**
@@ -209,29 +210,12 @@ export async function executePageCreate(
   subject: Subject,
   input: { title: string; body: string; summary?: string; tags?: string[] },
 ): Promise<{ createdSlug: string }> {
-  const existing = new Set(pagesRepo.getAllPages(subject.id).map((p) => p.slug));
-  const slug = deriveUniqueSlug(input.title, existing);
-
-  const now = new Date().toISOString();
-  const frontmatter: WikiFrontmatter = {
-    title: input.title,
-    created: now,
-    updated: now,
-    tags: input.tags ?? [],
-    sources: [],
-    ...(input.summary !== undefined ? { summary: input.summary } : {}),
-  };
-  const content = serializeFrontmatter(frontmatter, input.body);
-
-  const entries: ChangesetEntry[] = [
-    { action: 'create', path: buildWikiPath(subject.slug, slug), content },
-  ];
-  const changeset = createChangeset(jobId, subject, entries);
-  const validation = validateChangeset(changeset);
-  if (!validation.valid) throw new Error(`create changeset invalid: ${validation.errors.join('; ')}`);
-  await applyChangeset(changeset);
-
-  return { createdSlug: slug };
+  const plan = await planPageCreate(jobId, subject, {
+    ...input,
+    effectiveAt: new Date().toISOString(),
+  });
+  const result = await applyPlannedPageOperation(plan);
+  return { createdSlug: result.createdSlug };
 }
 
 /**
@@ -250,88 +234,12 @@ export async function executePageUpdate(
   subject: Subject,
   params: { slug: string; title?: string; body: string; summary?: string; tags?: string[] },
 ): Promise<{ updatedSlug: string; referencesUpdated: number }> {
-  const { slug, body } = params;
-  const doc = readPageInSubject(subject.slug, slug);
-  if (!doc) throw new Error(`page "${slug}" not found`);
-
-  const oldTitle = doc.frontmatter.title;
-  const newTitle = params.title?.trim() || oldTitle;
-
-  const now = new Date().toISOString();
-  const frontmatter: WikiFrontmatter = {
-    ...doc.frontmatter,
-    title: newTitle,
-    tags: params.tags ?? doc.frontmatter.tags,
-    ...(params.summary !== undefined ? { summary: params.summary } : {}),
-  };
-  const content = stampSystemFrontmatter(serializeFrontmatter(frontmatter, body), {
-    now,
-    existingCreated: doc.frontmatter.created,
+  const plan = await planPageUpdate(jobId, subject, {
+    ...params,
+    effectiveAt: new Date().toISOString(),
   });
-
-  const selfPath = buildWikiPath(subject.slug, slug);
-  const entries: ChangesetEntry[] = [
-    { action: 'update', path: selfPath, content },
-  ];
-
-  let referencesUpdated = 0;
-  if (newTitle !== oldTitle) {
-    const backlinks = pagesRepo
-      .getBacklinks(subject.id, slug)
-      .filter((b) => b.subjectId === subject.id && b.slug !== slug);
-    for (const bl of backlinks) {
-      const backDoc = readPageInSubject(subject.slug, bl.slug);
-      if (!backDoc) continue;
-      const raw = serializeWikiDocument(backDoc);
-      const rewritten = rewriteBacklinkText(raw, oldTitle, newTitle, subject.slug);
-      if (rewritten !== raw) {
-        entries.push({ action: 'update', path: buildWikiPath(subject.slug, bl.slug), content: rewritten });
-        referencesUpdated += 1;
-      }
-    }
-  }
-
-  const changeset = createChangeset(jobId, subject, entries);
-  const validation = validateChangeset(changeset);
-  if (!validation.valid) throw new Error(`update changeset invalid: ${validation.errors.join('; ')}`);
-  const unresolved = (validation.warnings ?? []).filter(
-    (w) => w.startsWith(`[${selfPath}]`) && w.includes('Unresolved wikilink:'),
-  );
-  if (unresolved.length > 0) throw new Error(`update would leave unresolved wikilink(s): ${unresolved.join('; ')}`);
-  await applyChangeset(changeset);
-
-  return { updatedSlug: slug, referencesUpdated };
-}
-
-/**
- * 纯函数：按顺序应用 old_string/new_string 精确替换。
- * 每个 oldString 必须在「应用前序 edits 后的当前正文」中恰好出现一次；
- * 任一组失败整批抛错（调用方不落盘）。仿 Claude Code Edit 工具语义。
- */
-export function applyPatchEdits(
-  body: string,
-  edits: Array<{ oldString: string; newString: string }>,
-): string {
-  if (edits.length === 0) throw new Error('patch requires at least one edit');
-  let current = body;
-  edits.forEach((edit, i) => {
-    const n = i + 1;
-    if (!edit.oldString) throw new Error(`edit #${n}: old_string must not be empty`);
-    if (edit.oldString === edit.newString) {
-      throw new Error(`edit #${n}: old_string and new_string are identical`);
-    }
-    const first = current.indexOf(edit.oldString);
-    if (first === -1) {
-      throw new Error(`edit #${n}: old_string not found — quote the page text verbatim`);
-    }
-    let count = 0;
-    for (let at = first; at !== -1; at = current.indexOf(edit.oldString, at + 1)) count++;
-    if (count > 1) {
-      throw new Error(`edit #${n}: old_string matches ${count} locations — include more surrounding context`);
-    }
-    current = current.slice(0, first) + edit.newString + current.slice(first + edit.oldString.length);
-  });
-  return current;
+  const result = await applyPlannedPageOperation(plan);
+  return { updatedSlug: result.updatedSlug, referencesUpdated: result.referencesUpdated };
 }
 
 /**
@@ -344,9 +252,10 @@ export async function executePagePatch(
   subject: Subject,
   params: { slug: string; edits: Array<{ oldString: string; newString: string }> },
 ): Promise<{ updatedSlug: string; appliedEdits: number }> {
-  const doc = readPageInSubject(subject.slug, params.slug);
-  if (!doc) throw new Error(`page "${params.slug}" not found`);
-  const newBody = applyPatchEdits(doc.body, params.edits);
-  const { updatedSlug } = await executePageUpdate(jobId, subject, { slug: params.slug, body: newBody });
-  return { updatedSlug, appliedEdits: params.edits.length };
+  const plan = await planPagePatch(jobId, subject, {
+    ...params,
+    effectiveAt: new Date().toISOString(),
+  });
+  const result = await applyPlannedPageOperation(plan);
+  return { updatedSlug: result.updatedSlug, appliedEdits: result.appliedEdits };
 }

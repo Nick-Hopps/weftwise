@@ -6,7 +6,7 @@
 
 **Architecture:** Query 默认编译 `query:read`，明确写入意图才编译只多出 `wiki.preview_change` 的 `query:propose`。预览服务把规范化 payload 和展示预览存入 `pending_actions`；批准 API 原子消费 action、重新规划并在 Vault 锁内校验 HEAD，然后调用共享页面 Saga 或 reenrich 入队服务。
 
-**Tech Stack:** TypeScript 5、Next.js 15 Route Handlers、React 19、Vercel AI SDK 4、Zod、better-sqlite3、Drizzle ORM、Vitest、simple-git、`diff`。
+**Tech Stack:** TypeScript 5、Next.js 15 Route Handlers、React 19、Vercel AI SDK 4、Zod、better-sqlite3、Drizzle ORM、Vitest、simple-git。
 
 ## Global Constraints
 
@@ -319,8 +319,6 @@ git commit -m "feat: 在 Saga 锁内校验审批预览版本"
 ### Task 4: 无副作用页面 planner 与 unified diff
 
 **Files:**
-- Modify: `package.json`
-- Modify: `package-lock.json`
 - Create: `src/server/wiki/unified-diff.ts`
 - Create: `src/server/wiki/page-operation-plan.ts`
 - Create: `src/server/wiki/__tests__/unified-diff.test.ts`
@@ -334,10 +332,7 @@ git commit -m "feat: 在 Saga 锁内校验审批预览版本"
 - Consumes: Task 3 的 `applyChangeset(..., options)`、现有 page identity/frontmatter/relink/validation 函数。
 - Produces: `PlannedPageOperation`、四个 core planner、`applyPlannedPageOperation`，以及供 Query 审批复用保护页/忠实度护栏的四个 `plan*InSubject` Service planner。
 
-- [ ] **Step 1: 安装直接依赖并写 unified diff 失败测试**
-
-Run: `npm install diff`  
-Expected: `package.json` 与 lockfile 增加直接依赖。
+- [ ] **Step 1: 写无外部依赖的 unified diff 失败测试**
 
 ```ts
 expect(buildUnifiedDiff([
@@ -445,7 +440,7 @@ Expected: PASS。
 - [ ] **Step 7: 提交**
 
 ```bash
-git add package.json package-lock.json src/server/wiki src/server/services/page-write.ts src/server/services/__tests__/page-write.test.ts src/server/services/__tests__/page-write-patch.test.ts
+git add src/server/wiki src/server/services/page-write.ts src/server/services/__tests__/page-write.test.ts src/server/services/__tests__/page-write-patch.test.ts
 git commit -m "refactor: 拆分页面变更规划与应用"
 ```
 
