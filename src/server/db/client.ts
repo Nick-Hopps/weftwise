@@ -398,6 +398,32 @@ function migrateMessages(): void {
   `);
 }
 
+function migratePendingActions(): void {
+  const sqlite = rawSqlite!;
+  if (tableExists('pending_actions')) return;
+  sqlite.exec(`
+    CREATE TABLE pending_actions (
+      id TEXT PRIMARY KEY NOT NULL,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      operation TEXT NOT NULL CHECK (operation IN ('create','update','patch','delete','reenrich')),
+      payload_json TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      preview_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','approved','executing','applied','rejected','expired','failed')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      approved_at TEXT,
+      applied_at TEXT,
+      operation_id TEXT,
+      job_id TEXT,
+      error_json TEXT
+    );
+  `);
+}
+
 function migratePageEmbeddings(): void {
   const sqlite = rawSqlite!;
   if (tableExists('page_embeddings')) return;
@@ -558,6 +584,12 @@ function ensureIndexes(): void {
       ON jobs(status, type, created_at);
     CREATE INDEX IF NOT EXISTS research_backlog_subject_status_idx
       ON research_backlog(subject_id, status, created_at);
+    CREATE INDEX IF NOT EXISTS pending_actions_conversation_status_idx
+      ON pending_actions(conversation_id, status, created_at);
+    CREATE INDEX IF NOT EXISTS pending_actions_subject_status_expiry_idx
+      ON pending_actions(subject_id, status, expires_at);
+    CREATE INDEX IF NOT EXISTS pending_actions_status_expiry_idx
+      ON pending_actions(status, expires_at);
   `);
 }
 
@@ -579,6 +611,7 @@ function ensureTables() {
     migrateIngestCheckpoints();
     migrateConversations();
     migrateMessages();
+    migratePendingActions();
     migratePageEmbeddings();
     migratePageMaturity();
     migrateUserProfiles();

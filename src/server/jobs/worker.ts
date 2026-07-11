@@ -5,6 +5,7 @@ import { describeErrorMessage } from '@/lib/error-format';
 import { runMaintenanceSweep } from '../services/maintenance-scheduler';
 import { pruneOldOperations } from '../db/repos/operations-repo';
 import { pruneOldUsage, USAGE_RETENTION_MS } from '../db/repos/usage-repo';
+import { maintainPendingActions } from '../services/pending-action-maintenance';
 import {
   getMaintenanceEnabled,
   getMaintenanceSweepIntervalHours,
@@ -59,6 +60,16 @@ function pruneOldOperationsTick(): void {
 function pruneOldUsageTick(): void {
   const removed = pruneOldUsage(Date.now() - USAGE_RETENTION_MS);
   if (removed > 0) console.log(`[maintenance] pruned ${removed} expired llm_usage rows`);
+}
+
+/** 审批操作卫生维护：过期 pending、恢复中断执行，并清理 30 天前终态记录。 */
+function maintainPendingActionsTick(): void {
+  const { expired, recovered, pruned } = maintainPendingActions();
+  if (expired + recovered + pruned > 0) {
+    console.log(
+      `[maintenance] pending_actions: expired ${expired}, recovered ${recovered}, pruned ${pruned}`,
+    );
+  }
 }
 
 /** 维护节律闸门：从未扫描或距上次 ≥ intervalHours 则应扫。 */
@@ -267,6 +278,11 @@ export function startWorker(pollIntervalMs = 2000): () => void {
   } catch (err) {
     console.error('[maintenance] llm_usage prune failed', err);
   }
+  try {
+    maintainPendingActionsTick();
+  } catch (err) {
+    console.error('[maintenance] pending_actions maintenance failed', err);
+  }
 
   const intervalId = setInterval(() => {
     // 并发调度：仅 ingest 之间可并发（上限实时读设置）；非 ingest 独占。
@@ -299,6 +315,11 @@ export function startWorker(pollIntervalMs = 2000): () => void {
       pruneOldUsageTick();
     } catch (err) {
       console.error('[maintenance] llm_usage prune failed', err);
+    }
+    try {
+      maintainPendingActionsTick();
+    } catch (err) {
+      console.error('[maintenance] pending_actions maintenance failed', err);
     }
     try {
       maintenanceTick();

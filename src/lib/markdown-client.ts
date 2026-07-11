@@ -324,12 +324,15 @@ export function renderMarkdown(
               (props['data-wiki-subject' as keyof typeof props] as
                 | string
                 | undefined) ?? null;
-            return createElement(WikiLinkComponent, {
-              href: buildWikiLinkHref(wikiSlug, wikiSubject),
-              slug: wikiSlug,
-              subjectSlug: wikiSubject ?? undefined,
-              children: props.children,
-            });
+            return createElement(
+              WikiLinkComponent,
+              {
+                href: buildWikiLinkHref(wikiSlug, wikiSubject),
+                slug: wikiSlug,
+                subjectSlug: wikiSubject ?? undefined,
+              },
+              props.children,
+            );
           }
           // Regular external / internal link
           return createElement('a', props);

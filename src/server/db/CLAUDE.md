@@ -76,6 +76,10 @@
 - `listMessages(conversationId): ConversationMessage[]` —— 按 `created_at, rowid ASC` 排序
 - `touchConversation(id): void` —— 更新 `updated_at = now`（新消息到达时置顶）
 
+### `pending-actions-repo.ts`
+
+审批闭环持久化与原子状态流转：记录服务端规范化 payload/hash、预览、TTL 和执行引用。`claimApproval`/`claimExecution`/`rejectPending`/`markApplied`/`markFailed` 均用条件 UPDATE 防并发双消费；worker 每分钟过期 pending、恢复中断的 approved/executing，并清理 30 天前终态记录。
+
 ### `embeddings-repo.ts` 🆕
 
 向量语义检索（⑧）：`subject_id` scoped，FK CASCADE。
@@ -144,6 +148,7 @@
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
+| `pending_actions` | `id` | `conversation_id`/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面 Saga，`job_id` 指向已批准的 re-enrich 调度 |
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 | `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
@@ -202,6 +207,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 `pending_actions` 表、热路径索引与 repo 条件状态流转；预览 30 分钟 TTL，终态保留 30 天，operation/job 双引用支持 worker 崩溃恢复 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：复合 PK / target_subject_id / subjects-repo / FTS5 带 subject filter / 启动自迁移 |
 | 2026-04-26 | wikiLanguage：新增 `app_settings` 表 + `settings-repo.ts`（`getWikiLanguage` / `setWikiLanguage`）|

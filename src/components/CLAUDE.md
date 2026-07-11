@@ -58,7 +58,8 @@
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 在 `subjectId === null` 时直接抛错（防误触发全量 reset），成功后 invalidate 8 个 query key；接入会话载入/保存/切换（`useEffect` 载历史 + `loadedConversationIdRef` 守卫防自身覆盖 + done 设 ref/id+invalidate）；embedded 变体消费 `ui-store.pendingChatReference`（选区追问信箱）→ pin 为引用 chip（section 兜底 `Selection`）+ 聚焦输入框；「换页清空 refs」effect 用 `prevPageSlugRef` 守卫**仅在 slug 真正变化时清**，避免 StrictMode 双挂载清掉刚 pin 的选区引用
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，批准页面变更后失效页面/图/历史等缓存，workflow job 则派发 `wiki:job-started`
+- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；刷新不会丢卡片，也不会把聊天回复当批准
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`，body 带 `subjectId`
@@ -165,6 +166,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-11 | Wiki 审批闭环 Phase 1B：Chat 接入 pending-action SSE、会话刷新恢复、批准/拒绝 API 与可访问 diff 卡片；actionId upsert 防重，reset 口头确认状态与 Wiki 审批状态彻底分离 |
 | 2026-04-22 | 初始化；对应最近一次 `refactor(ui): 统一设计系统与上下文面板` 后的结构 |
 | 2026-04-25 | Subject：SubjectSwitcher (⌘O) / wiki-page-elsewhere / 各客户端组件接入 subjectId / wiki-link 缓存 key 加 subject |
 | 2026-04-26 | wikiLanguage：`settings-dialog.tsx` 新增 "Wiki language" 行（React Query GET/PUT `/api/settings`，不写 Zustand）|

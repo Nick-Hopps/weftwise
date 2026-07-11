@@ -32,7 +32,10 @@
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
-| `/api/query` | POST | 直接同步调用 query-service（或入队 `save-to-wiki`）；body 必填 `subjectId`；用于 Chat UI |
+| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；propose 只开放 `wiki.preview_change` 生成审批预览，通过 `event: pending-action` SSE 推送，绝不直接写入；也支持入队 `save-to-wiki` |
+| `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
+| `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，锁内复核 HEAD 后同步执行页面 Saga 或仅入队 re-enrich；陈旧预览 409 返回刷新 action |
+| `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
@@ -134,6 +137,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-11 | Wiki 审批闭环 Phase 1B：`/api/query` 新增 read/propose 模式与 `pending-action` SSE；新增 pending-actions 列表/批准/拒绝三个 subject-scoped API，写请求均 requireAuth+CSRF，批准只消费服务端预览而不信任客户端 payload |
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |
 | 2026-04-25 | Subject：新增 `/api/subjects` + `(app)/subjects` 管理页；既有路由全部 subject 化（`resolveSubjectFromRequest`） |
 | 2026-06-22 | 新增 `(app)/history/page.tsx` + `/api/history*` 三个路由（GET 列表、GET diff、POST 回滚），支持前向 Saga 还原（⑥ 版本历史/diff）|

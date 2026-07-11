@@ -8,6 +8,8 @@ import type {
   SourceSearchResult,
   Subject,
   WikiInspection,
+  PendingActionView,
+  PreviewChangeInput,
 } from '@/lib/contracts';
 import type { AgentContext } from '../types';
 import { parseFrontmatter } from '@/server/wiki/frontmatter';
@@ -19,6 +21,9 @@ import { createSubjectEvidenceReader } from './evidence-reader';
  */
 export interface ToolContext {
   subject: Subject;
+  conversationId?: string;
+  previewChange?(input: PreviewChangeInput): Promise<PendingActionView>;
+  onPendingAction?(action: PendingActionView): void;
   readPage(slug: string): Promise<{ title: string; markdown: string } | null>;
   search(query: string, limit: number): Promise<Array<{ slug: string; title: string; summary: string }>>;
   inspectPage?(slug: string, include?: InspectSection[]): Promise<WikiInspection>;

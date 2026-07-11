@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // vi.mock 路径用 @/server/... 绝对别名（解析到与 SUT import 同一模块；与 query-tools.test 一致）
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
-const genMock = vi.hoisted(() => ({ generateTextWithTools: vi.fn(async () => ({ text: 'done' })) }));
+const genMock = vi.hoisted(() => ({
+  generateTextWithTools: vi.fn(async (task: string, opts: unknown) => {
+    void task;
+    void opts;
+    return { text: 'done' };
+  }),
+}));
 vi.mock('@/server/llm/provider-registry', () => genMock);
 vi.mock('@/server/db/repos/subjects-repo', () => ({ getById: vi.fn(() => ({ id: 's1', slug: 'general', name: 'G', description: '' })) }));
 const pagesMock = vi.hoisted(() => ({
@@ -31,9 +37,8 @@ describe('runCurateJob (tool-loop)', () => {
     const emit = vi.fn();
     const res = await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), emit);
     expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const call = (genMock.generateTextWithTools.mock.calls as any[][])[0];
-    const [task, opts] = call as [string, { tools: Record<string, unknown> }];
+    const [task, rawOpts] = genMock.generateTextWithTools.mock.calls[0];
+    const opts = rawOpts as { tools: Record<string, unknown> };
     expect(task).toBe('curate');
     expect(Object.keys(opts.tools)).toEqual(expect.arrayContaining([
       'wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read', 'wiki_inspect',
@@ -54,7 +59,10 @@ describe('runCurateJob (tool-loop)', () => {
     const emit = vi.fn();
     await runCurateJob(job({ scope: 'pages', slugs: ['a', 'b'], subjectId: 's1' }), emit);
     expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
-    const opts = (genMock.generateTextWithTools.mock.calls[0] as any[])[1];
+    const opts = genMock.generateTextWithTools.mock.calls[0][1] as {
+      tools: Record<string, unknown>;
+      messages: Array<{ content: unknown }>;
+    };
     // auto 模式只保留 scope 内 read/search/merge/split，无 list/create/delete
     const toolKeys = Object.keys(opts.tools);
     expect(toolKeys).toEqual(expect.arrayContaining([

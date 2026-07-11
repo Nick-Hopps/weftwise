@@ -258,6 +258,25 @@ describe('rollbackChangeset', () => {
 });
 
 describe('applyChangeset', () => {
+  it('expectedPreHead 不匹配时在锁内拒绝且不创建 operation 或写文件', async () => {
+    const cs = makeChangeset([
+      { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },
+    ]);
+
+    await expect(
+      applyChangeset(cs, undefined, { expectedPreHead: 'older-sha' }),
+    ).rejects.toMatchObject({ code: 'ACTION_STALE_PREVIEW' });
+
+    expect(mutexMocks.acquireVaultLock.mock.invocationCallOrder[0])
+      .toBeLessThan(gitMocks.getVaultHead.mock.invocationCallOrder[0]);
+    expect(dbMocks.prepare).not.toHaveBeenCalled();
+    expect(storeMocks.writeVaultFiles).not.toHaveBeenCalled();
+    expect(storeMocks.deleteVaultFile).not.toHaveBeenCalled();
+    expect(indexerMocks.indexTouchedPages).not.toHaveBeenCalled();
+    expect(gitMocks.commitVaultChanges).not.toHaveBeenCalled();
+    expect(mutexMocks.release).toHaveBeenCalledTimes(1);
+  });
+
   it('成功路径：写文件 → 重建索引 → git commit → applied，并释放 vault 锁', async () => {
     const cs = makeChangeset([
       { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },

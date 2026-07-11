@@ -191,13 +191,35 @@ export interface SourceLinkOps {
   onWarning?: (message: string) => void;
 }
 
+export interface ApplyChangesetOptions {
+  expectedPreHead?: string;
+}
+
+export class ActionStalePreviewError extends Error {
+  readonly code = 'ACTION_STALE_PREVIEW' as const;
+
+  constructor(
+    readonly expectedHead: string,
+    readonly actualHead: string,
+  ) {
+    super('Vault HEAD changed after preview; refresh and approve the new preview.');
+    this.name = 'ActionStalePreviewError';
+  }
+}
+
 export async function applyChangeset(
   changeset: Changeset,
-  sourceOps?: SourceLinkOps
+  sourceOps?: SourceLinkOps,
+  options: ApplyChangesetOptions = {},
 ): Promise<Changeset> {
   const release = await acquireVaultLock();
 
   try {
+    const preHead = await getVaultHead();
+    if (options.expectedPreHead !== undefined && options.expectedPreHead !== preHead) {
+      throw new ActionStalePreviewError(options.expectedPreHead, preHead);
+    }
+
     const db = getRawDb();
     const operationId = changeset.id;
     db
@@ -213,7 +235,6 @@ export async function applyChangeset(
         JSON.stringify(changeset.entries)
       );
 
-    const preHead = await getVaultHead();
     const working = { ...changeset, preHead };
 
     db

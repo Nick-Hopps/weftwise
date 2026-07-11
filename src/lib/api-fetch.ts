@@ -72,8 +72,8 @@ function appendSubjectId(path: string, subjectId: string): string {
  * `?subjectId=<id>` to GET URLs whose path is not already subject-scoped.
  *
  * For POST/PATCH/DELETE the caller still owns the body — pass `subjectId`
- * inside `body` (or as a query param) when needed. The hook only handles the
- * common read-side ergonomic case.
+ * inside `body` (or as a query param) when needed. This includes pending-action
+ * approve/reject requests. The hook only handles the common read-side ergonomic case.
  *
  * SSR / non-React callers should keep using the bare {@link apiFetch}.
  */

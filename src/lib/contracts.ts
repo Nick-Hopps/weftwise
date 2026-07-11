@@ -356,6 +356,56 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export type PendingActionOperation = 'create' | 'update' | 'patch' | 'delete' | 'reenrich';
+
+export type PendingActionStatus =
+  | 'pending'
+  | 'approved'
+  | 'executing'
+  | 'applied'
+  | 'rejected'
+  | 'expired'
+  | 'failed';
+
+export type PreviewChangeInput =
+  | {
+      operation: 'create';
+      payload: { title: string; body: string; summary?: string; tags?: string[] };
+    }
+  | {
+      operation: 'update';
+      payload: { slug: string; title?: string; body: string; summary?: string; tags?: string[] };
+    }
+  | {
+      operation: 'patch';
+      payload: { slug: string; edits: Array<{ oldString: string; newString: string }> };
+    }
+  | { operation: 'delete'; payload: { slug: string } }
+  | { operation: 'reenrich'; payload: { slug: string } };
+
+export interface PendingActionPreview {
+  kind: 'page-change' | 'workflow';
+  preHead: string;
+  summary: string;
+  affectedPages: Array<{
+    slug: string;
+    action: 'create' | 'update' | 'delete';
+  }>;
+  diff: string | null;
+  warnings: string[];
+}
+
+export interface PendingActionView extends PendingActionPreview {
+  actionId: string;
+  conversationId: string;
+  operation: PendingActionOperation;
+  status: PendingActionStatus;
+  expiresAt: string;
+  operationId: string | null;
+  jobId: string | null;
+  error: { code: string; message: string } | null;
+}
+
 export const AugmentationLevelSchema = z.enum(['off', 'light', 'standard', 'deep']);
 
 export const DEFAULT_WIKI_LANGUAGE = 'English';

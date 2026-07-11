@@ -15,6 +15,7 @@ import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
+import { resolveQueryMode } from '@/server/services/query-intent';
 
 export const runtime = 'nodejs';
 
@@ -184,11 +185,15 @@ export async function POST(request: NextRequest) {
           return;
         }
 
+        const mode = resolveQueryMode(trimmedQuestion);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,
           subject,
           history,
           currentPageSlug: pageSlug,
+          conversationId: activeConversationId,
+          mode,
+          onPendingAction: (action) => emit('pending-action', action),
           abortSignal: request.signal,
         });
 
@@ -239,4 +244,3 @@ export async function POST(request: NextRequest) {
     },
   });
 }
-

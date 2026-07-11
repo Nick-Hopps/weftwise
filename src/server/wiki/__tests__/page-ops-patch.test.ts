@@ -6,9 +6,11 @@ const txMocks = vi.hoisted(() => ({
     preHead: null, postHead: null, status: 'pending',
   })),
   validateChangeset: vi.fn(() => ({ valid: true, errors: [] as string[], warnings: [] as string[] })),
-  applyChangeset: vi.fn(async () => undefined),
+  applyChangeset: vi.fn(async (changeset: Record<string, unknown>) => ({ ...changeset, status: 'applied' })),
 }));
 vi.mock('../wiki-transaction', () => txMocks);
+
+vi.mock('../../git/git-service', () => ({ getVaultHead: vi.fn(async () => 'head-1') }));
 
 const storeMocks = vi.hoisted(() => ({
   readPageInSubject: vi.fn((_subjectSlug: string, _slug: string) => ({

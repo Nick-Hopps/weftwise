@@ -1,9 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildFanoutInput, selectRelevantExistingPagesForFanout, EXISTING_PAGES_FANOUT_TOP_K } from '../orchestrator';
+import type { AgentContext } from '../../types';
 
 // buildFanoutInput 仅用到 ctx.emit 与 ctx.chunkStore（item.sourceRefs 为空时不读 chunkStore）
-function stubCtx(overrides: Record<string, unknown> = {}): any {
-  return { emit: () => {}, chunkStore: new Map(), subject: { id: 'subj-1' }, ...overrides };
+function stubCtx(overrides: Record<string, unknown> = {}): AgentContext {
+  return {
+    emit: () => {},
+    chunkStore: new Map(),
+    subject: { id: 'subj-1' },
+    ...overrides,
+  } as unknown as AgentContext;
 }
 
 function manyExistingPages(n: number): Array<{ slug: string; title: string; summary: string }> {
