@@ -8,10 +8,11 @@
 import * as pagesRepo from '../db/repos/pages-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import type { Subject, SubjectId } from '@/lib/contracts';
+import type { PendingActionView, Subject, SubjectId } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
+import { createPendingActionPreview } from './pending-action-service';
 
 /** search_wiki 默认返回条数。 */
 const SEARCH_LIMIT_DEFAULT = 8;
@@ -39,6 +40,11 @@ export function subjectHasContent(subjectId: SubjectId): boolean {
   return pagesRepo.getAllPages(subjectId).some((p) => !pagesRepo.isMetaPage(p));
 }
 
+export interface QueryToolContextOptions {
+  conversationId?: string;
+  onPendingAction?: (action: PendingActionView) => void;
+}
+
 /**
  * query 侧 ToolContext：读已提交正文、混合检索、列举全部（过滤 meta）；onAccess 累积引用。
  *
@@ -47,10 +53,26 @@ export function subjectHasContent(subjectId: SubjectId): boolean {
  *   - wiki.search / wiki.list 无 body → 写 accessed.meta（仅元数据引用）
  *   - 若 slug 已在 bodies 中，meta 写入被跳过（去重、不降级）
  */
-export function buildQueryToolContext(subject: Subject, accessed: AccessedPages): ToolContext {
+export function buildQueryToolContext(
+  subject: Subject,
+  accessed: AccessedPages,
+  options: QueryToolContextOptions = {},
+): ToolContext {
   const evidence = createSubjectEvidenceReader(subject);
+  const approvalCapabilities: Partial<ToolContext> = options.conversationId
+    ? {
+        conversationId: options.conversationId,
+        previewChange: (input) => createPendingActionPreview({
+          conversationId: options.conversationId!,
+          subject,
+          input,
+        }),
+        onPendingAction: options.onPendingAction,
+      }
+    : {};
   return {
     subject,
+    ...approvalCapabilities,
     async readPage(slug) {
       const page = pagesRepo.getPageBySlug(subject.id, slug);
       const doc = readPageInSubject(subject.slug, slug);

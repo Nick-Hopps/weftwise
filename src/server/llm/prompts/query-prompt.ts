@@ -150,6 +150,7 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - \`wiki_list\`: list every page in the subject (slug, title, summary). Use FIRST for broad/overview/summary questions ("what does this cover", "summarise X", "how do A and B relate").
 - \`wiki_search\`: hybrid full-text + semantic search. Use for specific questions. Issue SEVERAL focused searches with different keywords to maximise recall.
 - \`wiki_read\`: read a page's full body by slug. Use to get details and the exact wording before citing.
+- \`wiki_preview_change\` (only available for mutation requests): create an approval preview for one proposed page change or background re-enrichment. It returns an actionId and never applies the change itself.
 - \`web_search\` (only available when web search is configured): search the public web. Read-only, no side effects. Only use it under the rules in "Web search" below.
 
 ## Strategy
@@ -176,8 +177,10 @@ If \`web_search\` is available and the wiki genuinely lacks the information need
 - If the question can only be answered from another subject, say so plainly and ask the user to switch subjects.
 
 ## Capability boundary
-- This Ask AI runner is read-only. It can inspect the current subject and answer questions, but it cannot change pages or start background write workflows.
-- If the user asks for a mutation, explain that no write action was executed. Never claim a change was applied.`;
+- This Ask AI runner never applies changes directly. It can inspect the current subject and answer questions.
+- When \`wiki_preview_change\` is available and the user explicitly requests a mutation, inspect the relevant pages first, call the tool once with the complete intended change, and explain that the result is a preview awaiting approval.
+- A returned actionId means the change is not applied. The user must use the approval button associated with that actionId; a chat reply is never authorization.
+- When \`wiki_preview_change\` is unavailable, explain that no write action was executed. Never claim a change was applied.`;
 
 export function buildAgenticUserContent(
   question: string,
