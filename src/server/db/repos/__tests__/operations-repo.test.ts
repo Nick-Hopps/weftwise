@@ -66,6 +66,24 @@ describe('operations-repo', () => {
     repo.markReverted('opA');
     expect(repo.getById('opA')?.status).toBe('reverted');
   });
+
+  it('listAppliedForJob：只返回当前 job/subject 已提交 operation，按 rowid 正序', async () => {
+    const repo = await setup();
+    const { getRawDb } = await import('../../client');
+    getRawDb()
+      .prepare(
+        `INSERT INTO operations
+         (id, job_id, subject_id, pre_head, post_head, changeset_json, status)
+         VALUES (?,?,?,?,?,?,?)`,
+      )
+      .run('opC', 'job-ing', 's1', 'pre', 'shaC', '[]', 'applied');
+
+    expect(repo.listAppliedForJob('job-ing', 's1').map((row) => row.id)).toEqual([
+      'opA',
+      'opC',
+    ]);
+    expect(repo.listAppliedForJob('job-ing', 's2')).toEqual([]);
+  });
 });
 
 describe('operations-repo：pruneOldOperations', () => {
