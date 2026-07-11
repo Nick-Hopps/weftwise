@@ -1,5 +1,35 @@
-import { describe, it, expect } from 'vitest';
-import { decideJobFailureAction } from '../worker';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+
+const mockMaintainPendingActions = vi.fn();
+
+vi.mock('@/server/services/pending-action-maintenance', () => ({
+  maintainPendingActions: (...args: unknown[]) => mockMaintainPendingActions(...args),
+}));
+vi.mock('../queue', () => ({
+  pruneEvents: vi.fn(() => 0),
+  claim: vi.fn(() => null),
+}));
+vi.mock('../events', () => ({ emit: vi.fn() }));
+vi.mock('@/server/services/maintenance-scheduler', () => ({
+  runMaintenanceSweep: vi.fn(() => 0),
+}));
+vi.mock('@/server/db/repos/operations-repo', () => ({
+  pruneOldOperations: vi.fn(() => 0),
+}));
+vi.mock('@/server/db/repos/usage-repo', () => ({
+  pruneOldUsage: vi.fn(() => 0),
+  USAGE_RETENTION_MS: 90 * 24 * 60 * 60_000,
+}));
+vi.mock('@/server/db/repos/settings-repo', () => ({
+  getMaintenanceEnabled: vi.fn(() => false),
+  getMaintenanceSweepIntervalHours: vi.fn(() => 24),
+  getMaintenanceMaxPagesPerSweep: vi.fn(() => 10),
+  getMaintenanceLastSweepAt: vi.fn(() => null),
+  setMaintenanceLastSweepAt: vi.fn(),
+  getIngestConcurrency: vi.fn(() => 1),
+}));
+
+import { decideJobFailureAction, startWorker, stopWorker } from '../worker';
 
 class AgentCancelled extends Error {
   constructor() {
@@ -78,5 +108,45 @@ describe('decideJobFailureAction', () => {
   it('真实原因藏在 cause 而不是 message 里（如 undici "terminated"）→ retry', () => {
     const err = new AIAPICallError('Failed to process successful response', 'terminated');
     expect(decideJobFailureAction(err, 1, 2)).toBe('retry');
+  });
+});
+
+describe('startWorker - pending_actions 卫生维护', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockMaintainPendingActions.mockReset().mockReturnValue({
+      expired: 0,
+      recovered: 0,
+      pruned: 0,
+    });
+  });
+
+  afterEach(() => {
+    stopWorker();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('启动立即维护一次，并在 60 秒 tick 再维护一次', () => {
+    startWorker(2_000);
+    expect(mockMaintainPendingActions).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(60_000);
+    expect(mockMaintainPendingActions).toHaveBeenCalledTimes(2);
+  });
+
+  it('维护异常仅记录错误，不中止 worker 后续 tick', () => {
+    const error = new Error('db busy');
+    mockMaintainPendingActions.mockImplementation(() => { throw error; });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    startWorker(2_000);
+    vi.advanceTimersByTime(60_000);
+
+    expect(mockMaintainPendingActions).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[maintenance] pending_actions maintenance failed',
+      error,
+    );
   });
 });
