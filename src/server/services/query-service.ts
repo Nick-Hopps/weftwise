@@ -47,13 +47,14 @@ import { registerHandler } from '../jobs/worker';
 import type { QueryResult, Job, Subject } from '@/lib/contracts';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
+import type { QueryMode } from './query-intent';
 
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
 /** query 工具集：`web.search` 仅在联网检索已配置时注入——未配置时模型完全看不到该工具。导出供单测直接校验。 */
-export function resolveQueryTools() {
-  const profile = resolveToolProfile('query:read', { webSearchConfigured: isWebSearchConfigured() });
+export function resolveQueryTools(mode: QueryMode = 'read') {
+  const profile = resolveToolProfile(mode === 'propose' ? 'query:propose' : 'query:read', { webSearchConfigured: isWebSearchConfigured() });
   return createBuiltinToolRegistry().resolve([...profile.tools]);
 }
 
