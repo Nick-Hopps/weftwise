@@ -4,6 +4,7 @@ const mockGetAllPages = vi.fn();
 const mockGetPageBySlug = vi.fn();
 const mockHybrid = vi.fn();
 const mockReadPage = vi.fn();
+const mockCreatePendingActionPreview = vi.fn();
 
 vi.mock('@/server/db/repos/pages-repo', () => ({
   getAllPages: (...a: unknown[]) => mockGetAllPages(...a),
@@ -15,6 +16,9 @@ vi.mock('@/server/search/hybrid-retrieval', () => ({
 }));
 vi.mock('@/server/wiki/wiki-store', () => ({
   readPageInSubject: (...a: unknown[]) => mockReadPage(...a),
+}));
+vi.mock('../pending-action-service', () => ({
+  createPendingActionPreview: (...a: unknown[]) => mockCreatePendingActionPreview(...a),
 }));
 
 const mockWebSearch = vi.fn();
@@ -59,6 +63,7 @@ beforeEach(() => {
   mockGetPageBySlug.mockReset();
   mockHybrid.mockReset();
   mockReadPage.mockReset();
+  mockCreatePendingActionPreview.mockReset();
 });
 
 describe('buildQueryToolContext - listPages', () => {
@@ -202,6 +207,29 @@ describe('buildQueryToolContext - 只读能力面', () => {
     expect(ctx.inspectPage).toBeTypeOf('function');
     expect(ctx.searchSources).toBeTypeOf('function');
     expect(ctx.readSource).toBeTypeOf('function');
+    expect(ctx.previewChange).toBeUndefined();
+  });
+});
+
+describe('buildQueryToolContext - 审批预览能力面', () => {
+  it('仅在提供 conversationId 时注入 subject-scoped 预览服务与回调', async () => {
+    const action = { actionId: 'action-1' };
+    mockCreatePendingActionPreview.mockResolvedValue(action);
+    const onPendingAction = vi.fn();
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages(), {
+      conversationId: 'conversation-1',
+      onPendingAction,
+    });
+    const input = { operation: 'delete' as const, payload: { slug: 'old-page' } };
+
+    await expect(ctx.previewChange?.(input)).resolves.toBe(action);
+    expect(mockCreatePendingActionPreview).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      subject: SUBJECT,
+      input,
+    });
+    expect(ctx.conversationId).toBe('conversation-1');
+    expect(ctx.onPendingAction).toBe(onPendingAction);
   });
 });
 

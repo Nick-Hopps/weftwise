@@ -44,7 +44,7 @@ import {
 import { buildWikiPath, slugFromTitle } from '../wiki/page-identity';
 import { serializeFrontmatter } from '../wiki/frontmatter';
 import { registerHandler } from '../jobs/worker';
-import type { QueryResult, Job, Subject } from '@/lib/contracts';
+import type { PendingActionView, QueryResult, Job, Subject } from '@/lib/contracts';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 import type { QueryMode } from './query-intent';
@@ -58,9 +58,25 @@ export function resolveQueryTools(mode: QueryMode = 'read') {
   return createBuiltinToolRegistry().resolve([...profile.tools]);
 }
 
-function compileQueryTools(subject: Subject, accessed: AccessedPages) {
-  const profile = resolveToolProfile('query:read', { webSearchConfigured: isWebSearchConfigured() });
-  return compileToolSet(resolveQueryTools(), buildQueryToolContext(subject, accessed), {
+interface QueryCompileOptions {
+  mode?: QueryMode;
+  conversationId?: string;
+  onPendingAction?: (action: PendingActionView) => void;
+}
+
+function compileQueryTools(
+  subject: Subject,
+  accessed: AccessedPages,
+  options: QueryCompileOptions = {},
+) {
+  const mode = options.mode ?? 'read';
+  const profile = resolveToolProfile(mode === 'propose' ? 'query:propose' : 'query:read', {
+    webSearchConfigured: isWebSearchConfigured(),
+  });
+  return compileToolSet(resolveQueryTools(mode), buildQueryToolContext(subject, accessed, {
+    conversationId: options.conversationId,
+    onPendingAction: options.onPendingAction,
+  }), {
     policy: createToolExecutionPolicy(profile, subject.id),
   });
 }
@@ -130,9 +146,16 @@ export function streamAgenticQuery(opts: {
   history?: { role: 'user' | 'assistant'; content: string }[];
   currentPageSlug?: string;
   abortSignal?: AbortSignal;
+  mode?: QueryMode;
+  conversationId?: string;
+  onPendingAction?: (action: PendingActionView) => void;
 }): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
   const accessed = createAccessedPages();
-  const tools = compileQueryTools(opts.subject, accessed);
+  const tools = compileQueryTools(opts.subject, accessed, {
+    mode: opts.mode,
+    conversationId: opts.conversationId,
+    onPendingAction: opts.onPendingAction,
+  });
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
     subject: subjectCtxFrom(opts.subject),
