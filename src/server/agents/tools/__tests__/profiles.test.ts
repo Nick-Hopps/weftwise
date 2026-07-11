@@ -22,6 +22,17 @@ describe('resolveToolProfile', () => {
     expect(resolveToolProfile('query:read', { webSearchConfigured: false }).tools).not.toContain('web.search');
   });
 
+  it('query:propose 只比 read 多 preview，不包含实际写工具', () => {
+    const read = resolveToolProfile('query:read', { webSearchConfigured: false }).tools;
+    const propose = resolveToolProfile('query:propose', { webSearchConfigured: false }).tools;
+    expect(propose).toEqual([...read, 'wiki.preview_change']);
+    for (const writeTool of [
+      'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete', 'wiki.reenrich',
+    ]) {
+      expect(propose).not.toContain(writeTool);
+    }
+  });
+
   it('Auto Curate 不声明 list/create/delete', () => {
     const tools = resolveToolProfile('curate:auto').tools;
     expect(tools).not.toContain('wiki.list');
