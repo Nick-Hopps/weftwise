@@ -120,6 +120,14 @@ export function listForConversation(
   return rows.map(mapRow);
 }
 
+export function listRecoverable(): PendingActionRecord[] {
+  const rows = getRawDb().prepare(
+    `SELECT ${SELECT_COLUMNS} FROM pending_actions
+     WHERE status IN ('approved','executing') ORDER BY updated_at ASC, rowid ASC`,
+  ).all() as RawPendingAction[];
+  return rows.map(mapRow);
+}
+
 export function claimApproval(
   id: string,
   subjectId: string,
@@ -181,12 +189,18 @@ export function rejectPending(id: string, subjectId: string, nowIso: string): bo
   return result.changes === 1;
 }
 
-export function markApplied(id: string, subjectId: string, nowIso: string): boolean {
+export function markApplied(
+  id: string,
+  subjectId: string,
+  nowIso: string,
+  refs: { operationId?: string; jobId?: string } = {},
+): boolean {
   const result = getRawDb().prepare(
     `UPDATE pending_actions
-     SET status = 'applied', applied_at = ?, updated_at = ?, error_json = NULL
+     SET status = 'applied', applied_at = ?, updated_at = ?, error_json = NULL,
+         operation_id = COALESCE(?, operation_id), job_id = COALESCE(?, job_id)
      WHERE id = ? AND subject_id = ? AND status = 'executing'`,
-  ).run(nowIso, nowIso, id, subjectId);
+  ).run(nowIso, nowIso, refs.operationId ?? null, refs.jobId ?? null, id, subjectId);
   return result.changes === 1;
 }
 
