@@ -4,7 +4,12 @@
  */
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as queue from '../jobs/queue';
+import { getVaultHead } from '../git/git-service';
 import { META_PAGE_SLUGS } from '../wiki/page-identity';
+import type { PendingActionPreview } from '@/lib/contracts';
+
+export const REENRICH_APPROVAL_WARNING =
+  '批准的是重新丰富任务，不是确定的内容变更；最终内容将在任务完成后通过历史记录审计。';
 
 /** 纯校验：可入队返回 null，否则返回面向用户的错误消息。page=null 表示该 subject 下未找到。 */
 export function validateReenrichTarget(
@@ -24,4 +29,22 @@ export function enqueueReenrich(subjectId: string, slug: string): { jobId: strin
   if (err) throw new Error(err);
   const job = queue.enqueue('re-enrich', { slug, subjectId }, subjectId);
   return { jobId: job.id };
+}
+
+/** 只规划 re-enrich 调度动作，不创建 job。 */
+export async function planReenrich(
+  subjectId: string,
+  slug: string,
+): Promise<PendingActionPreview> {
+  const page = pagesRepo.getPageBySlug(subjectId, slug);
+  const error = validateReenrichTarget(slug, page);
+  if (error) throw new Error(error);
+  return {
+    kind: 'workflow',
+    preHead: await getVaultHead(),
+    summary: `重新丰富页面 ${slug}`,
+    affectedPages: [{ slug, action: 'update' }],
+    diff: null,
+    warnings: [REENRICH_APPROVAL_WARNING],
+  };
 }
