@@ -5,7 +5,7 @@ import type { PendingActionOperation, PreviewChangeInput } from '@/lib/contracts
 const TrimmedTextSchema = z.string().trim().min(1);
 const TagsSchema = z.array(TrimmedTextSchema).optional();
 
-const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
+export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('create'),
     payload: z.object({
