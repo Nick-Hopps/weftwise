@@ -20,7 +20,7 @@ import { getConfig } from '../config/env';
 
 type Release = () => void;
 
-let pending: (() => void)[] = [];
+const pending: (() => void)[] = [];
 let locked = false;
 
 /** 锁文件路径：vault 的同级目录（如 data/.vault.lock） */

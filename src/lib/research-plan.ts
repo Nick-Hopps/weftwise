@@ -18,7 +18,7 @@ export function normalizeUrl(url: string): string {
   try {
     const u = new URL(url);
     u.hash = '';
-    let path = u.pathname.replace(/\/+$/, '');
+    const path = u.pathname.replace(/\/+$/, '');
     return `${u.protocol}//${u.host.toLowerCase()}${path}${u.search}`;
   } catch {
     return url.trim().replace(/\/+$/, '');
