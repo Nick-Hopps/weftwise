@@ -10,6 +10,7 @@ const {
   mockGenerateStructured,
   mockBacklogCreate,
   mockExtractCitations,
+  mockStreamTools,
 } = vi.hoisted(() => ({
   mockGenerateTools: vi.fn(),
   mockSubjectHasContent: vi.fn(),
@@ -19,6 +20,7 @@ const {
   mockGenerateStructured: vi.fn(),
   mockBacklogCreate: vi.fn(),
   mockExtractCitations: vi.fn(() => [] as { pageSlug: string; excerpt: string }[]),
+  mockStreamTools: vi.fn(),
 }));
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
@@ -29,7 +31,7 @@ vi.mock('@/server/db/repos/settings-repo', () => ({
 vi.mock('@/server/llm/provider-registry', () => ({
   generateStructuredOutput: mockGenerateStructured,
   streamTextResponse: vi.fn(),
-  streamTextWithTools: vi.fn(),
+  streamTextWithTools: mockStreamTools,
   generateTextWithTools: mockGenerateTools,
 }));
 vi.mock('../query-tools', () => ({
@@ -53,7 +55,12 @@ vi.mock('@/server/db/repos/research-backlog-repo', () => ({
   create: mockBacklogCreate,
 }));
 
-import { runQuery, recordCoverageGap, NO_QUERY_CONTEXT_ANSWER } from '../query-service';
+import {
+  runQuery,
+  streamAgenticQuery,
+  recordCoverageGap,
+  NO_QUERY_CONTEXT_ANSWER,
+} from '../query-service';
 
 const SUBJECT = {
   id: 's1', slug: 'general', name: 'General', description: '',
@@ -74,6 +81,7 @@ beforeEach(() => {
   mockGenerateStructured.mockReset().mockResolvedValue({ coverageSufficient: true });
   mockBacklogCreate.mockReset();
   mockExtractCitations.mockReset().mockReturnValue([]);
+  mockStreamTools.mockReset().mockReturnValue({ textStream: {} });
 });
 
 describe('runQuery（agentic）', () => {
@@ -112,6 +120,33 @@ describe('runQuery（agentic）', () => {
     // coverage 判定异步跑在 generateStructuredOutput 上，但不再有专门产出 citations 的结构化输出调用
     await flushPromises();
     expect(mockGenerateStructured).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('streamAgenticQuery - 动态工具模式', () => {
+  it('propose 模式编译审批预览 profile，并把会话上下文注入工具', () => {
+    const onPendingAction = vi.fn();
+
+    streamAgenticQuery({
+      question: '删除旧页面',
+      subject: SUBJECT,
+      mode: 'propose',
+      conversationId: 'conversation-1',
+      onPendingAction,
+    });
+
+    expect(mockBuildToolContext).toHaveBeenCalledWith(
+      SUBJECT,
+      expect.anything(),
+      { conversationId: 'conversation-1', onPendingAction },
+    );
+    expect(mockCompileToolSet).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        policy: expect.objectContaining({ profileId: 'query:propose' }),
+      }),
+    );
   });
 });
 

@@ -5,7 +5,19 @@
  * 语义沿用 DELETE /api/pages 路由 + executePageCreate/executePageUpdate。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
-import { executePageDelete, executePageCreate, executePageUpdate, executePagePatch } from '../wiki/page-ops';
+import {
+  executePageCreate,
+  executePageDelete,
+  executePagePatch,
+  executePageUpdate,
+} from '../wiki/page-ops';
+import {
+  planPageCreate,
+  planPageDelete,
+  planPagePatch,
+  planPageUpdate,
+  type PlannedPageOperation,
+} from '../wiki/page-operation-plan';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { checkRewriteFidelity, collectMissingLinkTargets, FIDELITY_PROFILES } from '../wiki/rewrite-fidelity';
 import { enqueueEmbedIndex } from './embedding-service';
@@ -24,17 +36,43 @@ export function validateDeleteTarget(
   return null;
 }
 
+export async function planDeletePageInSubject(
+  subject: Subject,
+  slug: string,
+  effectiveAt: string,
+): Promise<PlannedPageOperation<{ deletedSlug: string; brokenBacklinks: number }>> {
+  const page = pagesRepo.getPageBySlug(subject.id, slug);
+  const error = validateDeleteTarget(slug, page);
+  if (error) throw new Error(error);
+  return planPageDelete(crypto.randomUUID(), subject, { slug, effectiveAt });
+}
+
 /** 校验目标页后同步删除（Saga）+ 触发向量 prune；校验失败抛 Error（消息可直接转述）。 */
 export async function deletePageInSubject(
   subject: Subject,
   slug: string,
 ): Promise<{ deletedSlug: string; brokenBacklinks: number }> {
   const page = pagesRepo.getPageBySlug(subject.id, slug);
-  const err = validateDeleteTarget(slug, page);
-  if (err) throw new Error(err);
+  const error = validateDeleteTarget(slug, page);
+  if (error) throw new Error(error);
   const result = await executePageDelete(crypto.randomUUID(), subject, slug);
   enqueueEmbedIndex(subject.id);
   return result;
+}
+
+export async function planCreatePageInSubject(
+  subject: Subject,
+  input: { title: string; body: string; summary?: string; tags?: string[] },
+  effectiveAt: string,
+): Promise<PlannedPageOperation<{ createdSlug: string }>> {
+  const title = input.title?.trim();
+  if (!title) throw new Error('A page title is required.');
+  return planPageCreate(crypto.randomUUID(), subject, {
+    ...input,
+    title,
+    body: input.body ?? '',
+    effectiveAt,
+  });
 }
 
 /** 同步新建一页（Saga）+ 触发向量回填；title 派生唯一 slug（永不冲突）。 */
@@ -73,6 +111,25 @@ export function collectBrokenLinkTargets(subject: Subject, body: string): Set<st
   });
 }
 
+export async function planUpdatePageInSubject(
+  subject: Subject,
+  input: { slug: string; title?: string; body: string; summary?: string; tags?: string[] },
+  effectiveAt: string,
+): Promise<PlannedPageOperation<{ updatedSlug: string; referencesUpdated: number }>> {
+  if (META_PAGE_SLUGS.has(input.slug)) {
+    throw new Error(`Cannot update protected system page "${input.slug}".`);
+  }
+  const doc = readPageInSubject(subject.slug, input.slug);
+  if (!doc) throw new Error(`Page "${input.slug}" not found in this subject.`);
+  const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix, {
+    allowedDroppedTargets: collectBrokenLinkTargets(subject, doc.body),
+  });
+  if (!fidelity.ok) {
+    throw new Error(`Edit dropped too much content: ${fidelity.violations.join('; ')}`);
+  }
+  return planPageUpdate(crypto.randomUUID(), subject, { ...input, effectiveAt });
+}
+
 /**
  * 校验目标页存在 + 非保护页 + 忠实度护栏（FIDELITY_PROFILES.fix：正文不得缩水到原文
  * 80% 以下、不得丢失原有 wikilink）后同步更新（Saga，可选改标题联动 relink）+ 触发
@@ -98,6 +155,17 @@ export async function updatePageInSubject(
   const result = await executePageUpdate(crypto.randomUUID(), subject, input);
   enqueueEmbedIndex(subject.id);
   return result;
+}
+
+export async function planPatchPageInSubject(
+  subject: Subject,
+  input: { slug: string; edits: Array<{ oldString: string; newString: string }> },
+  effectiveAt: string,
+): Promise<PlannedPageOperation<{ updatedSlug: string; appliedEdits: number }>> {
+  if (META_PAGE_SLUGS.has(input.slug)) {
+    throw new Error(`Cannot update protected system page "${input.slug}".`);
+  }
+  return planPagePatch(crypto.randomUUID(), subject, { ...input, effectiveAt });
 }
 
 /**

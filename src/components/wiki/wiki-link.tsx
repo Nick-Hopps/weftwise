@@ -11,7 +11,7 @@ interface WikiLinkProps {
   slug: string;
   /** Subject slug when the link explicitly targets a different subject. */
   subjectSlug?: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   broken?: boolean;
 }
 

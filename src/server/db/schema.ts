@@ -5,7 +5,10 @@ import {
   blob,
   primaryKey,
   uniqueIndex,
+  index,
+  check,
 } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 
 export const subjects = sqliteTable('subjects', {
   id: text('id').primaryKey(),
@@ -171,6 +174,48 @@ export const messages = sqliteTable('messages', {
   citationsJson: text('citations_json'),
   createdAt: text('created_at').notNull(),
 });
+
+export const pendingActions = sqliteTable(
+  'pending_actions',
+  {
+    id: text('id').primaryKey(),
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    operation: text('operation').notNull(),
+    payloadJson: text('payload_json').notNull(),
+    payloadHash: text('payload_hash').notNull(),
+    previewJson: text('preview_json').notNull(),
+    status: text('status').notNull().default('pending'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+    approvedAt: text('approved_at'),
+    appliedAt: text('applied_at'),
+    operationId: text('operation_id'),
+    jobId: text('job_id'),
+    errorJson: text('error_json'),
+  },
+  (t) => ({
+    conversationStatusIdx: index('pending_actions_conversation_status_idx')
+      .on(t.conversationId, t.status, t.createdAt),
+    subjectStatusExpiryIdx: index('pending_actions_subject_status_expiry_idx')
+      .on(t.subjectId, t.status, t.expiresAt),
+    statusExpiryIdx: index('pending_actions_status_expiry_idx')
+      .on(t.status, t.expiresAt),
+    operationCheck: check(
+      'pending_actions_operation_check',
+      sql`${t.operation} IN ('create','update','patch','delete','reenrich')`,
+    ),
+    statusCheck: check(
+      'pending_actions_status_check',
+      sql`${t.status} IN ('pending','approved','executing','applied','rejected','expired','failed')`,
+    ),
+  }),
+);
 
 export const pageEmbeddings = sqliteTable(
   'page_embeddings',

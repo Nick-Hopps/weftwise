@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type BetterSqlite3 from 'better-sqlite3';
 
 let dir: string;
 let prevDb: string | undefined;
@@ -19,7 +20,7 @@ afterEach(() => {
 });
 
 // 为某 subject 在所有关联表插入一行（pages_fts 由 pages 插入触发器自动写入，不手插）。
-function seedSubjectData(sqlite: any, subjectId: string) {
+function seedSubjectData(sqlite: BetterSqlite3.Database, subjectId: string) {
   const now = new Date().toISOString();
   sqlite.prepare(`INSERT INTO pages (subject_id, slug, title, path, summary, content_hash, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
     .run(subjectId, 'page-a', 'Page A', `wiki/${subjectId}/page-a.md`, '', 'h1', '[]', now, now);
@@ -61,7 +62,7 @@ const SUBJECT_TABLES = [
   'conversations', 'operations', 'jobs', 'pages_fts', 'research_backlog',
 ];
 
-function totalRowsForSubject(sqlite: any, subjectId: string): number {
+function totalRowsForSubject(sqlite: BetterSqlite3.Database, subjectId: string): number {
   let total = 0;
   for (const t of SUBJECT_TABLES) {
     const r = sqlite.prepare(`SELECT COUNT(*) AS c FROM ${t} WHERE subject_id = ?`).get(subjectId) as { c: number };
@@ -106,8 +107,8 @@ describe('subjects-repo deleteWithContents', () => {
     expect(() => subjectsRepo.deleteWithContents(general.id)).toThrow(SubjectError);
     try {
       subjectsRepo.deleteWithContents(general.id);
-    } catch (e: any) {
-      expect(e.code).toBe('protected');
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe('protected');
     }
     expect(subjectsRepo.getBySlug('general')).not.toBeNull();
   });
