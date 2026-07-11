@@ -8,6 +8,7 @@ const mockAccessedToContext = vi.fn();
 const mockExtractCitations = vi.fn();
 const mockRecordCoverageGap = vi.fn();
 const mockAssessCoverage = vi.fn();
+const mockResolveQueryMode = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
 const mockListMsgs = vi.fn();
@@ -30,6 +31,9 @@ vi.mock('@/server/services/query-service', () => ({
 }));
 vi.mock('@/server/services/citation-extract', () => ({
   extractCitationsFromAnswer: (...a: unknown[]) => mockExtractCitations(...a),
+}));
+vi.mock('@/server/services/query-intent', () => ({
+  resolveQueryMode: (...a: unknown[]) => mockResolveQueryMode(...a),
 }));
 vi.mock('@/server/services/conversation-title', () => ({
   deriveConversationTitle: (q: string) => `T:${q.slice(0, 5)}`,
@@ -76,6 +80,9 @@ beforeEach(() => {
   mockExtractCitations.mockReturnValue([]);
   mockRecordCoverageGap.mockReset();
   mockAssessCoverage.mockReset();
+  mockResolveQueryMode.mockReset().mockImplementation((question: string) =>
+    question.includes('删除') ? 'propose' : 'read',
+  );
   mockCreate.mockReset();
   mockCreate.mockImplementation((s: string) => ({ id: 'new-conv', subjectId: s, title: 'T', createdAt: 't', updatedAt: 't' }));
   mockGet.mockReset();
@@ -149,5 +156,41 @@ describe('POST /api/query 流式持久化', () => {
       '你好',
       'hello',
     );
+    expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'read',
+      conversationId: 'new-conv',
+    }));
+  });
+
+  it('明确写入意图 → 传 propose 模式并推送 pending-action 事件', async () => {
+    const action = {
+      actionId: 'a1',
+      conversationId: 'new-conv',
+      operation: 'delete',
+      status: 'pending',
+    };
+    mockAgentic.mockImplementation((opts: unknown) => {
+      const onPendingAction = (opts as { onPendingAction?: (value: unknown) => void }).onPendingAction;
+      onPendingAction?.(action);
+      return {
+        stream: {
+          fullStream: (async function* () {
+            yield { type: 'text-delta', text: '请审批' } as const;
+          })(),
+        },
+        accessed: { meta: new Map(), bodies: new Map() },
+      };
+    });
+
+    const res = await call({ question: '删除旧页面', subjectId: 's1' });
+    const sse = await readSSE(res);
+
+    expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'propose',
+      conversationId: 'new-conv',
+      onPendingAction: expect.any(Function),
+    }));
+    expect(sse).toContain('event: pending-action');
+    expect(sse).toContain(`data: ${JSON.stringify(action)}`);
   });
 });
