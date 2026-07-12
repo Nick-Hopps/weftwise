@@ -6,6 +6,7 @@ import {
   statusOnConnect,
   terminalStatusForEvent,
   isAuthoritativeTerminal,
+  POSTCONDITION_JOB_EVENT_TYPES,
   type JobStreamStatus,
 } from './job-stream-logic';
 
@@ -231,6 +232,7 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'research:search',
         'research:triage',
         'research:complete',
+        ...POSTCONDITION_JOB_EVENT_TYPES,
       ];
 
       const listeners: Array<{ type: string; handler: (e: Event) => void }> = [];
