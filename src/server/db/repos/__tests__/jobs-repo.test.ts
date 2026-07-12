@@ -93,9 +93,14 @@ describe('jobs-repo.requeueJobWithParams', () => {
       { sourceId: 'src-1', filename: 'source.md', subjectId: 's1' },
       's1'
     );
+    const claimed = repo.claimNextJob('ingest');
+    if (claimed?.id !== job.id) throw new Error('测试任务未被正确领取');
+    repo.failJob(job.id, new Error('boom'));
+    const failed = repo.getJob(job.id);
+    if (!failed) throw new Error('失败任务不存在');
     db.prepare(
       `UPDATE jobs
-       SET status = 'failed', lease_expires_at = ?, heartbeat_at = ?, cancel_requested = 1
+       SET lease_expires_at = ?, heartbeat_at = ?
        WHERE id = ?`
     ).run('2026-07-13T12:02:00.000Z', '2026-07-13T12:00:00.000Z', job.id);
     db.prepare(
@@ -103,11 +108,11 @@ describe('jobs-repo.requeueJobWithParams', () => {
        VALUES (?, ?, ?, ?, ?)`
     ).run(job.id, 'writer-page', 'page-a', '{"content":"draft"}', NOW);
 
-    return { db, repo, jobId: job.id };
+    return { db, repo, jobId: job.id, failed };
   }
 
   it('原子合并处置上下文并重排 failed job，保留原参数和 ingest checkpoint', async () => {
-    const { db, repo, jobId } = await setupFailedIngestJob();
+    const { db, repo, jobId, failed } = await setupFailedIngestJob();
     const remediationContext = {
       lintJobId: 'lint-1',
       findingIds: ['finding-2', 'finding-1'],
@@ -121,7 +126,15 @@ describe('jobs-repo.requeueJobWithParams', () => {
       status: 'pending',
       leaseExpiresAt: null,
       heartbeatAt: null,
+      resultJson: failed.resultJson,
+      completedAt: failed.completedAt,
+      startedAt: failed.startedAt,
+      attemptCount: failed.attemptCount,
     });
+    expect(failed).toMatchObject({ status: 'failed', attemptCount: 1 });
+    expect(failed.resultJson).not.toBeNull();
+    expect(failed.completedAt).not.toBeNull();
+    expect(failed.startedAt).not.toBeNull();
     expect(JSON.parse(requeued!.paramsJson)).toEqual({
       sourceId: 'src-1',
       filename: 'source.md',
@@ -134,6 +147,59 @@ describe('jobs-repo.requeueJobWithParams', () => {
     expect(
       db.prepare(`SELECT COUNT(*) AS count FROM ingest_checkpoints WHERE job_id = ?`).get(jobId)
     ).toEqual({ count: 1 });
+  });
+
+  it('已取消的 failed job 不得通过参数重排复活', async () => {
+    const { db, repo, jobId } = await setupFailedIngestJob();
+    expect(repo.requestCancel(jobId)).toBe('cancelled');
+
+    expect(repo.requeueJobWithParams(jobId, { marker: 'patched' })).toBeNull();
+
+    const row = db
+      .prepare(
+        `SELECT status, cancel_requested, params_json, result_json FROM jobs WHERE id = ?`
+      )
+      .get(jobId) as {
+        status: string;
+        cancel_requested: number;
+        params_json: string;
+        result_json: string;
+      };
+    expect(row.status).toBe('failed');
+    expect(row.cancel_requested).toBe(1);
+    expect(JSON.parse(row.params_json)).not.toHaveProperty('marker');
+    expect(JSON.parse(row.result_json)).toMatchObject({ cancelled: true });
+  });
+
+  it('resultJson 已标记 cancelled 时防御性拒绝重排', async () => {
+    const { db, repo, jobId } = await setupFailedIngestJob();
+    const cancelledResult = JSON.stringify({
+      error: { message: 'Cancelled by user' },
+      cancelled: true,
+    });
+    db.prepare(
+      `UPDATE jobs SET cancel_requested = 0, result_json = ? WHERE id = ?`
+    ).run(cancelledResult, jobId);
+
+    expect(repo.requeueJobWithParams(jobId, { marker: 'patched' })).toBeNull();
+    expect(repo.getJob(jobId)).toMatchObject({
+      status: 'failed',
+      resultJson: cancelledResult,
+    });
+    expect(
+      db.prepare(`SELECT cancel_requested FROM jobs WHERE id = ?`).get(jobId)
+    ).toEqual({ cancel_requested: 0 });
+    expect(JSON.parse(repo.getJob(jobId)!.paramsJson)).not.toHaveProperty('marker');
+  });
+
+  it('连续两个重排仅首个成功，后续调用不得覆盖参数', async () => {
+    const { repo, jobId } = await setupFailedIngestJob();
+
+    expect(repo.requeueJobWithParams(jobId, { marker: 'first' })).not.toBeNull();
+    expect(repo.requeueJobWithParams(jobId, { marker: 'second' })).toBeNull();
+    expect(JSON.parse(repo.getJob(jobId)!.paramsJson)).toMatchObject({
+      marker: 'first',
+    });
   });
 
   it('非 failed job 或不存在的 job 返回 null 且不修改状态和参数', async () => {

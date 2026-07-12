@@ -54,12 +54,12 @@ export function contextKey(
   context: RemediationContext
 ): string {
   const normalized = normalizeRemediationContext(context);
-  return [
+  return JSON.stringify([
     subjectId,
     normalized.lintJobId,
     normalized.action,
-    normalized.findingIds.join(','),
-  ].join('\0');
+    normalized.findingIds,
+  ]);
 }
 
 export function findDuplicateRemediationJob(
