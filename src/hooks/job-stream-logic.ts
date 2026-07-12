@@ -4,6 +4,14 @@
 
 export type JobStreamStatus = 'idle' | 'streaming' | 'completed' | 'failed';
 
+/** Fix / Curate 定向后置校验的持久化命名事件。 */
+export const POSTCONDITION_JOB_EVENT_TYPES = [
+  'fix:verify:start',
+  'fix:verify:complete',
+  'curate:verify:start',
+  'curate:verify:complete',
+] as const;
+
 /**
  * The synthetic end-of-stream marker the SSE server appends for a terminal job
  * (see `server/jobs/events.ts`). It is NOT a real `job_events` row id, so it is

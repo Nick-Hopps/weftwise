@@ -1,11 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import {
+  POSTCONDITION_JOB_EVENT_TYPES,
   shouldResetRetryBudget,
   shouldReconnect,
   statusOnConnect,
   terminalStatusForEvent,
   isAuthoritativeTerminal,
 } from '../job-stream-logic';
+
+describe('POSTCONDITION_JOB_EVENT_TYPES', () => {
+  it('注册 Fix 与 Curate 的开始和完成事件', () => {
+    expect(POSTCONDITION_JOB_EVENT_TYPES).toEqual([
+      'fix:verify:start',
+      'fix:verify:complete',
+      'curate:verify:start',
+      'curate:verify:complete',
+    ]);
+  });
+});
 
 describe('shouldResetRetryBudget', () => {
   it('resets the budget on a genuinely new event (a real cursor id)', () => {
