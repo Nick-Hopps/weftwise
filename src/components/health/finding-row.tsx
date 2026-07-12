@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -24,6 +24,7 @@ import type {
 import { Tag } from '@/components/ui/tag';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { findingHref, SEVERITY_TONE } from './lint-findings';
+import { nextDeleteArmed, type ExecutableRemediationAction } from './remediation-ui';
 
 const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
   'broken-link': Unlink,
@@ -48,34 +49,45 @@ const TYPE_LABEL: Record<LintFinding['type'], string> = {
   'orphan-source': 'Orphan source',
   'thin-page': 'Thin page',
 };
+const NO_ACTING_ACTIONS = new Set<ExecutableRemediationAction>();
 
 export function FindingRow({
   finding,
   plan,
   showSubject = false,
-  acting = false,
+  acting = NO_ACTING_ACTIONS,
+  deleting = false,
+  busyActions,
   onAction,
   onDeleteSource,
 }: {
   finding: EnrichedLintFinding;
-  plan: RemediationPlan;
+  plan?: RemediationPlan;
   showSubject?: boolean;
-  acting?: boolean;
+  acting?: ReadonlySet<ExecutableRemediationAction>;
+  deleting?: boolean;
+  busyActions?: ReadonlySet<ExecutableRemediationAction>;
   onAction?: (action: RemediationAction) => void;
   onDeleteSource?: () => void;
 }) {
   const [deleteArmed, setDeleteArmed] = useState(false);
   const Icon = TYPE_ICON[finding.type];
   const href = findingHref(finding);
-  const statusTone = plan.status === 'failed'
+  const statusTone = plan?.status === 'failed'
     ? 'danger'
-    : plan.status === 'fixed'
+    : plan?.status === 'fixed'
       ? 'success'
-      : plan.status === 'queued'
+      : plan?.status === 'queued'
         ? 'accent'
-        : plan.status === 'awaiting-approval'
+        : plan?.status === 'awaiting-approval'
           ? 'warning'
           : 'neutral';
+
+  useEffect(() => {
+    if (deleting || acting.size > 0) {
+      setDeleteArmed((current) => nextDeleteArmed(current, 'acting'));
+    }
+  }, [acting, deleting]);
 
   return (
     <div className="flex gap-3 px-3 py-2.5 rounded-md hover:bg-subtle transition-colors">
@@ -112,14 +124,25 @@ export function FindingRow({
             <span className="font-medium">Fix:</span> {finding.suggestedFix}
           </p>
         )}
-        <div className="flex items-center gap-2 flex-wrap">
-          <Tag tone={statusTone} size="sm">
-            {plan.status}
-          </Tag>
-          <span className="text-xs text-foreground-tertiary">{plan.workflow}</span>
-        </div>
-        <p className="text-xs text-foreground-tertiary">{plan.reason}</p>
-        {plan.actions.length > 0 && (
+        {plan ? (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Tag tone={statusTone} size="sm">
+                {plan.status}
+              </Tag>
+              <span className="text-xs text-foreground-tertiary">{plan.workflow}</span>
+            </div>
+            <p className="text-xs text-foreground-tertiary">{plan.reason}</p>
+          </>
+        ) : (
+          <>
+            <Tag tone="neutral" size="sm">plan unavailable</Tag>
+            <p className="text-xs text-foreground-tertiary">
+              Re-run the health check before choosing a remediation.
+            </p>
+          </>
+        )}
+        {plan && plan.actions.length > 0 && (
           <div className="mt-1 flex items-center gap-2 flex-wrap">
             {plan.actions.map((item) =>
               item.type === 'review-source' && item.href ? (
@@ -135,8 +158,12 @@ export function FindingRow({
                   key={item.type}
                   intent="secondary"
                   size="sm"
-                  loading={acting}
-                  onClick={() => onAction?.(item)}
+                  loading={item.type !== 'review-source' && acting.has(item.type)}
+                  disabled={item.type !== 'review-source' && busyActions?.has(item.type)}
+                  onClick={() => {
+                    setDeleteArmed((current) => nextDeleteArmed(current, 'action'));
+                    onAction?.(item);
+                  }}
                 >
                   {item.label}
                 </Button>
@@ -144,18 +171,19 @@ export function FindingRow({
             )}
           </div>
         )}
-        {onDeleteSource && (
+        {plan && onDeleteSource && (
           <div className="mt-1 flex items-center gap-2">
             <Button
               intent={deleteArmed ? 'danger' : 'secondary'}
               size="sm"
-              disabled={acting}
+              loading={deleting}
+              disabled={deleting || acting.size > 0}
               onClick={() => {
                 if (!deleteArmed) {
-                  setDeleteArmed(true);
+                  setDeleteArmed((current) => nextDeleteArmed(current, 'arm'));
                   return;
                 }
-                setDeleteArmed(false);
+                setDeleteArmed((current) => nextDeleteArmed(current, 'action'));
                 onDeleteSource();
               }}
             >
