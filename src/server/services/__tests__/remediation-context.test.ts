@@ -231,4 +231,32 @@ describe('findDuplicateRemediationJob', () => {
     ).toBe('newer');
     expect(jobs.map((job) => job.id)).toEqual(['older', 'newer']);
   });
+
+  it('createdAt 相同时按 job.id 字典序稳定选择且不受输入顺序影响', () => {
+    const smallerId = makeJob({
+      id: 'job-a',
+      createdAt: '2026-07-13T11:00:00.000Z',
+    });
+    const largerId = makeJob({
+      id: 'job-z',
+      createdAt: '2026-07-13T11:00:00.000Z',
+    });
+
+    expect(
+      findDuplicateRemediationJob(
+        [smallerId, largerId],
+        'subject-1',
+        BASE_CONTEXT,
+        null
+      )?.id
+    ).toBe('job-z');
+    expect(
+      findDuplicateRemediationJob(
+        [largerId, smallerId],
+        'subject-1',
+        BASE_CONTEXT,
+        null
+      )?.id
+    ).toBe('job-z');
+  });
 });

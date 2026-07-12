@@ -88,7 +88,11 @@ export function findDuplicateRemediationJob(
           job.completedAt > lintRanAt));
     if (!reusable) continue;
 
-    if (latest === null || job.createdAt > latest.createdAt) {
+    if (
+      latest === null ||
+      job.createdAt > latest.createdAt ||
+      (job.createdAt === latest.createdAt && job.id > latest.id)
+    ) {
       latest = job;
     }
   }
