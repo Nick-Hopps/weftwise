@@ -588,6 +588,8 @@ function ensureIndexes(): void {
       ON jobs(subject_id, created_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS jobs_subject_type_status_created_id_idx
       ON jobs(subject_id, type, status, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS jobs_subject_type_status_completed_id_idx
+      ON jobs(subject_id, type, status, completed_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS research_backlog_subject_status_idx
       ON research_backlog(subject_id, status, created_at);
     CREATE INDEX IF NOT EXISTS pending_actions_conversation_status_idx
