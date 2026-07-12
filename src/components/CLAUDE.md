@@ -79,7 +79,8 @@
 
 ### `health/`
 
-- `health-view.tsx` —— 🆕 知识库体检主视图；"Tidy structure" 按钮触发 `POST /api/curate`（全 subject agent 策展）+ `useJobStream` 追踪 `curate:*` 事件，展示策展进度；同时展示 lint findings 按严重度分组；"Fix issues" 按钮触发 `POST /api/fix`（`fix` job）+ `useJobStream` 追踪 `fix:*` 事件，job 完成后自动重跑 lint 闭环
+- `health-view.tsx` —— 🆕 知识库体检主视图；"Tidy structure" / "Fix issues" 分别追踪 `curate:*` / `fix:*`，完成后显示 postcondition clean / residual / semantic failed 三态；Fix 仍自动重跑 lint 刷新完整 findings
+- `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
 
 ### `history/`
 
@@ -166,6 +167,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-12 | Phase 1C：Health 展示 Fix / Curate 后置校验三态；`use-job-stream` 注册四个 verify 事件；新增 `postcondition-summary` 纯函数与测试，Fix 自动 lint 刷新行为不变 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：Chat 接入 pending-action SSE、会话刷新恢复、批准/拒绝 API 与可访问 diff 卡片；actionId upsert 防重，reset 口头确认状态与 Wiki 审批状态彻底分离 |
 | 2026-04-22 | 初始化；对应最近一次 `refactor(ui): 统一设计系统与上下文面板` 后的结构 |
 | 2026-04-25 | Subject：SubjectSwitcher (⌘O) / wiki-page-elsewhere / 各客户端组件接入 subjectId / wiki-link 缓存 key 加 subject |

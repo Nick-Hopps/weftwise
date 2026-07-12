@@ -104,6 +104,7 @@ worker-entry.ts
 3. 令 `allowedSet = seed + 本 subject 一跳邻居`，装配 `createCurateGuard({ seedSet, allowedSet, caps })` + `buildCurateToolContext`，按 mode 解析 profile 后将同一 allowedSet 交给 `ToolExecutionPolicy`：manual 为 read/search/inspect/merge/split/create/delete；auto 仅 read/search/inspect/merge/split，无 list/create/delete。
 4. 调 `generateTextWithTools('curate', { system: CURATE_AGENTIC_SYSTEM_PROMPT, messages, tools, maxSteps: 40 })` 驱动工具循环；模型自驱读页、自行决策并调写工具；每次写工具调用经 guard 鉴权后调 page-ops 内核 + emit 事件。
 5. guard.totals() 非零则 enqueue embed-index。
+6. 按当前 `jobId + subjectId` 的 applied operations 执行共享确定性后置校验；无 operation 返回 clean，残留或校验异常返回 `completed + residual`，不回滚或重放写入。
 
 **护栏（`createCurateGuard`，`wiki/curate-plan.ts`）**：
 - caps 计数器：merge≤5 / split≤5 / delete≤5 / create≤5；超限时工具返回 ok:false + reason，模型物理越不过。
@@ -111,7 +112,7 @@ worker-entry.ts
 - auto 禁 list/create/delete：三个工具均不进入 profile；Guard 另外固定拒绝 auto delete/create，形成纵深防御。
 - 保护页：index/log 不可 merge/split/delete（slug 集合 = `page-identity::META_PAGE_SLUGS` 单一源）。
 
-**事件**：`curate:start` / `curate:agent:start`（进入工具循环前，报候选页数/mode/caps）/ `curate:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:complete`。
+**事件**：`curate:start` / `curate:agent:start`（进入工具循环前，报候选页数/mode/caps）/ `curate:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `curate:merge`（merge 执行前）/ `curate:split`（split 执行前）/ `curate:delete`（delete 执行前）/ `curate:create`（create 成功后）/ `curate:skip`（guard 拒绝）/ `curate:verify:start` / `curate:verify:complete` / `curate:complete`。
 
 **`curate-tools.ts`**（新增）— worker 侧 `ToolContext` 构造：
 - `buildCurateToolContext(subject, { guard, jobId, emit })` — read/search 与写能力保留既有 Guard；同时注入 subject evidence reader。当前 profile 只暴露 `wiki.inspect`，compile policy 用同一 allowedSet 令 scope 外 inspect 返回空结果；Auto 仍无 list/create/delete。
@@ -133,10 +134,11 @@ worker-entry.ts
    - `createFixGuard({ caps: { writes: Math.max(20, 本轮 loop 内不同 pageSlug 数 × 2) } })`（硬护栏）：写次数 cap + 保护页（index/log）+ 忠实度 `checkRewriteFidelity(…, FIDELITY_PROFILES.fix)`（`wiki/rewrite-fidelity.ts`，需现有正文，护栏不读盘；floor 0.8）。
    - 模型自驱读页后优先调 `wiki.patch` 精确修复链接；只有 contradiction profile 才能整页 `wiki.update`。每次写操作一个 commit。
    - LLM 可自行决策并发修复多页；校验失败/护栏拒绝时工具返回 `ok:false + reason`，模型物理越不过。
+3. **写后定向校验**：`operation-scope-collector` 从 applied operations 提取实际变更范围；`postcondition-verifier` 检查 broken/dangling links、新 orphan 与悬空 page_sources；原 `contradiction/missing-crossref` 在确有写入时经 `fix-semantic-postcondition` 复用 lint 路由单次无工具复检。任何不确定性保守 residual，不触发 worker retry。
 
-**事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:agent:start`（进入阶段2 工具循环前，报 finding 数/受影响页数）/ `fix:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:complete`。
+**事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:agent:start`（进入阶段2 工具循环前，报 finding 数/受影响页数）/ `fix:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:verify:start` / `fix:verify:complete` / `fix:complete`。
 
-完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发）。
+完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发），该全量体检只负责刷新 Health findings，不替代当前 Fix Job 的定向 postcondition。
 
 ### `reenrich-service.ts` 🆕 — 任务类型 `'re-enrich'`
 
@@ -242,6 +244,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-12 | Phase 1C：新增 operation scope collector、共享确定性 postcondition verifier、Fix 单次语义复检与统一报告编排；Fix / Curate 都返回 `postconditionStatus + postcondition`，residual/校验异常保持 Job completed 且不重放写入 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：Query 按 read/propose 动态编译工具，propose 仅生成持久化预览；pending-action-service 负责 hash/TTL/原子批准/陈旧刷新/恢复，re-enrich 在批准时才入队；复用 query task，LLM 示例配置不变 |
 | 2026-07-10 | Wiki 证据工具 Phase 1A：Query 实际只读工具补齐 `wiki.inspect/source.search/source.read` 与可继续 `wiki.list`；Fix links/contradiction 获得页面和来源证据；Curate Auto/Manual 获得 scope 内 inspect；三类 context 复用 subject evidence reader，stale-source 判定迁入 `sources/source-staleness.ts` 供 lint/inspect 共用 |
 | 2026-07-10 | 工具治理 Phase 0：Query 固定 query:read 且 ToolContext 不含写能力；Fix 按 finding 选择 links/contradiction profile 并移除 list/create；Curate 使用 mode profile + allowedSet，Auto 无 list/create/delete，读写 scope 由 compile policy 与 Guard 双重强制；ingest/re-enrich 的 commitPending 统一从 agents/runtime 导入 |
