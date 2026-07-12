@@ -1,16 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Job, RemediationContext } from '@/lib/contracts';
+import { MAX_REMEDIATION_JOBS } from '@/server/services/remediation-status';
 
 const mockAuth = vi.fn();
-const mockList = vi.fn();
+const mockListRecent = vi.fn();
 const mockResolve = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
   requireAuth: (...args: unknown[]) => mockAuth(...args),
 }));
 vi.mock('@/server/jobs/queue', () => ({
-  list: (...args: unknown[]) => mockList(...args),
+  listRecent: (...args: unknown[]) => mockListRecent(...args),
 }));
 vi.mock('@/server/middleware/subject', () => ({
   resolveSubjectFromRequest: (...args: unknown[]) => mockResolve(...args),
@@ -99,7 +100,7 @@ function remediationJob(
 beforeEach(() => {
   mockAuth.mockReset();
   mockAuth.mockReturnValue(null);
-  mockList.mockReset();
+  mockListRecent.mockReset();
   mockResolve.mockReset();
 });
 
@@ -120,7 +121,7 @@ describe('GET /api/lint/latest', () => {
       subject: { id: 's1', slug: 'general' },
       error: null,
     });
-    mockList.mockImplementation((filter?: { type?: string }) => (
+    mockListRecent.mockImplementation((filter?: { type?: string }) => (
       filter?.type === 'lint' ? [lint] : [queuedFix, resolvedFix]
     ));
 
@@ -130,13 +131,17 @@ describe('GET /api/lint/latest', () => {
     expect(response.status).toBe(200);
     expect(mockAuth).toHaveBeenCalledTimes(1);
     expect(mockResolve).toHaveBeenCalledTimes(1);
-    expect(mockList).toHaveBeenNthCalledWith(1, {
+    expect(mockListRecent).toHaveBeenNthCalledWith(1, {
       type: 'lint',
       status: 'completed',
       subjectId: 's1',
-    });
-    expect(mockList).toHaveBeenNthCalledWith(2, { subjectId: 's1' });
-    expect(mockList).toHaveBeenCalledTimes(2);
+    }, 1);
+    expect(mockListRecent).toHaveBeenNthCalledWith(
+      2,
+      { subjectId: 's1' },
+      MAX_REMEDIATION_JOBS,
+    );
+    expect(mockListRecent).toHaveBeenCalledTimes(2);
     expect(body).toEqual({
       jobId: 'lint-current',
       ranAt: LINT_RAN_AT,
@@ -193,9 +198,9 @@ describe('GET /api/lint/latest', () => {
         completedAt: BEFORE_LINT,
       }),
     ];
-    mockList.mockImplementation((filter?: { type?: string }) => (
+    mockListRecent.mockImplementation((filter?: { type?: string }) => (
       filter?.type === 'lint'
-        ? [lintJob('scoped-lint', 's1', []), globalLint]
+        ? [globalLint]
         : statusJobs
     ));
 
@@ -204,12 +209,17 @@ describe('GET /api/lint/latest', () => {
 
     expect(response.status).toBe(200);
     expect(mockResolve).not.toHaveBeenCalled();
-    expect(mockList).toHaveBeenNthCalledWith(1, {
+    expect(mockListRecent).toHaveBeenNthCalledWith(1, {
       type: 'lint',
       status: 'completed',
-    });
-    expect(mockList).toHaveBeenNthCalledWith(2);
-    expect(mockList).toHaveBeenCalledTimes(2);
+      subjectId: null,
+    }, 1);
+    expect(mockListRecent).toHaveBeenNthCalledWith(
+      2,
+      undefined,
+      MAX_REMEDIATION_JOBS,
+    );
+    expect(mockListRecent).toHaveBeenCalledTimes(2);
     expect(body.jobId).toBe('lint-global');
     expect(body.findings.map((item: { id: string }) => item.id)).toEqual([
       SUBJECT_ONE_FINDING_ID,
@@ -238,7 +248,7 @@ describe('GET /api/lint/latest', () => {
       subject: { id: 's1', slug: 'general' },
       error: null,
     });
-    mockList.mockReturnValue([]);
+    mockListRecent.mockReturnValue([]);
 
     const response = await call();
 
@@ -250,13 +260,17 @@ describe('GET /api/lint/latest', () => {
       remediations: {},
       recentOutcomes: {},
     });
-    expect(mockList).toHaveBeenNthCalledWith(1, {
+    expect(mockListRecent).toHaveBeenNthCalledWith(1, {
       type: 'lint',
       status: 'completed',
       subjectId: 's1',
-    });
-    expect(mockList).toHaveBeenNthCalledWith(2, { subjectId: 's1' });
-    expect(mockList).toHaveBeenCalledTimes(2);
+    }, 1);
+    expect(mockListRecent).toHaveBeenNthCalledWith(
+      2,
+      { subjectId: 's1' },
+      MAX_REMEDIATION_JOBS,
+    );
+    expect(mockListRecent).toHaveBeenCalledTimes(2);
   });
 
   it('鉴权失败时直接返回且不解析 subject、不查询 jobs', async () => {
@@ -268,7 +282,7 @@ describe('GET /api/lint/latest', () => {
 
     expect(response.status).toBe(401);
     expect(mockResolve).not.toHaveBeenCalled();
-    expect(mockList).not.toHaveBeenCalled();
+    expect(mockListRecent).not.toHaveBeenCalled();
   });
 
   it('subject 解析失败时直接返回且不查询 jobs', async () => {
@@ -281,6 +295,6 @@ describe('GET /api/lint/latest', () => {
 
     expect(response.status).toBe(404);
     expect(mockAuth).toHaveBeenCalledTimes(1);
-    expect(mockList).not.toHaveBeenCalled();
+    expect(mockListRecent).not.toHaveBeenCalled();
   });
 });

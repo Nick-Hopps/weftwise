@@ -3,7 +3,10 @@ import * as queue from '@/server/jobs/queue';
 import { requireAuth } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { selectLatestFindings } from '@/server/services/lint-latest';
-import { buildHealthSnapshot } from '@/server/services/remediation-status';
+import {
+  buildHealthSnapshot,
+  MAX_REMEDIATION_JOBS,
+} from '@/server/services/remediation-status';
 
 export const runtime = 'nodejs';
 
@@ -21,12 +24,17 @@ export async function GET(request: NextRequest) {
 
   if (allSubjects) {
     const lint = selectLatestFindings(
-      queue
-        .list({ type: 'lint', status: 'completed' })
-        .filter((job) => job.subjectId === null),
+      queue.listRecent(
+        { type: 'lint', status: 'completed', subjectId: null },
+        1,
+      ),
     );
     return NextResponse.json(
-      buildHealthSnapshot(lint, queue.list(), { readOnly: true }),
+      buildHealthSnapshot(
+        lint,
+        queue.listRecent(undefined, MAX_REMEDIATION_JOBS),
+        { readOnly: true },
+      ),
     );
   }
 
@@ -34,13 +42,22 @@ export async function GET(request: NextRequest) {
   if (resolution.error) return resolution.error;
 
   const lint = selectLatestFindings(
-    queue.list({
-      type: 'lint',
-      status: 'completed',
-      subjectId: resolution.subject.id,
-    }),
+    queue.listRecent(
+      {
+        type: 'lint',
+        status: 'completed',
+        subjectId: resolution.subject.id,
+      },
+      1,
+    ),
   );
   return NextResponse.json(
-    buildHealthSnapshot(lint, queue.list({ subjectId: resolution.subject.id })),
+    buildHealthSnapshot(
+      lint,
+      queue.listRecent(
+        { subjectId: resolution.subject.id },
+        MAX_REMEDIATION_JOBS,
+      ),
+    ),
   );
 }

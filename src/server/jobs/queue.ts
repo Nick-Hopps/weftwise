@@ -29,6 +29,13 @@ export function list(filter?: jobsRepo.JobFilter): Job[] {
   return jobsRepo.listJobs(filter);
 }
 
+export function listRecent(
+  filter: jobsRepo.JobFilter | undefined,
+  limit: number,
+): Job[] {
+  return jobsRepo.listRecentJobs(filter, limit);
+}
+
 export function requeue(jobId: string): void {
   jobsRepo.requeueJob(jobId);
 }

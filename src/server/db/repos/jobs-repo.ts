@@ -1,4 +1,4 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, desc, isNull } from 'drizzle-orm';
 import { getDb, getRawDb } from '../client';
 import { jobs, jobEvents } from '../schema';
 import type { Job, JobEvent, SubjectId } from '@/lib/contracts';
@@ -340,7 +340,7 @@ export function getJob(id: string): Job | null {
 export interface JobFilter {
   status?: Job['status'];
   type?: Job['type'];
-  subjectId?: SubjectId;
+  subjectId?: SubjectId | null;
 }
 
 export function listJobs(filter?: JobFilter): Job[] {
@@ -350,7 +350,8 @@ export function listJobs(filter?: JobFilter): Job[] {
   const clauses = [];
   if (filter?.status) clauses.push(eq(jobs.status, filter.status));
   if (filter?.type) clauses.push(eq(jobs.type, filter.type));
-  if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
+  if (filter?.subjectId === null) clauses.push(isNull(jobs.subjectId));
+  else if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
 
   if (clauses.length === 1) {
     query = query.where(clauses[0]);
@@ -359,6 +360,35 @@ export function listJobs(filter?: JobFilter): Job[] {
   }
 
   const rows = query.orderBy(asc(jobs.createdAt)).all();
+  return rows.map(rowToJob);
+}
+
+/**
+ * 按创建时间与 ID 稳定倒序读取有界近期任务，避免状态快照扫描全部历史任务。
+ */
+export function listRecentJobs(filter: JobFilter | undefined, limit: number): Job[] {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new RangeError('listRecentJobs limit 必须是正安全整数');
+  }
+
+  const db = getDb();
+  let query = db.select().from(jobs).$dynamic();
+  const clauses = [];
+  if (filter?.status) clauses.push(eq(jobs.status, filter.status));
+  if (filter?.type) clauses.push(eq(jobs.type, filter.type));
+  if (filter?.subjectId === null) clauses.push(isNull(jobs.subjectId));
+  else if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
+
+  if (clauses.length === 1) {
+    query = query.where(clauses[0]);
+  } else if (clauses.length > 1) {
+    query = query.where(and(...clauses));
+  }
+
+  const rows = query
+    .orderBy(desc(jobs.createdAt), desc(jobs.id))
+    .limit(limit)
+    .all();
   return rows.map(rowToJob);
 }
 

@@ -47,6 +47,53 @@ describe('jobs-repo.pruneJobEvents', () => {
   });
 });
 
+describe('jobs-repo.listRecentJobs', () => {
+  async function setupRecentJobs() {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at)
+       VALUES (?,?,?,?,?,?)`,
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const insert = db.prepare(
+      `INSERT INTO jobs
+       (id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count)
+       VALUES (?, 'lint', 'completed', ?, '{}', '{}', ?, NULL, ?, NULL, NULL, 0)`,
+    );
+    insert.run('global-old', null, '2026-07-13T09:00:00.000Z', '2026-07-13T09:01:00.000Z');
+    insert.run('global-tie-a', null, '2026-07-13T10:00:00.000Z', '2026-07-13T10:01:00.000Z');
+    insert.run('global-tie-z', null, '2026-07-13T10:00:00.000Z', '2026-07-13T10:01:00.000Z');
+    insert.run('subject-new', 's1', '2026-07-13T11:00:00.000Z', '2026-07-13T11:01:00.000Z');
+    return import('../jobs-repo');
+  }
+
+  it('显式 subjectId:null 仅返回全局任务', async () => {
+    const repo = await setupRecentJobs();
+
+    expect(repo.listRecentJobs({ subjectId: null }, 10).map((job) => job.id))
+      .toEqual(['global-tie-z', 'global-tie-a', 'global-old']);
+    expect(repo.listJobs({ subjectId: null }).map((job) => job.id))
+      .toEqual(expect.arrayContaining(['global-old', 'global-tie-a', 'global-tie-z']));
+    expect(repo.listJobs({ subjectId: null })).toHaveLength(3);
+  });
+
+  it('createdAt 相同时以 id DESC 稳定决胜', async () => {
+    const repo = await setupRecentJobs();
+
+    expect(repo.listRecentJobs(undefined, 4).map((job) => job.id))
+      .toEqual(['subject-new', 'global-tie-z', 'global-tie-a', 'global-old']);
+  });
+
+  it('LIMIT 在 SQL 结果集生效并严格限制返回行数', async () => {
+    const repo = await setupRecentJobs();
+
+    const result = repo.listRecentJobs({ type: 'lint', status: 'completed' }, 2);
+    expect(result).toHaveLength(2);
+    expect(result.map((job) => job.id)).toEqual(['subject-new', 'global-tie-z']);
+  });
+});
+
 const NOW = '2026-01-01T00:00:00Z';
 
 describe('jobs-repo.findLatestIngestJobForSource', () => {
@@ -57,13 +104,18 @@ describe('jobs-repo.findLatestIngestJobForSource', () => {
       `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
     ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
     const repo = await import('../jobs-repo');
-    return { repo };
+    return { db, repo };
   }
 
   it('按 params.sourceId 精确匹配并取最新一条；无命中返回 null', async () => {
-    const { repo } = await setupJobs();
-    repo.enqueueJob('ingest', { sourceId: 'src-x', filename: 'a.md', subjectId: 's1' }, 's1');
+    const { db, repo } = await setupJobs();
+    const j1 = repo.enqueueJob('ingest', { sourceId: 'src-x', filename: 'a.md', subjectId: 's1' }, 's1');
     const j2 = repo.enqueueJob('ingest', { sourceId: 'src-x', filename: 'a.md', subjectId: 's1' }, 's1');
+    // 明确时间顺序，避免同毫秒入队时依赖 SQLite 未声明的 tie-break。
+    db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
+      .run('2026-07-13T10:00:00.000Z', j1.id);
+    db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
+      .run('2026-07-13T10:00:01.000Z', j2.id);
     repo.enqueueJob('ingest', { sourceId: 'src-y', filename: 'b.md', subjectId: 's1' }, 's1');
     repo.enqueueJob('lint', { sourceId: 'src-x' }, 's1'); // 非 ingest 不算
 
