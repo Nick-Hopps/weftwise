@@ -287,15 +287,16 @@ export interface LintFinding {
   pageSlug: string;
   description: string;
   suggestedFix: string | null;
-  /** orphan-source 专属：孤儿 source 的 DB id。 */
+  /** 来源相关 finding 可用：关联 source 的 DB id。 */
   sourceId?: string;
-  /** orphan-source 专属：source 文件名（pageSlug 为空时的展示替代）。 */
+  /** 来源相关 finding 可用：source 文件名（pageSlug 为空时的展示替代）。 */
   sourceFilename?: string;
   /** orphan-source 专属：关联的 failed ingest job id；查无 job / job 非 failed 时为 null。 */
   failedJobId?: string | null;
 }
 
 export interface EnrichedLintFinding extends LintFinding {
+  id: string;
   subjectId: SubjectId;
   subjectSlug: string;
 }
@@ -305,6 +306,52 @@ export interface LintLatestResult {
   ranAt: string | null;
   bySeverity: { critical: number; warning: number; info: number };
   findings: EnrichedLintFinding[];
+}
+
+export type RemediationStatus =
+  | 'fixed'
+  | 'queued'
+  | 'awaiting-approval'
+  | 'skipped'
+  | 'failed';
+export type RemediationWorkflow =
+  | 'fix'
+  | 'curate'
+  | 'research'
+  | 're-ingest'
+  | 'source-review';
+export type RemediationActionType =
+  | 'fix'
+  | 'curate'
+  | 'research'
+  | 're-ingest'
+  | 'review-source';
+
+export interface RemediationAction {
+  type: RemediationActionType;
+  label: string;
+  destructive: false;
+  href?: string;
+}
+
+export interface RemediationPlan {
+  findingId: string;
+  workflow: RemediationWorkflow;
+  status: RemediationStatus;
+  actions: RemediationAction[];
+  reason: string;
+  jobId?: string;
+}
+
+export interface RemediationContext {
+  lintJobId: string;
+  findingIds: string[];
+  action: Exclude<RemediationActionType, 'review-source'>;
+}
+
+export interface HealthSnapshot extends LintLatestResult {
+  remediations: Record<string, RemediationPlan>;
+  recentOutcomes: Record<string, RemediationStatus>;
 }
 
 /** Fix / Curate 写后定向校验的实际 operation 范围。 */
