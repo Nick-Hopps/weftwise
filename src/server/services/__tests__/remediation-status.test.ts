@@ -106,6 +106,14 @@ const cleanResult = (writes: number, semanticStatus = 'not-needed') =>
     semanticStatus,
   });
 
+const RESEARCH_CANDIDATE = {
+  url: 'https://example.com',
+  title: 'Example source',
+  snippet: 'Example snippet',
+  score: 3,
+  reason: 'Relevant evidence',
+};
+
 describe('buildHealthSnapshot', () => {
   it('无关联 job 时保留 router 初始状态，readOnly 只清空动作', () => {
     const current = lint([
@@ -165,11 +173,15 @@ describe('buildHealthSnapshot', () => {
   });
 
   it.each([
-    ['非空 candidates', JSON.stringify({ candidates: [{ url: 'https://example.com' }] }), 'awaiting-approval'],
+    ['合法非空 candidates', JSON.stringify({ candidates: [RESEARCH_CANDIDATE] }), 'awaiting-approval'],
     ['空 candidates', JSON.stringify({ candidates: [] }), 'skipped'],
-    ['缺失 candidates', JSON.stringify({ topics: ['topic'] }), 'skipped'],
-    ['损坏结果', '{', 'skipped'],
-  ] as const)('completed research 的%s立即映射为 %s', (_name, resultJson, status) => {
+    ['缺失 candidates', JSON.stringify({ topics: ['topic'] }), 'failed'],
+    ['candidates 非数组', JSON.stringify({ candidates: {} }), 'failed'],
+    ['candidate 为 null', JSON.stringify({ candidates: [null] }), 'failed'],
+    ['candidate 缺字段', JSON.stringify({ candidates: [{ ...RESEARCH_CANDIDATE, title: undefined }] }), 'failed'],
+    ['candidate 字段类型错误', JSON.stringify({ candidates: [{ ...RESEARCH_CANDIDATE, score: '3' }] }), 'failed'],
+    ['损坏结果', '{', 'failed'],
+  ] as const)('completed research 的%s立即映射到预期状态', (_name, resultJson, status) => {
     const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
     const related = remediationJob('job-1', ['finding-1'], {
       action: 'research',
@@ -254,6 +266,22 @@ describe('buildHealthSnapshot', () => {
       .toBe('failed');
   });
 
+  it.each([
+    ['缺失', { writes: 0, postconditionStatus: 'clean' }],
+    ['unknown', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'unknown' }],
+    ['null', { writes: 0, postconditionStatus: 'clean', semanticStatus: null }],
+  ])('当前 finding 的 semanticStatus %s 时零写入也判为 failed', (_name, result) => {
+    const current = lint([finding('finding-1')]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify(result),
+    });
+
+    expect(buildHealthSnapshot(current, [related]).remediations['finding-1'].status)
+      .toBe('failed');
+  });
+
   it('finding 消失后仅根据 lint 前终结的最新 job 生成保守 recentOutcomes', () => {
     const jobs = [
       remediationJob('clean-fix', ['fixed-fix'], {
@@ -287,7 +315,7 @@ describe('buildHealthSnapshot', () => {
       }),
       remediationJob('research-done', ['research-finding'], {
         action: 'research', status: 'completed', completedAt: BEFORE_LINT,
-        resultJson: JSON.stringify({ candidates: [{ url: 'https://example.com' }] }),
+        resultJson: JSON.stringify({ candidates: [RESEARCH_CANDIDATE] }),
       }),
       remediationJob('late-job', ['late-finding'], {
         status: 'completed', completedAt: AFTER_LINT, resultJson: cleanResult(1),
@@ -344,6 +372,51 @@ describe('buildHealthSnapshot', () => {
 
     expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes)
       .toEqual({ 'resolved-finding': 'failed' });
+  });
+
+  it.each([
+    ['缺失', { writes: 0, postconditionStatus: 'clean' }],
+    ['unknown', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'unknown' }],
+    ['null', { writes: 0, postconditionStatus: 'clean', semanticStatus: null }],
+  ])('recent outcome 的 semanticStatus %s 时零写入也判为 failed', (_name, result) => {
+    const related = remediationJob('job-1', ['resolved-finding'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify(result),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes)
+      .toEqual({ 'resolved-finding': 'failed' });
+  });
+
+  it('多 ID context 为每个 finding 各生成一次 recent outcome', () => {
+    const findingIds = ['finding-a', 'finding-b', 'finding-c'];
+    const related = remediationJob('job-1', findingIds, {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: cleanResult(1),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes).toEqual({
+      'finding-a': 'fixed',
+      'finding-b': 'fixed',
+      'finding-c': 'fixed',
+    });
+  });
+
+  it('不同 subject 的相同手工 finding ID 不会互相抑制', () => {
+    const current = lint([finding('manual-id', { subjectId: 'subject-1' })]);
+    const otherSubject = remediationJob('job-other', ['manual-id'], {
+      subjectId: 'subject-2',
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: cleanResult(1),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [otherSubject]);
+
+    expect(snapshot.remediations['manual-id'].status).toBe('awaiting-approval');
+    expect(snapshot.recentOutcomes).toEqual({ 'manual-id': 'fixed' });
   });
 
   it('subject 隔离优先于其他 subject 的同 finding ID 新 job', () => {

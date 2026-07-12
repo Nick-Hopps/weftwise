@@ -5,6 +5,7 @@ import type {
   RemediationContext,
   RemediationPlan,
   RemediationStatus,
+  ResearchCandidate,
 } from '@/lib/contracts';
 import { readRemediationContext } from './remediation-context';
 import { routeFinding } from './remediation-router';
@@ -15,6 +16,17 @@ interface ContextJob {
   job: Job;
   context: RemediationContext;
 }
+
+interface FindingContextJob extends ContextJob {
+  findingId: string;
+}
+
+const WRITE_SEMANTIC_STATUSES = new Set([
+  'not-needed',
+  'clean',
+  'residual',
+  'failed',
+]);
 
 export function buildHealthSnapshot(
   lint: LintLatestResult,
@@ -28,22 +40,23 @@ export function buildHealthSnapshot(
       const context = readRemediationContext(job);
       return context && job.subjectId ? [{ job, context }] : [];
     });
-  const latestByFinding = new Map<string, ContextJob>();
+  const latestByFinding = new Map<string, FindingContextJob>();
 
   for (const contextJob of contextJobs) {
     for (const findingId of contextJob.context.findingIds) {
-      latestByFinding.set(findingKey(contextJob.job.subjectId!, findingId), contextJob);
+      latestByFinding.set(
+        findingKey(contextJob.job.subjectId!, findingId),
+        { ...contextJob, findingId },
+      );
     }
   }
 
   const remediations: Record<string, RemediationPlan> = {};
   const currentKeys = new Set<string>();
-  const currentIds = new Set<string>();
 
   for (const finding of lint.findings) {
     const key = findingKey(finding.subjectId, finding.id);
     currentKeys.add(key);
-    currentIds.add(finding.id);
 
     const initial = routeFinding(finding, options);
     const related = latestByFinding.get(key);
@@ -55,18 +68,10 @@ export function buildHealthSnapshot(
   const recentOutcomes: Record<string, RemediationStatus> = {};
 
   for (const [key, contextJob] of latestByFinding) {
-    for (const findingId of contextJob.context.findingIds) {
-      if (
-        key !== findingKey(contextJob.job.subjectId!, findingId)
-        || currentKeys.has(key)
-        || currentIds.has(findingId)
-      ) {
-        continue;
-      }
+    if (currentKeys.has(key)) continue;
 
-      const outcome = readRecentOutcome(contextJob, lint.ranAt);
-      if (outcome) recentOutcomes[findingId] = outcome;
-    }
+    const outcome = readRecentOutcome(contextJob, lint.ranAt);
+    if (outcome) recentOutcomes[contextJob.findingId] = outcome;
   }
 
   return { ...lint, remediations, recentOutcomes };
@@ -84,9 +89,7 @@ function applyCurrentJob(
   } else if (job.status === 'failed') {
     status = 'failed';
   } else if (context.action === 'research') {
-    status = hasResearchCandidates(job.resultJson)
-      ? 'awaiting-approval'
-      : 'skipped';
+    status = researchOutcome(job.resultJson);
   } else if (
     lintRanAt === null
     || job.completedAt === null
@@ -125,31 +128,51 @@ function readRecentOutcome(
 function completedWriteOutcome(resultJson: string | null): RemediationStatus {
   const result = parseRecord(resultJson);
   const writes = result?.writes;
+  const semanticStatus = result?.semanticStatus;
   if (
     !result
     || typeof writes !== 'number'
     || !Number.isInteger(writes)
     || writes < 0
     || (result.postconditionStatus !== 'clean' && result.postconditionStatus !== 'residual')
+    || typeof semanticStatus !== 'string'
+    || !WRITE_SEMANTIC_STATUSES.has(semanticStatus)
   ) {
     return 'failed';
   }
   if (
     result.postconditionStatus !== 'clean'
-    || result.semanticStatus === 'residual'
-    || result.semanticStatus === 'failed'
+    || semanticStatus === 'residual'
+    || semanticStatus === 'failed'
   ) {
     return 'failed';
   }
   if (writes === 0) return 'skipped';
-  return result.semanticStatus === 'not-needed' || result.semanticStatus === 'clean'
+  return semanticStatus === 'not-needed' || semanticStatus === 'clean'
     ? 'fixed'
     : 'failed';
 }
 
-function hasResearchCandidates(resultJson: string | null): boolean {
+function researchOutcome(
+  resultJson: string | null,
+): 'awaiting-approval' | 'skipped' | 'failed' {
   const result = parseRecord(resultJson);
-  return Array.isArray(result?.candidates) && result.candidates.length > 0;
+  if (!result || !Array.isArray(result.candidates)) return 'failed';
+  if (result.candidates.length === 0) return 'skipped';
+  return result.candidates.every(isResearchCandidate)
+    ? 'awaiting-approval'
+    : 'failed';
+}
+
+function isResearchCandidate(value: unknown): value is ResearchCandidate {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.url === 'string'
+    && typeof value.title === 'string'
+    && typeof value.snippet === 'string'
+    && (typeof value.score === 'number' || value.score === null)
+    && (typeof value.reason === 'string' || value.reason === null)
+  );
 }
 
 function parseRecord(resultJson: string | null): Record<string, unknown> | null {
