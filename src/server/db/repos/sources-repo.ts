@@ -1,5 +1,5 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { getDb } from '../client';
+import { getDb, getRawDb } from '../client';
 import { sources, pageSources } from '../schema';
 import type { Source, SubjectId } from '@/lib/contracts';
 
@@ -98,6 +98,52 @@ export function getSourcesForPage(
     .all();
 
   return rows.map(rowToSource);
+}
+
+export interface PageSourceIntegrityRow {
+  subjectId: SubjectId;
+  pageSlug: string;
+  sourceId: string;
+  pageExists: boolean;
+  sourceSubjectId: SubjectId | null;
+}
+
+/** 定向返回 page_sources 的两端存在性；保留悬空行供写后校验报告。 */
+export function listPageSourceIntegrityRows(
+  subjectId: SubjectId,
+  pageSlugs: string[],
+): PageSourceIntegrityRow[] {
+  const uniqueSlugs = [...new Set(pageSlugs)];
+  if (uniqueSlugs.length === 0) return [];
+
+  const placeholders = uniqueSlugs.map(() => '?').join(', ');
+  const rows = getRawDb()
+    .prepare(
+      `SELECT ps.subject_id, ps.page_slug, ps.source_id,
+              CASE WHEN p.slug IS NULL THEN 0 ELSE 1 END AS page_exists,
+              s.subject_id AS source_subject_id
+       FROM page_sources ps
+       LEFT JOIN pages p
+         ON p.subject_id = ps.subject_id AND p.slug = ps.page_slug
+       LEFT JOIN sources s ON s.id = ps.source_id
+       WHERE ps.subject_id = ? AND ps.page_slug IN (${placeholders})
+       ORDER BY ps.page_slug ASC, ps.source_id ASC`,
+    )
+    .all(subjectId, ...uniqueSlugs) as Array<{
+      subject_id: string;
+      page_slug: string;
+      source_id: string;
+      page_exists: number;
+      source_subject_id: string | null;
+    }>;
+
+  return rows.map((row) => ({
+    subjectId: row.subject_id,
+    pageSlug: row.page_slug,
+    sourceId: row.source_id,
+    pageExists: row.page_exists === 1,
+    sourceSubjectId: row.source_subject_id,
+  }));
 }
 
 /**
