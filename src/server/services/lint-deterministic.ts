@@ -183,6 +183,8 @@ export function checkStaleSourcesForPage(subject: Subject, page: WikiPage): Lint
       type: 'stale-source',
       severity: 'info',
       pageSlug: page.slug,
+      sourceId: source.id,
+      sourceFilename: source.filename,
       description: `Source file "${source.filename}" linked to "${page.slug}" (subject: ${subject.slug}) is missing or changed on disk.`,
       suggestedFix: 'Re-ingest the source file to update the wiki page content.',
     });

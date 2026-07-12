@@ -3,6 +3,7 @@
  * 纯函数：不触 DB / 请求，便于单测；scope（subject vs all）由调用方在传入前用 queue.list 过滤。
  */
 import type { Job, EnrichedLintFinding, LintLatestResult } from '@/lib/contracts';
+import { identifyFindings } from './finding-identity';
 
 export function selectLatestFindings(jobs: Job[]): LintLatestResult {
   const completed = jobs.filter((j) => j.type === 'lint' && j.status === 'completed');
@@ -17,7 +18,9 @@ export function selectLatestFindings(jobs: Job[]): LintLatestResult {
   try {
     const parsed = latest.resultJson ? (JSON.parse(latest.resultJson) as { findings?: unknown }) : null;
     if (parsed && Array.isArray(parsed.findings)) {
-      findings = parsed.findings as EnrichedLintFinding[];
+      findings = identifyFindings(
+        parsed.findings as Parameters<typeof identifyFindings>[0],
+      );
     }
   } catch {
     findings = [];
