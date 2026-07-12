@@ -26,6 +26,7 @@ export function routeFinding(
   options: { readOnly?: boolean } = {},
 ): RemediationPlan {
   let plan: RemediationPlan;
+  const sourceId = finding.sourceId?.trim();
 
   switch (finding.type) {
     case 'missing-frontmatter':
@@ -74,7 +75,7 @@ export function routeFinding(
       };
       break;
     case 'stale-source':
-      plan = finding.sourceId
+      plan = sourceId
         ? {
             findingId: finding.id,
             workflow: 'source-review',
@@ -83,7 +84,7 @@ export function routeFinding(
               action(
                 'review-source',
                 'Review source',
-                `/sources?sourceId=${encodeURIComponent(finding.sourceId)}`,
+                `/sources/${encodeURIComponent(sourceId)}`,
               ),
             ],
             reason: 'Review the stale source before deciding whether its pages need an update.',
@@ -106,7 +107,7 @@ export function routeFinding(
       };
       break;
     case 'orphan-source':
-      plan = finding.sourceId
+      plan = sourceId
         ? {
             findingId: finding.id,
             workflow: 're-ingest',

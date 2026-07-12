@@ -9,6 +9,63 @@ import type {
 } from '@/lib/contracts';
 import { routeFinding } from '../remediation-router';
 
+type ExpectedRoute = {
+  workflow: RemediationWorkflow;
+  status: RemediationStatus;
+  action: RemediationActionType | null;
+  sourceId?: string;
+};
+
+const EXPECTED_ROUTES = {
+  'missing-frontmatter': {
+    workflow: 'fix',
+    status: 'awaiting-approval',
+    action: 'fix',
+  },
+  'broken-link': {
+    workflow: 'fix',
+    status: 'awaiting-approval',
+    action: 'fix',
+  },
+  'missing-crossref': {
+    workflow: 'fix',
+    status: 'awaiting-approval',
+    action: 'fix',
+  },
+  contradiction: {
+    workflow: 'fix',
+    status: 'awaiting-approval',
+    action: 'fix',
+  },
+  orphan: {
+    workflow: 'curate',
+    status: 'awaiting-approval',
+    action: 'curate',
+  },
+  'stale-source': {
+    workflow: 'source-review',
+    status: 'awaiting-approval',
+    action: 'review-source',
+    sourceId: 'source-1',
+  },
+  'coverage-gap': {
+    workflow: 'research',
+    status: 'awaiting-approval',
+    action: 'research',
+  },
+  'orphan-source': {
+    workflow: 're-ingest',
+    status: 'awaiting-approval',
+    action: 're-ingest',
+    sourceId: 'source-1',
+  },
+  'thin-page': {
+    workflow: 'research',
+    status: 'awaiting-approval',
+    action: 'research',
+  },
+} satisfies Record<LintFinding['type'], ExpectedRoute>;
+
 function finding(
   type: LintFinding['type'],
   overrides: Partial<EnrichedLintFinding> = {},
@@ -27,62 +84,18 @@ function finding(
 }
 
 describe('routeFinding', () => {
-  it.each<{
-    type: LintFinding['type'];
-    workflow: RemediationWorkflow;
-    status: RemediationStatus;
-    action: RemediationActionType;
-  }>([
-    {
-      type: 'missing-frontmatter',
-      workflow: 'fix',
-      status: 'awaiting-approval',
-      action: 'fix',
-    },
-    {
-      type: 'broken-link',
-      workflow: 'fix',
-      status: 'awaiting-approval',
-      action: 'fix',
-    },
-    {
-      type: 'missing-crossref',
-      workflow: 'fix',
-      status: 'awaiting-approval',
-      action: 'fix',
-    },
-    {
-      type: 'contradiction',
-      workflow: 'fix',
-      status: 'awaiting-approval',
-      action: 'fix',
-    },
-    {
-      type: 'orphan',
-      workflow: 'curate',
-      status: 'awaiting-approval',
-      action: 'curate',
-    },
-    {
-      type: 'coverage-gap',
-      workflow: 'research',
-      status: 'awaiting-approval',
-      action: 'research',
-    },
-    {
-      type: 'thin-page',
-      workflow: 'research',
-      status: 'awaiting-approval',
-      action: 'research',
-    },
-  ])('$type 映射到 $workflow / $action', ({ type, workflow, status, action }) => {
-    const plan = routeFinding(finding(type));
+  it.each(
+    Object.entries(EXPECTED_ROUTES) as [LintFinding['type'], ExpectedRoute][],
+  )('%s 映射到预期处置计划', (type, expected) => {
+    const plan = routeFinding(finding(type, { sourceId: expected.sourceId }));
 
     expect(plan).toMatchObject({
       findingId: `finding-${type}`,
-      workflow,
-      status,
-      actions: [{ type: action, destructive: false }],
+      workflow: expected.workflow,
+      status: expected.status,
+      actions: expected.action
+        ? [{ type: expected.action, destructive: false }]
+        : [],
     });
     expect(plan.reason).not.toBe('');
   });
@@ -108,7 +121,7 @@ describe('routeFinding', () => {
 
   it('stale-source 有 sourceId 时提供已编码的 review-source 链接', () => {
     const plan = routeFinding(
-      finding('stale-source', { sourceId: 'folder name/source 1.pdf' }),
+      finding('stale-source', { sourceId: ' folder name/source 1?.pdf# ' }),
     );
 
     expect(plan).toMatchObject({
@@ -119,7 +132,7 @@ describe('routeFinding', () => {
         {
           type: 'review-source',
           destructive: false,
-          href: '/sources?sourceId=folder%20name%2Fsource%201.pdf',
+          href: '/sources/folder%20name%2Fsource%201%3F.pdf%23',
         },
       ],
     });
@@ -127,6 +140,16 @@ describe('routeFinding', () => {
 
   it('stale-source 无 sourceId 时跳过且不提供动作', () => {
     const plan = routeFinding(finding('stale-source'));
+
+    expect(plan).toMatchObject({
+      workflow: 'source-review',
+      status: 'skipped',
+      actions: [],
+    });
+  });
+
+  it.each(['', '   \t\n'])('stale-source 的空白 sourceId %j 被跳过', (sourceId) => {
+    const plan = routeFinding(finding('stale-source', { sourceId }));
 
     expect(plan).toMatchObject({
       workflow: 'source-review',
@@ -148,6 +171,16 @@ describe('routeFinding', () => {
 
   it('orphan-source 无 sourceId 时跳过且不提供动作', () => {
     const plan = routeFinding(finding('orphan-source'));
+
+    expect(plan).toMatchObject({
+      workflow: 're-ingest',
+      status: 'skipped',
+      actions: [],
+    });
+  });
+
+  it.each(['', '   \t\n'])('orphan-source 的空白 sourceId %j 被跳过', (sourceId) => {
+    const plan = routeFinding(finding('orphan-source', { sourceId }));
 
     expect(plan).toMatchObject({
       workflow: 're-ingest',
