@@ -21,6 +21,12 @@ interface FindingContextJob extends ContextJob {
   findingId: string;
 }
 
+interface RecentOutcomeEntry {
+  subjectId: string;
+  findingId: string;
+  outcome: RemediationStatus;
+}
+
 const WRITE_SEMANTIC_STATUSES = new Set([
   'not-needed',
   'clean',
@@ -65,13 +71,32 @@ export function buildHealthSnapshot(
       : initial;
   }
 
-  const recentOutcomes: Record<string, RemediationStatus> = {};
+  const recentEntries: RecentOutcomeEntry[] = [];
+  const recentIdCounts = new Map<string, number>();
 
   for (const [key, contextJob] of latestByFinding) {
     if (currentKeys.has(key)) continue;
 
     const outcome = readRecentOutcome(contextJob, lint.ranAt);
-    if (outcome) recentOutcomes[contextJob.findingId] = outcome;
+    if (!outcome) continue;
+
+    recentEntries.push({
+      subjectId: contextJob.job.subjectId!,
+      findingId: contextJob.findingId,
+      outcome,
+    });
+    recentIdCounts.set(
+      contextJob.findingId,
+      (recentIdCounts.get(contextJob.findingId) ?? 0) + 1,
+    );
+  }
+
+  const recentOutcomes: Record<string, RemediationStatus> = {};
+  for (const entry of recentEntries) {
+    const key = recentIdCounts.get(entry.findingId) === 1
+      ? entry.findingId
+      : findingKey(entry.subjectId, entry.findingId);
+    recentOutcomes[key] = entry.outcome;
   }
 
   return { ...lint, remediations, recentOutcomes };
@@ -132,7 +157,7 @@ function completedWriteOutcome(resultJson: string | null): RemediationStatus {
   if (
     !result
     || typeof writes !== 'number'
-    || !Number.isInteger(writes)
+    || !Number.isSafeInteger(writes)
     || writes < 0
     || (result.postconditionStatus !== 'clean' && result.postconditionStatus !== 'residual')
     || typeof semanticStatus !== 'string'
@@ -170,7 +195,15 @@ function isResearchCandidate(value: unknown): value is ResearchCandidate {
     typeof value.url === 'string'
     && typeof value.title === 'string'
     && typeof value.snippet === 'string'
-    && (typeof value.score === 'number' || value.score === null)
+    && (
+      value.score === null
+      || (
+        typeof value.score === 'number'
+        && Number.isInteger(value.score)
+        && value.score >= 0
+        && value.score <= 3
+      )
+    )
     && (typeof value.reason === 'string' || value.reason === null)
   );
 }
