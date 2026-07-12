@@ -8,16 +8,19 @@ import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
 import type { ResearchBacklogEntry } from '@/lib/contracts';
+import { researchBacklogPatchBody } from './remediation-ui';
 
 /**
  * T3.2 Health 页 "Research backlog" 区块：列出本 subject 的待研究问题（Ask AI 未命中信号 +
  * 手动添加），支持逐条 Research（复用现成 POST /api/research topic 分支）与 Dismiss。
  */
 export function ResearchBacklogSection({
-  onResearchStarted,
+  researchBusy,
+  onResearch,
 }: {
-  /** Research 成功入队后回调 jobId（父组件可用来接入 useJobStream 展示进度）。 */
-  onResearchStarted?: (jobId: string) => void;
+  /** 父组件统一持有 Research 锁与 job 跟踪，避免多个入口覆盖同一 jobId。 */
+  researchBusy: boolean;
+  onResearch: (topic: string) => Promise<string | null>;
 }) {
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
@@ -44,39 +47,35 @@ export function ResearchBacklogSection({
   }
 
   async function handleResearch(entry: ResearchBacklogEntry) {
+    if (researchBusy || !subjectId) return;
+    const originSubjectId = subjectId;
     setPendingId(entry.id);
     setError(null);
     try {
-      const res = await apiFetch('/api/research', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: entry.question }),
-      });
-      if (!res.ok) {
-        const json = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(json.error ?? `Research request failed (${res.status})`);
-        return;
-      }
-      const json = (await res.json()) as { jobId: string };
+      const jobId = await onResearch(entry.question);
+      if (!jobId) return;
       await apiFetch(`/api/research-backlog/${entry.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'researched', researchJobId: json.jobId }),
+        body: JSON.stringify(researchBacklogPatchBody('researched', originSubjectId, jobId)),
       });
-      onResearchStarted?.(json.jobId);
       await refetch();
+    } catch {
+      setError('Research backlog could not be updated.');
     } finally {
       setPendingId(null);
     }
   }
 
   async function handleDismiss(entry: ResearchBacklogEntry) {
+    if (!subjectId) return;
+    const originSubjectId = subjectId;
     setPendingId(entry.id);
     try {
       await apiFetch(`/api/research-backlog/${entry.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'dismissed' }),
+        body: JSON.stringify(researchBacklogPatchBody('dismissed', originSubjectId)),
       });
       await refetch();
     } finally {
@@ -116,11 +115,22 @@ export function ResearchBacklogSection({
                 <p className="text-sm text-foreground-secondary">{entry.question}</p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <Button intent="secondary" size="sm" onClick={() => handleResearch(entry)} loading={busy}>
+                <Button
+                  intent="secondary"
+                  size="sm"
+                  onClick={() => handleResearch(entry)}
+                  loading={busy}
+                  disabled={researchBusy}
+                >
                   {!busy && <Search className="h-3 w-3" />}
                   Research
                 </Button>
-                <Button intent="ghost" size="sm" onClick={() => handleDismiss(entry)} disabled={busy}>
+                <Button
+                  intent="ghost"
+                  size="sm"
+                  onClick={() => handleDismiss(entry)}
+                  disabled={busy || researchBusy}
+                >
                   <X className="h-3 w-3" />
                   Dismiss
                 </Button>
