@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { PostconditionReport } from '@/lib/contracts';
 
 // vi.mock 路径用 @/server/... 绝对别名（解析到与 SUT import 同一模块；与 query-tools.test 一致）
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
@@ -21,9 +22,12 @@ vi.mock('@/server/wiki/wiki-store', () => ({
   readPageInSubject: vi.fn(() => ({ frontmatter: { title: 'T', summary: 's', tags: [] }, body: 'body' })),
 }));
 vi.mock('@/server/db/repos/settings-repo', () => ({ getWikiLanguage: vi.fn(() => 'English') }));
-vi.mock('@/server/services/embedding-service', () => ({ enqueueEmbedIndex: vi.fn() }));
+const embedMock = vi.hoisted(() => ({ enqueueEmbedIndex: vi.fn() }));
+vi.mock('@/server/services/embedding-service', () => embedMock);
 // curate-tools 透传引入；本测试不触发搜索，mock 防 import-time 副作用
 vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
+const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
+vi.mock('@/server/services/postcondition-service', () => postconditionMock);
 
 import { runCurateJob } from '../curate-service';
 
@@ -31,8 +35,30 @@ function job(params: object) {
   return { id: 'j1', type: 'curate', subjectId: 's1', paramsJson: JSON.stringify(params) } as never;
 }
 
+const cleanReport: PostconditionReport = {
+  status: 'clean',
+  checkedAt: '2026-07-12T08:00:00.000Z',
+  scope: {
+    jobId: 'j1',
+    subjectId: 's1',
+    createdSlugs: [],
+    updatedSlugs: [],
+    deletedSlugs: [],
+    touchedSlugs: [],
+    operationIds: [],
+  },
+  residualFindings: [],
+  semanticStatus: 'not-needed',
+  verificationError: null,
+};
+
 describe('runCurateJob (tool-loop)', () => {
-  beforeEach(() => { genMock.generateTextWithTools.mockClear(); });
+  beforeEach(() => {
+    genMock.generateTextWithTools.mockClear();
+    embedMock.enqueueEmbedIndex.mockClear();
+    postconditionMock.verifyJobPostconditions.mockReset();
+    postconditionMock.verifyJobPostconditions.mockResolvedValue(cleanReport);
+  });
   it('manual：驱动 generateTextWithTools(curate) + emit start/complete', async () => {
     const emit = vi.fn();
     const res = await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), emit);
@@ -45,14 +71,25 @@ describe('runCurateJob (tool-loop)', () => {
     ]));
     expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('curate:complete', expect.any(String), expect.any(Object));
-    expect(res).toHaveProperty('writes');
+    expect(res).toMatchObject({
+      writes: expect.any(Number),
+      postconditionStatus: 'clean',
+      postcondition: cleanReport,
+    });
+    expect(postconditionMock.verifyJobPostconditions).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'curate',
+      semanticFindings: undefined,
+      emit,
+    }));
   });
   it('scope<2 → 提前 complete，不调 LLM', async () => {
     pagesMock.getAllPages.mockReturnValueOnce([{ slug: 'a', tags: [] }]);
     const emit = vi.fn();
-    await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), emit);
+    const result = await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), emit);
     expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('curate:complete', expect.stringMatching(/Nothing to curate/), expect.any(Object));
+    expect(result).toMatchObject({ postconditionStatus: 'clean', postcondition: cleanReport });
+    expect(postconditionMock.verifyJobPostconditions).toHaveBeenCalledOnce();
   });
   it('auto（scope:pages）：seed 驱动 → 用户消息为 AUTOMATIC 模式', async () => {
     // 2 个 seed 页保证 scope>=2 触发 LLM；getAllLinks 返回 [] → scope=seed
@@ -75,5 +112,40 @@ describe('runCurateJob (tool-loop)', () => {
     expect(userMsg).toMatch(/AUTOMATIC/);        // 证明 {auto:true} 传入 → seedSet!==null
     expect(userMsg).toMatch(/do NOT create/i);   // auto 禁建页提示
     expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.objectContaining({ scope: 'pages' }));
+  });
+
+  it('residual 报告仍正常完成并进入结果与 complete 事件', async () => {
+    const residualReport: PostconditionReport = {
+      ...cleanReport,
+      status: 'residual',
+      residualFindings: [
+        {
+          type: 'orphan-page',
+          severity: 'info',
+          pageSlug: 'a',
+          description: '新页面无入链',
+        },
+      ],
+    };
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce(residualReport);
+    const emit = vi.fn();
+
+    const result = await runCurateJob(
+      job({ scope: 'subject', subjectId: 's1' }),
+      emit,
+    );
+
+    expect(result).toMatchObject({
+      postconditionStatus: 'residual',
+      postcondition: residualReport,
+    });
+    expect(emit).toHaveBeenCalledWith(
+      'curate:complete',
+      expect.stringContaining('Postcondition residual'),
+      expect.objectContaining({
+        postconditionStatus: 'residual',
+        residualCount: 1,
+      }),
+    );
   });
 });

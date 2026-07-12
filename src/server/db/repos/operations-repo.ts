@@ -51,6 +51,20 @@ export function listForSubject(subjectId: string): OperationRow[] {
   return rows.map(mapRow);
 }
 
+/** Fix / Curate 写后校验：按提交顺序返回当前 Job 在本 Subject 已应用的 operation。 */
+export function listAppliedForJob(jobId: string, subjectId: string): OperationRow[] {
+  const rows = getRawDb()
+    .prepare(
+      `SELECT ${SELECT_COLS}
+       FROM operations o LEFT JOIN jobs j ON j.id = o.job_id
+       WHERE o.job_id = ? AND o.subject_id = ?
+             AND o.status = 'applied' AND o.post_head IS NOT NULL
+       ORDER BY o.rowid ASC`,
+    )
+    .all(jobId, subjectId) as RawRow[];
+  return rows.map(mapRow);
+}
+
 /** 单行（回滚 / diff 用）；不限 subject，由调用方做 subject 守卫。 */
 export function getById(id: string): OperationRow | null {
   const r = getRawDb()
