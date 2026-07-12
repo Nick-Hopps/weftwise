@@ -93,11 +93,9 @@ function applyCurrentJob(
     || job.completedAt > lintRanAt
   ) {
     status = 'queued';
-  } else if (
-    (context.action === 'fix' || context.action === 'curate')
-    && readWrites(job.resultJson) === 0
-  ) {
-    status = 'skipped';
+  } else if (context.action === 'fix' || context.action === 'curate') {
+    const outcome = completedWriteOutcome(job.resultJson);
+    status = outcome === 'fixed' ? 'failed' : outcome;
   } else {
     status = 'failed';
   }
@@ -121,15 +119,21 @@ function readRecentOutcome(
   if (job.status === 'failed') return 'failed';
   if (context.action === 're-ingest') return 'fixed';
 
-  const result = parseRecord(job.resultJson);
+  return completedWriteOutcome(job.resultJson);
+}
+
+function completedWriteOutcome(resultJson: string | null): RemediationStatus {
+  const result = parseRecord(resultJson);
+  const writes = result?.writes;
   if (
     !result
-    || typeof result.writes !== 'number'
+    || typeof writes !== 'number'
+    || !Number.isInteger(writes)
+    || writes < 0
     || (result.postconditionStatus !== 'clean' && result.postconditionStatus !== 'residual')
   ) {
     return 'failed';
   }
-  if (result.writes === 0) return 'skipped';
   if (
     result.postconditionStatus !== 'clean'
     || result.semanticStatus === 'residual'
@@ -137,6 +141,7 @@ function readRecentOutcome(
   ) {
     return 'failed';
   }
+  if (writes === 0) return 'skipped';
   return result.semanticStatus === 'not-needed' || result.semanticStatus === 'clean'
     ? 'fixed'
     : 'failed';
@@ -145,11 +150,6 @@ function readRecentOutcome(
 function hasResearchCandidates(resultJson: string | null): boolean {
   const result = parseRecord(resultJson);
   return Array.isArray(result?.candidates) && result.candidates.length > 0;
-}
-
-function readWrites(resultJson: string | null): number | null {
-  const result = parseRecord(resultJson);
-  return result && typeof result.writes === 'number' ? result.writes : null;
 }
 
 function parseRecord(resultJson: string | null): Record<string, unknown> | null {
