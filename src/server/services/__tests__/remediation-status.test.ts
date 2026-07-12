@@ -220,6 +220,40 @@ describe('buildHealthSnapshot', () => {
     expect(snapshot.remediations['broken-result'].status).toBe('failed');
   });
 
+  it.each([
+    ['postcondition residual', { writes: 0, postconditionStatus: 'residual', semanticStatus: 'not-needed' }],
+    ['semantic failed', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'failed' }],
+    ['semantic residual', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'residual' }],
+  ])('当前 finding 的零写入遇到 %s 时优先判为 failed', (_name, result) => {
+    const current = lint([finding('finding-1')]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify(result),
+    });
+
+    expect(buildHealthSnapshot(current, [related]).remediations['finding-1'].status)
+      .toBe('failed');
+  });
+
+  it.each([
+    ['负数', { writes: -1, postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['小数', { writes: 1.5, postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['字符串', { writes: '0', postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['null', { writes: null, postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['缺失', { postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+  ])('当前 finding 拒绝%s writes', (_name, result) => {
+    const current = lint([finding('finding-1')]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify(result),
+    });
+
+    expect(buildHealthSnapshot(current, [related]).remediations['finding-1'].status)
+      .toBe('failed');
+  });
+
   it('finding 消失后仅根据 lint 前终结的最新 job 生成保守 recentOutcomes', () => {
     const jobs = [
       remediationJob('clean-fix', ['fixed-fix'], {
@@ -278,6 +312,38 @@ describe('buildHealthSnapshot', () => {
       'fixed-reingest': 'fixed',
       'failed-job-finding': 'failed',
     });
+  });
+
+  it.each([
+    ['postcondition residual', { writes: 0, postconditionStatus: 'residual', semanticStatus: 'not-needed' }],
+    ['semantic failed', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'failed' }],
+    ['semantic residual', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'residual' }],
+  ])('recent outcome 的零写入遇到 %s 时优先判为 failed', (_name, result) => {
+    const related = remediationJob('job-1', ['resolved-finding'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify(result),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes)
+      .toEqual({ 'resolved-finding': 'failed' });
+  });
+
+  it.each([
+    ['负数', { writes: -1, postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['小数', { writes: 1.5, postconditionStatus: 'clean', semanticStatus: 'clean' }],
+    ['字符串', { writes: '0', postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['null', { writes: null, postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+    ['缺失', { postconditionStatus: 'clean', semanticStatus: 'not-needed' }],
+  ])('recent outcome 拒绝%s writes', (_name, result) => {
+    const related = remediationJob('job-1', ['resolved-finding'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify(result),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes)
+      .toEqual({ 'resolved-finding': 'failed' });
   });
 
   it('subject 隔离优先于其他 subject 的同 finding ID 新 job', () => {
