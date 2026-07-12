@@ -68,6 +68,9 @@ function parseResearchParams(job: Job): ResearchParams & { subjectId: string } {
     throw new Error('Research params are not valid JSON');
   }
   if (!isRecord(raw)) throw new Error('Research params must be an object');
+  if (hasOwn(raw, 'gapIds')) {
+    throw new Error('gapIds is no longer supported; use findingIds with lintJobId');
+  }
 
   let paramsSubjectId: string | undefined;
   if (hasOwn(raw, 'subjectId')) {
