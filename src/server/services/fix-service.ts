@@ -15,6 +15,7 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { enqueueEmbedIndex } from './embedding-service';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { selectLatestFindings } from './lint-latest';
+import { identifyFindings } from './finding-identity';
 import { fixMissingFrontmatter, partitionFindings, buildFixWorklist, buildSubjectReportLines, createFixGuard } from './fix-deterministic';
 import { buildFixToolContext } from './fix-tools';
 import { readPageInSubject } from '../wiki/wiki-store';
@@ -27,7 +28,14 @@ import { generateTextWithTools } from '../llm/provider-registry';
 import { FIX_AGENTIC_SYSTEM_PROMPT, buildFixAgenticUserPrompt } from '../llm/prompts/fix-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import { toolActivityLine } from '@/lib/tool-activity';
-import type { ChangesetEntry, Job } from '@/lib/contracts';
+import type {
+  ChangesetEntry,
+  EnrichedLintFinding,
+  Job,
+  LintFinding,
+  LintLatestResult,
+  RemediationContext,
+} from '@/lib/contracts';
 import { verifyJobPostconditions } from './postcondition-service';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 FixGuard cap 真正兜底）。 */
@@ -35,6 +43,71 @@ export const FIX_MAX_STEPS = 60;
 
 interface FixParams {
   subjectId?: string;
+  remediationContext?: RemediationContext;
+}
+
+const FIX_TYPES = new Set<LintFinding['type']>([
+  'missing-frontmatter',
+  'broken-link',
+  'missing-crossref',
+  'contradiction',
+]);
+
+function lintSnapshotForFix(
+  subjectId: string,
+  context?: RemediationContext,
+): LintLatestResult {
+  if (!context) {
+    return selectLatestFindings(
+      queue.list({ type: 'lint', status: 'completed', subjectId }),
+    );
+  }
+
+  const lintJob = queue.get(context.lintJobId);
+  if (
+    !lintJob
+    || lintJob.type !== 'lint'
+    || lintJob.status !== 'completed'
+    || lintJob.subjectId !== subjectId
+  ) {
+    throw new Error('Fix lint snapshot is missing or belongs to another subject');
+  }
+
+  const snapshot = selectLatestFindings([lintJob]);
+  if (snapshot.jobId !== context.lintJobId) {
+    throw new Error('Fix lint snapshot mismatch');
+  }
+  return snapshot;
+}
+
+function selectedFixFindings(
+  freshDeterministic: EnrichedLintFinding[],
+  snapshot: LintLatestResult,
+  context?: RemediationContext,
+): {
+  deterministic: EnrichedLintFinding[];
+  semantic: EnrichedLintFinding[];
+} {
+  const snapshotSemantic = snapshot.findings.filter(
+    (finding) => finding.type === 'missing-crossref' || finding.type === 'contradiction',
+  );
+  if (!context) {
+    return { deterministic: freshDeterministic, semantic: snapshotSemantic };
+  }
+
+  const requested = new Set(context.findingIds);
+  const snapshotMatches = snapshot.findings.filter((finding) => requested.has(finding.id));
+  if (snapshotMatches.length !== requested.size) {
+    throw new Error('Fix finding scope is stale');
+  }
+  if (snapshotMatches.some((finding) => !FIX_TYPES.has(finding.type))) {
+    throw new Error('Fix remediation contains a non-fix finding');
+  }
+
+  return {
+    deterministic: freshDeterministic.filter((finding) => requested.has(finding.id)),
+    semantic: snapshotSemantic.filter((finding) => requested.has(finding.id)),
+  };
 }
 
 export async function runFixJob(
@@ -46,16 +119,31 @@ export async function runFixJob(
   if (!subjectId) throw new Error('fix job missing subjectId');
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) throw new Error(`Subject ${subjectId} not found`);
+  const remediationContext = params.remediationContext;
+  if (remediationContext && remediationContext.action !== 'fix') {
+    throw new Error('Fix remediation action mismatch');
+  }
 
   // 1. 工作清单：确定性新鲜重扫 + 快照语义
-  const freshDeterministic = runDeterministicChecksForSubject(subject).filter(
-    (f) => f.type === 'missing-frontmatter' || f.type === 'broken-link',
+  const snapshot = lintSnapshotForFix(subject.id, remediationContext);
+  const freshDeterministic = identifyFindings(
+    runDeterministicChecksForSubject(subject)
+      .filter((finding) => (
+        finding.type === 'missing-frontmatter' || finding.type === 'broken-link'
+      ))
+      .map((finding) => ({
+        ...finding,
+        subjectId: subject.id,
+        subjectSlug: subject.slug,
+      })),
   );
-  const snapshotSemantic = selectLatestFindings(
-    queue.list({ type: 'lint', status: 'completed', subjectId: subject.id }),
-  ).findings.filter((f) => f.type === 'missing-crossref' || f.type === 'contradiction');
+  const selected = selectedFixFindings(
+    freshDeterministic,
+    snapshot,
+    remediationContext,
+  );
 
-  const worklist = buildFixWorklist(freshDeterministic, snapshotSemantic);
+  const worklist = buildFixWorklist(selected.deterministic, selected.semantic);
   const { frontmatter, llm: loop } = partitionFindings(worklist);
 
   emit('fix:start', `Fixing ${frontmatter.length + loop.length} issue(s) in "${subject.slug}"…`, {
@@ -137,7 +225,7 @@ export async function runFixJob(
     kind: 'fix',
     job,
     subject,
-    semanticFindings: snapshotSemantic,
+    semanticFindings: selected.semantic,
     emit,
   });
   const completeData = {
