@@ -57,6 +57,19 @@ describe('parseHealthSnapshot', () => {
   });
 
   it.each([
+    ['只有 remediations', {
+      ...legacySnapshot,
+      remediations: fullSnapshot.remediations,
+    }],
+    ['只有 recentOutcomes', {
+      ...legacySnapshot,
+      recentOutcomes: fullSnapshot.recentOutcomes,
+    }],
+  ])('拒绝半升级响应：%s', (_name, value) => {
+    expect(() => parseHealthSnapshot(value)).toThrow(/HealthSnapshot/);
+  });
+
+  it.each([
     ['null', null],
     ['数组', []],
     ['jobId 类型错误', { ...legacySnapshot, jobId: 1 }],

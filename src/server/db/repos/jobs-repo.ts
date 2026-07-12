@@ -393,6 +393,28 @@ export function listRecentJobs(filter: JobFilter | undefined, limit: number): Jo
 }
 
 /**
+ * 按完成时间稳定选择指定 scope 最近完成的一次 lint；创建时间不参与快照新旧判断。
+ */
+export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null {
+  const db = getDb();
+  const subjectClause = subjectId === null
+    ? isNull(jobs.subjectId)
+    : eq(jobs.subjectId, subjectId);
+  const rows = db
+    .select()
+    .from(jobs)
+    .where(and(
+      subjectClause,
+      eq(jobs.type, 'lint'),
+      eq(jobs.status, 'completed'),
+    ))
+    .orderBy(desc(jobs.completedAt), desc(jobs.id))
+    .limit(1)
+    .all();
+  return rows[0] ? rowToJob(rows[0]) : null;
+}
+
+/**
  * 按 params.sourceId 反查本 subject 最新一条 ingest job（orphan-source 体检/reingest 用）。
  * jobs 表无独立 source_id 列，靠解析 paramsJson 精确匹配；量级为单 subject 的 ingest
  * job 数，个人库场景全量遍历可接受。

@@ -79,13 +79,13 @@ describe('热路径查询走索引（非全表扫描）', () => {
     expect(detail).toMatch(/USING (COVERING )?INDEX/);
   });
 
-  it('jobs 最新 subject lint 与全局 lint 有稳定排序索引', async () => {
+  it('jobs 最新 subject lint 与全局 lint 按完成时间走稳定排序索引', async () => {
     const db = await bootstrap();
     const subjectLatest = planDetail(
       db,
       `SELECT * FROM jobs
        WHERE subject_id = ? AND type = ? AND status = ?
-       ORDER BY created_at DESC, id DESC LIMIT 1`,
+       ORDER BY completed_at DESC, id DESC LIMIT 1`,
       'general',
       'lint',
       'completed',
@@ -94,15 +94,17 @@ describe('热路径查询走索引（非全表扫描）', () => {
       db,
       `SELECT * FROM jobs
        WHERE subject_id IS NULL AND type = ? AND status = ?
-       ORDER BY created_at DESC, id DESC LIMIT 1`,
+       ORDER BY completed_at DESC, id DESC LIMIT 1`,
       'lint',
       'completed',
     );
 
-    expect(subjectLatest).toMatch(/jobs_subject_type_status_created_id_idx/);
-    expect(globalLatest).toMatch(/jobs_subject_type_status_created_id_idx/);
+    expect(subjectLatest).toMatch(/jobs_subject_type_status_completed_id_idx/);
+    expect(globalLatest).toMatch(/jobs_subject_type_status_completed_id_idx/);
     expect(subjectLatest).not.toMatch(/USE TEMP B-TREE/);
     expect(globalLatest).not.toMatch(/USE TEMP B-TREE/);
+    expect(subjectLatest).not.toMatch(/SCAN jobs\b/);
+    expect(globalLatest).not.toMatch(/SCAN jobs\b/);
   });
 
   it('jobs 最近状态快照在 subject 与全量路径均走稳定排序索引', async () => {

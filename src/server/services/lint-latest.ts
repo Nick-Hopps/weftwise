@@ -50,7 +50,11 @@ export function selectLatestFindings(jobs: Job[]): LintLatestResult {
   }
 
   // 按完成时间选最近一次（completedAt 为 ISO-8601，字符串比较即时间序；与返回的 ranAt 自洽）
-  const latest = completed.reduce((a, b) => ((a.completedAt ?? '') >= (b.completedAt ?? '') ? a : b));
+  const latest = completed.reduce((a, b) => {
+    const completedOrder = (a.completedAt ?? '').localeCompare(b.completedAt ?? '');
+    if (completedOrder !== 0) return completedOrder > 0 ? a : b;
+    return a.id.localeCompare(b.id) >= 0 ? a : b;
+  });
 
   let findings: EnrichedLintFinding[] = [];
   try {

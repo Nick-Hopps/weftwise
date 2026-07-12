@@ -65,12 +65,17 @@ export function parseHealthSnapshot(value: unknown): HealthSnapshot {
     invalid('findings 非法');
   }
 
-  const remediations = value.remediations === undefined
-    ? {}
-    : parseRemediations(value.remediations);
-  const recentOutcomes = value.recentOutcomes === undefined
-    ? {}
-    : parseRecentOutcomes(value.recentOutcomes);
+  const hasRemediations = value.remediations !== undefined;
+  const hasRecentOutcomes = value.recentOutcomes !== undefined;
+  if (hasRemediations !== hasRecentOutcomes) {
+    invalid('remediations 与 recentOutcomes 必须同时存在或同时缺失');
+  }
+  const remediations = hasRemediations
+    ? parseRemediations(value.remediations)
+    : {};
+  const recentOutcomes = hasRecentOutcomes
+    ? parseRecentOutcomes(value.recentOutcomes)
+    : {};
 
   return {
     jobId: value.jobId,

@@ -23,11 +23,9 @@ export async function GET(request: NextRequest) {
   const allSubjects = request.nextUrl.searchParams.get('allSubjects') === '1';
 
   if (allSubjects) {
+    const latestLint = queue.listLatestCompletedLint(null);
     const lint = selectLatestFindings(
-      queue.listRecent(
-        { type: 'lint', status: 'completed', subjectId: null },
-        1,
-      ),
+      latestLint ? [latestLint] : [],
     );
     return NextResponse.json(
       buildHealthSnapshot(
@@ -41,15 +39,9 @@ export async function GET(request: NextRequest) {
   const resolution = resolveSubjectFromRequest(request);
   if (resolution.error) return resolution.error;
 
+  const latestLint = queue.listLatestCompletedLint(resolution.subject.id);
   const lint = selectLatestFindings(
-    queue.listRecent(
-      {
-        type: 'lint',
-        status: 'completed',
-        subjectId: resolution.subject.id,
-      },
-      1,
-    ),
+    latestLint ? [latestLint] : [],
   );
   return NextResponse.json(
     buildHealthSnapshot(

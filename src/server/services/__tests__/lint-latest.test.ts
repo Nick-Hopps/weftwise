@@ -63,6 +63,14 @@ describe('selectLatestFindings', () => {
     expect(selectLatestFindings([a, b]).jobId).toBe('a');
   });
 
+  it('completedAt 相同时按 id DESC 稳定决胜且不依赖输入顺序', () => {
+    const a = job({ id: 'lint-a', completedAt: '2026-03-01T00:05:00.000Z' });
+    const z = job({ id: 'lint-z', completedAt: '2026-03-01T00:05:00.000Z' });
+
+    expect(selectLatestFindings([a, z]).jobId).toBe('lint-z');
+    expect(selectLatestFindings([z, a]).jobId).toBe('lint-z');
+  });
+
   it('忽略非 completed 的 job', () => {
     const running = job({ id: 'run', status: 'running', createdAt: '2026-09-01T00:00:00.000Z' });
     const done = job({ id: 'done', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' });

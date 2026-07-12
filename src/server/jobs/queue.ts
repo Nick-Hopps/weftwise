@@ -36,6 +36,10 @@ export function listRecent(
   return jobsRepo.listRecentJobs(filter, limit);
 }
 
+export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null {
+  return jobsRepo.listLatestCompletedLint(subjectId);
+}
+
 export function requeue(jobId: string): void {
   jobsRepo.requeueJob(jobId);
 }

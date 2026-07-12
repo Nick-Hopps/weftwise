@@ -94,6 +94,75 @@ describe('jobs-repo.listRecentJobs', () => {
   });
 });
 
+describe('jobs-repo.listLatestCompletedLint', () => {
+  async function setupLatestLintJobs() {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at)
+       VALUES (?,?,?,?,?,?)`,
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const insert = db.prepare(
+      `INSERT INTO jobs
+       (id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count)
+       VALUES (?, ?, ?, ?, '{}', '{}', ?, NULL, ?, NULL, NULL, 0)`,
+    );
+    return { db, insert, repo: await import('../jobs-repo') };
+  }
+
+  it('按 completedAt 而非 createdAt 选择 subject 最新 completed lint', async () => {
+    const { insert, repo } = await setupLatestLintJobs();
+    insert.run(
+      'lint-a', 'lint', 'completed', 's1',
+      '2026-07-13T09:00:00.000Z', '2026-07-13T12:00:00.000Z',
+    );
+    insert.run(
+      'lint-b', 'lint', 'completed', 's1',
+      '2026-07-13T11:00:00.000Z', '2026-07-13T10:00:00.000Z',
+    );
+    insert.run(
+      'lint-running', 'lint', 'running', 's1',
+      '2026-07-13T13:00:00.000Z', null,
+    );
+    insert.run(
+      'fix-late', 'fix', 'completed', 's1',
+      '2026-07-13T13:00:00.000Z', '2026-07-13T14:00:00.000Z',
+    );
+
+    expect(repo.listLatestCompletedLint('s1')?.id).toBe('lint-a');
+  });
+
+  it('completedAt 相同时以 id DESC 稳定决胜', async () => {
+    const { insert, repo } = await setupLatestLintJobs();
+    insert.run(
+      'lint-tie-a', 'lint', 'completed', 's1',
+      '2026-07-13T11:00:00.000Z', '2026-07-13T12:00:00.000Z',
+    );
+    insert.run(
+      'lint-tie-z', 'lint', 'completed', 's1',
+      '2026-07-13T09:00:00.000Z', '2026-07-13T12:00:00.000Z',
+    );
+
+    expect(repo.listLatestCompletedLint('s1')?.id).toBe('lint-tie-z');
+  });
+
+  it('subjectId:null 只选全局 completed lint，无命中返回 null', async () => {
+    const { insert, repo } = await setupLatestLintJobs();
+    insert.run(
+      'global-lint', 'lint', 'completed', null,
+      '2026-07-13T09:00:00.000Z', '2026-07-13T12:00:00.000Z',
+    );
+    insert.run(
+      'scoped-lint', 'lint', 'completed', 's1',
+      '2026-07-13T10:00:00.000Z', '2026-07-13T13:00:00.000Z',
+    );
+
+    expect(repo.listLatestCompletedLint(null)?.id).toBe('global-lint');
+    expect(repo.listLatestCompletedLint('missing-subject')).toBeNull();
+  });
+});
+
 const NOW = '2026-01-01T00:00:00Z';
 
 describe('jobs-repo.findLatestIngestJobForSource', () => {
