@@ -1,8 +1,17 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { PostconditionReport } from '@/lib/contracts';
+import type {
+  EnrichedLintFinding,
+  Job,
+  LintFinding,
+  LintLatestResult,
+  PostconditionReport,
+  RemediationContext,
+} from '@/lib/contracts';
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
-const genMock = vi.hoisted(() => ({ generateTextWithTools: vi.fn(async () => ({ text: 'done' })) }));
+const genMock = vi.hoisted(() => ({
+  generateTextWithTools: vi.fn(async (_task: string, _opts: unknown) => ({ text: 'done' })),
+}));
 vi.mock('@/server/llm/provider-registry', () => genMock);
 vi.mock('@/server/db/repos/subjects-repo', () => ({ getById: vi.fn(() => ({ id: 's1', slug: 'general', name: 'G', description: '' })) }));
 const pagesMock = vi.hoisted(() => ({
@@ -25,18 +34,112 @@ const txMock = vi.hoisted(() => ({
   applyChangeset: vi.fn(async () => undefined),
 }));
 vi.mock('@/server/wiki/wiki-transaction', () => txMock);
-const lintMock = vi.hoisted(() => ({ runDeterministicChecksForSubject: vi.fn(() => [] as Array<{ type: string; pageSlug: string; description: string; suggestedFix: string | null }>) }));
+const lintMock = vi.hoisted(() => ({ runDeterministicChecksForSubject: vi.fn(() => [] as LintFinding[]) }));
 vi.mock('@/server/services/lint-deterministic', () => lintMock);
-const latestMock = vi.hoisted(() => ({ selectLatestFindings: vi.fn(() => ({ findings: [] as Array<{ type: string; pageSlug: string; description: string; suggestedFix: string | null }> })) }));
+const latestMock = vi.hoisted(() => ({
+  selectLatestFindings: vi.fn<(_jobs: Job[]) => LintLatestResult>(() => ({
+    jobId: null,
+    ranAt: null,
+    bySeverity: { critical: 0, warning: 0, info: 0 },
+    findings: [],
+  })),
+}));
 vi.mock('@/server/services/lint-latest', () => latestMock);
-vi.mock('@/server/jobs/queue', () => ({ list: vi.fn(() => []) }));
+const queueMock = vi.hoisted(() => ({
+  list: vi.fn(() => [] as Job[]),
+  get: vi.fn(() => null as Job | null),
+  isCancelRequested: vi.fn(() => false),
+}));
+vi.mock('@/server/jobs/queue', () => queueMock);
 const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
 vi.mock('@/server/services/postcondition-service', () => postconditionMock);
 
 import { runFixJob } from '../fix-service';
+import { identifyFindings } from '../finding-identity';
 
-function job() {
-  return { id: 'j1', type: 'fix', subjectId: 's1', paramsJson: JSON.stringify({ subjectId: 's1' }) } as never;
+function job(params: { subjectId?: string; remediationContext?: RemediationContext } = { subjectId: 's1' }): Job {
+  return {
+    id: 'j1',
+    type: 'fix',
+    status: 'running',
+    subjectId: 's1',
+    paramsJson: JSON.stringify(params),
+    resultJson: null,
+    createdAt: '2026-07-12T10:01:00.000Z',
+    startedAt: '2026-07-12T10:01:00.000Z',
+    completedAt: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    attemptCount: 0,
+  };
+}
+
+function lintJob(overrides: Partial<Job> = {}): Job {
+  return {
+    id: 'lint-1',
+    type: 'lint',
+    status: 'completed',
+    subjectId: 's1',
+    paramsJson: JSON.stringify({ subjectId: 's1' }),
+    resultJson: JSON.stringify({ findings: [] }),
+    createdAt: '2026-07-12T10:00:00.000Z',
+    startedAt: '2026-07-12T10:00:00.000Z',
+    completedAt: '2026-07-12T10:00:30.000Z',
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    attemptCount: 0,
+    ...overrides,
+  };
+}
+
+function finding(
+  type: LintFinding['type'],
+  pageSlug: string,
+  description: string,
+): LintFinding {
+  return {
+    type,
+    severity: 'warning',
+    pageSlug,
+    description,
+    suggestedFix: null,
+  };
+}
+
+function identified(raw: LintFinding): EnrichedLintFinding {
+  return identifyFindings([{
+    ...raw,
+    subjectId: 's1',
+    subjectSlug: 'general',
+  }])[0]!;
+}
+
+function snapshot(
+  findings: EnrichedLintFinding[],
+  overrides: Partial<LintLatestResult> = {},
+): LintLatestResult {
+  return {
+    jobId: 'lint-1',
+    ranAt: '2026-07-12T10:00:30.000Z',
+    bySeverity: {
+      critical: findings.filter((item) => item.severity === 'critical').length,
+      warning: findings.filter((item) => item.severity === 'warning').length,
+      info: findings.filter((item) => item.severity === 'info').length,
+    },
+    findings,
+    ...overrides,
+  };
+}
+
+function context(findingIds: string[], action: RemediationContext['action'] = 'fix'): RemediationContext {
+  return { lintJobId: 'lint-1', findingIds, action };
+}
+
+function getFixPrompt(): string {
+  const opts = genMock.generateTextWithTools.mock.calls[0]?.[1] as
+    | { messages: Array<{ content: unknown }> }
+    | undefined;
+  return String(opts?.messages[0]?.content ?? '');
 }
 
 const cleanReport: PostconditionReport = {
@@ -61,14 +164,22 @@ describe('runFixJob (tool-loop)', () => {
     genMock.generateTextWithTools.mockClear();
     embedMock.enqueueEmbedIndex.mockClear();
     txMock.applyChangeset.mockClear();
+    lintMock.runDeterministicChecksForSubject.mockReset();
     lintMock.runDeterministicChecksForSubject.mockReturnValue([]);
-    latestMock.selectLatestFindings.mockReturnValue({ findings: [] });
+    latestMock.selectLatestFindings.mockReset();
+    latestMock.selectLatestFindings.mockReturnValue(snapshot([], { jobId: null, ranAt: null }));
+    queueMock.list.mockReset();
+    queueMock.list.mockReturnValue([]);
+    queueMock.get.mockReset();
+    queueMock.get.mockReturnValue(null);
+    queueMock.isCancelRequested.mockReset();
+    queueMock.isCancelRequested.mockReturnValue(false);
     postconditionMock.verifyJobPostconditions.mockReset();
     postconditionMock.verifyJobPostconditions.mockResolvedValue(cleanReport);
   });
 
   it('只有链接 finding 时使用 fix:links，提供页面与来源证据及 patch', async () => {
-    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([{ type: 'broken-link', pageSlug: 'a', description: '[[Ghost]] missing', suggestedFix: null }]);
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([{ type: 'broken-link', severity: 'warning', pageSlug: 'a', description: '[[Ghost]] missing', suggestedFix: null }]);
     const emit = vi.fn();
     const res = await runFixJob(job(), emit);
     expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
@@ -93,7 +204,7 @@ describe('runFixJob (tool-loop)', () => {
   });
 
   it('只有 missing-frontmatter → pre-pass 一个 commit，不调 LLM', async () => {
-    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([{ type: 'missing-frontmatter', pageSlug: 'a', description: 'missing title', suggestedFix: null }]);
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([{ type: 'missing-frontmatter', severity: 'warning', pageSlug: 'a', description: 'missing title', suggestedFix: null }]);
     const emit = vi.fn();
     await runFixJob(job(), emit);
     expect(txMock.applyChangeset).toHaveBeenCalledOnce();
@@ -104,8 +215,8 @@ describe('runFixJob (tool-loop)', () => {
   });
 
   it('含 contradiction 时使用 fix:contradiction，额外提供 wiki_update', async () => {
-    const contradiction = { type: 'contradiction', pageSlug: 'a', description: 'A 与 B 冲突', suggestedFix: null };
-    latestMock.selectLatestFindings.mockReturnValueOnce({ findings: [contradiction] });
+    const contradiction = identified(finding('contradiction', 'a', 'A 与 B 冲突'));
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
     const emit = vi.fn();
     await runFixJob(job(), emit);
     const opts = (genMock.generateTextWithTools.mock.calls[0] as unknown[])[1] as { tools: Record<string, unknown> };
@@ -159,5 +270,141 @@ describe('runFixJob (tool-loop)', () => {
         residualCount: 1,
       }),
     );
+  });
+
+  it('remediation context 只处理指定且属于 Fix 的 finding ID', async () => {
+    const brokenARaw = finding('broken-link', 'a', 'A 中的坏链');
+    const brokenBRaw = finding('broken-link', 'b', 'B 中的坏链');
+    const brokenA = identified(brokenARaw);
+    const brokenB = identified(brokenBRaw);
+    const coverageC = identified(finding('coverage-gap', 'c', 'C 的覆盖缺口'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([brokenA, brokenB, coverageC]));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([brokenARaw, brokenBRaw]);
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([brokenA.id]),
+    }), vi.fn());
+
+    const prompt = getFixPrompt();
+    expect(prompt).toContain(brokenA.description);
+    expect(prompt).not.toContain(brokenB.description);
+    expect(prompt).not.toContain(coverageC.description);
+  });
+
+  it.each([
+    ['lint job 不存在', null, undefined, undefined],
+    ['lint job 属于其他 subject', lintJob({ subjectId: 's2' }), undefined, undefined],
+    ['lint job 未完成', lintJob({ status: 'running' }), undefined, undefined],
+    ['引用的 job 不是 lint', lintJob({ type: 'fix' }), undefined, undefined],
+    ['finding ID 不存在', lintJob(), 'f'.repeat(64), undefined],
+    ['finding 不属于 Fix', lintJob(), undefined, 'coverage-gap'],
+  ] as const)(
+    '%s 时在写入或 LLM 前拒绝执行',
+    async (_label, storedLintJob, missingId, nonFixType) => {
+      const brokenA = identified(finding('broken-link', 'a', 'A 中的坏链'));
+      const selected = nonFixType
+        ? identified(finding(nonFixType, 'c', 'C 的覆盖缺口'))
+        : brokenA;
+      queueMock.get.mockReturnValueOnce(storedLintJob);
+      latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([selected]));
+      lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([brokenA]);
+
+      await expect(runFixJob(job({
+        subjectId: 's1',
+        remediationContext: context([missingId ?? selected.id]),
+      }), vi.fn())).rejects.toThrow();
+
+      expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
+      expect(txMock.applyChangeset).not.toHaveBeenCalled();
+    },
+  );
+
+  it('错误 action 时在写入或 LLM 前拒绝执行', async () => {
+    const missingFrontmatter = identified(finding('missing-frontmatter', 'a', 'A 缺 frontmatter'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([missingFrontmatter]));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([missingFrontmatter]);
+
+    await expect(runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([missingFrontmatter.id], 'curate'),
+    }), vi.fn())).rejects.toThrow();
+
+    expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
+    expect(txMock.applyChangeset).not.toHaveBeenCalled();
+  });
+
+  it('精确 lint job 解析出的 snapshot jobId 不匹配时拒绝执行', async () => {
+    const brokenA = identified(finding('broken-link', 'a', 'A 中的坏链'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([brokenA], { jobId: 'lint-other' }));
+
+    await expect(runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([brokenA.id]),
+    }), vi.fn())).rejects.toThrow();
+
+    expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
+    expect(txMock.applyChangeset).not.toHaveBeenCalled();
+  });
+
+  it('fresh deterministic 重新生成稳定 ID 后匹配，已 stale 的 deterministic 不处理', async () => {
+    const currentRaw = finding('broken-link', 'a', '当前仍存在的坏链');
+    const current = identified(currentRaw);
+    const stale = identified(finding('broken-link', 'b', '快照中已过期的坏链'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([current, stale]));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([currentRaw]);
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([current.id, stale.id]),
+    }), vi.fn());
+
+    const prompt = getFixPrompt();
+    expect(prompt).toContain(current.description);
+    expect(prompt).not.toContain(stale.description);
+  });
+
+  it('无 remediation context 时保留 fresh deterministic 与最新 semantic 全量行为', async () => {
+    const brokenA = identified(finding('broken-link', 'a', 'A 中的坏链'));
+    const brokenB = identified(finding('broken-link', 'b', 'B 中的坏链'));
+    const semanticC = identified(finding('missing-crossref', 'c', 'C 缺少交叉引用'));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([brokenA, brokenB]);
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([semanticC]));
+
+    await runFixJob(job(), vi.fn());
+
+    const prompt = getFixPrompt();
+    expect(prompt).toContain(brokenA.description);
+    expect(prompt).toContain(brokenB.description);
+    expect(prompt).toContain(semanticC.description);
+    expect(queueMock.list).toHaveBeenCalledWith({
+      type: 'lint',
+      status: 'completed',
+      subjectId: 's1',
+    });
+    expect(queueMock.get).not.toHaveBeenCalled();
+  });
+
+  it('后置校验只接收 context 选中的 semantic findings', async () => {
+    const missingA = identified(finding('missing-crossref', 'a', 'A 缺少交叉引用'));
+    const contradictionB = identified(finding('contradiction', 'b', 'B 与 C 冲突'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([missingA, contradictionB]));
+    const emit = vi.fn();
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([missingA.id]),
+    }), emit);
+
+    expect(postconditionMock.verifyJobPostconditions).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'fix',
+      semanticFindings: [missingA],
+      emit,
+    }));
   });
 });
