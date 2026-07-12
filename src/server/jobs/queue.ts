@@ -33,6 +33,13 @@ export function requeue(jobId: string): void {
   jobsRepo.requeueJob(jobId);
 }
 
+export function requeueJobWithParams(
+  jobId: string,
+  patch: Record<string, unknown>
+): Job | null {
+  return jobsRepo.requeueJobWithParams(jobId, patch);
+}
+
 export function reclaimExpired(): number {
   return jobsRepo.reclaimExpiredJobs();
 }
