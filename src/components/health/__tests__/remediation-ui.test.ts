@@ -5,7 +5,11 @@ import type {
   RemediationActionType,
   RemediationPlan,
 } from '@/lib/contracts';
-import { actionFindingIds, actionForFinding } from '../remediation-ui';
+import {
+  actionFindingIds,
+  actionForFinding,
+  recentOutcomeCounts,
+} from '../remediation-ui';
 
 function finding(id: string, type: EnrichedLintFinding['type']): EnrichedLintFinding {
   return {
@@ -77,5 +81,21 @@ describe('Health remediation UI helper', () => {
     expect(actionForFinding(snapshot, readonly.id, 'curate')).toBeNull();
     expect(actionForFinding(snapshot, readonly.id, 'research')).toBeNull();
     expect(actionForFinding(snapshot, readonly.id, 're-ingest')).toBeNull();
+  });
+
+  it('近期结果超过 50 条时仍完整统计所有终态', () => {
+    const recentOutcomes = Object.fromEntries([
+      ...Array.from({ length: 55 }, (_, index) => [`fixed-${index}`, 'fixed'] as const),
+      ...Array.from({ length: 7 }, (_, index) => [`failed-${index}`, 'failed'] as const),
+      ...Array.from({ length: 3 }, (_, index) => [`skipped-${index}`, 'skipped'] as const),
+      ['queued', 'queued'] as const,
+      ['awaiting', 'awaiting-approval'] as const,
+    ]);
+
+    expect(recentOutcomeCounts({ ...snapshot, recentOutcomes })).toEqual({
+      fixed: 55,
+      failed: 7,
+      skipped: 3,
+    });
   });
 });
