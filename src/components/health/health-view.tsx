@@ -15,9 +15,35 @@ import { FindingRow } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
 import { ResearchBacklogSection } from './research-backlog-section';
 import { blockImeEnterSubmit } from '@/lib/keyboard';
-import type { LintFinding, ResearchCandidate } from '@/lib/contracts';
+import type { LintFinding, PostconditionReport, ResearchCandidate } from '@/lib/contracts';
+import {
+  buildPostconditionNotice,
+  extractPostconditionReport,
+} from './postcondition-summary';
 
 type Scope = 'subject' | 'all';
+
+function PostconditionBanner({
+  label,
+  report,
+}: {
+  label: string;
+  report: PostconditionReport;
+}) {
+  const notice = buildPostconditionNotice(report);
+  const tone = notice.tone === 'success'
+    ? 'border-success/40 bg-success-bg text-success'
+    : 'border-warning/40 bg-warning-bg text-warning';
+
+  return (
+    <div className={`rounded-md border px-3 py-2 text-sm ${tone}`}>
+      <p className="font-medium">{label} · {notice.title}</p>
+      {notice.details.map((detail, index) => (
+        <p key={`${index}-${detail}`} className="mt-0.5">{detail}</p>
+      ))}
+    </div>
+  );
+}
 
 export function HealthView() {
   const apiFetch = useApiFetch();
@@ -67,30 +93,48 @@ export function HealthView() {
 
   const [curateJobId, setCurateJobId] = useState<string | null>(null);
   const [curateStarting, setCurateStarting] = useState(false);
-  const { status: curateStatus, latestMessage: curateMessage } = useJobStream(curateJobId);
+  const [curatePostcondition, setCuratePostcondition] = useState<PostconditionReport | null>(null);
+  const { status: curateStatus, events: curateEvents, latestMessage: curateMessage } = useJobStream(curateJobId);
   const curating = curateStarting || (curateJobId !== null && curateStatus !== 'completed' && curateStatus !== 'failed');
 
   const [fixJobId, setFixJobId] = useState<string | null>(null);
   const [fixStarting, setFixStarting] = useState(false);
   const [fixSummary, setFixSummary] = useState<{ fixed: number; skipped: number; failed: number } | null>(null);
+  const [fixPostcondition, setFixPostcondition] = useState<PostconditionReport | null>(null);
   const { status: fixStatus, events: fixEvents, latestMessage: fixMessage } = useJobStream(fixJobId);
   const fixing = fixStarting || (fixJobId !== null && fixStatus !== 'completed' && fixStatus !== 'failed');
 
   useEffect(() => {
     if (curateStatus === 'completed') {
+      const verification = [...curateEvents]
+        .reverse()
+        .find((event) => event.type === 'curate:verify:complete');
+      setCuratePostcondition(extractPostconditionReport(verification));
       queryClient.invalidateQueries({ queryKey: ['pages'] });
       queryClient.invalidateQueries({ queryKey: ['lint-latest', allSubjects ? 'all' : subjectId] });
       setCurateJobId(null);
     } else if (curateStatus === 'failed') {
       setCurateJobId(null);
     }
-  }, [curateStatus, queryClient, allSubjects, subjectId]);
+  }, [curateStatus, curateEvents, queryClient, allSubjects, subjectId]);
 
   useEffect(() => {
     if (fixStatus === 'completed') {
+      const verification = [...fixEvents]
+        .reverse()
+        .find((event) => event.type === 'fix:verify:complete');
+      setFixPostcondition(extractPostconditionReport(verification));
       const done = [...fixEvents].reverse().find((e) => e.type === 'fix:complete');
-      const d = done?.data as { fixed?: number; skipped?: number; failed?: number } | undefined;
-      setFixSummary({ fixed: d?.fixed ?? 0, skipped: d?.skipped ?? 0, failed: d?.failed ?? 0 });
+      const d = done?.data.data as {
+        writes?: number;
+        residualCount?: number;
+        semanticStatus?: string;
+      } | undefined;
+      setFixSummary({
+        fixed: d?.writes ?? 0,
+        skipped: d?.residualCount ?? 0,
+        failed: d?.semanticStatus === 'failed' ? 1 : 0,
+      });
       queryClient.invalidateQueries({ queryKey: ['pages'] });
       queryClient.invalidateQueries({ queryKey: ['lint-latest', allSubjects ? 'all' : subjectId] });
       setFixJobId(null);
@@ -101,6 +145,11 @@ export function HealthView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixStatus, fixEvents, queryClient, allSubjects, subjectId]);
+
+  useEffect(() => {
+    setCuratePostcondition(null);
+    setFixPostcondition(null);
+  }, [subjectId]);
 
   const [reingestJobId, setReingestJobId] = useState<string | null>(null);
   const { status: reingestStatus } = useJobStream(reingestJobId);
@@ -119,6 +168,7 @@ export function HealthView() {
 
   async function runCurate() {
     setCurateStarting(true);
+    setCuratePostcondition(null);
     try {
       const res = await apiFetch('/api/curate', {
         method: 'POST',
@@ -137,6 +187,7 @@ export function HealthView() {
   async function runFix() {
     setFixStarting(true);
     setFixSummary(null);
+    setFixPostcondition(null);
     try {
       const res = await apiFetch('/api/fix', {
         method: 'POST',
@@ -439,6 +490,14 @@ export function HealthView() {
           Fixed {fixSummary.fixed} · skipped {fixSummary.skipped} (needs manual review)
           {fixSummary.failed > 0 ? ` · failed ${fixSummary.failed}` : ''}. Re-running health check…
         </div>
+      )}
+
+      {curatePostcondition && (
+        <PostconditionBanner label="Tidy structure" report={curatePostcondition} />
+      )}
+
+      {fixPostcondition && (
+        <PostconditionBanner label="Fix issues" report={fixPostcondition} />
       )}
 
       {isLoading ? (

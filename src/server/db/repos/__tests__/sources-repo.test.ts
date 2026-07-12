@@ -70,6 +70,70 @@ describe('sources-repo.getSourcesForPage', () => {
   });
 });
 
+describe('sources-repo.listPageSourceIntegrityRows', () => {
+  it('返回指定页面关联的 page/source 存在性与 source subject', async () => {
+    const repo = await setup();
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    const insertPage = db.prepare(
+      `INSERT INTO pages
+       (subject_id, slug, title, path, summary, content_hash, tags, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+    );
+    insertPage.run('s1', 'page-a', 'Page A', 'wiki/sub-a/page-a.md', '', 'p1', '[]', NOW, NOW);
+    insertPage.run('s1', 'cross-source-page', 'Cross', 'wiki/sub-a/cross-source-page.md', '', 'p2', '[]', NOW, NOW);
+    const insertLink = db.prepare(
+      `INSERT INTO page_sources (subject_id, page_slug, source_id) VALUES (?,?,?)`,
+    );
+    insertLink.run('s1', 'deleted-page', 'src1');
+    insertLink.run('s1', 'cross-source-page', 'src3');
+
+    expect(
+      repo.listPageSourceIntegrityRows('s1', [
+        'page-a',
+        'deleted-page',
+        'cross-source-page',
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          subjectId: 's1',
+          pageSlug: 'page-a',
+          sourceId: 'src1',
+          pageExists: true,
+          sourceSubjectId: 's1',
+        },
+        {
+          subjectId: 's1',
+          pageSlug: 'page-a',
+          sourceId: 'ghost-src',
+          pageExists: true,
+          sourceSubjectId: null,
+        },
+        {
+          subjectId: 's1',
+          pageSlug: 'deleted-page',
+          sourceId: 'src1',
+          pageExists: false,
+          sourceSubjectId: 's1',
+        },
+        {
+          subjectId: 's1',
+          pageSlug: 'cross-source-page',
+          sourceId: 'src3',
+          pageExists: true,
+          sourceSubjectId: 's2',
+        },
+      ]),
+    );
+  });
+
+  it('空 slug 列表直接返回空数组', async () => {
+    const repo = await setup();
+    expect(repo.listPageSourceIntegrityRows('s1', [])).toEqual([]);
+  });
+});
+
 describe('sources-repo.listUnreferencedSources / deleteSource', () => {
   it('只返回本 subject 零 page_sources 关联的 source', async () => {
     const repo = await setup();

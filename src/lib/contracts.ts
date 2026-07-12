@@ -307,6 +307,49 @@ export interface LintLatestResult {
   findings: EnrichedLintFinding[];
 }
 
+/** Fix / Curate 写后定向校验的实际 operation 范围。 */
+export interface PostconditionScope {
+  jobId: string;
+  subjectId: SubjectId;
+  createdSlugs: string[];
+  updatedSlugs: string[];
+  deletedSlugs: string[];
+  touchedSlugs: string[];
+  operationIds: string[];
+}
+
+export type PostconditionFindingType =
+  | 'broken-link'
+  | 'dangling-incoming-link'
+  | 'orphan-page'
+  | 'dangling-page-source'
+  | 'contradiction'
+  | 'missing-crossref'
+  | 'verification-error';
+
+export interface PostconditionFinding {
+  type: PostconditionFindingType;
+  severity: 'critical' | 'warning' | 'info';
+  pageSlug: string | null;
+  description: string;
+  relatedSlugs?: string[];
+}
+
+export type PostconditionSemanticStatus =
+  | 'not-needed'
+  | 'clean'
+  | 'residual'
+  | 'failed';
+
+export interface PostconditionReport {
+  status: 'clean' | 'residual';
+  checkedAt: string;
+  scope: PostconditionScope;
+  residualFindings: PostconditionFinding[];
+  semanticStatus: PostconditionSemanticStatus;
+  verificationError: string | null;
+}
+
 export interface ChangesetEntry {
   action: 'create' | 'update' | 'delete';
   path: string;
