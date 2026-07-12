@@ -16,7 +16,7 @@ vi.mock('@/server/llm/provider-registry', () => genMock);
 vi.mock('@/server/db/repos/subjects-repo', () => ({ getById: vi.fn(() => ({ id: 's1', slug: 'general', name: 'G', description: '' })) }));
 const pagesMock = vi.hoisted(() => ({
   getAllPages: vi.fn(() => [{ slug: 'a', title: 'A', summary: '', tags: [] }, { slug: 'b', title: 'B', summary: '', tags: [] }]),
-  getPageBySlug: vi.fn(() => ({ slug: 'a', title: 'A', summary: '', tags: [] })),
+  getPageBySlug: vi.fn((_subjectId: string, slug: string) => ({ slug, title: slug.toUpperCase(), summary: '', tags: [] })),
   isMetaPage: vi.fn(() => false),
 }));
 vi.mock('@/server/db/repos/pages-repo', () => pagesMock);
@@ -26,8 +26,14 @@ vi.mock('@/server/wiki/wiki-store', () => ({
 vi.mock('@/server/db/repos/settings-repo', () => ({ getWikiLanguage: vi.fn(() => 'English') }));
 const embedMock = vi.hoisted(() => ({ enqueueEmbedIndex: vi.fn() }));
 vi.mock('@/server/services/embedding-service', () => embedMock);
-vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
-vi.mock('@/server/wiki/page-ops', () => ({ executePageUpdate: vi.fn(async () => ({ updatedSlug: 'a' })), executePageCreate: vi.fn(async () => ({ createdSlug: 'x' })) }));
+const searchMock = vi.hoisted(() => ({ hybridRankSlugs: vi.fn(async () => [] as string[]) }));
+vi.mock('@/server/search/hybrid-retrieval', () => searchMock);
+const pageOpsMock = vi.hoisted(() => ({
+  executePageUpdate: vi.fn(async (_jobId: string, _subject: unknown, input: { slug: string }) => ({ updatedSlug: input.slug, referencesUpdated: 0 })),
+  executePageCreate: vi.fn(async () => ({ createdSlug: 'x' })),
+  executePagePatch: vi.fn(async (_jobId: string, _subject: unknown, input: { slug: string; edits: unknown[] }) => ({ updatedSlug: input.slug, appliedEdits: input.edits.length })),
+}));
+vi.mock('@/server/wiki/page-ops', () => pageOpsMock);
 const txMock = vi.hoisted(() => ({
   createChangeset: vi.fn((id: string, s: { id: string; slug: string }, entries: unknown[]) => ({ id, subjectId: s.id, subjectSlug: s.slug, entries })),
   validateChangeset: vi.fn(() => ({ valid: true, errors: [] as string[], warnings: [] as string[] })),
@@ -72,6 +78,13 @@ function job(params: { subjectId?: string; remediationContext?: RemediationConte
     heartbeatAt: null,
     attemptCount: 0,
   };
+}
+
+function jobWithParamsJson(
+  paramsJson: string,
+  subjectId: Job['subjectId'] = 's1',
+): Job {
+  return { ...job(), subjectId, paramsJson };
 }
 
 function lintJob(overrides: Partial<Job> = {}): Job {
@@ -161,9 +174,15 @@ const cleanReport: PostconditionReport = {
 
 describe('runFixJob (tool-loop)', () => {
   beforeEach(() => {
-    genMock.generateTextWithTools.mockClear();
+    genMock.generateTextWithTools.mockReset();
+    genMock.generateTextWithTools.mockResolvedValue({ text: 'done' });
     embedMock.enqueueEmbedIndex.mockClear();
     txMock.applyChangeset.mockClear();
+    pageOpsMock.executePageUpdate.mockClear();
+    pageOpsMock.executePageCreate.mockClear();
+    pageOpsMock.executePagePatch.mockClear();
+    searchMock.hybridRankSlugs.mockReset();
+    searchMock.hybridRankSlugs.mockResolvedValue([]);
     lintMock.runDeterministicChecksForSubject.mockReset();
     lintMock.runDeterministicChecksForSubject.mockReturnValue([]);
     latestMock.selectLatestFindings.mockReset();
@@ -316,6 +335,7 @@ describe('runFixJob (tool-loop)', () => {
         remediationContext: context([missingId ?? selected.id]),
       }), vi.fn())).rejects.toThrow();
 
+      expect(lintMock.runDeterministicChecksForSubject).not.toHaveBeenCalled();
       expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
       expect(txMock.applyChangeset).not.toHaveBeenCalled();
     },
@@ -406,5 +426,116 @@ describe('runFixJob (tool-loop)', () => {
       semanticFindings: [missingA],
       emit,
     }));
+  });
+
+  it.each([
+    ['顶层 null', 'null'],
+    ['顶层 false', 'false'],
+    ['顶层数组', '[]'],
+    ['context null', JSON.stringify({ subjectId: 's1', remediationContext: null })],
+    ['context false', JSON.stringify({ subjectId: 's1', remediationContext: false })],
+    ['context 数组', JSON.stringify({ subjectId: 's1', remediationContext: [] })],
+  ])('%s 不得降级到 legacy 全量路径', async (_label, paramsJson) => {
+    await expect(runFixJob(jobWithParamsJson(paramsJson), vi.fn())).rejects.toThrow();
+
+    expect(lintMock.runDeterministicChecksForSubject).not.toHaveBeenCalled();
+    expect(queueMock.list).not.toHaveBeenCalled();
+    expect(queueMock.get).not.toHaveBeenCalled();
+    expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
+    expect(txMock.applyChangeset).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['空 lintJobId', { lintJobId: '', findingIds: ['a'.repeat(64)], action: 'fix' }],
+    ['空 findingIds', { lintJobId: 'lint-1', findingIds: [], action: 'fix' }],
+    ['finding ID 非 64hex', { lintJobId: 'lint-1', findingIds: ['not-a-finding-id'], action: 'fix' }],
+    ['finding ID 含大写十六进制', { lintJobId: 'lint-1', findingIds: ['A'.repeat(64)], action: 'fix' }],
+  ])('%s 时在 deterministic 扫描前拒绝', async (_label, remediationContext) => {
+    const paramsJson = JSON.stringify({ subjectId: 's1', remediationContext });
+
+    await expect(runFixJob(jobWithParamsJson(paramsJson), vi.fn())).rejects.toThrow();
+
+    expect(lintMock.runDeterministicChecksForSubject).not.toHaveBeenCalled();
+    expect(queueMock.list).not.toHaveBeenCalled();
+    expect(queueMock.get).not.toHaveBeenCalled();
+  });
+
+  it('params.subjectId 与 job.subjectId 不一致时在 deterministic 扫描前拒绝', async () => {
+    await expect(runFixJob(jobWithParamsJson(
+      JSON.stringify({ subjectId: 's2' }),
+      's1',
+    ), vi.fn())).rejects.toThrow();
+
+    expect(lintMock.runDeterministicChecksForSubject).not.toHaveBeenCalled();
+    expect(queueMock.list).not.toHaveBeenCalled();
+  });
+
+  it('兼容旧 job.subjectId=null 且 params.subjectId 合法', async () => {
+    await runFixJob(jobWithParamsJson(
+      JSON.stringify({ subjectId: 's1' }),
+      null,
+    ), vi.fn());
+
+    expect(lintMock.runDeterministicChecksForSubject).toHaveBeenCalledOnce();
+    expect(queueMock.list).toHaveBeenCalledWith({
+      type: 'lint',
+      status: 'completed',
+      subjectId: 's1',
+    });
+  });
+
+  it('scoped 模式只限制写页，read/search 仍可访问同 subject 的 scope 外页面', async () => {
+    const contradictionA = identified(finding('contradiction', 'a', 'A 与其他说法冲突'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradictionA]));
+    searchMock.hybridRankSlugs.mockResolvedValueOnce(['b']);
+
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const read = await opts.tools.wiki_read!.execute({ slug: 'b' });
+      const search = await opts.tools.wiki_search!.execute({ query: 'B' });
+      const patch = await opts.tools.wiki_patch!.execute({
+        slug: 'b',
+        edits: [{ oldString: 'before', newString: 'after' }],
+      });
+      const update = await opts.tools.wiki_update!.execute({ slug: 'b', body: 'updated body' });
+
+      expect(read).toEqual(expect.objectContaining({ found: true, title: 'B' }));
+      expect(search).toEqual({ hits: [{ slug: 'b', title: 'B', summary: '' }] });
+      expect(patch).toEqual(expect.objectContaining({ ok: false, message: expect.stringContaining('[PAGE_OUT_OF_SCOPE]') }));
+      expect(update).toEqual(expect.objectContaining({ ok: false, message: expect.stringContaining('[PAGE_OUT_OF_SCOPE]') }));
+      return { text: 'done' };
+    });
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([contradictionA.id]),
+    }), vi.fn());
+
+    expect(pageOpsMock.executePagePatch).not.toHaveBeenCalled();
+    expect(pageOpsMock.executePageUpdate).not.toHaveBeenCalled();
+  });
+
+  it('legacy 模式保持 subject-wide 写范围', async () => {
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([
+      finding('broken-link', 'a', 'A 中的坏链'),
+    ]);
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const patch = await opts.tools.wiki_patch!.execute({
+        slug: 'b',
+        edits: [{ oldString: 'before', newString: 'after' }],
+      });
+      expect(patch).toEqual(expect.objectContaining({ ok: true, updatedSlug: 'b' }));
+      return { text: 'done' };
+    });
+
+    await runFixJob(job(), vi.fn());
+
+    expect(pageOpsMock.executePagePatch).toHaveBeenCalledWith(
+      'j1',
+      expect.objectContaining({ id: 's1' }),
+      { slug: 'b', edits: [{ oldString: 'before', newString: 'after' }] },
+    );
   });
 });
