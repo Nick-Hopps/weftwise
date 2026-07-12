@@ -40,6 +40,18 @@ export function requeueJobWithParams(
   return jobsRepo.requeueJobWithParams(jobId, patch);
 }
 
+export function getOrCreateJobAtomic(
+  input: jobsRepo.AtomicJobCreateInput,
+): jobsRepo.AtomicJobCreateResult {
+  return jobsRepo.getOrCreateJobAtomic(input);
+}
+
+export function reingestSourceAtomic(
+  input: jobsRepo.AtomicSourceReingestInput,
+): jobsRepo.AtomicSourceReingestResult {
+  return jobsRepo.reingestSourceAtomic(input);
+}
+
 export function reclaimExpired(): number {
   return jobsRepo.reclaimExpiredJobs();
 }

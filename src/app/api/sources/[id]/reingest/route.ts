@@ -35,7 +35,7 @@ export async function POST(
       subjectId: resolution.subject.id,
       sourceId: id,
     });
-    return NextResponse.json(result, { status: 202 });
+    return NextResponse.json({ jobId: result.jobId }, { status: 202 });
   } catch (error) {
     if (error instanceof SourceReingestError) {
       return NextResponse.json(

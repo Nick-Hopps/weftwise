@@ -1,45 +1,75 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
+import type { Job } from '@/lib/contracts';
 
 const mockRequireAuth = vi.fn();
 const mockRequireCsrf = vi.fn();
 const mockResolve = vi.fn();
 const mockGetSource = vi.fn();
 const mockListUnreferenced = vi.fn();
-const mockFindJob = vi.fn();
-const mockRequeueWithParams = vi.fn();
-const mockEnqueue = vi.fn();
-const mockEmit = vi.fn();
+const mockReingestAtomic = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
-  requireAuth: (...a: unknown[]) => mockRequireAuth(...a),
-  requireCsrf: (...a: unknown[]) => mockRequireCsrf(...a),
+  requireAuth: (...args: unknown[]) => mockRequireAuth(...args),
+  requireCsrf: (...args: unknown[]) => mockRequireCsrf(...args),
 }));
 vi.mock('@/server/middleware/subject', () => ({
-  resolveSubjectFromRequest: (...a: unknown[]) => mockResolve(...a),
+  resolveSubjectFromRequest: (...args: unknown[]) => mockResolve(...args),
 }));
 vi.mock('@/server/db/repos/sources-repo', () => ({
-  getSource: (...a: unknown[]) => mockGetSource(...a),
-  listUnreferencedSources: (...a: unknown[]) => mockListUnreferenced(...a),
-}));
-vi.mock('@/server/db/repos/jobs-repo', () => ({
-  findLatestIngestJobForSource: (...a: unknown[]) => mockFindJob(...a),
+  getSource: (...args: unknown[]) => mockGetSource(...args),
+  listUnreferencedSources: (...args: unknown[]) => mockListUnreferenced(...args),
 }));
 vi.mock('@/server/jobs/queue', () => ({
-  requeueJobWithParams: (...a: unknown[]) => mockRequeueWithParams(...a),
-  enqueue: (...a: unknown[]) => mockEnqueue(...a),
+  reingestSourceAtomic: (...args: unknown[]) => mockReingestAtomic(...args),
 }));
-vi.mock('@/server/jobs/events', () => ({ emit: (...a: unknown[]) => mockEmit(...a) }));
 
 import { reingestOrphanSource } from '@/server/services/source-reingest';
 import { POST } from '../route';
 
 const SUBJECT = { id: 's1', slug: 'general' };
-const SOURCE = { id: 'src1', subjectId: 's1', filename: 'a.md', contentHash: 'h', parsedAt: null, metadataJson: '{}' };
+const SOURCE = {
+  id: 'src1',
+  subjectId: 's1',
+  filename: 'a.md',
+  contentHash: 'h',
+  parsedAt: null,
+  metadataJson: '{}',
+};
+const REMEDIATION_CONTEXT = {
+  lintJobId: 'lint-1',
+  findingIds: ['a'.repeat(64)],
+  action: 're-ingest' as const,
+};
 
 function call(id: string) {
-  const req = new NextRequest(`http://localhost/api/sources/${id}/reingest`, { method: 'POST' });
-  return POST(req, { params: Promise.resolve({ id }) });
+  const request = new NextRequest(
+    `http://localhost/api/sources/${id}/reingest`,
+    { method: 'POST' },
+  );
+  return POST(request, { params: Promise.resolve({ id }) });
+}
+
+function inFlightJob(remediationContext = REMEDIATION_CONTEXT): Job {
+  return {
+    id: 'j1',
+    type: 'ingest',
+    status: 'pending',
+    subjectId: 's1',
+    paramsJson: JSON.stringify({
+      sourceId: 'src1',
+      filename: 'a.md',
+      subjectId: 's1',
+      remediationContext,
+    }),
+    resultJson: null,
+    createdAt: '2026-07-13T10:00:00.000Z',
+    startedAt: null,
+    completedAt: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    attemptCount: 0,
+  };
 }
 
 beforeEach(() => {
@@ -49,153 +79,67 @@ beforeEach(() => {
   mockResolve.mockReturnValue({ subject: SUBJECT, error: null });
   mockGetSource.mockReturnValue(SOURCE);
   mockListUnreferenced.mockReturnValue([SOURCE]);
-  mockFindJob.mockReturnValue(null);
-  mockRequeueWithParams.mockReturnValue({ id: 'j1' });
-  mockEnqueue.mockReturnValue({ id: 'new-job' });
+  mockReingestAtomic.mockReturnValue({
+    kind: 'created',
+    job: { id: 'new-job' },
+  });
 });
 
 describe('POST /api/sources/[id]/reingest', () => {
-  it('source 不存在 → 404', async () => {
-    mockGetSource.mockReturnValue(null);
-    const response = await call('missing');
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: 'source-not-found' });
-    expect(mockRequeueWithParams).not.toHaveBeenCalled();
-    expect(mockEnqueue).not.toHaveBeenCalled();
+  it('source 不存在或跨 subject → 稳定 404 source-not-found，且不进入原子编排', async () => {
+    mockGetSource.mockReturnValueOnce(null);
+    const missing = await call('missing');
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: 'source-not-found' });
+
+    mockGetSource.mockReturnValueOnce({ ...SOURCE, subjectId: 'other' });
+    const crossSubject = await call('src1');
+    expect(crossSubject.status).toBe(404);
+    expect(await crossSubject.json()).toEqual({ error: 'source-not-found' });
+    expect(mockReingestAtomic).not.toHaveBeenCalled();
   });
 
-  it('source 属其他 subject → 404', async () => {
-    mockGetSource.mockReturnValue({ ...SOURCE, subjectId: 'other' });
-    expect((await call('src1')).status).toBe(404);
-    expect(mockRequeueWithParams).not.toHaveBeenCalled();
-    expect(mockEnqueue).not.toHaveBeenCalled();
-  });
-
-  it('已被页面引用 → 409 already-referenced', async () => {
+  it('已被页面引用 → 409 already-referenced，且不进入原子编排', async () => {
     mockListUnreferenced.mockReturnValue([]);
-    const res = await call('src1');
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe('already-referenced');
-    expect(mockRequeueWithParams).not.toHaveBeenCalled();
-    expect(mockEnqueue).not.toHaveBeenCalled();
+    const response = await call('src1');
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'already-referenced' });
+    expect(mockReingestAtomic).not.toHaveBeenCalled();
   });
 
-  it('同源 job 在途（pending/running）→ 409 in-flight', async () => {
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'running', resultJson: null });
-    const res = await call('src1');
-    expect(res.status).toBe(409);
-    expect((await res.json()).error).toBe('in-flight');
-    expect(mockRequeueWithParams).not.toHaveBeenCalled();
-    expect(mockEnqueue).not.toHaveBeenCalled();
+  it('专用 route 无 context 时在途任务仍返回 409 in-flight', async () => {
+    mockReingestAtomic.mockReturnValue({
+      kind: 'in-flight',
+      job: { id: 'j1' },
+      deduplicated: false,
+    });
+    const response = await call('src1');
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'in-flight' });
   });
 
-  it('有 failed job → requeue 原 job（checkpoint 续传），202 回原 jobId', async () => {
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'failed', resultJson: null });
-    const res = await call('src1');
-    expect(res.status).toBe(202);
-    expect((await res.json()).jobId).toBe('j1');
-    expect(mockRequeueWithParams).toHaveBeenCalledWith('j1', {});
-    expect(mockEmit).toHaveBeenCalledWith(
-      'j1',
-      'job:retrying',
-      'Manual re-ingest — resuming from checkpoint',
-      { manual: true },
-    );
-    expect(mockEnqueue).not.toHaveBeenCalled();
+  it.each([
+    ['requeued', 'j1'],
+    ['created', 'new-job'],
+  ] as const)('%s → 专用 route 仅返回 202 jobId', async (kind, jobId) => {
+    mockReingestAtomic.mockReturnValue({ kind, job: { id: jobId } });
+    const response = await call('src1');
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ jobId });
   });
 
-  it('failed job 原子重排冲突 → 409 requeue-conflict，且不新建 job', async () => {
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'failed', resultJson: null });
-    mockRequeueWithParams.mockReturnValue(null);
-    const res = await call('src1');
+  it('原子编排 conflict → 409 requeue-conflict', async () => {
+    mockReingestAtomic.mockReturnValue({ kind: 'conflict' });
+    const response = await call('src1');
 
-    expect(res.status).toBe(409);
-    expect(await res.json()).toEqual({ error: 'requeue-conflict' });
-    expect(mockEmit).not.toHaveBeenCalled();
-    expect(mockEnqueue).not.toHaveBeenCalled();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'requeue-conflict' });
   });
 
-  it('failed job 已被用户终结（cancelled）→ 不 requeue，新建 ingest job', async () => {
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'failed', resultJson: JSON.stringify({ cancelled: true }) });
-    const res = await call('src1');
-    expect(res.status).toBe(202);
-    expect((await res.json()).jobId).toBe('new-job');
-    expect(mockRequeueWithParams).not.toHaveBeenCalled();
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      'ingest',
-      { sourceId: 'src1', filename: 'a.md', subjectId: 's1' },
-      's1',
-    );
-  });
-
-  it('failed job result 损坏时按普通失败处理并原子重排', async () => {
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'failed', resultJson: '{' });
-    const res = await call('src1');
-
-    expect(res.status).toBe(202);
-    expect((await res.json()).jobId).toBe('j1');
-    expect(mockRequeueWithParams).toHaveBeenCalledWith('j1', {});
-    expect(mockEnqueue).not.toHaveBeenCalled();
-  });
-
-  it('查无 job / job completed → 新建 ingest job，202 回新 jobId', async () => {
-    const res = await call('src1');
-    expect(res.status).toBe(202);
-    expect((await res.json()).jobId).toBe('new-job');
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      'ingest',
-      { sourceId: 'src1', filename: 'a.md', subjectId: 's1' },
-      's1',
-    );
-
-    mockEnqueue.mockClear();
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'completed', resultJson: null });
-    const res2 = await call('src1');
-    expect(res2.status).toBe(202);
-    expect(mockEnqueue).toHaveBeenCalled();
-  });
-
-  it('helper 原子重排时把 remediationContext 合并进原 job 参数', () => {
-    const remediationContext = {
-      lintJobId: 'lint-1',
-      findingIds: ['a'.repeat(64)],
-      action: 're-ingest' as const,
-    };
-    mockFindJob.mockReturnValue({ id: 'j1', status: 'failed', resultJson: null });
-
-    expect(reingestOrphanSource({
-      subjectId: 's1',
-      sourceId: 'src1',
-      remediationContext,
-    })).toEqual({ jobId: 'j1' });
-    expect(mockRequeueWithParams).toHaveBeenCalledWith('j1', { remediationContext });
-  });
-
-  it('helper 新建 ingest 时也携带 remediationContext', () => {
-    const remediationContext = {
-      lintJobId: 'lint-1',
-      findingIds: ['a'.repeat(64)],
-      action: 're-ingest' as const,
-    };
-
-    expect(reingestOrphanSource({
-      subjectId: 's1',
-      sourceId: 'src1',
-      remediationContext,
-    })).toEqual({ jobId: 'new-job' });
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      'ingest',
-      {
-        sourceId: 'src1',
-        filename: 'a.md',
-        subjectId: 's1',
-        remediationContext,
-      },
-      's1',
-    );
-  });
-
-  it('Auth、CSRF、subject 失败都不调用 helper 依赖', async () => {
+  it('Auth、CSRF、subject 失败都不读取 source 或进入原子编排', async () => {
     mockRequireAuth.mockReturnValueOnce(
       NextResponse.json({ error: 'unauthorized' }, { status: 401 }),
     );
@@ -213,7 +157,48 @@ describe('POST /api/sources/[id]/reingest', () => {
     expect((await call('src1')).status).toBe(404);
 
     expect(mockGetSource).not.toHaveBeenCalled();
-    expect(mockRequeueWithParams).not.toHaveBeenCalled();
-    expect(mockEnqueue).not.toHaveBeenCalled();
+    expect(mockReingestAtomic).not.toHaveBeenCalled();
+  });
+});
+
+describe('reingestOrphanSource 与原子 repo 集成边界', () => {
+  it('把创建参数、context patch 和同步 in-flight matcher 一次传给原子 API', () => {
+    expect(reingestOrphanSource({
+      subjectId: 's1',
+      sourceId: 'src1',
+      remediationContext: REMEDIATION_CONTEXT,
+    })).toEqual({ jobId: 'new-job', deduplicated: false });
+
+    expect(mockReingestAtomic).toHaveBeenCalledWith({
+      subjectId: 's1',
+      sourceId: 'src1',
+      createParams: {
+        sourceId: 'src1',
+        filename: 'a.md',
+        subjectId: 's1',
+        remediationContext: REMEDIATION_CONTEXT,
+      },
+      paramsPatch: { remediationContext: REMEDIATION_CONTEXT },
+      isDuplicateInFlight: expect.any(Function),
+    });
+
+    const matcher = mockReingestAtomic.mock.calls[0][0]
+      .isDuplicateInFlight as (job: Job) => boolean;
+    expect(matcher(inFlightJob())).toBe(true);
+    expect(matcher(inFlightJob({ ...REMEDIATION_CONTEXT, lintJobId: 'lint-2' }))).toBe(false);
+  });
+
+  it('相同 context 的 in-flight 原子结果作为 deduplicated 返回原 job', () => {
+    mockReingestAtomic.mockReturnValue({
+      kind: 'in-flight',
+      job: { id: 'j1' },
+      deduplicated: true,
+    });
+
+    expect(reingestOrphanSource({
+      subjectId: 's1',
+      sourceId: 'src1',
+      remediationContext: REMEDIATION_CONTEXT,
+    })).toEqual({ jobId: 'j1', deduplicated: true });
   });
 });
