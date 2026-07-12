@@ -259,6 +259,8 @@ describe('runResearchJob', () => {
   it.each([
     ['畸形 JSON', researchJob({}, { paramsJson: '{' }), /valid JSON/],
     ['非对象 JSON', researchJob([], { paramsJson: '[]' }), /must be an object/],
+    ['topic 显式携带旧 gapIds', researchJob({ topic: 'x', gapIds: ['1'] }), /gapIds/],
+    ['findingIds 显式携带旧 gapIds', researchJob({ findingIds: [GAP_ID], lintJobId: 'lint-1', gapIds: null }), /gapIds/],
     ['subjectId 类型错误', researchJob({ topic: 'x', subjectId: 1 }), /subjectId/],
     ['job 与 params subjectId 不一致', researchJob({ topic: 'x', subjectId: 's2' }), /does not match/],
     ['topic 与 findingIds 同时存在', researchJob({ topic: 'x', findingIds: [GAP_ID], lintJobId: 'lint-1' }), /exactly one/],
@@ -273,6 +275,7 @@ describe('runResearchJob', () => {
     ['topic 路径携带处置上下文', researchJob({ topic: 'x', remediationContext: remediationContext() }), /context/],
   ] as const)('%s 时在调用 LLM 前拒绝', async (_label, invalidJob, message) => {
     await expect(runResearchJob(invalidJob, vi.fn())).rejects.toThrow(message);
+    expect(queueMock.get).not.toHaveBeenCalled();
     expect(genMock.generateStructuredOutput).not.toHaveBeenCalled();
     expect(searchMock.webSearch).not.toHaveBeenCalled();
   });
