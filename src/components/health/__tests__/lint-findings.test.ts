@@ -4,6 +4,7 @@ import type { EnrichedLintFinding, LintFinding } from '@/lib/contracts';
 
 function f(over: Partial<EnrichedLintFinding> = {}): EnrichedLintFinding {
   return {
+    id: '0'.repeat(64),
     type: 'broken-link',
     severity: 'warning',
     pageSlug: 'page',
