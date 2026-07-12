@@ -78,3 +78,84 @@ describe('jobs-repo.findLatestIngestJobForSource', () => {
     expect(repo.findLatestIngestJobForSource('s2', 'src-a')).toBeNull();
   });
 });
+
+describe('jobs-repo.requeueJobWithParams', () => {
+  async function setupFailedIngestJob() {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+
+    const repo = await import('../jobs-repo');
+    const job = repo.enqueueJob(
+      'ingest',
+      { sourceId: 'src-1', filename: 'source.md', subjectId: 's1' },
+      's1'
+    );
+    db.prepare(
+      `UPDATE jobs
+       SET status = 'failed', lease_expires_at = ?, heartbeat_at = ?, cancel_requested = 1
+       WHERE id = ?`
+    ).run('2026-07-13T12:02:00.000Z', '2026-07-13T12:00:00.000Z', job.id);
+    db.prepare(
+      `INSERT INTO ingest_checkpoints (job_id, kind, key, data_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(job.id, 'writer-page', 'page-a', '{"content":"draft"}', NOW);
+
+    return { db, repo, jobId: job.id };
+  }
+
+  it('原子合并处置上下文并重排 failed job，保留原参数和 ingest checkpoint', async () => {
+    const { db, repo, jobId } = await setupFailedIngestJob();
+    const remediationContext = {
+      lintJobId: 'lint-1',
+      findingIds: ['finding-2', 'finding-1'],
+      action: 're-ingest',
+    };
+
+    const requeued = repo.requeueJobWithParams(jobId, { remediationContext });
+
+    expect(requeued).toMatchObject({
+      id: jobId,
+      status: 'pending',
+      leaseExpiresAt: null,
+      heartbeatAt: null,
+    });
+    expect(JSON.parse(requeued!.paramsJson)).toEqual({
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+      remediationContext,
+    });
+    expect(
+      db.prepare(`SELECT cancel_requested FROM jobs WHERE id = ?`).get(jobId)
+    ).toEqual({ cancel_requested: 0 });
+    expect(
+      db.prepare(`SELECT COUNT(*) AS count FROM ingest_checkpoints WHERE job_id = ?`).get(jobId)
+    ).toEqual({ count: 1 });
+  });
+
+  it('非 failed job 或不存在的 job 返回 null 且不修改状态和参数', async () => {
+    const { repo } = await setupFailedIngestJob();
+    const pending = repo.enqueueJob('lint', { marker: 'original' }, 's1');
+
+    expect(repo.requeueJobWithParams(pending.id, { marker: 'patched' })).toBeNull();
+    expect(repo.requeueJobWithParams('missing-job', { marker: 'patched' })).toBeNull();
+    expect(repo.getJob(pending.id)).toMatchObject({
+      status: 'pending',
+      paramsJson: JSON.stringify({ marker: 'original' }),
+    });
+  });
+
+  it('paramsJson 损坏时返回 null，不得重排为丢失原参数的任务', async () => {
+    const { db, repo, jobId } = await setupFailedIngestJob();
+    db.prepare(`UPDATE jobs SET params_json = ? WHERE id = ?`).run('{', jobId);
+
+    expect(repo.requeueJobWithParams(jobId, { remediationContext: {} })).toBeNull();
+    expect(repo.getJob(jobId)).toMatchObject({
+      status: 'failed',
+      paramsJson: '{',
+    });
+  });
+});

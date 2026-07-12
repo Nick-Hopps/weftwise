@@ -101,6 +101,47 @@ export function requeueJob(jobId: string): void {
   `).run(jobId);
 }
 
+export function requeueJobWithParams(
+  jobId: string,
+  patch: Record<string, unknown>
+): Job | null {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): Job | null => {
+    const existing = sqlite
+      .prepare(`SELECT params_json FROM jobs WHERE id = ? AND status = 'failed'`)
+      .get(jobId) as { params_json: string } | undefined;
+    if (!existing) return null;
+
+    let params: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(existing.params_json);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return null;
+      }
+      params = parsed as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+
+    const result = sqlite
+      .prepare(`
+        UPDATE jobs
+        SET params_json = ?, status = 'pending', lease_expires_at = NULL,
+            heartbeat_at = NULL, cancel_requested = 0
+        WHERE id = ? AND status = 'failed'
+      `)
+      .run(JSON.stringify({ ...params, ...patch }), jobId);
+    if (result.changes !== 1) return null;
+
+    const row = sqlite.prepare(`SELECT * FROM jobs WHERE id = ?`).get(jobId) as
+      | JobRow
+      | undefined;
+    return row ? rowToJobFromRaw(row) : null;
+  });
+
+  return tx();
+}
+
 export type CancelResult = 'cancelled' | 'already-terminal' | 'not-found';
 
 /**
