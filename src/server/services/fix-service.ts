@@ -28,6 +28,7 @@ import { FIX_AGENTIC_SYSTEM_PROMPT, buildFixAgenticUserPrompt } from '../llm/pro
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import { toolActivityLine } from '@/lib/tool-activity';
 import type { ChangesetEntry, Job } from '@/lib/contracts';
+import { verifyJobPostconditions } from './postcondition-service';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 FixGuard cap 真正兜底）。 */
 export const FIX_MAX_STEPS = 60;
@@ -132,13 +133,32 @@ export async function runFixJob(
   const writes = deterministicFixed + update + create;
   if (writes > 0) enqueueEmbedIndex(subject.id);
 
-  emit('fix:complete', `Fix complete: ${deterministicFixed} frontmatter, ${update} edited, ${create} created.`, {
+  const postcondition = await verifyJobPostconditions({
+    kind: 'fix',
+    job,
+    subject,
+    semanticFindings: snapshotSemantic,
+    emit,
+  });
+  const completeData = {
     deterministic: deterministicFixed,
     update,
     create,
     writes,
-  });
-  return { deterministic: deterministicFixed, update, create, writes };
+    postconditionStatus: postcondition.status,
+    residualCount: postcondition.residualFindings.length,
+    semanticStatus: postcondition.semanticStatus,
+    postcondition,
+  };
+  const verificationText = postcondition.status === 'clean'
+    ? 'Postcondition clean.'
+    : `Postcondition residual: ${postcondition.residualFindings.length} issue(s).`;
+  emit(
+    'fix:complete',
+    `Fix complete: ${deterministicFixed} frontmatter, ${update} edited, ${create} created. ${verificationText}`,
+    completeData,
+  );
+  return completeData;
 }
 
 registerHandler('fix', runFixJob);

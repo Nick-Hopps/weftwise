@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { PostconditionReport } from '@/lib/contracts';
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
 const genMock = vi.hoisted(() => ({ generateTextWithTools: vi.fn(async () => ({ text: 'done' })) }));
@@ -29,12 +30,31 @@ vi.mock('@/server/services/lint-deterministic', () => lintMock);
 const latestMock = vi.hoisted(() => ({ selectLatestFindings: vi.fn(() => ({ findings: [] as Array<{ type: string; pageSlug: string; description: string; suggestedFix: string | null }> })) }));
 vi.mock('@/server/services/lint-latest', () => latestMock);
 vi.mock('@/server/jobs/queue', () => ({ list: vi.fn(() => []) }));
+const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
+vi.mock('@/server/services/postcondition-service', () => postconditionMock);
 
 import { runFixJob } from '../fix-service';
 
 function job() {
   return { id: 'j1', type: 'fix', subjectId: 's1', paramsJson: JSON.stringify({ subjectId: 's1' }) } as never;
 }
+
+const cleanReport: PostconditionReport = {
+  status: 'clean',
+  checkedAt: '2026-07-12T08:00:00.000Z',
+  scope: {
+    jobId: 'j1',
+    subjectId: 's1',
+    createdSlugs: [],
+    updatedSlugs: [],
+    deletedSlugs: [],
+    touchedSlugs: [],
+    operationIds: [],
+  },
+  residualFindings: [],
+  semanticStatus: 'not-needed',
+  verificationError: null,
+};
 
 describe('runFixJob (tool-loop)', () => {
   beforeEach(() => {
@@ -43,6 +63,8 @@ describe('runFixJob (tool-loop)', () => {
     txMock.applyChangeset.mockClear();
     lintMock.runDeterministicChecksForSubject.mockReturnValue([]);
     latestMock.selectLatestFindings.mockReturnValue({ findings: [] });
+    postconditionMock.verifyJobPostconditions.mockReset();
+    postconditionMock.verifyJobPostconditions.mockResolvedValue(cleanReport);
   });
 
   it('只有链接 finding 时使用 fix:links，提供页面与来源证据及 patch', async () => {
@@ -63,7 +85,11 @@ describe('runFixJob (tool-loop)', () => {
     expect(toolKeys).not.toContain('wiki_create');
     expect(emit).toHaveBeenCalledWith('fix:start', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('fix:complete', expect.any(String), expect.any(Object));
-    expect(res).toHaveProperty('writes');
+    expect(res).toMatchObject({
+      writes: expect.any(Number),
+      postconditionStatus: 'clean',
+      postcondition: cleanReport,
+    });
   });
 
   it('只有 missing-frontmatter → pre-pass 一个 commit，不调 LLM', async () => {
@@ -78,13 +104,19 @@ describe('runFixJob (tool-loop)', () => {
   });
 
   it('含 contradiction 时使用 fix:contradiction，额外提供 wiki_update', async () => {
-    latestMock.selectLatestFindings.mockReturnValueOnce({
-      findings: [{ type: 'contradiction', pageSlug: 'a', description: 'A 与 B 冲突', suggestedFix: null }],
-    });
-    await runFixJob(job(), vi.fn());
+    const contradiction = { type: 'contradiction', pageSlug: 'a', description: 'A 与 B 冲突', suggestedFix: null };
+    latestMock.selectLatestFindings.mockReturnValueOnce({ findings: [contradiction] });
+    const emit = vi.fn();
+    await runFixJob(job(), emit);
     const opts = (genMock.generateTextWithTools.mock.calls[0] as unknown[])[1] as { tools: Record<string, unknown> };
     expect(Object.keys(opts.tools)).toContain('wiki_update');
     expect(Object.keys(opts.tools)).not.toContain('wiki_list');
+    expect(postconditionMock.verifyJobPostconditions).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'fix',
+      job: expect.objectContaining({ id: 'j1' }),
+      semanticFindings: [contradiction],
+      emit,
+    }));
   });
 
   it('worklist 空 → 不调 LLM、不 commit，仍 emit complete', async () => {
@@ -94,5 +126,38 @@ describe('runFixJob (tool-loop)', () => {
     expect(txMock.applyChangeset).not.toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith('fix:complete', expect.any(String), expect.any(Object));
     expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
+    expect(postconditionMock.verifyJobPostconditions).toHaveBeenCalledOnce();
+  });
+
+  it('residual 报告仍正常完成并进入结果与 complete 事件', async () => {
+    const residualReport: PostconditionReport = {
+      ...cleanReport,
+      status: 'residual',
+      residualFindings: [
+        {
+          type: 'broken-link',
+          severity: 'warning',
+          pageSlug: 'a',
+          description: '仍有坏链',
+        },
+      ],
+    };
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce(residualReport);
+    const emit = vi.fn();
+
+    const result = await runFixJob(job(), emit);
+
+    expect(result).toMatchObject({
+      postconditionStatus: 'residual',
+      postcondition: residualReport,
+    });
+    expect(emit).toHaveBeenCalledWith(
+      'fix:complete',
+      expect.stringContaining('Postcondition residual'),
+      expect.objectContaining({
+        postconditionStatus: 'residual',
+        residualCount: 1,
+      }),
+    );
   });
 });
