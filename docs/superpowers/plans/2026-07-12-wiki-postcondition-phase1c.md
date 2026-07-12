@@ -66,7 +66,7 @@
 - Consumes: `OperationRow`、`parseWikiPath()`、Zod。
 - Produces: `PostconditionScope`、`PostconditionFinding`、`PostconditionReport`、`listAppliedForJob()`、`buildPostconditionScope()`、`collectPostconditionScope()`。
 
-- [ ] **Step 1: 写 applied operation 查询和 scope 解析失败测试**
+- [x] **Step 1: 写 applied operation 查询和 scope 解析失败测试**
 
 在 repo 测试的 `setup()` 中追加同 Job 的 applied / pending / reverted operation，并断言：
 
@@ -133,12 +133,12 @@ it.each([
 });
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `npx vitest run src/server/db/repos/__tests__/operations-repo.test.ts src/server/services/__tests__/operation-scope-collector.test.ts`  
 Expected: FAIL，提示查询函数、collector 或共享类型不存在。
 
-- [ ] **Step 3: 在 contracts 中增加唯一共享契约**
+- [x] **Step 3: 在 contracts 中增加唯一共享契约**
 
 ```ts
 export interface PostconditionScope {
@@ -180,7 +180,7 @@ export interface PostconditionReport {
 }
 ```
 
-- [ ] **Step 4: 实现 Repo 查询与严格 scope 收集器**
+- [x] **Step 4: 实现 Repo 查询与严格 scope 收集器**
 
 Repo SQL 固定为：
 
@@ -229,12 +229,12 @@ export function collectPostconditionScope(
 
 `buildPostconditionScope()` 必须校验 row 的 job / subject，使用 `parseWikiPath()` 校验路径 Subject，并用保序 `Set` 分别聚合五个数组；任一行不可解析就抛 `PostconditionScopeError`。
 
-- [ ] **Step 5: 运行定向测试与类型检查**
+- [x] **Step 5: 运行定向测试与类型检查**
 
 Run: `npx vitest run src/server/db/repos/__tests__/operations-repo.test.ts src/server/services/__tests__/operation-scope-collector.test.ts && npx tsc --noEmit`  
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add src/lib/contracts.ts src/server/db/repos/operations-repo.ts src/server/db/repos/__tests__/operations-repo.test.ts src/server/services/operation-scope-collector.ts src/server/services/__tests__/operation-scope-collector.test.ts
@@ -255,7 +255,7 @@ git commit -m "feat: 建立后置校验范围契约"
 - Consumes: Task 1 的 `PostconditionScope` / `PostconditionFinding`，`pagesRepo.getAllPagesAcrossSubjects()`、`pagesRepo.getAllLinks()`。
 - Produces: `PageSourceIntegrityRow`、`listPageSourceIntegrityRows()`、`PostconditionSnapshot`、`loadPostconditionSnapshot()`、`verifyDeterministicPostconditions()`。
 
-- [ ] **Step 1: 写 page_sources 完整性查询失败测试**
+- [x] **Step 1: 写 page_sources 完整性查询失败测试**
 
 在真实 SQLite 中插入正常、page 缺失、source 缺失、source Subject 错配四种行：
 
@@ -273,7 +273,7 @@ it('空 slug 列表不执行非法 IN 查询', () => {
 });
 ```
 
-- [ ] **Step 2: 写确定性规则失败测试**
+- [x] **Step 2: 写确定性规则失败测试**
 
 用纯 `PostconditionSnapshot` fixture 覆盖四类 finding 和定向边界：
 
@@ -324,12 +324,12 @@ expect(findings.every((finding) => !finding.description.includes('historical-mis
 
 另写用例覆盖：跨 Subject broken target、已存在目标不报、created 页有跨 Subject 入链不 orphan、meta created 页不报、重复 link 去重、结果稳定排序、空 scope 返回空数组。
 
-- [ ] **Step 3: 运行测试确认 RED**
+- [x] **Step 3: 运行测试确认 RED**
 
 Run: `npx vitest run src/server/db/repos/__tests__/sources-repo.test.ts src/server/services/__tests__/postcondition-verifier.test.ts`  
 Expected: FAIL，提示完整性查询或 verifier 不存在。
 
-- [ ] **Step 4: 实现 provenance Repo 查询**
+- [x] **Step 4: 实现 provenance Repo 查询**
 
 ```ts
 export interface PageSourceIntegrityRow {
@@ -348,7 +348,7 @@ export function listPageSourceIntegrityRows(
 
 实现使用参数化 `IN (...)`，从 `page_sources ps` 左联 `pages p`（复合条件 `subject_id + slug`）与 `sources s`，只查询当前 Subject 和 scope slug。`pageExists` 用 `p.slug IS NOT NULL` 映射，保留 source 缺失行。
 
-- [ ] **Step 5: 实现快照加载和纯确定性校验**
+- [x] **Step 5: 实现快照加载和纯确定性校验**
 
 ```ts
 export interface PostconditionSnapshot {
@@ -380,12 +380,12 @@ export function verifyDeterministicPostconditions(
 
 实现以 `<subjectId>\0<slug>` 构建 page key：只检查存活 touched 页出链、当前已不存在 deleted 目标的存活入链、存活非 meta created 页入链、scope provenance 行。finding 通过 `type + pageSlug + description` key 去重并按同一 key 排序。
 
-- [ ] **Step 6: 运行定向测试与类型检查**
+- [x] **Step 6: 运行定向测试与类型检查**
 
 Run: `npx vitest run src/server/db/repos/__tests__/sources-repo.test.ts src/server/services/__tests__/postcondition-verifier.test.ts && npx tsc --noEmit`  
 Expected: PASS。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add src/server/db/repos/sources-repo.ts src/server/db/repos/__tests__/sources-repo.test.ts src/server/services/postcondition-verifier.ts src/server/services/__tests__/postcondition-verifier.test.ts
@@ -404,7 +404,7 @@ git commit -m "feat: 实现确定性后置校验"
 - Consumes: `LintFinding[]`、Task 1 的 scope / finding、`generateStructuredOutput('lint')`、`scanWikiPages()`、`getWikiLanguage()`。
 - Produces: `semanticFindingId()`、`FixSemanticPostconditionResult`、`recheckFixSemanticPostconditions()`。
 
-- [ ] **Step 1: 写决策映射与调用边界失败测试**
+- [x] **Step 1: 写决策映射与调用边界失败测试**
 
 Mock `generateStructuredOutput` 并断言一次调用、task 为 lint、无 tools 参数：
 
@@ -433,12 +433,12 @@ it('一次复检原语义 finding，并把 residual 映射为共享 finding', as
 
 再覆盖：空 findings 不调用、空 scope 不调用、未知/重复/缺失 decision 保守 residual、超上限 finding 保守 residual、模型异常为 failed、调用前/调用后取消为 failed、输出不能新增 coverage-gap。
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `npx vitest run src/server/services/__tests__/fix-semantic-postcondition.test.ts`  
 Expected: FAIL，提示模块不存在。
 
-- [ ] **Step 3: 定义窄 Schema、稳定内部 ID 与有界输入**
+- [x] **Step 3: 定义窄 Schema、稳定内部 ID 与有界输入**
 
 ```ts
 const SemanticDecisionSchema = z.object({
@@ -478,7 +478,7 @@ function buildFixPostconditionPrompt(input: {
 }
 ```
 
-- [ ] **Step 4: 实现单次无工具复检与保守失败**
+- [x] **Step 4: 实现单次无工具复检与保守失败**
 
 ```ts
 export interface FixSemanticPostconditionResult {
@@ -508,12 +508,12 @@ await generateStructuredOutput(
 
 catch 中只 `console.warn` 完整异常，对外返回固定安全文案 `Fix 语义后置复检未完成。`，并把所有原语义 finding 映射为 residual；不得把异常重新抛给 worker。
 
-- [ ] **Step 5: 运行定向测试与类型检查**
+- [x] **Step 5: 运行定向测试与类型检查**
 
 Run: `npx vitest run src/server/services/__tests__/fix-semantic-postcondition.test.ts && npx tsc --noEmit`  
 Expected: PASS。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add src/server/services/fix-semantic-postcondition.ts src/server/services/__tests__/fix-semantic-postcondition.test.ts
@@ -532,7 +532,7 @@ git commit -m "feat: 实现 Fix 语义复检"
 - Consumes: Tasks 1–3 的 collector、确定性 verifier、Fix semantic checker。
 - Produces: `verifyJobPostconditions()`，供 Fix / Curate 唯一调用。
 
-- [ ] **Step 1: 写 clean / residual / failure orchestration 失败测试**
+- [x] **Step 1: 写 clean / residual / failure orchestration 失败测试**
 
 通过模块 mock 控制各阶段：
 
@@ -560,12 +560,12 @@ it('Fix 合并确定性与语义 residual，并发出统一事件', async () => 
 
 另写：空 scope clean 且不调用 verifier / semantic；Curate 不调用 semantic；collector 抛错、确定性 verifier 抛错均返回带 `verification-error` 的 residual；semantic failed 保留结构 findings 并设置 `semanticStatus:'failed'`；`checkedAt` 使用注入 clock；finding 合并稳定去重。
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `npx vitest run src/server/services/__tests__/postcondition-service.test.ts`  
 Expected: FAIL，提示编排模块不存在。
 
-- [ ] **Step 3: 实现统一编排接口**
+- [x] **Step 3: 实现统一编排接口**
 
 ```ts
 export async function verifyJobPostconditions(input: {
@@ -612,12 +612,12 @@ function emptyPostconditionScope(jobId: string, subjectId: SubjectId): Postcondi
 
 完整异常只写服务端 `console.warn`，不进入 SSE / resultJson。
 
-- [ ] **Step 4: 运行定向测试与类型检查**
+- [x] **Step 4: 运行定向测试与类型检查**
 
 Run: `npx vitest run src/server/services/__tests__/postcondition-service.test.ts && npx tsc --noEmit`  
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/server/services/postcondition-service.ts src/server/services/__tests__/postcondition-service.test.ts
@@ -636,7 +636,7 @@ git commit -m "feat: 编排后置校验报告"
 - Consumes: Task 4 的 `verifyJobPostconditions()`。
 - Produces: 所有 Fix 成功结果的 `postconditionStatus` / `postcondition`，以及增强后的 `fix:complete` data。
 
-- [ ] **Step 1: 扩展 Fix 服务测试为报告契约**
+- [x] **Step 1: 扩展 Fix 服务测试为报告契约**
 
 Mock 统一编排器返回固定报告：
 
@@ -664,12 +664,12 @@ it('写入完成后传入原语义 findings，并返回后置报告', async () =
 
 补充 worklist 空、只有 frontmatter、tool-loop 三条路径都调用一次 postcondition；residual report 仍正常 return，不抛错；embedding enqueue 次数保持原样。
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `npx vitest run src/server/services/__tests__/fix-service.test.ts`  
 Expected: FAIL，结果缺少 postcondition 或编排器未调用。
 
-- [ ] **Step 3: 在现有写入和 embedding 后接入报告**
+- [x] **Step 3: 在现有写入和 embedding 后接入报告**
 
 ```ts
 const postcondition = await verifyJobPostconditions({
@@ -703,12 +703,12 @@ return { ...completeData };
 
 完成文案必须区分 clean / residual，但不得把 residual 写成 Job failed。不要移动或复制现有 `enqueueEmbedIndex()`。
 
-- [ ] **Step 4: 运行 Fix 相关回归与类型检查**
+- [x] **Step 4: 运行 Fix 相关回归与类型检查**
 
 Run: `npx vitest run src/server/services/__tests__/fix-service.test.ts src/server/services/__tests__/fix-tools.test.ts src/server/services/__tests__/fix-deterministic.test.ts && npx tsc --noEmit`  
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/server/services/fix-service.ts src/server/services/__tests__/fix-service.test.ts
@@ -727,7 +727,7 @@ git commit -m "feat: 接入 Fix 后置校验"
 - Consumes: Task 4 的 `verifyJobPostconditions()`。
 - Produces: 普通和候选不足早退两条 Curate 成功路径的统一报告。
 
-- [ ] **Step 1: 写普通与早退路径失败测试**
+- [x] **Step 1: 写普通与早退路径失败测试**
 
 ```ts
 it.each([
@@ -746,12 +746,12 @@ it.each([
 
 补充 residual 报告仍 emit `curate:complete` 且不抛错；Curate 不传语义 findings；embedding 行为不变。
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `npx vitest run src/server/services/__tests__/curate-service.test.ts`  
 Expected: FAIL，早退或普通路径缺少 postcondition。
 
-- [ ] **Step 3: 收敛 Curate 两条完成路径**
+- [x] **Step 3: 收敛 Curate 两条完成路径**
 
 新增局部 helper，避免复制报告拼装：
 
@@ -798,12 +798,12 @@ async function completeCurate(
 
 `scopeSlugs.length < 2` 以零 totals 调 helper；普通路径在现有 embedding enqueue 后调用 helper。`CurateTotals` 明确定义 merge / split / delete / create / writes 数字字段。
 
-- [ ] **Step 4: 运行 Curate 相关回归与类型检查**
+- [x] **Step 4: 运行 Curate 相关回归与类型检查**
 
 Run: `npx vitest run src/server/services/__tests__/curate-service.test.ts src/server/services/__tests__/curate-tools.test.ts src/server/wiki/__tests__/curate-plan.test.ts && npx tsc --noEmit`  
 Expected: PASS。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add src/server/services/curate-service.ts src/server/services/__tests__/curate-service.test.ts
@@ -826,7 +826,7 @@ git commit -m "feat: 接入 Curate 后置校验"
 - Consumes: `PostconditionReport` 与 `JobStreamEvent` 的 `{ message, data, createdAt }` SSE 包装。
 - Produces: `POSTCONDITION_JOB_EVENT_TYPES`、`extractPostconditionReport()`、`buildPostconditionNotice()`，以及 Fix / Curate 完成提示。
 
-- [ ] **Step 1: 写 SSE 报告解析和提示模型失败测试**
+- [x] **Step 1: 写 SSE 报告解析和提示模型失败测试**
 
 ```ts
 it('从 verify:complete 的嵌套 data 中解析报告', () => {
@@ -860,12 +860,12 @@ expect(POSTCONDITION_JOB_EVENT_TYPES).toEqual([
 ]);
 ```
 
-- [ ] **Step 2: 运行测试确认 RED**
+- [x] **Step 2: 运行测试确认 RED**
 
 Run: `npx vitest run src/components/health/__tests__/postcondition-summary.test.ts`  
 Expected: FAIL，提示 summary 模块不存在。
 
-- [ ] **Step 3: 实现纯解析与提示模型**
+- [x] **Step 3: 实现纯解析与提示模型**
 
 ```ts
 export interface PostconditionNotice {
@@ -900,7 +900,7 @@ function isPostconditionReport(value: unknown): value is PostconditionReport {
 
 `buildPostconditionNotice()` 的 semantic failed 文案优先级高于普通 residual。
 
-- [ ] **Step 4: 注册 verify 事件并接入 Health state**
+- [x] **Step 4: 注册 verify 事件并接入 Health state**
 
 在 `job-stream-logic.ts` 导出只读常量：
 
@@ -926,12 +926,12 @@ setPostcondition(extractPostconditionReport(verificationEvent));
 
 开始新 Fix / Curate 时清空旧报告。渲染使用现有 success / warning 设计 token：clean 绿色，residual 或 semantic failed 黄色，展示 title 与最多三条 details。Fix 原有 `void runLint()`、pages / lint-latest invalidation 保持不变；Curate 增加完成摘要但不自动新增 lint Job。
 
-- [ ] **Step 5: 运行 UI / stream 定向测试、Lint 与类型检查**
+- [x] **Step 5: 运行 UI / stream 定向测试、Lint 与类型检查**
 
 Run: `npx vitest run src/components/health/__tests__/postcondition-summary.test.ts src/hooks/__tests__/job-stream-logic.test.ts src/components/health/__tests__/lint-findings.test.ts && npm run lint && npx tsc --noEmit`  
 Expected: 测试与类型检查 PASS；ESLint 0 errors（允许仓库已有 warnings，不得新增 warning）。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add src/hooks/job-stream-logic.ts src/hooks/use-job-stream.ts src/hooks/__tests__/job-stream-logic.test.ts src/components/health/postcondition-summary.ts src/components/health/__tests__/postcondition-summary.test.ts src/components/health/health-view.tsx
@@ -953,7 +953,7 @@ git commit -m "feat: 展示后置校验结果"
 - Consumes: Tasks 1–7 的最终行为与测试证据。
 - Produces: 可维护文档、完成勾选和全量验证记录。
 
-- [ ] **Step 1: 更新模块文档**
+- [x] **Step 1: 更新模块文档**
 
 在 Lib 文档把 `PostconditionScope / PostconditionFinding / PostconditionReport` 加入 `contracts.ts` 的领域类型清单。在 DB 文档记录：
 
@@ -971,7 +971,7 @@ postcondition residual 不改变 Job completed 状态，不触发重写或回滚
 
 在 Components 文档记录 Health clean / residual / semantic failed 三态展示，以及 Fix 自动 lint 仍只是 findings 刷新。
 
-- [ ] **Step 2: 运行全部定向测试**
+- [x] **Step 2: 运行全部定向测试**
 
 Run:
 
@@ -991,7 +991,7 @@ npx vitest run \
 
 Expected: 全部 PASS。
 
-- [ ] **Step 3: 验证 LLM 配置与禁止修改范围**
+- [x] **Step 3: 验证 LLM 配置与禁止修改范围**
 
 Run: `git diff main...HEAD -- llm-config.example.json src/server/agents/tools src/server/agents/skills`  
 Expected: 无输出。
@@ -999,7 +999,7 @@ Expected: 无输出。
 Run: `npx vitest run src/server/llm/__tests__/config-example.test.ts`  
 Expected: PASS。
 
-- [ ] **Step 4: 运行全量质量门禁**
+- [x] **Step 4: 运行全量质量门禁**
 
 Run: `npm test -- --run`  
 Expected: 全量 Vitest PASS。
@@ -1013,16 +1013,30 @@ Expected: PASS。
 Run: `npm run build`  
 Expected: Next.js production build PASS。
 
-- [ ] **Step 5: 回填计划验收记录**
+- [x] **Step 5: 回填计划验收记录**
 
 把本计划全部 checkbox 改为 `[x]`，并在文末新增“验收记录”。记录必须逐项写明定向测试的实际文件数与用例数、全量测试的实际文件数与用例数、ESLint 的实际 error / warning 数、TypeScript 结果、production build 结果，以及 `llm-config.example.json` 未修改；所有数字直接抄录最新命令输出。
 
-- [ ] **Step 6: 提交文档与验收记录**
+- [x] **Step 6: 提交文档与验收记录**
 
 ```bash
 git add src/lib/CLAUDE.md src/server/db/CLAUDE.md src/server/services/CLAUDE.md src/components/CLAUDE.md docs/superpowers/plans/2026-07-12-wiki-postcondition-phase1c.md
 git commit -m "chore: 完成 Phase 1C 全量验收"
 ```
+
+---
+
+## 验收记录
+
+- 定向测试：10 个测试文件、78 个用例全部通过
+- LLM 配置测试：1 个测试文件、3 个用例全部通过
+- 全量测试：191 个测试文件、1272 个用例全部通过
+- ESLint：0 errors、12 warnings；均为主分支既有 warning，本阶段未新增
+- TypeScript：`npx tsc --noEmit` 通过
+- Production build：`npm run build` 通过
+- `llm-config.example.json`：未修改
+- `src/server/agents/tools/**`：未修改
+- `src/server/agents/skills/**`：未修改
 
 ---
 

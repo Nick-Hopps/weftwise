@@ -54,6 +54,7 @@
 
 - `upsertSource(subjectId, payload) / findByHash(subjectId, hash) / linkPageToSource(subjectId, pageSlug, sourceId)`
 - `listUnreferencedSources(subjectId)` —— 零 page_sources 关联的 source（孤儿候选）；`deleteSource(id)` —— 删单行（文件清理归 source-store）；`findLatestIngestJobForSource(subjectId, sourceId)`（jobs-repo）—— listJobs 按 type/subject 过滤后全量遍历 + JSON 解析精确匹配反查最新 ingest job
+- `listPageSourceIntegrityRows(subjectId, pageSlugs)` —— 定向 LEFT JOIN pages/sources，保留 page/source 悬空与 source Subject 错配行，供 Fix / Curate 写后只读校验
 
 ### `operations-repo.ts`
 
@@ -62,6 +63,7 @@
 - `listForSubject(subjectId): OperationRow[]` —— 按 `rowid DESC` 倒序（id 恒为新 UUID → 纯 INSERT → rowid=时序），过滤 `post_head IS NOT NULL AND status IN (applied, reverted)`；返回 `OperationRow { id, jobId, subjectId, preHead, postHead, changesetJson, status, jobType }`（LEFT JOIN jobs 取 `jobType`，同步编辑/删除无 jobs 行 → null）
 - `getById(id): OperationRow | null` —— 取单条记录
 - `markReverted(id): void` —— 设 `status='reverted'`（表示用户手动回滚过该操作；与 `rolled-back` 区分）
+- `listAppliedForJob(jobId, subjectId): OperationRow[]` —— 仅返回 `applied + post_head 非空` 行，按 `rowid ASC` 提交顺序供写后影响范围收集
 
 ### `conversations-repo.ts` 🆕
 
@@ -208,6 +210,7 @@ src/server/db/
 | 日期 | 变更 |
 |------|------|
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 `pending_actions` 表、热路径索引与 repo 条件状态流转；预览 30 分钟 TTL，终态保留 30 天，operation/job 双引用支持 worker 崩溃恢复 |
+| 2026-07-12 | Phase 1C：`operations-repo.listAppliedForJob` 提供 Job/Subject 已应用 Changeset 权威范围；`sources-repo.listPageSourceIntegrityRows` 提供定向 provenance 完整性快照 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：复合 PK / target_subject_id / subjects-repo / FTS5 带 subject filter / 启动自迁移 |
 | 2026-04-26 | wikiLanguage：新增 `app_settings` 表 + `settings-repo.ts`（`getWikiLanguage` / `setWikiLanguage`）|

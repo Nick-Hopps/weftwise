@@ -10,7 +10,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry / Conversation / ConversationMessage` |
+| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry / PostconditionScope / PostconditionFinding / PostconditionReport / Conversation / ConversationMessage` |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
@@ -38,6 +38,9 @@ IngestResult   { pagesCreated: string[], pagesUpdated: string[],
                  linksAdded: number, commitSha: string }
 QueryResult    { answer, citations: { pageSlug, excerpt }[], savedAsPage }
 LintFinding    { type, severity, pageSlug, description, suggestedFix }
+PostconditionScope { jobId, subjectId, createdSlugs, updatedSlugs, deletedSlugs, touchedSlugs, operationIds }
+PostconditionFinding { type, severity, pageSlug|null, description, relatedSlugs? }
+PostconditionReport { status: 'clean'|'residual', checkedAt, scope, residualFindings, semanticStatus, verificationError }
 ChangesetEntry { action: 'create'|'update'|'delete', path, content }
 Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
                  status: 'pending'|'applied'|'rolled-back' }
@@ -129,6 +132,7 @@ src/lib/
 | 2026-06-30 | `tool-activity.ts` 补 `wiki_update`(✏️) 映射，供 fix tool-loop 工具活动展示 |
 | 2026-07-09 | 新增 `error-format.ts::describeErrorMessage`，修复 AI SDK `RetryError` 最后一次尝试 message 为空时真实原因丢失的问题（`server/jobs/worker.ts` + `server/db/repos/jobs-repo.ts::failJob` 接入） |
 | 2026-07-09 | `markdown-client.ts::renderMarkdown()` 接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接；供 Ask AI 表格渲染使用，所有共用该函数的消费方（chat、Wiki 阅读页正文、source-viewer 等）一并获得该能力 |
+| 2026-07-12 | contracts 新增 Fix / Curate 写后定向校验共享契约：`PostconditionScope` / `PostconditionFinding` / `PostconditionReport`，供 Service resultJson、SSE 与 Health UI 共用 |
 
 ---
 
