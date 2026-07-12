@@ -16,7 +16,16 @@ import { enqueueEmbedIndex } from './embedding-service';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { selectLatestFindings } from './lint-latest';
 import { identifyFindings } from './finding-identity';
-import { fixMissingFrontmatter, partitionFindings, buildFixWorklist, buildSubjectReportLines, createFixGuard } from './fix-deterministic';
+import {
+  DETERMINISTIC_FIX_TYPES,
+  LLM_FIX_TYPES,
+  fixMissingFrontmatter,
+  partitionFindings,
+  buildFixWorklist,
+  buildSubjectReportLines,
+  createFixGuard,
+} from './fix-deterministic';
+import { normalizeRemediationContext } from './remediation-context';
 import { buildFixToolContext } from './fix-tools';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { buildWikiPath } from '../wiki/page-identity';
@@ -32,26 +41,83 @@ import type {
   ChangesetEntry,
   EnrichedLintFinding,
   Job,
-  LintFinding,
   LintLatestResult,
   RemediationContext,
 } from '@/lib/contracts';
+import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { verifyJobPostconditions } from './postcondition-service';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 FixGuard cap 真正兜底）。 */
 export const FIX_MAX_STEPS = 60;
 
 interface FixParams {
-  subjectId?: string;
+  subjectId: string;
   remediationContext?: RemediationContext;
 }
 
-const FIX_TYPES = new Set<LintFinding['type']>([
-  'missing-frontmatter',
-  'broken-link',
-  'missing-crossref',
-  'contradiction',
-]);
+const FINDING_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** 严格解析 Fix 参数；仅 remediationContext 属性完全缺失时进入 legacy 模式。 */
+function parseFixParams(job: Job): FixParams {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(job.paramsJson);
+  } catch {
+    throw new Error('Fix params are not valid JSON');
+  }
+  if (!isRecord(raw)) throw new Error('Fix params must be an object');
+
+  let paramsSubjectId: string | undefined;
+  if (hasOwn(raw, 'subjectId')) {
+    if (typeof raw.subjectId !== 'string' || raw.subjectId.trim().length === 0) {
+      throw new Error('Fix params subjectId must be a non-empty string');
+    }
+    paramsSubjectId = raw.subjectId;
+  }
+  if (
+    paramsSubjectId !== undefined
+    && job.subjectId !== null
+    && paramsSubjectId !== job.subjectId
+  ) {
+    throw new Error('Fix params subjectId does not match job subjectId');
+  }
+  const subjectId = paramsSubjectId ?? job.subjectId;
+  if (!subjectId) throw new Error('fix job missing subjectId');
+
+  if (!hasOwn(raw, 'remediationContext')) return { subjectId };
+  const context = raw.remediationContext;
+  if (!isRecord(context)) throw new Error('Fix remediation context must be an object');
+  if (context.action !== 'fix') throw new Error('Fix remediation action mismatch');
+  if (typeof context.lintJobId !== 'string' || context.lintJobId.trim().length === 0) {
+    throw new Error('Fix remediation lintJobId must be non-empty');
+  }
+  if (
+    !Array.isArray(context.findingIds)
+    || context.findingIds.length === 0
+    || !context.findingIds.every(
+      (findingId) => typeof findingId === 'string' && FINDING_ID_PATTERN.test(findingId),
+    )
+  ) {
+    throw new Error('Fix remediation findingIds must contain valid finding IDs');
+  }
+
+  return {
+    subjectId,
+    remediationContext: normalizeRemediationContext({
+      lintJobId: context.lintJobId,
+      findingIds: context.findingIds,
+      action: 'fix',
+    }),
+  };
+}
 
 function lintSnapshotForFix(
   subjectId: string,
@@ -80,19 +146,18 @@ function lintSnapshotForFix(
   return snapshot;
 }
 
-function selectedFixFindings(
-  freshDeterministic: EnrichedLintFinding[],
+function selectedFixScope(
   snapshot: LintLatestResult,
   context?: RemediationContext,
 ): {
-  deterministic: EnrichedLintFinding[];
+  requestedIds: ReadonlySet<string> | null;
   semantic: EnrichedLintFinding[];
 } {
   const snapshotSemantic = snapshot.findings.filter(
     (finding) => finding.type === 'missing-crossref' || finding.type === 'contradiction',
   );
   if (!context) {
-    return { deterministic: freshDeterministic, semantic: snapshotSemantic };
+    return { requestedIds: null, semantic: snapshotSemantic };
   }
 
   const requested = new Set(context.findingIds);
@@ -100,13 +165,39 @@ function selectedFixFindings(
   if (snapshotMatches.length !== requested.size) {
     throw new Error('Fix finding scope is stale');
   }
-  if (snapshotMatches.some((finding) => !FIX_TYPES.has(finding.type))) {
+  if (snapshotMatches.some((finding) => (
+    !DETERMINISTIC_FIX_TYPES.has(finding.type) && !LLM_FIX_TYPES.has(finding.type)
+  ))) {
     throw new Error('Fix remediation contains a non-fix finding');
   }
 
   return {
-    deterministic: freshDeterministic.filter((finding) => requested.has(finding.id)),
+    requestedIds: requested,
     semantic: snapshotSemantic.filter((finding) => requested.has(finding.id)),
+  };
+}
+
+/** scoped Fix 只收窄写侧；read/search/inspect/source evidence 仍保持 subject-wide。 */
+function scopeFixWrites(
+  context: ToolContext,
+  allowedPageSlugs: ReadonlySet<string>,
+): ToolContext {
+  const assertAllowed = (slug: string): void => {
+    if (!allowedPageSlugs.has(slug)) {
+      throw new Error(`[PAGE_OUT_OF_SCOPE] ${slug} is outside selected Fix findings`);
+    }
+  };
+
+  return {
+    ...context,
+    updatePage: context.updatePage && (async (input) => {
+      assertAllowed(input.slug);
+      return context.updatePage!(input);
+    }),
+    patchPage: context.patchPage && (async (input) => {
+      assertAllowed(input.slug);
+      return context.patchPage!(input);
+    }),
   };
 }
 
@@ -114,18 +205,14 @@ export async function runFixJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
-  const params = JSON.parse(job.paramsJson) as FixParams;
-  const subjectId = params.subjectId ?? job.subjectId;
-  if (!subjectId) throw new Error('fix job missing subjectId');
-  const subject = subjectsRepo.getById(subjectId);
-  if (!subject) throw new Error(`Subject ${subjectId} not found`);
+  const params = parseFixParams(job);
+  const subject = subjectsRepo.getById(params.subjectId);
+  if (!subject) throw new Error(`Subject ${params.subjectId} not found`);
   const remediationContext = params.remediationContext;
-  if (remediationContext && remediationContext.action !== 'fix') {
-    throw new Error('Fix remediation action mismatch');
-  }
 
   // 1. 工作清单：确定性新鲜重扫 + 快照语义
   const snapshot = lintSnapshotForFix(subject.id, remediationContext);
+  const selectedScope = selectedFixScope(snapshot, remediationContext);
   const freshDeterministic = identifyFindings(
     runDeterministicChecksForSubject(subject)
       .filter((finding) => (
@@ -137,13 +224,12 @@ export async function runFixJob(
         subjectSlug: subject.slug,
       })),
   );
-  const selected = selectedFixFindings(
-    freshDeterministic,
-    snapshot,
-    remediationContext,
-  );
+  const requestedIds = selectedScope.requestedIds;
+  const selectedDeterministic = requestedIds
+    ? freshDeterministic.filter((finding) => requestedIds.has(finding.id))
+    : freshDeterministic;
 
-  const worklist = buildFixWorklist(selected.deterministic, selected.semantic);
+  const worklist = buildFixWorklist(selectedDeterministic, selectedScope.semantic);
   const { frontmatter, llm: loop } = partitionFindings(worklist);
 
   emit('fix:start', `Fixing ${frontmatter.length + loop.length} issue(s) in "${subject.slug}"…`, {
@@ -180,11 +266,14 @@ export async function runFixJob(
   if (loop.length > 0) {
     const writeCap = Math.max(20, new Set(loop.map((f) => f.pageSlug)).size * 2);
     const guard = createFixGuard({ caps: { writes: writeCap } });
-    const ctx = buildFixToolContext(subject, { guard, jobId: job.id, emit });
+    const baseContext = buildFixToolContext(subject, { guard, jobId: job.id, emit });
+    const toolContext = remediationContext
+      ? scopeFixWrites(baseContext, new Set(worklist.map((finding) => finding.pageSlug)))
+      : baseContext;
     const profile = resolveToolProfile(
       loop.some((finding) => finding.type === 'contradiction') ? 'fix:contradiction' : 'fix:links',
     );
-    const tools = compileToolSet(createBuiltinToolRegistry().resolve([...profile.tools]), ctx, {
+    const tools = compileToolSet(createBuiltinToolRegistry().resolve([...profile.tools]), toolContext, {
       policy: createToolExecutionPolicy(profile, subject.id, {
         jobCapability: { jobId: job.id, jobType: job.type },
       }),
@@ -225,7 +314,7 @@ export async function runFixJob(
     kind: 'fix',
     job,
     subject,
-    semanticFindings: selected.semantic,
+    semanticFindings: selectedScope.semantic,
     emit,
   });
   const completeData = {
