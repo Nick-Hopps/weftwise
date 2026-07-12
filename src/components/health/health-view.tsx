@@ -25,7 +25,7 @@ import {
   buildPostconditionNotice,
   extractPostconditionReport,
 } from './postcondition-summary';
-import { actionFindingIds } from './remediation-ui';
+import { actionFindingIds, recentOutcomeCounts } from './remediation-ui';
 
 type Scope = 'subject' | 'all';
 type ExecutableRemediationAction = Exclude<RemediationActionType, 'review-source'>;
@@ -416,14 +416,12 @@ export function HealthView() {
   const fixFindingIds = data ? actionFindingIds(data, 'fix') : [];
   const curateFindingIds = data ? actionFindingIds(data, 'curate') : [];
   const researchFindingIds = data ? actionFindingIds(data, 'research') : [];
-  const recentOutcomeSummary = useMemo(() => {
-    const statuses = Object.values(data?.recentOutcomes ?? {}).slice(0, 50);
-    return {
-      fixed: statuses.filter((status) => status === 'fixed').length,
-      failed: statuses.filter((status) => status === 'failed').length,
-      skipped: statuses.filter((status) => status === 'skipped').length,
-    };
-  }, [data?.recentOutcomes]);
+  const recentOutcomeSummary = useMemo(
+    () => data
+      ? recentOutcomeCounts(data)
+      : { fixed: 0, failed: 0, skipped: 0 },
+    [data],
+  );
   const recentTerminalCount = recentOutcomeSummary.fixed
     + recentOutcomeSummary.failed
     + recentOutcomeSummary.skipped;

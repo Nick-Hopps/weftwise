@@ -22,3 +22,16 @@ export function actionFindingIds(
     .filter((finding) => actionForFinding(snapshot, finding.id, action) !== null)
     .map((finding) => finding.id);
 }
+
+/** 服务端已保证集合有界；客户端必须完整统计全部近期终态。 */
+export function recentOutcomeCounts(
+  snapshot: Pick<HealthSnapshot, 'recentOutcomes'>,
+): { fixed: number; failed: number; skipped: number } {
+  const counts = { fixed: 0, failed: 0, skipped: 0 };
+  for (const status of Object.values(snapshot.recentOutcomes)) {
+    if (status === 'fixed' || status === 'failed' || status === 'skipped') {
+      counts[status] += 1;
+    }
+  }
+  return counts;
+}
