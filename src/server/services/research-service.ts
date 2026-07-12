@@ -12,9 +12,7 @@
  * side-effect import：worker-entry import 本文件即完成 registerHandler('research', ...)。
  */
 import { registerHandler } from '../jobs/worker';
-import * as queue from '../jobs/queue';
 import * as subjectsRepo from '../db/repos/subjects-repo';
-import { selectLatestFindings } from './lint-latest';
 import { webSearch } from '../search/web-search';
 import { generateStructuredOutput } from '../llm/provider-registry';
 import {
@@ -27,6 +25,10 @@ import {
 } from '../llm/prompts/research-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import { normalizeRemediationContext } from './remediation-context';
+import {
+  MAX_RESEARCH_FINDING_IDS,
+  resolveTopicsFromFindingIds,
+} from './research-scope';
 import {
   dedupeQueries,
   dedupeCandidates,
@@ -72,22 +74,17 @@ function parseResearchParams(job: Job): ResearchParams & { subjectId: string } {
     throw new Error('gapIds is no longer supported; use findingIds with lintJobId');
   }
 
-  let paramsSubjectId: string | undefined;
+  if (!job.subjectId) throw new Error('research job missing subjectId');
+
   if (hasOwn(raw, 'subjectId')) {
     if (typeof raw.subjectId !== 'string' || raw.subjectId.trim().length === 0) {
       throw new Error('Research params subjectId must be a non-empty string');
     }
-    paramsSubjectId = raw.subjectId;
+    if (raw.subjectId !== job.subjectId) {
+      throw new Error('Research params subjectId does not match job subjectId');
+    }
   }
-  if (
-    paramsSubjectId !== undefined
-    && job.subjectId !== null
-    && paramsSubjectId !== job.subjectId
-  ) {
-    throw new Error('Research params subjectId does not match job subjectId');
-  }
-  const subjectId = paramsSubjectId ?? job.subjectId;
-  if (!subjectId) throw new Error('research job missing subjectId');
+  const subjectId = job.subjectId;
 
   const hasFindingIds = hasOwn(raw, 'findingIds');
   const hasTopic = hasOwn(raw, 'topic');
@@ -117,85 +114,55 @@ function parseResearchParams(job: Job): ResearchParams & { subjectId: string } {
   ) {
     throw new Error('Research findingIds must contain valid finding IDs');
   }
+  if (raw.findingIds.length > MAX_RESEARCH_FINDING_IDS) {
+    throw new Error(`Research findingIds must contain at most ${MAX_RESEARCH_FINDING_IDS} values`);
+  }
   if (typeof raw.lintJobId !== 'string' || raw.lintJobId.trim().length === 0) {
     throw new Error('Research findingIds require a non-empty lintJobId');
   }
 
   const findingIds = raw.findingIds as string[];
   const lintJobId = raw.lintJobId;
-  let remediationContext: RemediationContext | undefined;
-  if (hasOwn(raw, 'remediationContext')) {
-    const context = raw.remediationContext;
-    if (!isRecord(context)) {
-      throw new Error('Research remediation context must be an object');
-    }
-    if (context.action !== 'research') {
-      throw new Error('Research remediation action mismatch');
-    }
-    if (
-      typeof context.lintJobId !== 'string'
-      || !Array.isArray(context.findingIds)
-      || context.findingIds.length === 0
-      || !context.findingIds.every(
-        (findingId) => typeof findingId === 'string' && FINDING_ID_PATTERN.test(findingId),
-      )
-    ) {
-      throw new Error('Research remediation context is invalid');
-    }
+  if (!hasOwn(raw, 'remediationContext')) {
+    throw new Error('Research findingIds require remediation context');
+  }
+  const context = raw.remediationContext;
+  if (!isRecord(context)) {
+    throw new Error('Research remediation context must be an object');
+  }
+  if (context.action !== 'research') {
+    throw new Error('Research remediation action mismatch');
+  }
+  if (
+    typeof context.lintJobId !== 'string'
+    || !Array.isArray(context.findingIds)
+    || context.findingIds.length === 0
+    || context.findingIds.length > MAX_RESEARCH_FINDING_IDS
+    || !context.findingIds.every(
+      (findingId) => typeof findingId === 'string' && FINDING_ID_PATTERN.test(findingId),
+    )
+  ) {
+    throw new Error('Research remediation context is invalid');
+  }
 
-    remediationContext = normalizeRemediationContext({
-      lintJobId: context.lintJobId,
-      findingIds: context.findingIds,
-      action: 'research',
-    });
-    const normalizedParams = normalizeRemediationContext({
-      lintJobId,
-      findingIds,
-      action: 'research',
-    });
-    if (
-      remediationContext.lintJobId !== normalizedParams.lintJobId
-      || !sameStringArray(remediationContext.findingIds, normalizedParams.findingIds)
-    ) {
-      throw new Error('Research remediation context does not match finding params');
-    }
+  const remediationContext = normalizeRemediationContext({
+    lintJobId: context.lintJobId,
+    findingIds: context.findingIds,
+    action: 'research',
+  });
+  const normalizedParams = normalizeRemediationContext({
+    lintJobId,
+    findingIds,
+    action: 'research',
+  });
+  if (
+    remediationContext.lintJobId !== normalizedParams.lintJobId
+    || !sameStringArray(remediationContext.findingIds, normalizedParams.findingIds)
+  ) {
+    throw new Error('Research remediation context does not match finding params');
   }
 
   return { subjectId, findingIds, lintJobId, remediationContext };
-}
-
-/** 从指定 subject 的指定 completed lint 快照精确解析 coverage-gap 主题。 */
-export function resolveTopicsFromFindingIds(
-  subjectId: string,
-  lintJobId: string,
-  findingIds: string[],
-): string[] {
-  const lintJob = queue.get(lintJobId);
-  if (
-    !lintJob
-    || lintJob.type !== 'lint'
-    || lintJob.status !== 'completed'
-    || lintJob.subjectId !== subjectId
-  ) {
-    throw new Error('Research lint snapshot is missing or belongs to another subject');
-  }
-
-  const snapshot = selectLatestFindings([lintJob]);
-  if (snapshot.jobId !== lintJobId) {
-    throw new Error('Research lint snapshot mismatch');
-  }
-
-  const requested = new Set(findingIds);
-  const matches = snapshot.findings.filter((finding) => requested.has(finding.id));
-  if (
-    requested.size === 0
-    || matches.length !== requested.size
-    || matches.some((finding) => finding.type !== 'coverage-gap')
-  ) {
-    throw new Error('Research findingIds must reference coverage-gap findings');
-  }
-
-  return [...new Set(matches.map((finding) => finding.description))];
 }
 
 export async function runResearchJob(
