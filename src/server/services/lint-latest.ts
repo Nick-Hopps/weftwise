@@ -3,7 +3,45 @@
  * 纯函数：不触 DB / 请求，便于单测；scope（subject vs all）由调用方在传入前用 queue.list 过滤。
  */
 import type { Job, EnrichedLintFinding, LintLatestResult } from '@/lib/contracts';
-import { identifyFindings } from './finding-identity';
+import { identifyFindings, type FindingIdentityInput } from './finding-identity';
+
+const LINT_FINDING_TYPES = new Set([
+  'broken-link',
+  'orphan',
+  'missing-frontmatter',
+  'stale-source',
+  'contradiction',
+  'missing-crossref',
+  'coverage-gap',
+  'orphan-source',
+  'thin-page',
+]);
+
+const LINT_FINDING_SEVERITIES = new Set(['critical', 'warning', 'info']);
+
+function isHistoricalFinding(value: unknown): value is FindingIdentityInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+
+  const finding = value as Record<string, unknown>;
+  return (
+    typeof finding.type === 'string'
+    && LINT_FINDING_TYPES.has(finding.type)
+    && typeof finding.severity === 'string'
+    && LINT_FINDING_SEVERITIES.has(finding.severity)
+    && typeof finding.pageSlug === 'string'
+    && typeof finding.description === 'string'
+    && (typeof finding.suggestedFix === 'string' || finding.suggestedFix === null)
+    && typeof finding.subjectId === 'string'
+    && typeof finding.subjectSlug === 'string'
+    && (!('sourceId' in finding) || typeof finding.sourceId === 'string')
+    && (!('sourceFilename' in finding) || typeof finding.sourceFilename === 'string')
+    && (
+      !('failedJobId' in finding)
+      || typeof finding.failedJobId === 'string'
+      || finding.failedJobId === null
+    )
+  );
+}
 
 export function selectLatestFindings(jobs: Job[]): LintLatestResult {
   const completed = jobs.filter((j) => j.type === 'lint' && j.status === 'completed');
@@ -18,9 +56,7 @@ export function selectLatestFindings(jobs: Job[]): LintLatestResult {
   try {
     const parsed = latest.resultJson ? (JSON.parse(latest.resultJson) as { findings?: unknown }) : null;
     if (parsed && Array.isArray(parsed.findings)) {
-      findings = identifyFindings(
-        parsed.findings as Parameters<typeof identifyFindings>[0],
-      );
+      findings = identifyFindings(parsed.findings.filter(isHistoricalFinding));
     }
   } catch {
     findings = [];
