@@ -73,6 +73,36 @@ describe('contextKey', () => {
       expect(contextKey(subjectId, context)).not.toBe(baseKey);
     }
   });
+
+  it('finding ID 含逗号时仍生成无碰撞幂等键', () => {
+    const left: RemediationContext = {
+      ...BASE_CONTEXT,
+      findingIds: ['a,b', 'c'],
+    };
+    const right: RemediationContext = {
+      ...BASE_CONTEXT,
+      findingIds: ['a', 'b,c'],
+    };
+
+    expect(contextKey('subject-1', left)).not.toBe(
+      contextKey('subject-1', right)
+    );
+  });
+
+  it('字段含 NUL 时不会与字段边界拼接产生碰撞', () => {
+    const left: RemediationContext = {
+      ...BASE_CONTEXT,
+      lintJobId: 'job',
+    };
+    const right: RemediationContext = {
+      ...BASE_CONTEXT,
+      lintJobId: 'lint\0job',
+    };
+
+    expect(contextKey('subject\0lint', left)).not.toBe(
+      contextKey('subject', right)
+    );
+  });
 });
 
 describe('readRemediationContext', () => {

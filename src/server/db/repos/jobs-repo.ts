@@ -108,9 +108,30 @@ export function requeueJobWithParams(
   const sqlite = getRawDb();
   const tx = sqlite.transaction((): Job | null => {
     const existing = sqlite
-      .prepare(`SELECT params_json FROM jobs WHERE id = ? AND status = 'failed'`)
-      .get(jobId) as { params_json: string } | undefined;
+      .prepare(`
+        SELECT params_json, result_json FROM jobs
+        WHERE id = ? AND status = 'failed' AND cancel_requested = 0
+      `)
+      .get(jobId) as
+      | { params_json: string; result_json: string | null }
+      | undefined;
     if (!existing) return null;
+
+    if (existing.result_json) {
+      try {
+        const result: unknown = JSON.parse(existing.result_json);
+        if (
+          typeof result === 'object' &&
+          result !== null &&
+          !Array.isArray(result) &&
+          (result as Record<string, unknown>).cancelled === true
+        ) {
+          return null;
+        }
+      } catch {
+        // 旧 result 无法解析时不阻断普通失败任务重排。
+      }
+    }
 
     let params: Record<string, unknown>;
     try {
@@ -128,7 +149,7 @@ export function requeueJobWithParams(
         UPDATE jobs
         SET params_json = ?, status = 'pending', lease_expires_at = NULL,
             heartbeat_at = NULL, cancel_requested = 0
-        WHERE id = ? AND status = 'failed'
+        WHERE id = ? AND status = 'failed' AND cancel_requested = 0
       `)
       .run(JSON.stringify({ ...params, ...patch }), jobId);
     if (result.changes !== 1) return null;
@@ -139,7 +160,7 @@ export function requeueJobWithParams(
     return row ? rowToJobFromRaw(row) : null;
   });
 
-  return tx();
+  return tx.immediate();
 }
 
 export type CancelResult = 'cancelled' | 'already-terminal' | 'not-found';
