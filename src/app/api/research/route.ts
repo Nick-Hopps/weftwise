@@ -4,14 +4,16 @@ import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import { selectLatestFindings } from '@/server/services/lint-latest';
+import { normalizeRemediationContext } from '@/server/services/remediation-context';
+import { resolveTopicsFromFindingIds } from '@/server/services/research-service';
 
 export const runtime = 'nodejs';
 
 /**
  * POST /api/research — 缺口/主题触发联网研究，入队 'research' job（只发现不写入）。
- * body: { gapIds?: string[], topic?: string }（二选一）
- *  - gapIds：最近 lint 快照里 coverage-gap findings 的数组下标（十进制字符串）；服务端重新读取
- *    快照校验存在（轻微过期无害——见 design doc）。
+ * body: { findingIds: string[], lintJobId: string } | { topic: string }（二选一）
+ *  - findingIds：当前 subject 最新 completed lint 快照里 coverage-gap findings 的稳定 ID；
+ *    lintJobId 必须精确匹配该快照，避免陈旧选择误触发。
  *  - topic：手动自由文本。
  * web search 未配置 → 422（先去设置里配好）。
  */
@@ -21,49 +23,89 @@ export async function POST(request: NextRequest) {
   const csrfError = requireCsrf(request);
   if (csrfError) return csrfError;
 
-  let body: { gapIds?: unknown; topic?: unknown } = {};
+  let parsedBody: unknown = {};
   try {
-    body = (await request.json()) ?? {};
+    parsedBody = (await request.json()) ?? {};
   } catch {
-    body = {};
+    parsedBody = {};
   }
+  const body = isRecord(parsedBody) ? parsedBody : {};
 
   const resolution = resolveSubjectFromRequest(request, { required: true, body });
   if (resolution.error) return resolution.error;
   const { subject } = resolution;
 
-  const hasGapIds = Array.isArray(body.gapIds) && body.gapIds.length > 0;
-  const hasTopic = typeof body.topic === 'string' && body.topic.trim().length > 0;
-
-  if (hasGapIds && hasTopic) {
-    return NextResponse.json({ error: 'Provide either "gapIds" or "topic", not both' }, { status: 400 });
-  }
-  if (!hasGapIds && !hasTopic) {
-    return NextResponse.json({ error: 'Missing "gapIds" or "topic"' }, { status: 400 });
+  if (hasOwn(body, 'gapIds')) {
+    return NextResponse.json(
+      { error: 'gapIds is no longer supported; use findingIds with lintJobId' },
+      { status: 400 },
+    );
   }
 
-  let gapIds: string[] | undefined;
-  if (hasGapIds) {
-    const raw = body.gapIds as unknown[];
-    if (!raw.every((g) => typeof g === 'string')) {
-      return NextResponse.json({ error: '"gapIds" must be an array of strings' }, { status: 400 });
+  const hasFindingIds = hasOwn(body, 'findingIds');
+  const hasTopic = hasOwn(body, 'topic');
+  if (hasFindingIds === hasTopic) {
+    return NextResponse.json({ error: 'Provide either findingIds or topic' }, { status: 400 });
+  }
+
+  let findingParams:
+    | {
+      findingIds: string[];
+      lintJobId: string;
+      remediationContext: ReturnType<typeof normalizeRemediationContext>;
     }
-    gapIds = raw as string[];
+    | undefined;
+  let topic: string | undefined;
 
-    // 服务端重新读取最近快照校验 gapIds 至少命中一条 coverage-gap finding。
-    const latest = selectLatestFindings(
-      queue.list({ type: 'lint', status: 'completed', subjectId: subject.id }),
-    );
-    const indices = new Set(gapIds);
-    const hit = latest.findings.some(
-      (f, i) => f.type === 'coverage-gap' && indices.has(String(i)),
-    );
-    if (!hit) {
+  if (hasFindingIds) {
+    if (
+      !Array.isArray(body.findingIds)
+      || body.findingIds.length === 0
+      || !body.findingIds.every(
+        (findingId) => typeof findingId === 'string' && /^[0-9a-f]{64}$/.test(findingId),
+      )
+      || typeof body.lintJobId !== 'string'
+      || body.lintJobId.trim().length === 0
+    ) {
       return NextResponse.json(
-        { error: 'None of the provided gapIds reference a current coverage-gap finding' },
+        { error: 'findingIds require a current lintJobId and 64 character hex IDs' },
         { status: 400 },
       );
     }
+
+    const findingIds = body.findingIds as string[];
+    const lintJobId = body.lintJobId;
+    const latest = selectLatestFindings(
+      queue.list({ type: 'lint', status: 'completed', subjectId: subject.id }),
+    );
+    if (latest.jobId !== lintJobId) {
+      return NextResponse.json({ error: 'Research lint snapshot is stale' }, { status: 409 });
+    }
+
+    try {
+      resolveTopicsFromFindingIds(subject.id, lintJobId, findingIds);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Invalid findingIds' },
+        { status: 400 },
+      );
+    }
+
+    const remediationContext = normalizeRemediationContext({
+      lintJobId,
+      findingIds,
+      action: 'research',
+    });
+    findingParams = {
+      findingIds: remediationContext.findingIds,
+      lintJobId,
+      remediationContext,
+    };
+  } else {
+    if (typeof body.topic !== 'string' || body.topic.trim().length === 0) {
+      return NextResponse.json({ error: 'Provide either findingIds or topic' }, { status: 400 });
+    }
+    topic = body.topic.trim();
   }
 
   if (!isWebSearchConfigured()) {
@@ -73,11 +115,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const topic = hasTopic ? (body.topic as string).trim() : undefined;
-  const job = queue.enqueue('research', { gapIds, topic, subjectId: subject.id }, subject.id);
+  const params = findingParams
+    ? { ...findingParams, subjectId: subject.id }
+    : { topic: topic!, subjectId: subject.id };
+  const job = queue.enqueue('research', params, subject.id);
 
   return NextResponse.json(
     { jobId: job.id, subjectId: subject.id, subjectSlug: subject.slug },
     { status: 202 },
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
 }
