@@ -20,7 +20,8 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import { resolveTask } from '../llm/task-router';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { runSemanticChecksForSubject } from './lint-semantic';
-import type { LintFinding, Job, Subject } from '@/lib/contracts';
+import { identifyFindings } from './finding-identity';
+import type { EnrichedLintFinding, LintFinding, Job, Subject } from '@/lib/contracts';
 
 interface LintParams {
   subjectId?: string;
@@ -45,6 +46,19 @@ export function summarizeFindings(
     .map(([t, n]) => `${t}×${n}`)
     .join(', ');
   return { bySeverity, byType, text: [severityText, typeText].filter(Boolean).join('; ') };
+}
+
+function identifySubjectFindings(
+  subject: Subject,
+  findings: LintFinding[],
+): EnrichedLintFinding[] {
+  return identifyFindings(
+    findings.map((finding) => ({
+      ...finding,
+      subjectId: subject.id,
+      subjectSlug: subject.slug,
+    })),
+  );
 }
 
 /** lint task 的模型标签；配置解析失败时回落 null（不阻断 lint 主流程）。 */
@@ -79,19 +93,18 @@ async function runLintJob(
     { subjectIds: targets.map((s) => s.id) }
   );
 
-  const allFindings: (LintFinding & { subjectId: string; subjectSlug: string })[] = [];
+  const allFindings: EnrichedLintFinding[] = [];
   const semanticFailures: string[] = [];
 
   for (const subject of targets) {
     emit('lint:deterministic:start', `Subject "${subject.slug}": running deterministic checks...`);
     const deterministicFindings = runDeterministicChecksForSubject(subject);
-    allFindings.push(
-      ...deterministicFindings.map((f) => ({ ...f, subjectId: subject.id, subjectSlug: subject.slug })),
-    );
+    const identifiedDeterministicFindings = identifySubjectFindings(subject, deterministicFindings);
+    allFindings.push(...identifiedDeterministicFindings);
     emit(
       'lint:deterministic:done',
-      `Subject "${subject.slug}": ${deterministicFindings.length} deterministic finding(s)`,
-      { findings: deterministicFindings, subject: subject.slug }
+      `Subject "${subject.slug}": ${identifiedDeterministicFindings.length} deterministic finding(s)`,
+      { findings: identifiedDeterministicFindings, subject: subject.slug }
     );
 
     const pageCount = pagesRepo.getAllPages(subject.id).filter((p) => !pagesRepo.isMetaPage(p)).length;
@@ -103,14 +116,13 @@ async function runLintJob(
     );
     try {
       const semanticFindings = await runSemanticChecksForSubject(subject);
-      allFindings.push(
-        ...semanticFindings.map((f) => ({ ...f, subjectId: subject.id, subjectSlug: subject.slug })),
-      );
-      const semanticStats = summarizeFindings(semanticFindings);
+      const identifiedSemanticFindings = identifySubjectFindings(subject, semanticFindings);
+      allFindings.push(...identifiedSemanticFindings);
+      const semanticStats = summarizeFindings(identifiedSemanticFindings);
       emit(
         'lint:semantic:done',
-        `Subject "${subject.slug}": ${semanticFindings.length} semantic finding(s)${semanticStats.text ? ` (${semanticStats.text})` : ''}`,
-        { findings: semanticFindings, subject: subject.slug, ...semanticStats },
+        `Subject "${subject.slug}": ${identifiedSemanticFindings.length} semantic finding(s)${semanticStats.text ? ` (${semanticStats.text})` : ''}`,
+        { findings: identifiedSemanticFindings, subject: subject.slug, ...semanticStats },
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

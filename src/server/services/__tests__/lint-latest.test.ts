@@ -46,7 +46,9 @@ describe('selectLatestFindings', () => {
       id: 'new',
       createdAt: '2026-02-01T00:00:00.000Z',
       completedAt: '2026-02-01T00:05:00.000Z',
-      resultJson: JSON.stringify({ findings: [finding('critical'), finding('info')] }),
+      resultJson: JSON.stringify({
+        findings: [finding('critical'), { ...finding('info'), pageSlug: 'p2' }],
+      }),
     });
     const res = selectLatestFindings([older, newer]);
     expect(res.jobId).toBe('new');
@@ -81,5 +83,26 @@ describe('selectLatestFindings', () => {
     expect(res.jobId).toBe('nullres');
     expect(res.findings).toEqual([]);
     expect(res.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
+  });
+
+  it('重新计算旧快照 finding ID，覆盖伪造 ID 并按规范 ID 去重', () => {
+    const original = finding('warning');
+    const legacy = job({
+      id: 'legacy',
+      resultJson: JSON.stringify({
+        findings: [
+          { ...original, id: 'forged-id' },
+          { ...original, description: '  d\r\n\t' },
+        ],
+      }),
+    });
+
+    const res = selectLatestFindings([legacy]);
+
+    expect(res.findings).toHaveLength(1);
+    expect(res.findings[0]).toMatchObject({ ...original });
+    expect(res.findings[0].id).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.findings[0].id).not.toBe('forged-id');
+    expect(res.bySeverity).toEqual({ critical: 0, warning: 1, info: 0 });
   });
 });
