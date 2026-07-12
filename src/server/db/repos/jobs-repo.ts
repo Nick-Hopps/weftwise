@@ -10,24 +10,7 @@ export function enqueueJob(
   subjectId: SubjectId | null = null
 ): Job {
   const db = getDb();
-  const id = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
-
-  const job: Job = {
-    id,
-    type,
-    status: 'pending',
-    subjectId,
-    paramsJson: JSON.stringify(params),
-    resultJson: null,
-    createdAt,
-    startedAt: null,
-    completedAt: null,
-    leaseExpiresAt: null,
-    heartbeatAt: null,
-    attemptCount: 0,
-  };
-
+  const job = makePendingJob(type, params, subjectId);
   db
     .insert(jobs)
     .values({
@@ -45,8 +28,107 @@ export function enqueueJob(
       attemptCount: job.attemptCount,
     })
     .run();
-
   return job;
+}
+
+export interface AtomicJobCreateInput {
+  type: Job['type'];
+  params: Record<string, unknown>;
+  subjectId: SubjectId;
+  matcher: (jobs: Job[]) => Job | null;
+  beforeCreate?: () => void;
+}
+
+export interface AtomicJobCreateResult {
+  job: Job;
+  deduplicated: boolean;
+}
+
+/**
+ * 在 subject 写锁内重新读取任务并执行同步幂等 matcher；只有确认无重复后才插入。
+ */
+export function getOrCreateJobAtomic(
+  input: AtomicJobCreateInput,
+): AtomicJobCreateResult {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): AtomicJobCreateResult => {
+    const duplicate = input.matcher(listSubjectJobsRaw(sqlite, input.subjectId));
+    if (duplicate) return { job: duplicate, deduplicated: true };
+
+    input.beforeCreate?.();
+    const job = makePendingJob(input.type, input.params, input.subjectId);
+    insertJob(sqlite, job);
+    return { job, deduplicated: false };
+  });
+  return tx.immediate();
+}
+
+export type AtomicSourceReingestResult =
+  | { kind: 'in-flight'; job: Job; deduplicated: boolean }
+  | { kind: 'requeued'; job: Job }
+  | { kind: 'created'; job: Job }
+  | { kind: 'conflict' };
+
+export interface AtomicSourceReingestInput {
+  subjectId: SubjectId;
+  sourceId: string;
+  createParams: Record<string, unknown>;
+  paramsPatch: Record<string, unknown>;
+  isDuplicateInFlight?: (job: Job) => boolean;
+}
+
+/**
+ * 在同一 IMMEDIATE 事务内完成同源 ingest 判定、续传/新建与 retrying 事件写入。
+ */
+export function reingestSourceAtomic(
+  input: AtomicSourceReingestInput,
+): AtomicSourceReingestResult {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): AtomicSourceReingestResult => {
+    const previous = findLatestSourceJobRaw(
+      listSubjectJobsRaw(sqlite, input.subjectId),
+      input.sourceId,
+    );
+
+    if (
+      previous
+      && (previous.status === 'pending' || previous.status === 'running')
+    ) {
+      return {
+        kind: 'in-flight',
+        job: previous,
+        deduplicated: input.isDuplicateInFlight?.(previous) ?? false,
+      };
+    }
+
+    if (previous?.status === 'failed' && !isCancelledResult(previous.resultJson)) {
+      const params = parseRecord(previous.paramsJson);
+      if (!params) return { kind: 'conflict' };
+
+      const update = sqlite.prepare(`
+        UPDATE jobs
+        SET params_json = ?, status = 'pending', lease_expires_at = NULL,
+            heartbeat_at = NULL, cancel_requested = 0
+        WHERE id = ? AND status = 'failed' AND cancel_requested = 0
+      `).run(JSON.stringify({ ...params, ...input.paramsPatch }), previous.id);
+      if (update.changes !== 1) return { kind: 'conflict' };
+
+      insertRetryingEvent(sqlite, previous.id);
+      const requeued = getJobRaw(sqlite, previous.id);
+      return requeued
+        ? { kind: 'requeued', job: requeued }
+        : { kind: 'conflict' };
+    }
+
+    const created = makePendingJob(
+      'ingest',
+      input.createParams,
+      input.subjectId,
+    );
+    insertJob(sqlite, created);
+    return { kind: 'created', job: created };
+  });
+  return tx.immediate();
 }
 
 const LEASE_DURATION_MS = 2 * 60 * 1000; // 2 minutes
@@ -430,6 +512,107 @@ export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
     .all();
 
   return rows.map(rowToJobEvent);
+}
+
+type RawDb = ReturnType<typeof getRawDb>;
+
+function makePendingJob(
+  type: Job['type'],
+  params: Record<string, unknown>,
+  subjectId: SubjectId | null,
+): Job {
+  return {
+    id: crypto.randomUUID(),
+    type,
+    status: 'pending',
+    subjectId,
+    paramsJson: JSON.stringify(params),
+    resultJson: null,
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    attemptCount: 0,
+  };
+}
+
+function insertJob(sqlite: RawDb, job: Job): void {
+  sqlite.prepare(`
+    INSERT INTO jobs (
+      id, type, status, subject_id, params_json, result_json, created_at,
+      started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    job.id,
+    job.type,
+    job.status,
+    job.subjectId,
+    job.paramsJson,
+    job.resultJson,
+    job.createdAt,
+    job.startedAt,
+    job.completedAt,
+    job.leaseExpiresAt,
+    job.heartbeatAt,
+    job.attemptCount,
+  );
+}
+
+function listSubjectJobsRaw(sqlite: RawDb, subjectId: SubjectId): Job[] {
+  const rows = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ?
+    ORDER BY created_at ASC, rowid ASC
+  `).all(subjectId) as JobRow[];
+  return rows.map(rowToJobFromRaw);
+}
+
+function getJobRaw(sqlite: RawDb, jobId: string): Job | null {
+  const row = sqlite.prepare(`SELECT * FROM jobs WHERE id = ?`).get(jobId) as
+    | JobRow
+    | undefined;
+  return row ? rowToJobFromRaw(row) : null;
+}
+
+function findLatestSourceJobRaw(jobsForSubject: Job[], sourceId: string): Job | null {
+  let latest: Job | null = null;
+  for (const job of jobsForSubject) {
+    if (job.type !== 'ingest') continue;
+    const params = parseRecord(job.paramsJson);
+    if (params?.sourceId === sourceId) latest = job;
+  }
+  return latest;
+}
+
+function insertRetryingEvent(sqlite: RawDb, jobId: string): void {
+  sqlite.prepare(`
+    INSERT INTO job_events (id, job_id, type, message, data_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    crypto.randomUUID(),
+    jobId,
+    'job:retrying',
+    'Manual re-ingest — resuming from checkpoint',
+    JSON.stringify({ manual: true }),
+    new Date().toISOString(),
+  );
+}
+
+function parseRecord(json: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(json);
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isCancelledResult(resultJson: string | null): boolean {
+  if (!resultJson) return false;
+  return parseRecord(resultJson)?.cancelled === true;
 }
 
 interface JobRow {

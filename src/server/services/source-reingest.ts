@@ -1,8 +1,7 @@
 import type { RemediationContext } from '@/lib/contracts';
 import * as sourcesRepo from '../db/repos/sources-repo';
-import * as jobsRepo from '../db/repos/jobs-repo';
 import * as queue from '../jobs/queue';
-import * as events from '../jobs/events';
+import { contextKey, readRemediationContext } from './remediation-context';
 
 export type SourceReingestErrorCode =
   | 'source-not-found'
@@ -28,7 +27,7 @@ export function reingestOrphanSource(input: {
   subjectId: string;
   sourceId: string;
   remediationContext?: RemediationContext;
-}): { jobId: string } {
+}): { jobId: string; deduplicated: boolean } {
   const source = sourcesRepo.getSource(input.sourceId);
   if (!source || source.subjectId !== input.subjectId) {
     throw new SourceReingestError(404, 'source-not-found', 'Source not found');
@@ -45,71 +44,47 @@ export function reingestOrphanSource(input: {
     );
   }
 
-  const previous = jobsRepo.findLatestIngestJobForSource(
-    input.subjectId,
-    source.id,
-  );
-  if (
-    previous
-    && (previous.status === 'pending' || previous.status === 'running')
-  ) {
+  const remediationContext = input.remediationContext;
+  const result = queue.reingestSourceAtomic({
+    subjectId: input.subjectId,
+    sourceId: source.id,
+    createParams: {
+      sourceId: source.id,
+      filename: source.filename,
+      subjectId: input.subjectId,
+      ...(remediationContext
+        ? { remediationContext }
+        : {}),
+    },
+    paramsPatch: remediationContext ? { remediationContext } : {},
+    ...(remediationContext
+      ? {
+          isDuplicateInFlight: (job) => {
+            const existing = readRemediationContext(job);
+            return existing !== null
+              && contextKey(input.subjectId, existing)
+                === contextKey(input.subjectId, remediationContext);
+          },
+        }
+      : {}),
+  });
+
+  if (result.kind === 'created' || result.kind === 'requeued') {
+    return { jobId: result.job.id, deduplicated: false };
+  }
+  if (result.kind === 'in-flight') {
+    if (result.deduplicated) {
+      return { jobId: result.job.id, deduplicated: true };
+    }
     throw new SourceReingestError(
       409,
       'in-flight',
       'Source ingestion is already in flight',
     );
   }
-
-  if (previous?.status === 'failed' && !isCancelled(previous.resultJson)) {
-    const requeued = queue.requeueJobWithParams(
-      previous.id,
-      input.remediationContext
-        ? { remediationContext: input.remediationContext }
-        : {},
-    );
-    if (!requeued) {
-      throw new SourceReingestError(
-        409,
-        'requeue-conflict',
-        'Failed ingest job changed before retry',
-      );
-    }
-
-    events.emit(
-      previous.id,
-      'job:retrying',
-      'Manual re-ingest — resuming from checkpoint',
-      { manual: true },
-    );
-    return { jobId: previous.id };
-  }
-
-  const created = queue.enqueue(
-    'ingest',
-    {
-      sourceId: source.id,
-      filename: source.filename,
-      subjectId: input.subjectId,
-      ...(input.remediationContext
-        ? { remediationContext: input.remediationContext }
-        : {}),
-    },
-    input.subjectId,
+  throw new SourceReingestError(
+    409,
+    'requeue-conflict',
+    'Failed ingest job changed before retry',
   );
-  return { jobId: created.id };
-}
-
-function isCancelled(resultJson: string | null): boolean {
-  if (!resultJson) return false;
-  try {
-    const result: unknown = JSON.parse(resultJson);
-    return (
-      typeof result === 'object'
-      && result !== null
-      && !Array.isArray(result)
-      && (result as Record<string, unknown>).cancelled === true
-    );
-  } catch {
-    return false;
-  }
 }

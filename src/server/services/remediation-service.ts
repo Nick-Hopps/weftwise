@@ -158,74 +158,81 @@ export async function remediate(input: {
     findingIds: ids,
     action: executableAction,
   });
-  const duplicate = findDuplicateRemediationJob(
-    queue.list({ subjectId: input.subject.id }),
-    input.subject.id,
-    context,
-    lint.ranAt,
-  );
-  if (duplicate) {
-    return { jobId: duplicate.id, deduplicated: true };
-  }
-
   if (executableAction === 'fix') {
-    return enqueue('fix', {
+    return getOrCreateRemediationJob('fix', {
       subjectId: input.subject.id,
       remediationContext: context,
-    }, input.subject.id);
+    }, input.subject.id, context, lint.ranAt);
   }
 
   if (executableAction === 'curate') {
     const slugs = [...new Set(findings.map((finding) => finding.pageSlug))]
       .sort();
-    return enqueue('curate', {
+    return getOrCreateRemediationJob('curate', {
       scope: 'pages',
       slugs,
       subjectId: input.subject.id,
       remediationContext: context,
-    }, input.subject.id);
+    }, input.subject.id, context, lint.ranAt);
   }
 
   if (executableAction === 'research') {
-    if (!isWebSearchConfigured()) {
-      throw new RemediationRequestError(
-        422,
-        'web-search-not-configured',
-        'Web search is not configured',
-      );
-    }
-    return enqueue('research', {
+    return getOrCreateRemediationJob('research', {
       findingIds: ids,
       lintJobId,
       subjectId: input.subject.id,
       remediationContext: context,
-    }, input.subject.id);
+    }, input.subject.id, context, lint.ranAt, assertWebSearchConfigured);
   }
 
   return reingest(input.subject, findings, context);
 }
 
-function enqueue(
+function getOrCreateRemediationJob(
   type: 'fix' | 'curate' | 'research',
   params: Record<string, unknown>,
   subjectId: string,
-): { jobId: string; deduplicated: false } {
-  const job = queue.enqueue(type, params, subjectId);
-  return { jobId: job.id, deduplicated: false };
+  context: RemediationContext,
+  lintRanAt: string | null,
+  beforeCreate?: () => void,
+): { jobId: string; deduplicated: boolean } {
+  const result = queue.getOrCreateJobAtomic({
+    type,
+    params,
+    subjectId,
+    matcher: (jobs) => findDuplicateRemediationJob(
+      jobs,
+      subjectId,
+      context,
+      lintRanAt,
+    ),
+    ...(beforeCreate ? { beforeCreate } : {}),
+  });
+  return { jobId: result.job.id, deduplicated: result.deduplicated };
+}
+
+function assertWebSearchConfigured(): void {
+  if (!isWebSearchConfigured()) {
+    throw new RemediationRequestError(
+      422,
+      'web-search-not-configured',
+      'Web search is not configured',
+    );
+  }
 }
 
 function reingest(
   subject: Subject,
   findings: EnrichedLintFinding[],
   context: RemediationContext,
-): { jobId: string; deduplicated: false } {
+): { jobId: string; deduplicated: boolean } {
   try {
     const result = reingestOrphanSource({
       subjectId: subject.id,
       sourceId: findings[0].sourceId!,
       remediationContext: context,
     });
-    return { jobId: result.jobId, deduplicated: false };
+    return result;
   } catch (error) {
     if (error instanceof SourceReingestError) {
       throw new RemediationRequestError(

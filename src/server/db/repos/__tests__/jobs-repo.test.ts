@@ -225,3 +225,280 @@ describe('jobs-repo.requeueJobWithParams', () => {
     });
   });
 });
+
+describe('jobs-repo.getOrCreateJobAtomic', () => {
+  it('在 BEGIN IMMEDIATE 写锁内重检 matcher，第二次相同 context 只复用一条 job', async () => {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const repo = await import('../jobs-repo');
+    const { findDuplicateRemediationJob } = await import('../../../services/remediation-context');
+    const context = {
+      lintJobId: 'lint-1',
+      findingIds: ['a'.repeat(64)],
+      action: 'fix' as const,
+    };
+    const matcher = vi.fn((jobs) => {
+      expect(db.inTransaction).toBe(true);
+      return findDuplicateRemediationJob(
+        jobs,
+        's1',
+        context,
+        '2026-07-13T10:00:00.000Z',
+      );
+    });
+    const beforeCreate = vi.fn(() => {
+      expect(db.inTransaction).toBe(true);
+    });
+    const input = {
+      type: 'fix' as const,
+      params: { subjectId: 's1', remediationContext: context },
+      subjectId: 's1',
+      matcher,
+      beforeCreate,
+    };
+
+    const first = repo.getOrCreateJobAtomic(input);
+    const second = repo.getOrCreateJobAtomic(input);
+
+    expect(first).toMatchObject({ deduplicated: false });
+    expect(second).toMatchObject({
+      deduplicated: true,
+      job: { id: first.job.id },
+    });
+    expect(matcher).toHaveBeenCalledTimes(2);
+    expect(beforeCreate).toHaveBeenCalledTimes(1);
+    expect(repo.listJobs({ subjectId: 's1' })).toHaveLength(1);
+  });
+});
+
+describe('jobs-repo.reingestSourceAtomic', () => {
+  async function setupAtomicReingest() {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const repo = await import('../jobs-repo');
+    const context = {
+      lintJobId: 'lint-1',
+      findingIds: ['a'.repeat(64)],
+      action: 're-ingest' as const,
+    };
+    const params = {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+      remediationContext: context,
+    };
+    const isDuplicateInFlight = (job: { paramsJson: string }) => {
+      const parsed = JSON.parse(job.paramsJson) as { remediationContext?: unknown };
+      return JSON.stringify(parsed.remediationContext) === JSON.stringify(context);
+    };
+    return { db, repo, context, params, isDuplicateInFlight };
+  }
+
+  it('第二次同 source/context 原子复用 pending ingest，不创建重复 job', async () => {
+    const { repo, context, params, isDuplicateInFlight } = await setupAtomicReingest();
+
+    const first = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+      isDuplicateInFlight,
+    });
+    const second = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+      isDuplicateInFlight,
+    });
+
+    expect(first).toMatchObject({ kind: 'created' });
+    if (first.kind !== 'created') throw new Error('首个调用应创建 ingest job');
+    expect(second).toMatchObject({
+      kind: 'in-flight',
+      deduplicated: true,
+      job: { id: first.job.id },
+    });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(1);
+  });
+
+  it('无 context matcher 的专用路径仍把在途任务标为非幂等 in-flight', async () => {
+    const { repo, params } = await setupAtomicReingest();
+    const first = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: {},
+    });
+    if (first.kind !== 'created') throw new Error('首个调用应创建 ingest job');
+
+    expect(repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: {},
+    })).toMatchObject({
+      kind: 'in-flight',
+      deduplicated: false,
+      job: { id: first.job.id },
+    });
+  });
+
+  it('failed 重排与 job:retrying 事件同事务成功落库', async () => {
+    const { repo, context, params, isDuplicateInFlight } = await setupAtomicReingest();
+    const failed = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(failed.id);
+    repo.failJob(failed.id, new Error('boom'));
+
+    const result = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+      isDuplicateInFlight,
+    });
+
+    expect(result).toMatchObject({ kind: 'requeued', job: { id: failed.id, status: 'pending' } });
+    expect(JSON.parse(repo.getJob(failed.id)!.paramsJson)).toMatchObject({ remediationContext: context });
+    expect(repo.getJobEvents(failed.id)).toEqual([
+      expect.objectContaining({
+        jobId: failed.id,
+        type: 'job:retrying',
+        message: 'Manual re-ingest — resuming from checkpoint',
+        dataJson: JSON.stringify({ manual: true }),
+      }),
+    ]);
+  });
+
+  it('cancelled failed 最新任务新建 ingest', async () => {
+    const { repo, context, params } = await setupAtomicReingest();
+    const cancelled = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(cancelled.id);
+    repo.failJob(cancelled.id, new Error('boom'));
+    expect(repo.requestCancel(cancelled.id)).toBe('cancelled');
+    expect(repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+    })).toMatchObject({ kind: 'created' });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(2);
+  });
+
+  it('completed 最新任务新建 ingest', async () => {
+    const { repo, context, params } = await setupAtomicReingest();
+    const completed = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(completed.id);
+    repo.completeJob(completed.id, { ok: true });
+    expect(repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+    })).toMatchObject({ kind: 'created' });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(2);
+  });
+
+  it('failed resultJson 损坏仍按普通失败原子重排', async () => {
+    const { db, repo, context, params } = await setupAtomicReingest();
+    const failed = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(failed.id);
+    repo.failJob(failed.id, new Error('boom'));
+    db.prepare(`UPDATE jobs SET result_json = ? WHERE id = ?`).run('{', failed.id);
+
+    expect(repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+    })).toMatchObject({ kind: 'requeued', job: { id: failed.id } });
+    expect(repo.getJobEvents(failed.id)).toHaveLength(1);
+  });
+
+  it('job:retrying 事件 INSERT 失败时整个 failed 重排回滚', async () => {
+    const { db, repo, context, params, isDuplicateInFlight } = await setupAtomicReingest();
+    const failed = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(failed.id);
+    repo.failJob(failed.id, new Error('boom'));
+    const before = repo.getJob(failed.id)!;
+    db.exec(`
+      CREATE TRIGGER fail_retry_event
+      BEFORE INSERT ON job_events
+      WHEN NEW.type = 'job:retrying'
+      BEGIN
+        SELECT RAISE(ABORT, 'event insert failed');
+      END;
+    `);
+
+    expect(() => repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+      isDuplicateInFlight,
+    })).toThrow(/event insert failed/);
+
+    expect(repo.getJob(failed.id)).toMatchObject({
+      status: 'failed',
+      paramsJson: before.paramsJson,
+      leaseExpiresAt: before.leaseExpiresAt,
+      heartbeatAt: before.heartbeatAt,
+    });
+    expect(repo.getJobEvents(failed.id)).toEqual([]);
+  });
+
+  it('failed job 条件更新未命中时返回 conflict，且不修改或创建 job', async () => {
+    const { db, repo, context, params } = await setupAtomicReingest();
+    const failed = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(failed.id);
+    repo.failJob(failed.id, new Error('boom'));
+    db.exec(`
+      CREATE TRIGGER ignore_failed_requeue
+      BEFORE UPDATE ON jobs
+      WHEN OLD.id = '${failed.id}' AND NEW.status = 'pending'
+      BEGIN
+        SELECT RAISE(IGNORE);
+      END;
+    `);
+
+    expect(repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+    })).toEqual({ kind: 'conflict' });
+    expect(repo.getJob(failed.id)).toMatchObject({ status: 'failed' });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(1);
+    expect(repo.getJobEvents(failed.id)).toEqual([]);
+  });
+});

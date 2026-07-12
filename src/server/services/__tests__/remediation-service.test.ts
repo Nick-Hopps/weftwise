@@ -3,7 +3,7 @@ import type { Job, LintFinding, RemediationContext, Subject } from '@/lib/contra
 import { findingId } from '../finding-identity';
 
 const queueMock = vi.hoisted(() => ({
-  enqueue: vi.fn(),
+  getOrCreateJobAtomic: vi.fn(),
   list: vi.fn(),
 }));
 const webSearchMock = vi.hoisted(() => ({
@@ -84,6 +84,7 @@ const GAP_ID = findingId(GAP);
 const ORPHAN_SOURCE_ID = findingId(ORPHAN_SOURCE);
 const SECOND_ORPHAN_SOURCE_ID = findingId(SECOND_ORPHAN_SOURCE);
 const ORPHAN_SOURCE_WITHOUT_ID_ID = findingId(ORPHAN_SOURCE_WITHOUT_ID);
+let remediationJobs: Job[] = [];
 
 const ALL_FINDINGS = [
   BROKEN,
@@ -120,12 +121,22 @@ function context(action: RemediationContext['action'], findingIds: string[]): Re
 
 beforeEach(() => {
   vi.clearAllMocks();
-  queueMock.list.mockImplementation((filter?: { type?: string }) => (
-    filter?.type === 'lint' ? [makeJob()] : []
-  ));
-  queueMock.enqueue.mockReturnValue({ id: 'job-1' });
+  remediationJobs = [];
+  queueMock.list.mockReturnValue([makeJob()]);
+  queueMock.getOrCreateJobAtomic.mockImplementation((input: {
+    matcher: (jobs: Job[]) => Job | null;
+    beforeCreate?: () => void;
+  }) => {
+    const duplicate = input.matcher(remediationJobs);
+    if (duplicate) return { job: duplicate, deduplicated: true };
+    input.beforeCreate?.();
+    return { job: { id: 'job-1' }, deduplicated: false };
+  });
   webSearchMock.isWebSearchConfigured.mockReturnValue(true);
-  sourceReingestMock.reingestOrphanSource.mockReturnValue({ jobId: 'ingest-1' });
+  sourceReingestMock.reingestOrphanSource.mockReturnValue({
+    jobId: 'ingest-1',
+    deduplicated: false,
+  });
 });
 
 describe('remediate 参数与快照校验', () => {
@@ -136,7 +147,7 @@ describe('remediate 参数与快照校验', () => {
       findingIds: [BROKEN_ID],
       action: 'fix',
     })).rejects.toMatchObject({ status: 409, code: 'stale-snapshot' });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
     expect(sourceReingestMock.reingestOrphanSource).not.toHaveBeenCalled();
   });
 
@@ -151,7 +162,7 @@ describe('remediate 参数与快照校验', () => {
       status: 400,
     });
     expect(queueMock.list).not.toHaveBeenCalled();
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
     expect(sourceReingestMock.reingestOrphanSource).not.toHaveBeenCalled();
   });
 
@@ -163,7 +174,7 @@ describe('remediate 参数与快照校验', () => {
       action: 'fix',
     })).rejects.toMatchObject({ status: 400, code: 'invalid-finding-count' });
     expect(queueMock.list).not.toHaveBeenCalled();
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
   });
 
   it('任意 finding ID 缺失则整体 stale，不部分入队', async () => {
@@ -173,7 +184,7 @@ describe('remediate 参数与快照校验', () => {
       findingIds: [BROKEN_ID, 'f'.repeat(64)],
       action: 'fix',
     })).rejects.toMatchObject({ status: 409, code: 'stale-snapshot' });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
   });
 
   it('action 与单条 finding 不匹配 → 400', async () => {
@@ -183,7 +194,7 @@ describe('remediate 参数与快照校验', () => {
       findingIds: [ORPHAN_ID],
       action: 'fix',
     })).rejects.toMatchObject({ status: 400, code: 'action-not-allowed' });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
   });
 
   it('action 混合批次只要有一条不允许就整体拒绝', async () => {
@@ -193,7 +204,7 @@ describe('remediate 参数与快照校验', () => {
       findingIds: [BROKEN_ID, ORPHAN_ID],
       action: 'fix',
     })).rejects.toMatchObject({ status: 400, code: 'action-not-allowed' });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
   });
 });
 
@@ -206,11 +217,16 @@ describe('remediate 工作流编排', () => {
       action: 'fix',
     });
 
-    expect(queueMock.enqueue).toHaveBeenCalledTimes(1);
-    expect(queueMock.enqueue).toHaveBeenCalledWith('fix', {
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledTimes(1);
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledWith({
+      type: 'fix',
+      params: {
+        subjectId: SUBJECT.id,
+        remediationContext: context('fix', [CONTRADICTION_ID, BROKEN_ID]),
+      },
       subjectId: SUBJECT.id,
-      remediationContext: context('fix', [CONTRADICTION_ID, BROKEN_ID]),
-    }, SUBJECT.id);
+      matcher: expect.any(Function),
+    });
     expect(result).toEqual({ jobId: 'job-1', deduplicated: false });
   });
 
@@ -222,12 +238,17 @@ describe('remediate 工作流编排', () => {
       action: 'curate',
     });
 
-    expect(queueMock.enqueue).toHaveBeenCalledWith('curate', {
-      scope: 'pages',
-      slugs: ['orphan', 'orphan-two'],
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledWith({
+      type: 'curate',
+      params: {
+        scope: 'pages',
+        slugs: ['orphan', 'orphan-two'],
+        subjectId: SUBJECT.id,
+        remediationContext: context('curate', [SECOND_ORPHAN_ID, ORPHAN_ID]),
+      },
       subjectId: SUBJECT.id,
-      remediationContext: context('curate', [SECOND_ORPHAN_ID, ORPHAN_ID]),
-    }, SUBJECT.id);
+      matcher: expect.any(Function),
+    });
   });
 
   it('Research 参数满足 worker 契约并携带规范化上下文', async () => {
@@ -238,12 +259,18 @@ describe('remediate 工作流编排', () => {
       action: 'research',
     });
 
-    expect(queueMock.enqueue).toHaveBeenCalledWith('research', {
-      findingIds: [GAP_ID],
-      lintJobId: 'lint-1',
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledWith({
+      type: 'research',
+      params: {
+        findingIds: [GAP_ID],
+        lintJobId: 'lint-1',
+        subjectId: SUBJECT.id,
+        remediationContext: context('research', [GAP_ID]),
+      },
       subjectId: SUBJECT.id,
-      remediationContext: context('research', [GAP_ID]),
-    }, SUBJECT.id);
+      matcher: expect.any(Function),
+      beforeCreate: expect.any(Function),
+    });
   });
 
   it('Research 未配置 Web Search → 422，且不入队', async () => {
@@ -254,7 +281,7 @@ describe('remediate 工作流编排', () => {
       findingIds: [GAP_ID],
       action: 'research',
     })).rejects.toMatchObject({ status: 422, code: 'web-search-not-configured' });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledTimes(1);
   });
 
   it('Re-ingest 严格限制单条且必须包含 sourceId', async () => {
@@ -271,7 +298,7 @@ describe('remediate 工作流编排', () => {
       action: 're-ingest',
     })).rejects.toMatchObject({ status: 400, code: 'invalid-reingest-scope' });
     expect(sourceReingestMock.reingestOrphanSource).not.toHaveBeenCalled();
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
   });
 
   it('Re-ingest 委托共用 helper 并传递 remediationContext', async () => {
@@ -288,6 +315,20 @@ describe('remediate 工作流编排', () => {
       remediationContext: context('re-ingest', [ORPHAN_SOURCE_ID]),
     });
     expect(result).toEqual({ jobId: 'ingest-1', deduplicated: false });
+  });
+
+  it('Re-ingest 原子 helper 复用同 context in-flight 时透传 deduplicated', async () => {
+    sourceReingestMock.reingestOrphanSource.mockReturnValue({
+      jobId: 'ingest-existing',
+      deduplicated: true,
+    });
+
+    await expect(remediate({
+      subject: SUBJECT,
+      lintJobId: 'lint-1',
+      findingIds: [ORPHAN_SOURCE_ID],
+      action: 're-ingest',
+    })).resolves.toEqual({ jobId: 'ingest-existing', deduplicated: true });
   });
 
   it('统一入口把 source 404 映射为 409，其余 typed 状态保持', async () => {
@@ -310,7 +351,7 @@ describe('remediate 工作流编排', () => {
       findingIds: [ORPHAN_SOURCE_ID],
       action: 're-ingest',
     })).rejects.toMatchObject({ status: 409, code: 'requeue-conflict' });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).not.toHaveBeenCalled();
   });
 });
 
@@ -328,9 +369,7 @@ describe('remediate 幂等复用', () => {
       completedAt,
       createdAt: '2026-07-13T10:02:00.000Z',
     });
-    queueMock.list.mockImplementation((filter?: { type?: string }) => (
-      filter?.type === 'lint' ? [makeJob()] : [duplicate]
-    ));
+    remediationJobs = [duplicate];
 
     await expect(remediate({
       subject: SUBJECT,
@@ -338,7 +377,7 @@ describe('remediate 幂等复用', () => {
       findingIds: [BROKEN_ID],
       action: 'fix',
     })).resolves.toEqual({ jobId: duplicate.id, deduplicated: true });
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledTimes(1);
   });
 
   it('已被新 lint 复检的 completed job 不复用', async () => {
@@ -349,9 +388,7 @@ describe('remediate 幂等复用', () => {
       paramsJson: JSON.stringify({ remediationContext: context('fix', [BROKEN_ID]) }),
       completedAt: '2026-07-13T10:00:59.000Z',
     });
-    queueMock.list.mockImplementation((filter?: { type?: string }) => (
-      filter?.type === 'lint' ? [makeJob()] : [oldCompleted]
-    ));
+    remediationJobs = [oldCompleted];
 
     await expect(remediate({
       subject: SUBJECT,
@@ -359,7 +396,7 @@ describe('remediate 幂等复用', () => {
       findingIds: [BROKEN_ID],
       action: 'fix',
     })).resolves.toEqual({ jobId: 'job-1', deduplicated: false });
-    expect(queueMock.enqueue).toHaveBeenCalledTimes(1);
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledTimes(1);
   });
 
   it('Research duplicate 在当前 Web Search 配置变化时仍优先复用', async () => {
@@ -369,9 +406,7 @@ describe('remediate 幂等复用', () => {
       status: 'pending',
       paramsJson: JSON.stringify({ remediationContext: context('research', [GAP_ID]) }),
     });
-    queueMock.list.mockImplementation((filter?: { type?: string }) => (
-      filter?.type === 'lint' ? [makeJob()] : [duplicate]
-    ));
+    remediationJobs = [duplicate];
     webSearchMock.isWebSearchConfigured.mockReturnValue(false);
 
     await expect(remediate({
@@ -381,7 +416,7 @@ describe('remediate 幂等复用', () => {
       action: 'research',
     })).resolves.toEqual({ jobId: duplicate.id, deduplicated: true });
     expect(webSearchMock.isWebSearchConfigured).not.toHaveBeenCalled();
-    expect(queueMock.enqueue).not.toHaveBeenCalled();
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledTimes(1);
   });
 });
 
