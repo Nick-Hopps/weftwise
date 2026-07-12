@@ -19,6 +19,27 @@ const base: IdentityInput = {
 };
 
 describe('findingId', () => {
+  it('遵循固定 canonical 协议生成 golden digest', () => {
+    const goldenInput: IdentityInput = {
+      type: 'stale-source',
+      severity: 'critical',
+      pageSlug: 'unicode-page',
+      description: ' Ａ  value\r\nnext ',
+      suggestedFix: '更新来源',
+      sourceId: 'source-golden',
+      sourceFilename: 'ignored.md',
+      failedJobId: 'failed-job-golden',
+      subjectId: 'subject-golden',
+      subjectSlug: 'golden',
+      id: 'f'.repeat(64),
+    };
+
+    // finding ID 是持久化兼容协议；算法变化必须提升 lint-finding:vN。
+    expect(findingId(goldenInput)).toBe(
+      'c0090e0a6bfed1184eadf5144ed192565cd68778ed9ed8a6a95810d213f1390f',
+    );
+  });
+
   it('返回 64 位小写十六进制，并规范化空白与换行', () => {
     const id = findingId(base);
     const normalizedId = findingId({
@@ -35,32 +56,46 @@ describe('findingId', () => {
     expect(id).toBe(unicodeNormalizedId);
   });
 
-  it('忽略 severity、suggestedFix 与 failedJobId', () => {
-    const changedMetadata: IdentityInput = {
-      ...base,
-      severity: 'critical',
-      suggestedFix: null,
-      failedJobId: 'failed-job-1',
-    };
-
-    expect(findingId(changedMetadata)).toBe(findingId(base));
-  });
+  it.each([
+    ['subjectId', {}, { subjectId: 'subject-2' }],
+    ['type', {}, { type: 'orphan' }],
+    ['pageSlug', {}, { pageSlug: 'another-page' }],
+    ['sourceId', {}, { sourceId: 'source-1' }],
+    [
+      'sourceFilename fallback',
+      { sourceFilename: 'source-a.md' },
+      { sourceFilename: 'source-b.md' },
+    ],
+    ['description', {}, { description: 'Different description' }],
+  ] as const)(
+    '%s 变化时返回不同 ID',
+    (_field, original, changed) => {
+      expect(findingId({ ...base, ...changed })).not.toBe(
+        findingId({ ...base, ...original }),
+      );
+    },
+  );
 
   it.each([
-    ['subjectId', { subjectId: 'subject-2' }],
-    ['pageSlug', { pageSlug: 'another-page' }],
-    ['sourceId', { sourceId: 'source-1' }],
-    ['description', { description: 'Different description' }],
-  ] as const)('%s 变化时返回不同 ID', (_field, change) => {
-    expect(findingId({ ...base, ...change })).not.toBe(findingId(base));
+    ['severity', { severity: 'critical' }],
+    ['suggestedFix', { suggestedFix: null }],
+    ['failedJobId', { failedJobId: 'failed-job-1' }],
+    ['subjectSlug', { subjectSlug: 'another-subject' }],
+    ['id', { id: 'f'.repeat(64) }],
+  ] as const)('%s 变化时不改变 ID', (_field, change) => {
+    expect(findingId({ ...base, ...change })).toBe(findingId(base));
   });
 });
 
 describe('identifyFindings', () => {
   it('按重新计算的 ID 去重，并保留首次出现顺序', () => {
-    const duplicate: IdentityInput = {
+    const first: IdentityInput = {
       ...base,
       id: 'f'.repeat(64),
+    };
+    const duplicate: IdentityInput = {
+      ...base,
+      id: 'e'.repeat(64),
       severity: 'info',
       suggestedFix: null,
       description: ' Broken [[Ghost]]   link ',
@@ -71,18 +106,15 @@ describe('identifyFindings', () => {
       description: 'Different finding',
     };
 
-    const identified = identifyFindings([base, duplicate, different]);
+    const identified = identifyFindings([first, duplicate, different]);
 
     expect(identified).toHaveLength(2);
     expect(identified.map((finding) => finding.pageSlug)).toEqual([
       'start',
       'different',
     ]);
-    expect(identified[0]).toMatchObject({
-      severity: base.severity,
-      suggestedFix: base.suggestedFix,
-      id: findingId(base),
-    });
+    expect(identified[0]?.id).not.toBe(first.id);
+    expect(identified[0]).toEqual({ ...first, id: findingId(first) });
     expect(identified[1]?.id).toBe(findingId(different));
   });
 });
