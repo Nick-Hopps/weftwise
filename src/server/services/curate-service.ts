@@ -21,11 +21,54 @@ import { generateTextWithTools } from '../llm/provider-registry';
 import { CURATE_AGENTIC_SYSTEM_PROMPT, buildCurateAgenticUserPrompt } from '../llm/prompts/curate-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import { toolActivityLine } from '@/lib/tool-activity';
-import type { Job } from '@/lib/contracts';
+import type { Job, Subject } from '@/lib/contracts';
+import { verifyJobPostconditions } from './postcondition-service';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
 export const CURATE_MAX_STEPS = 40;
 const CURATE_CAPS = { merge: 5, split: 5, delete: 5, create: 5 };
+
+interface CurateTotals {
+  merge: number;
+  split: number;
+  delete: number;
+  create: number;
+  writes: number;
+}
+
+type CurateEmit = (
+  type: string,
+  message: string,
+  data?: Record<string, unknown>,
+) => void;
+
+async function completeCurate(
+  totals: CurateTotals,
+  baseMessage: string,
+  job: Job,
+  subject: Subject,
+  emit: CurateEmit,
+): Promise<Record<string, unknown>> {
+  const postcondition = await verifyJobPostconditions({
+    kind: 'curate',
+    job,
+    subject,
+    semanticFindings: undefined,
+    emit,
+  });
+  const result = {
+    ...totals,
+    postconditionStatus: postcondition.status,
+    residualCount: postcondition.residualFindings.length,
+    semanticStatus: postcondition.semanticStatus,
+    postcondition,
+  };
+  const verificationText = postcondition.status === 'clean'
+    ? 'Postcondition clean.'
+    : `Postcondition residual: ${postcondition.residualFindings.length} issue(s).`;
+  emit('curate:complete', `${baseMessage} ${verificationText}`, result);
+  return result;
+}
 
 export async function runCurateJob(
   job: Job,
@@ -56,8 +99,13 @@ export async function runCurateJob(
   });
 
   if (scopeSlugs.length < 2) {
-    emit('curate:complete', 'Nothing to curate (need at least 2 pages).', { merge: 0, split: 0, delete: 0, create: 0, writes: 0 });
-    return { merge: 0, split: 0, delete: 0, create: 0, writes: 0 };
+    return completeCurate(
+      { merge: 0, split: 0, delete: 0, create: 0, writes: 0 },
+      'Nothing to curate (need at least 2 pages).',
+      job,
+      subject,
+      emit,
+    );
   }
 
   // 2. scope 元数据（slug/title/summary/tags/bodyChars，不喂正文——模型用 wiki.read 自取）
@@ -110,12 +158,13 @@ export async function runCurateJob(
   const totals = guard.totals();
   if (totals.writes > 0) enqueueEmbedIndex(subject.id);
 
-  emit(
-    'curate:complete',
-    `Curation done: ${totals.merge} merge(s), ${totals.split} split(s), ${totals.delete} delete(s), ${totals.create} create(s).`,
+  return completeCurate(
     totals,
+    `Curation done: ${totals.merge} merge(s), ${totals.split} split(s), ${totals.delete} delete(s), ${totals.create} create(s).`,
+    job,
+    subject,
+    emit,
   );
-  return totals as unknown as Record<string, unknown>;
 }
 
 registerHandler('curate', runCurateJob);
