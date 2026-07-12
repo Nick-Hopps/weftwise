@@ -5,7 +5,11 @@ import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import { selectLatestFindings } from '@/server/services/lint-latest';
 import { normalizeRemediationContext } from '@/server/services/remediation-context';
-import { resolveTopicsFromFindingIds } from '@/server/services/research-service';
+import {
+  MAX_RESEARCH_FINDING_IDS,
+  ResearchScopeError,
+  resolveTopicsFromFindingIds,
+} from '@/server/services/research-scope';
 
 export const runtime = 'nodejs';
 
@@ -61,6 +65,7 @@ export async function POST(request: NextRequest) {
     if (
       !Array.isArray(body.findingIds)
       || body.findingIds.length === 0
+      || body.findingIds.length > MAX_RESEARCH_FINDING_IDS
       || !body.findingIds.every(
         (findingId) => typeof findingId === 'string' && /^[0-9a-f]{64}$/.test(findingId),
       )
@@ -85,10 +90,11 @@ export async function POST(request: NextRequest) {
     try {
       resolveTopicsFromFindingIds(subject.id, lintJobId, findingIds);
     } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Invalid findingIds' },
-        { status: 400 },
-      );
+      if (error instanceof ResearchScopeError) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+      console.error('[research] unexpected finding scope error', error);
+      return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 
     const remediationContext = normalizeRemediationContext({

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { Job, LintFinding } from '@/lib/contracts';
 
 const mockEnqueue = vi.fn();
@@ -7,6 +9,15 @@ const mockList = vi.fn();
 const mockResolveSubject = vi.fn();
 const mockResolveTopics = vi.fn();
 const mockIsConfigured = vi.fn();
+const MockResearchScopeError = vi.hoisted(() => class ResearchScopeError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'ResearchScopeError';
+    this.code = code;
+  }
+});
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null, requireCsrf: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
@@ -19,11 +30,14 @@ vi.mock('@/server/jobs/queue', () => ({
 vi.mock('@/server/search/web-search', () => ({
   isWebSearchConfigured: (...args: unknown[]) => mockIsConfigured(...args),
 }));
-vi.mock('@/server/services/research-service', () => ({
+vi.mock('@/server/services/research-scope', () => ({
+  MAX_RESEARCH_FINDING_IDS: 100,
+  ResearchScopeError: MockResearchScopeError,
   resolveTopicsFromFindingIds: (...args: unknown[]) => mockResolveTopics(...args),
 }));
 
 import { findingId } from '@/server/services/finding-identity';
+import { ResearchScopeError } from '@/server/services/research-scope';
 import { POST } from '../route';
 
 const RAW_GAP = {
@@ -46,6 +60,10 @@ const RAW_SECOND_GAP = {
 } satisfies LintFinding & { subjectId: string; subjectSlug: string };
 const GAP_ID = findingId(RAW_GAP);
 const SECOND_GAP_ID = findingId(RAW_SECOND_GAP);
+const TOO_MANY_FINDING_IDS = Array.from(
+  { length: 101 },
+  (_, index) => index.toString(16).padStart(64, '0'),
+);
 
 function req(body: unknown) {
   return new NextRequest('http://localhost/api/research', {
@@ -173,7 +191,10 @@ describe('POST /api/research', () => {
 
   it('精确 resolver 拒绝缺失 ID 或非 coverage-gap → 400', async () => {
     mockResolveTopics.mockImplementation(() => {
-      throw new Error('Research findingIds must reference coverage-gap findings');
+      throw new ResearchScopeError(
+        'invalid-finding-scope',
+        'Research findingIds must reference coverage-gap findings',
+      );
     });
     const res = await POST(req({ findingIds: [GAP_ID], lintJobId: 'lint-1' }));
     expect(res.status).toBe(400);
@@ -181,6 +202,37 @@ describe('POST /api/research', () => {
       error: 'Research findingIds must reference coverage-gap findings',
     });
     expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+
+  it('findingIds 超过 100 项 → 400，且不读取快照或调用 resolver', async () => {
+    const res = await POST(req({ findingIds: TOO_MANY_FINDING_IDS, lintJobId: 'lint-1' }));
+    expect(res.status).toBe(400);
+    expect(mockList).not.toHaveBeenCalled();
+    expect(mockResolveTopics).not.toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+
+  it('resolver 未知异常 → 稳定 500 且不泄漏内部消息', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockResolveTopics.mockImplementation(() => {
+      throw new Error('database password leaked');
+    });
+
+    const res = await POST(req({ findingIds: [GAP_ID], lintJobId: 'lint-1' }));
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: 'Internal server error' });
+    expect(consoleError).toHaveBeenCalled();
+    expect(mockEnqueue).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('route 不导入会注册 worker handler 的 research-service', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/app/api/research/route.ts'),
+      'utf8',
+    );
+    expect(source).not.toContain("@/server/services/research-service");
+    expect(source).toContain("@/server/services/research-scope");
   });
 
   it('web search 未配置 → 422，不入队', async () => {

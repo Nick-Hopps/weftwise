@@ -24,7 +24,11 @@ const genMock = vi.hoisted(() => ({ generateStructuredOutput: vi.fn() }));
 vi.mock('@/server/llm/provider-registry', () => genMock);
 
 import { findingId } from '../finding-identity';
-import { runResearchJob, resolveTopicsFromFindingIds } from '../research-service';
+import { runResearchJob } from '../research-service';
+import {
+  ResearchScopeError,
+  resolveTopicsFromFindingIds,
+} from '../research-scope';
 
 const RAW_FINDINGS = [
   {
@@ -69,6 +73,10 @@ const BROKEN_ID = findingId(RAW_FINDINGS[0]);
 const GAP_ID = findingId(RAW_FINDINGS[1]);
 const DUPLICATE_TOPIC_GAP_ID = findingId(RAW_FINDINGS[2]);
 const SECOND_GAP_ID = findingId(RAW_FINDINGS[3]);
+const TOO_MANY_FINDING_IDS = Array.from(
+  { length: 101 },
+  (_, index) => index.toString(16).padStart(64, '0'),
+);
 
 function researchJob(
   params: unknown,
@@ -143,8 +151,9 @@ describe('resolveTopicsFromFindingIds', () => {
     ['subject 错误', lintJob({ subjectId: 's2' })],
   ] as const)('lint job %s 时拒绝', (_label, storedJob) => {
     queueMock.get.mockReturnValue(storedJob);
-    expect(() => resolveTopicsFromFindingIds('s1', 'lint-1', [GAP_ID]))
-      .toThrow(/missing|another subject/);
+    const call = () => resolveTopicsFromFindingIds('s1', 'lint-1', [GAP_ID]);
+    expect(call).toThrow(ResearchScopeError);
+    expect(call).toThrow(/missing|another subject/);
   });
 
   it('快照 jobId 与请求 lintJobId 不一致时拒绝', () => {
@@ -161,6 +170,21 @@ describe('resolveTopicsFromFindingIds', () => {
   it('任一 finding 不是 coverage-gap 时拒绝整个请求', () => {
     expect(() => resolveTopicsFromFindingIds('s1', 'lint-1', [GAP_ID, BROKEN_ID]))
       .toThrow(/coverage-gap/);
+  });
+
+  it('queue.get 未知异常保持原异常，不包装为范围错误', () => {
+    const repositoryError = new Error('database unavailable');
+    queueMock.get.mockImplementation(() => {
+      throw repositoryError;
+    });
+
+    try {
+      resolveTopicsFromFindingIds('s1', 'lint-1', [GAP_ID]);
+      throw new Error('expected resolver to throw');
+    } catch (error) {
+      expect(error).toBe(repositoryError);
+      expect(error).not.toBeInstanceOf(ResearchScopeError);
+    }
   });
 });
 
@@ -261,13 +285,16 @@ describe('runResearchJob', () => {
     ['非对象 JSON', researchJob([], { paramsJson: '[]' }), /must be an object/],
     ['topic 显式携带旧 gapIds', researchJob({ topic: 'x', gapIds: ['1'] }), /gapIds/],
     ['findingIds 显式携带旧 gapIds', researchJob({ findingIds: [GAP_ID], lintJobId: 'lint-1', gapIds: null }), /gapIds/],
+    ['job subjectId 为空，即使 params 提供 subjectId', researchJob({ topic: 'x', subjectId: 's1' }, { subjectId: null }), /missing subjectId/],
     ['subjectId 类型错误', researchJob({ topic: 'x', subjectId: 1 }), /subjectId/],
     ['job 与 params subjectId 不一致', researchJob({ topic: 'x', subjectId: 's2' }), /does not match/],
     ['topic 与 findingIds 同时存在', researchJob({ topic: 'x', findingIds: [GAP_ID], lintJobId: 'lint-1' }), /exactly one/],
     ['topic 与 findingIds 都不存在', researchJob({ subjectId: 's1' }), /exactly one/],
     ['findingIds 为空', researchJob({ findingIds: [], lintJobId: 'lint-1' }), /findingIds/],
     ['findingId 非小写 64 hex', researchJob({ findingIds: ['A'.repeat(64)], lintJobId: 'lint-1' }), /findingIds/],
+    ['findingIds 超过 100 项', researchJob({ findingIds: TOO_MANY_FINDING_IDS, lintJobId: 'lint-1', remediationContext: remediationContext(TOO_MANY_FINDING_IDS) }), /100/],
     ['findingIds 缺 lintJobId', researchJob({ findingIds: [GAP_ID] }), /lintJobId/],
+    ['findingIds 缺处置上下文', researchJob({ findingIds: [GAP_ID], lintJobId: 'lint-1' }), /context/],
     ['处置上下文非对象', researchJob({ findingIds: [GAP_ID], lintJobId: 'lint-1', remediationContext: 'bad' }), /context/],
     ['处置 action 不匹配', researchJob({ findingIds: [GAP_ID], lintJobId: 'lint-1', remediationContext: remediationContext([GAP_ID], { action: 'fix' }) }), /action/],
     ['处置 lintJobId 不匹配', researchJob({ findingIds: [GAP_ID], lintJobId: 'lint-1', remediationContext: remediationContext([GAP_ID], { lintJobId: 'lint-2' }) }), /context.*match/],
