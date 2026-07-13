@@ -87,7 +87,7 @@
 
 **Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API。
 
-**刷新恢复与 subject 隔离**：当前 subject 以 React Query 严格按 `pending → running` 顺序读取 active jobs，避免 job 被 worker claim 时跨查询遗漏；首次成功 hydrate 前四类可执行 action 全部安全禁用，查询失败显示错误并自动/手动重试，但不会伪装成 workflow loading。恢复只接受合法 job type 与完整 `remediationContext`（Re-ingest 还要求 `ingest + action:'re-ingest'`），按 `createdAt + id` 选择同 workflow 最新 job，并恢复对应 `useJobStream`/origin meta；queued plan 的 `jobId` 是 active 列表短暂缺失时的服务端兜底。
+**刷新恢复与 subject 隔离**：当前 subject 以 React Query 严格按 `pending → running` 顺序读取 active jobs，避免 job 被 worker claim 时跨查询遗漏；首次成功 hydrate 前四类可执行 action 全部安全禁用，查询失败显示错误并自动/手动重试，但不会伪装成 workflow loading。合法 `fix` / `curate` / `research` job 按 job type 恢复；仅当 `remediationContext` 完整且 `action` 与 workflow 匹配时标记为 remediation 来源，否则按 manual workflow 恢复。唯 Re-ingest 必须是 `ingest` job 且带严格匹配的 `action:'re-ingest'` context。每个 workflow 按 `createdAt + id` 选择最新 job，并恢复对应 `useJobStream`/origin meta；queued plan 的 `jobId` 是 active 列表短暂缺失时的服务端兜底。
 
 所有异步请求都捕获 `{ generation, subjectId, scope }` origin；切换 subject 或 All Subjects 会同步使旧响应、旧删除请求、旧 lint rerun 与候选结果失效。manual/backlog/remediation Research 共用同步 action gate，避免 React state 提交前重复启动。终态同时失效 `['health-active-jobs', subjectId]` 与 `['lint-latest', subjectId]`；Fix/Curate/Re-ingest 完成继续触发 lint，Research 完成读取 candidates，settled job ID 防旧 queued 快照立即重挂，从而形成 subject-scoped 的执行、恢复、复检闭环。
 

@@ -69,6 +69,7 @@ const CONTRADICTION = rawFinding('contradiction', 'contradiction');
 const ORPHAN = rawFinding('orphan', 'orphan');
 const SECOND_ORPHAN = rawFinding('orphan', 'orphan-two');
 const GAP = rawFinding('coverage-gap', 'gap');
+const THIN_PAGE = rawFinding('thin-page', 'thin-without-sources');
 const ORPHAN_SOURCE = rawFinding('orphan-source', '', { sourceId: 'source-1', sourceFilename: 'one.md' });
 const SECOND_ORPHAN_SOURCE = rawFinding('orphan-source', '', {
   sourceId: 'source-2',
@@ -81,6 +82,7 @@ const CONTRADICTION_ID = findingId(CONTRADICTION);
 const ORPHAN_ID = findingId(ORPHAN);
 const SECOND_ORPHAN_ID = findingId(SECOND_ORPHAN);
 const GAP_ID = findingId(GAP);
+const THIN_PAGE_ID = findingId(THIN_PAGE);
 const ORPHAN_SOURCE_ID = findingId(ORPHAN_SOURCE);
 const SECOND_ORPHAN_SOURCE_ID = findingId(SECOND_ORPHAN_SOURCE);
 const ORPHAN_SOURCE_WITHOUT_ID_ID = findingId(ORPHAN_SOURCE_WITHOUT_ID);
@@ -92,6 +94,7 @@ const ALL_FINDINGS = [
   ORPHAN,
   SECOND_ORPHAN,
   GAP,
+  THIN_PAGE,
   ORPHAN_SOURCE,
   SECOND_ORPHAN_SOURCE,
   ORPHAN_SOURCE_WITHOUT_ID,
@@ -266,6 +269,29 @@ describe('remediate 工作流编排', () => {
         lintJobId: 'lint-1',
         subjectId: SUBJECT.id,
         remediationContext: context('research', [GAP_ID]),
+      },
+      subjectId: SUBJECT.id,
+      matcher: expect.any(Function),
+      beforeCreate: expect.any(Function),
+    });
+  });
+
+  it('router 允许的 thin-page 可与 coverage-gap 一起生成 worker 可消费的 Research context', async () => {
+    await remediate({
+      subject: SUBJECT,
+      lintJobId: 'lint-1',
+      findingIds: [THIN_PAGE_ID, GAP_ID],
+      action: 'research',
+    });
+
+    const findingIds = [THIN_PAGE_ID, GAP_ID].sort();
+    expect(queueMock.getOrCreateJobAtomic).toHaveBeenCalledWith({
+      type: 'research',
+      params: {
+        findingIds,
+        lintJobId: 'lint-1',
+        subjectId: SUBJECT.id,
+        remediationContext: context('research', findingIds),
       },
       subjectId: SUBJECT.id,
       matcher: expect.any(Function),

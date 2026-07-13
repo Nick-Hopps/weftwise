@@ -29,7 +29,7 @@ SubjectId      = string  // uuid 或 'subject-general' / 'subject-<uuid>' legacy
 Subject        { id: SubjectId, slug, name, description, createdAt, updatedAt }
 WikiPage       { subjectId, slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
 WikiLink       { subjectId, sourceSlug, targetSubjectId, targetSlug, context }
-Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'curate'|'embed-index'|'re-enrich'|'fix', status, subjectId: SubjectId|null,
+Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'embed-index'|'curate'|'re-enrich'|'fix'|'research', status, subjectId: SubjectId|null,
                  paramsJson, resultJson, createdAt, startedAt, completedAt,
                  leaseExpiresAt, heartbeatAt, attemptCount }
 JobEvent       { id, jobId, type, message, dataJson, createdAt }

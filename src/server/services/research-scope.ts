@@ -1,7 +1,13 @@
+import type { LintFinding } from '@/lib/contracts';
 import * as queue from '../jobs/queue';
 import { selectLatestFindings } from './lint-latest';
 
 export const MAX_RESEARCH_FINDING_IDS = 100;
+
+const RESEARCH_FINDING_TYPES: ReadonlySet<LintFinding['type']> = new Set([
+  'coverage-gap',
+  'thin-page',
+]);
 
 export type ResearchScopeErrorCode =
   | 'invalid-finding-count'
@@ -20,7 +26,7 @@ export class ResearchScopeError extends Error {
   }
 }
 
-/** 从指定 subject 的指定 completed lint 快照精确解析 coverage-gap 主题。 */
+/** 从指定 subject 的指定 completed lint 快照精确解析可 Research finding 主题。 */
 export function resolveTopicsFromFindingIds(
   subjectId: string,
   lintJobId: string,
@@ -59,11 +65,11 @@ export function resolveTopicsFromFindingIds(
   const matches = snapshot.findings.filter((finding) => requested.has(finding.id));
   if (
     matches.length !== requested.size
-    || matches.some((finding) => finding.type !== 'coverage-gap')
+    || matches.some((finding) => !RESEARCH_FINDING_TYPES.has(finding.type))
   ) {
     throw new ResearchScopeError(
       'invalid-finding-scope',
-      'Research findingIds must reference coverage-gap findings',
+      'Research findingIds must reference coverage-gap or thin-page findings',
     );
   }
 

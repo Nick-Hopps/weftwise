@@ -1,5 +1,5 @@
 /**
- * Research service — 任务类型 'research'：缺口 → 联网研究 → 候选清单（只发现不写入）。
+ * Research service — 任务类型 'research'：覆盖缺口/零来源薄页 → 联网研究 → 候选清单（只发现不写入）。
  *
  * 三阶段：
  *   1. LLM 生成检索 query（generateObject 无 tools；失败 → job 失败）
