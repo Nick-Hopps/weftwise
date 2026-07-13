@@ -214,6 +214,11 @@ describe('runCurateJob (tool-loop)', () => {
     postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
       ...cleanReport,
       status: 'residual',
+      scope: {
+        ...cleanReport.scope,
+        updatedSlugs: ['a'],
+        touchedSlugs: ['a'],
+      },
       residualFindings: [{
         type: 'orphan-page',
         severity: 'info',
@@ -244,6 +249,11 @@ describe('runCurateJob (tool-loop)', () => {
     postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
       ...cleanReport,
       status: 'residual',
+      scope: {
+        ...cleanReport.scope,
+        updatedSlugs: ['a'],
+        touchedSlugs: ['a'],
+      },
       residualFindings: [{
         type: 'dangling-incoming-link',
         severity: 'warning',
@@ -340,6 +350,33 @@ describe('runCurateJob (tool-loop)', () => {
     expect(result.perFindingOutcomes).toEqual({
       [first.id]: 'skipped',
       [second.id]: 'skipped',
+    });
+  });
+
+  it('批量 Curate 只有实际触达页为 fixed，未触达 orphan 为 skipped', async () => {
+    const touched = orphan('a');
+    const untouched = orphan('b');
+    const context = remediationContext([touched, untouched]);
+    queueMock.get.mockReturnValueOnce(lintJob([touched, untouched]));
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+      ...cleanReport,
+      scope: {
+        ...cleanReport.scope,
+        updatedSlugs: ['a'],
+        touchedSlugs: ['a'],
+      },
+    });
+
+    const result = await runCurateJob(job({
+      scope: 'pages',
+      slugs: ['a', 'b'],
+      subjectId: 's1',
+      remediationContext: context,
+    }), vi.fn());
+
+    expect(result.perFindingOutcomes).toEqual({
+      [touched.id]: 'fixed',
+      [untouched.id]: 'skipped',
     });
   });
 

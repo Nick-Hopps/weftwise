@@ -301,6 +301,11 @@ describe('runFixJob (tool-loop)', () => {
     postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
       ...cleanReport,
       status: 'residual',
+      scope: {
+        ...cleanReport.scope,
+        updatedSlugs: ['a'],
+        touchedSlugs: ['a'],
+      },
       residualFindings: [{
         type: 'contradiction',
         severity: 'warning',
@@ -321,6 +326,31 @@ describe('runFixJob (tool-loop)', () => {
         [missing.id]: 'fixed',
         [contradiction.id]: 'failed',
       },
+    });
+  });
+
+  it('批量 Fix 只有实际触达页为 fixed，未触达 finding 为 skipped', async () => {
+    const touched = identified(finding('contradiction', 'a', 'A 与来源冲突'));
+    const untouched = identified(finding('contradiction', 'b', 'B 与来源冲突'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([touched, untouched]));
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+      ...cleanReport,
+      scope: {
+        ...cleanReport.scope,
+        updatedSlugs: ['a'],
+        touchedSlugs: ['a'],
+      },
+    });
+
+    const result = await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([touched.id, untouched.id]),
+    }), vi.fn());
+
+    expect(result.perFindingOutcomes).toEqual({
+      [touched.id]: 'fixed',
+      [untouched.id]: 'skipped',
     });
   });
 

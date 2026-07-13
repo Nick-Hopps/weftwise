@@ -86,7 +86,7 @@ export function reingestSourceAtomic(
 ): AtomicSourceReingestResult {
   const sqlite = getRawDb();
   const tx = sqlite.transaction((): AtomicSourceReingestResult => {
-    const previous = findLatestSourceJobRaw(
+    const previous = findPreferredSourceJobRaw(
       sqlite,
       input.subjectId,
       input.sourceId,
@@ -417,14 +417,15 @@ export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null
 }
 
 /**
- * 按 params.sourceId 反查本 subject 最新一条 ingest job（orphan-source 体检/reingest 用）。
+ * 按 params.sourceId 反查本 subject ingest job（orphan-source 体检/reingest 用）。
+ * 任意 pending/running 优先；仅在没有 active 时返回最新 terminal。
  * jobs 表无独立 source_id 列，通过受 json_valid 保护的 JSON 表达式索引精确匹配。
  */
 export function findLatestIngestJobForSource(
   subjectId: SubjectId,
   sourceId: string
 ): Job | null {
-  return findLatestSourceJobRaw(getRawDb(), subjectId, sourceId);
+  return findPreferredSourceJobRaw(getRawDb(), subjectId, sourceId);
 }
 
 export function completeJob(
@@ -646,6 +647,31 @@ function findLatestSourceJobRaw(
     LIMIT 1
   `).get(subjectId, sourceId) as JobRow | undefined;
   return row ? rowToJobFromRaw(row) : null;
+}
+
+function findActiveSourceJobRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job | null {
+  const row = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = 'ingest'
+      AND CASE WHEN json_valid(params_json)
+        THEN json_extract(params_json, '$.sourceId') END = ?
+      AND status IN ('pending', 'running')
+    LIMIT 1
+  `).get(subjectId, sourceId) as JobRow | undefined;
+  return row ? rowToJobFromRaw(row) : null;
+}
+
+function findPreferredSourceJobRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job | null {
+  return findActiveSourceJobRaw(sqlite, subjectId, sourceId)
+    ?? findLatestSourceJobRaw(sqlite, subjectId, sourceId);
 }
 
 function insertRetryingEvent(sqlite: RawDb, jobId: string): void {
