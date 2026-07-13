@@ -2,7 +2,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Bookmark, Check } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
-import { normalizeSlug } from '@/lib/slug';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,10 +11,9 @@ import type { Citation } from './message-list';
 interface SaveToWikiButtonProps {
   answer: string;
   citations: Citation[];
-  onSaved?: (slug: string) => void;
 }
 
-export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButtonProps) {
+export function SaveToWikiButton({ answer, citations }: SaveToWikiButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +54,6 @@ export function SaveToWikiButton({ answer, citations, onSaved }: SaveToWikiButto
       if (data.jobId) {
         setSavedJobId(data.jobId);
         window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
-        onSaved?.(normalizeSlug(title));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');

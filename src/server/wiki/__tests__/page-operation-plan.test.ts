@@ -65,7 +65,7 @@ beforeEach(() => {
 describe('页面操作 planner', () => {
   it('create 只生成稳定 changeset/diff，不 apply', async () => {
     const plan = await planPageCreate('job-1', subject, {
-      title: 'Page A', body: 'new body', effectiveAt,
+      title: 'Page A', body: 'new body', tags: ['query-answer'], effectiveAt,
     });
 
     expect(plan).toMatchObject({
@@ -76,6 +76,8 @@ describe('页面操作 planner', () => {
     expect(plan.diff).toContain('--- /dev/null');
     expect(plan.diff).toContain('+++ b/wiki/general/page-a-2.md');
     expect(plan.diff).toContain('2026-07-11T00:00:00.000Z');
+    expect(plan.diff).toContain('query-answer');
+    expect(plan.diff).toContain('sources: []');
     expect(txMocks.applyChangeset).not.toHaveBeenCalled();
   });
 

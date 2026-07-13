@@ -85,14 +85,20 @@ export async function planCreatePageInSubject(
   });
 }
 
+export interface CreatePageCommandOptions {
+  /** worker 调用传真实 job ID；同步工具调用省略时生成独立 operation 关联 ID。 */
+  jobId?: string;
+}
+
 /** 同步新建一页（Saga）+ 触发向量回填；title 派生唯一 slug（永不冲突）。 */
 export async function createPageInSubject(
   subject: Subject,
   input: { title: string; body: string; summary?: string; tags?: string[] },
+  options: CreatePageCommandOptions = {},
 ): Promise<{ createdSlug: string }> {
   const title = input.title?.trim();
   if (!title) throw new Error('A page title is required.');
-  const result = await executePageCreate(crypto.randomUUID(), subject, {
+  const result = await executePageCreate(options.jobId ?? crypto.randomUUID(), subject, {
     ...input,
     title,
     body: input.body ?? '',
