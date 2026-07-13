@@ -192,7 +192,7 @@ export async function POST(request: NextRequest) {
       // purge 事务失败会回滚 epoch；失败路径仍提升一次，使维护前旧 lease 失效。
       bumpSubjectEpoch(subject.id);
     }
-    throw failure;
+    return maintenanceErrorResponse(failure);
   } finally {
     try {
       // 补偿未完成时保留 resetting + 旧 epoch，由启动恢复读 manifest 决定。

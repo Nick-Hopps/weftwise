@@ -7,6 +7,7 @@
 1. 把用户上传的文件（md / html / pdf / txt）解析为统一的 `ParsedSource`。
 2. 将原始内容持久化到 `vault/sources/` 并在 `vault/.llm-wiki/sources/*.json` 记录元数据。
 3. 向 ingest 任务提供 `content + 缓冲区` 的访问接口。
+4. 为通用 URL Ingest 与 Research 候选导入提供同一套 SSRF-safe 抓取边界。
 
 ## 入口与启动
 
@@ -68,6 +69,13 @@ updateSourcePageLinks(sourceId, pageSlugs)    // 写 page_sources 多对多
 updateSourceChunks(sourceId, chunks)          // chunk 持久化到 metadata sidecar
 ```
 
+### `url-safety.ts` / `url-fetcher.ts`
+
+- 仅允许无 userinfo 的 `http:` / `https:`；拒绝 localhost、`.local`、`.internal`、非公网 IPv4、非 `2000::/3` 公网 IPv6及特殊/文档保留段。
+- 每次请求及每一跳重定向都解析全部 DNS 答案；任一地址非公网即拒绝。socket 固定连接首个已验证 IP，HTTPS 仍使用原 hostname 做 SNI 与证书校验，关闭 DNS rebinding 窗口。
+- 重定向手动处理，最多 5 跳；全链路共享 10 秒超时，只接受 identity 编码的文本响应，并同时用 `Content-Length` 和流式累计限制 5MB。
+- Research coordinator 只从服务端候选快照读取 URL，复用 `fetchUrlSource()`；客户端批准请求不能提交或覆盖 URL。
+
 ## 关键依赖与配置
 
 - `pdf-parse` —— PDF 二进制解析（只能在 Node 环境运行；Route Handler 必须 `runtime='nodejs'`）。
@@ -110,7 +118,8 @@ src/server/sources/
 ├── source-cleaner.ts                # 按来源预清洗（PDF 清洗链）
 ├── source-chunker.ts                # 结构感知递归切分器（token 计长）
 ├── source-store.ts                  # 持久化 + 去重 + page_sources
-├── url-fetcher.ts                   # URL 协议/超时10s/5MB/content-type 守卫
+├── url-safety.ts                    # URL/DNS/IP 公网判定与固定目标解析
+├── url-fetcher.ts                   # 逐跳 SSRF 校验 + IP 固定 + 超时/5MB/content-type 守卫
 ├── url-ingest.ts                    # URL 列表校验 ≤20 + allSettled 编排
 └── parsers/
     ├── markdown-parser.ts
@@ -122,6 +131,7 @@ src/server/sources/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Phase 2C 收紧 URL 出网边界：逐跳手动重定向、每跳全 DNS 公网校验、固定已验证 IP、防 DNS rebinding，并由通用 URL Ingest 与 Research 候选导入共用；总超时/5MB/文本类型守卫保留 |
 | 2026-04-22 | 初始化 |
 | 2026-07-03 | Ingest 支持 URL 输入：新增 `url-fetcher.ts`（fetch + 协议/超时10s/5MB 守卫）+ `url-ingest.ts`（validateUrlList≤20 + ingestUrlBatch allSettled 编排）；`src/lib/url-list.ts` 工具（URL 格式化与校验）；`POST /api/ingest` route 加 urls 分支；workbench 加 URL tab；parser-registry / source-store 零改动。|
 
