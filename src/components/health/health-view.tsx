@@ -26,9 +26,11 @@ import {
   extractPostconditionReport,
 } from './postcondition-summary';
 import {
+  activeJobsHydrationBusyActions,
   actionFindingIds,
   createActionGate,
   createLintRerunQueue,
+  fetchActiveHealthJobs,
   healthTerminalInvalidationKeys,
   isHealthOriginCurrent,
   persistedBusyActions,
@@ -119,26 +121,15 @@ export function HealthView() {
   }
 
   const { data, isLoading } = useLintSummary(allSubjects);
-  const { data: activeJobs = [] } = useQuery({
+  const {
+    data: activeJobs = [],
+    isSuccess: activeJobsReady,
+    isError: activeJobsHydrationError,
+    isFetching: activeJobsFetching,
+    refetch: refetchActiveJobs,
+  } = useQuery({
     queryKey: ['health-active-jobs', originSubjectId],
-    queryFn: async (): Promise<Job[]> => {
-      const encodedSubjectId = encodeURIComponent(originSubjectId);
-      const [runningResponse, pendingResponse] = await Promise.all([
-        apiFetch(`/api/jobs?status=running&subjectId=${encodedSubjectId}`),
-        apiFetch(`/api/jobs?status=pending&subjectId=${encodedSubjectId}`),
-      ]);
-      if (!runningResponse.ok || !pendingResponse.ok) {
-        throw new Error('Active jobs request failed');
-      }
-      const [running, pending] = await Promise.all([
-        runningResponse.json(),
-        pendingResponse.json(),
-      ]);
-      return [
-        ...(Array.isArray(running) ? running as Job[] : []),
-        ...(Array.isArray(pending) ? pending as Job[] : []),
-      ];
-    },
+    queryFn: (): Promise<Job[]> => fetchActiveHealthJobs(originSubjectId, apiFetch),
     enabled: !allSubjects && !!originSubjectId,
     refetchInterval: 5_000,
     staleTime: 2_000,
@@ -156,13 +147,24 @@ export function HealthView() {
     () => data ? persistedBusyActions(data) : new Set<ExecutableRemediationAction>(),
     [data],
   );
-  const effectiveBusyActions = useMemo(
+  const hydrationBusyActions = useMemo(
+    () => activeJobsHydrationBusyActions(scope, originSubjectId, activeJobsReady),
+    [scope, originSubjectId, activeJobsReady],
+  );
+  const workflowBusyActions = useMemo(
     () => new Set([
       ...snapshotBusyActions,
       ...(Object.keys(recoverableJobs) as ExecutableRemediationAction[]),
       ...busyActions,
     ]),
     [snapshotBusyActions, recoverableJobs, busyActions],
+  );
+  const effectiveBusyActions = useMemo(
+    () => new Set([
+      ...hydrationBusyActions,
+      ...workflowBusyActions,
+    ]),
+    [hydrationBusyActions, workflowBusyActions],
   );
 
   function captureOrigin(): HealthOrigin {
@@ -321,13 +323,13 @@ export function HealthView() {
   const [curateJobId, setCurateJobId] = useState<string | null>(null);
   const [curatePostcondition, setCuratePostcondition] = useState<PostconditionReport | null>(null);
   const { status: curateStatus, events: curateEvents, latestMessage: curateMessage } = useJobStream(curateJobId);
-  const curating = effectiveBusyActions.has('curate');
+  const curating = workflowBusyActions.has('curate');
 
   const [fixJobId, setFixJobId] = useState<string | null>(null);
   const [fixSummary, setFixSummary] = useState<{ fixed: number; skipped: number; failed: number } | null>(null);
   const [fixPostcondition, setFixPostcondition] = useState<PostconditionReport | null>(null);
   const { status: fixStatus, events: fixEvents, latestMessage: fixMessage } = useJobStream(fixJobId);
-  const fixing = effectiveBusyActions.has('fix');
+  const fixing = workflowBusyActions.has('fix');
 
   useEffect(() => {
     const meta = actionJobMetaRef.current.curate;
@@ -425,7 +427,7 @@ export function HealthView() {
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
   const { status: researchStatus } = useJobStream(researchJobId);
-  const researching = effectiveBusyActions.has('research');
+  const researching = workflowBusyActions.has('research');
 
   function showResearchError(source: ResearchOrigin, message: string): void {
     if (source === 'remediation') setRemediationError(message);
@@ -809,7 +811,14 @@ export function HealthView() {
             intent="secondary"
             onClick={() => void runRemediation('curate', curateFindingIds)}
             loading={curating}
-            disabled={allSubjects || neverRun || curateFindingIds.length === 0 || running || fixing}
+            disabled={
+              allSubjects
+              || neverRun
+              || curateFindingIds.length === 0
+              || running
+              || fixing
+              || effectiveBusyActions.has('curate')
+            }
           >
             {!curating && <Wand2 className="h-3.5 w-3.5" />}
             Tidy structure
@@ -818,7 +827,14 @@ export function HealthView() {
             intent="secondary"
             onClick={() => void runRemediation('fix', fixFindingIds)}
             loading={fixing}
-            disabled={allSubjects || neverRun || fixFindingIds.length === 0 || running || curating}
+            disabled={
+              allSubjects
+              || neverRun
+              || fixFindingIds.length === 0
+              || running
+              || curating
+              || effectiveBusyActions.has('fix')
+            }
           >
             {!fixing && <Wrench className="h-3.5 w-3.5" />}
             Fix issues
@@ -827,7 +843,12 @@ export function HealthView() {
             intent="secondary"
             onClick={() => void runRemediation('research', researchFindingIds)}
             loading={researching}
-            disabled={allSubjects || neverRun || researchFindingIds.length === 0}
+            disabled={
+              allSubjects
+              || neverRun
+              || researchFindingIds.length === 0
+              || effectiveBusyActions.has('research')
+            }
           >
             {!researching && <Search className="h-3.5 w-3.5" />}
             Research gaps{researchFindingIds.length > 0 ? ` (${researchFindingIds.length})` : ''}
@@ -841,6 +862,7 @@ export function HealthView() {
           onKeyDown={blockImeEnterSubmit}
           onSubmit={(e) => {
             e.preventDefault();
+            if (effectiveBusyActions.has('research')) return;
             const t = topicInput.trim();
             if (!t) return;
             void startResearch(t, 'manual');
@@ -857,7 +879,7 @@ export function HealthView() {
             intent="secondary"
             type="submit"
             loading={researching}
-            disabled={researching || !topicInput.trim()}
+            disabled={effectiveBusyActions.has('research') || !topicInput.trim()}
           >
             {!researching && <Search className="h-3.5 w-3.5" />}
             Research
@@ -883,6 +905,20 @@ export function HealthView() {
         </div>
       )}
 
+      {!allSubjects && activeJobsHydrationError && (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
+          <span>Active jobs hydration failed. Actions stay disabled; retrying automatically.</span>
+          <Button
+            intent="secondary"
+            size="sm"
+            loading={activeJobsFetching}
+            onClick={() => void refetchActiveJobs()}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+
       {recentTerminalCount > 0 && (
         <div className={`rounded-md border px-3 py-2 text-sm ${recentBannerClass}`}>
           Recently verified: {recentOutcomeSummary.fixed} fixed
@@ -902,7 +938,7 @@ export function HealthView() {
 
       {!allSubjects && (
         <ResearchBacklogSection
-          researchBusy={researching}
+          researchBusy={effectiveBusyActions.has('research')}
           onResearch={(topic) => startResearch(topic, 'backlog')}
         />
       )}

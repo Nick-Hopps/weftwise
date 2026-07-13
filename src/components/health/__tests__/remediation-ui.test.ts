@@ -9,10 +9,12 @@ import type {
   RemediationPlan,
 } from '@/lib/contracts';
 import {
+  activeJobsHydrationBusyActions,
   actionFindingIds,
   actionForFinding,
   createActionGate,
   createLintRerunQueue,
+  fetchActiveHealthJobs,
   isHealthOriginCurrent,
   nextDeleteArmed,
   readResearchCandidates,
@@ -239,6 +241,40 @@ describe('Health remediation UI helper', () => {
     });
 
     expect([...actions]).toEqual(['fix']);
+  });
+
+  it('active jobs hydration 未成功前锁住四类 action，成功后释放', () => {
+    expect([...activeJobsHydrationBusyActions('subject', 'subject-1', false)]).toEqual([
+      'fix',
+      'curate',
+      'research',
+      're-ingest',
+    ]);
+    expect([...activeJobsHydrationBusyActions('subject', 'subject-1', true)]).toEqual([]);
+    expect([...activeJobsHydrationBusyActions('all', 'subject-1', false)]).toEqual([]);
+  });
+
+  it('active jobs 严格按 pending 后 running 顺序读取', async () => {
+    const events: string[] = [];
+    const jobs = await fetchActiveHealthJobs('subject / 1', async (url) => {
+      events.push(`fetch:${url}`);
+      const status = url.includes('status=pending') ? 'pending' : 'running';
+      return {
+        ok: true,
+        async json() {
+          events.push(`json:${status}`);
+          return [job(`${status}-job`, 'fix', {}, '2026-07-13T01:00:00Z')];
+        },
+      };
+    });
+
+    expect(events).toEqual([
+      'fetch:/api/jobs?status=pending&subjectId=subject%20%2F%201',
+      'json:pending',
+      'fetch:/api/jobs?status=running&subjectId=subject%20%2F%201',
+      'json:running',
+    ]);
+    expect(jobs.map((item) => item.id)).toEqual(['pending-job', 'running-job']);
   });
 
   it('Delete 在途时禁用同一行的 Re-ingest action', () => {

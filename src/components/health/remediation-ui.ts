@@ -21,6 +21,20 @@ export interface RecoverableHealthJob {
   createdAt: string;
 }
 
+type ActiveJobsResponse = {
+  ok: boolean;
+  json(): Promise<unknown>;
+};
+
+type ActiveJobsFetch = (url: string) => Promise<ActiveJobsResponse>;
+
+const EXECUTABLE_REMEDIATION_ACTIONS: readonly ExecutableRemediationAction[] = [
+  'fix',
+  'curate',
+  'research',
+  're-ingest',
+];
+
 export function isHealthOriginCurrent(current: HealthOrigin, candidate: HealthOrigin): boolean {
   return current.generation === candidate.generation
     && current.subjectId === candidate.subjectId
@@ -63,6 +77,41 @@ export function persistedBusyActions(
     }
   }
   return busy;
+}
+
+/** subject 的 active jobs 首次成功 hydrate 前，所有可执行入口保持安全禁用。 */
+export function activeJobsHydrationBusyActions(
+  scope: HealthScope,
+  subjectId: string,
+  ready: boolean,
+): Set<ExecutableRemediationAction> {
+  return scope === 'subject' && !!subjectId && !ready
+    ? new Set(EXECUTABLE_REMEDIATION_ACTIONS)
+    : new Set();
+}
+
+/** 先读 pending 再读 running，覆盖轮询间 job 从 pending 被 claim 的窗口。 */
+export async function fetchActiveHealthJobs(
+  subjectId: string,
+  request: ActiveJobsFetch,
+): Promise<Job[]> {
+  const encodedSubjectId = encodeURIComponent(subjectId);
+  const pendingResponse = await request(
+    `/api/jobs?status=pending&subjectId=${encodedSubjectId}`,
+  );
+  if (!pendingResponse.ok) throw new Error('Active jobs request failed');
+  const pending = await pendingResponse.json();
+
+  const runningResponse = await request(
+    `/api/jobs?status=running&subjectId=${encodedSubjectId}`,
+  );
+  if (!runningResponse.ok) throw new Error('Active jobs request failed');
+  const running = await runningResponse.json();
+
+  return [
+    ...(Array.isArray(pending) ? pending as Job[] : []),
+    ...(Array.isArray(running) ? running as Job[] : []),
+  ];
 }
 
 export function selectRecoverableHealthJobs(
