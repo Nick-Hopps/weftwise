@@ -11,11 +11,13 @@ import {
   actionFindingIds,
   actionForFinding,
   createActionGate,
+  createLintRerunQueue,
   isHealthOriginCurrent,
   nextDeleteArmed,
   readResearchCandidates,
   recentOutcomeBannerTone,
   recentOutcomeCounts,
+  persistedBusyActions,
   researchBacklogPatchBody,
 } from '../remediation-ui';
 import { FindingRow } from '../finding-row';
@@ -24,6 +26,15 @@ vi.mock('@/components/ui/tag', async () => {
   const ReactModule = await import('react');
   return {
     Tag: ({ children }: React.PropsWithChildren) => ReactModule.createElement('span', null, children),
+  };
+});
+
+vi.mock('@/components/ui/button', async () => {
+  const ReactModule = await import('react');
+  return {
+    Button: ({ children, disabled }: React.PropsWithChildren<{ disabled?: boolean }>) =>
+      ReactModule.createElement('button', { disabled }, children),
+    buttonVariants: () => '',
   };
 });
 
@@ -184,5 +195,69 @@ describe('Health remediation UI helper', () => {
       status: 'dismissed',
       subjectId: 'subject-origin',
     });
+  });
+
+  it('刷新恢复 busy 只消费 queued plan 的服务端可执行 action', () => {
+    const queuedFix = plan(broken.id, [{ type: 'fix', label: 'Fix', destructive: false }]);
+    const finishedResearch = {
+      ...plan(gap.id, [{ type: 'research', label: 'Research', destructive: false }]),
+      status: 'fixed' as const,
+    };
+    const queuedReadonly = { ...plan(readonly.id, []), status: 'queued' as const };
+    const actions = persistedBusyActions({
+      ...snapshot,
+      remediations: {
+        [broken.id]: queuedFix,
+        [gap.id]: finishedResearch,
+        [readonly.id]: queuedReadonly,
+      },
+    });
+
+    expect([...actions]).toEqual(['fix']);
+  });
+
+  it('Delete 在途时禁用同一行的 Re-ingest action', () => {
+    const orphanSource = {
+      ...finding('source', 'orphan-source'),
+      sourceId: 'source-1',
+      sourceFilename: 'source.md',
+    };
+    const html = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: orphanSource,
+      plan: {
+        findingId: orphanSource.id,
+        workflow: 're-ingest',
+        status: 'queued',
+        actions: [{ type: 're-ingest', label: 'Retry ingest', destructive: false }],
+        reason: '重新摄入来源',
+      },
+      deleting: true,
+      onAction: () => undefined,
+      onDeleteSource: () => undefined,
+    }));
+
+    expect(html).toContain('<button disabled="">Retry ingest</button>');
+  });
+
+  it('lint busy 时同 origin 只排队一次，并在终态 drain', () => {
+    const queue = createLintRerunQueue();
+    const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
+
+    expect(queue.request(origin)).toBe('start');
+    expect(queue.request(origin)).toBe('queued');
+    expect(queue.request(origin)).toBe('queued');
+    expect(queue.finish(origin, origin)).toEqual(origin);
+    expect(queue.request(origin)).toBe('start');
+  });
+
+  it('lint pending rerun 在 current origin 改变后丢弃', () => {
+    const queue = createLintRerunQueue();
+    const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
+    const nextOrigin = { generation: 2, subjectId: 'subject-2', scope: 'subject' as const };
+
+    expect(queue.request(origin)).toBe('start');
+    expect(queue.request(origin)).toBe('queued');
+    expect(queue.request(nextOrigin)).toBe('ignored');
+    expect(queue.finish(origin, nextOrigin)).toBeNull();
   });
 });

@@ -43,6 +43,47 @@ export function createActionGate() {
   };
 }
 
+export function persistedBusyActions(
+  snapshot: Pick<HealthSnapshot, 'findings' | 'remediations'>,
+): Set<ExecutableRemediationAction> {
+  const busy = new Set<ExecutableRemediationAction>();
+  for (const finding of snapshot.findings) {
+    const plan = snapshot.remediations[finding.id];
+    if (plan?.status !== 'queued') continue;
+    for (const action of plan.actions) {
+      if (action.type !== 'review-source') busy.add(action.type);
+    }
+  }
+  return busy;
+}
+
+export function createLintRerunQueue() {
+  let active: HealthOrigin | null = null;
+  let pending: HealthOrigin | null = null;
+  return {
+    request(origin: HealthOrigin): 'start' | 'queued' | 'ignored' {
+      if (!active) {
+        active = origin;
+        return 'start';
+      }
+      if (!isHealthOriginCurrent(active, origin)) return 'ignored';
+      pending = origin;
+      return 'queued';
+    },
+    finish(origin: HealthOrigin, currentOrigin: HealthOrigin): HealthOrigin | null {
+      if (!active || !isHealthOriginCurrent(active, origin)) return null;
+      active = null;
+      const next = pending;
+      pending = null;
+      return next && isHealthOriginCurrent(next, currentOrigin) ? next : null;
+    },
+    reset(): void {
+      active = null;
+      pending = null;
+    },
+  };
+}
+
 /** 只读取服务端计划；未知 finding 或 action 不在客户端推断替代动作。 */
 export function actionForFinding(
   snapshot: HealthSnapshot,
