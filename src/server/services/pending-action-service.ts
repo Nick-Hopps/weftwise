@@ -228,6 +228,10 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
       const workflow = await planReenrich(subject.id, String(payload.slug));
       return { preview: workflow, pagePlan: null, effectiveAt };
     }
+    // Task 6 才会接入新 operation 的持久化 payload 与 plan/apply；当前先保持显式拒绝。
+    case 'metadata-patch':
+    case 'link-ensure':
+      throw new Error(`Pending action operation "${record.operation}" is not implemented yet.`);
   }
   return {
     preview: {
