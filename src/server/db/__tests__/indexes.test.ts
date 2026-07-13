@@ -168,22 +168,30 @@ describe('热路径查询走索引（非全表扫描）', () => {
     expect(detail).not.toMatch(/SCAN jobs\b/);
   });
 
-  it('同源 ingest active 优先查询走 source+status 表达式索引', async () => {
+  it('同源 ingest 全量 active 与任一 active 查询都走 source+status 表达式索引', async () => {
     const db = await bootstrap();
-    const detail = planDetail(
-      db,
-      `SELECT * FROM jobs
+    const activeSql = `SELECT * FROM jobs
        WHERE subject_id = ? AND type = 'ingest'
          AND CASE WHEN json_valid(params_json)
            THEN json_extract(params_json, '$.sourceId') END = ?
-         AND status IN ('pending', 'running')
-       LIMIT 1`,
+         AND status IN ('pending', 'running')`;
+    const allDetail = planDetail(
+      db,
+      activeSql,
+      'general',
+      'source-1',
+    );
+    const oneDetail = planDetail(
+      db,
+      `${activeSql} LIMIT 1`,
       'general',
       'source-1',
     );
 
-    expect(detail).toMatch(/jobs_subject_ingest_source_status_created_id_idx/);
-    expect(detail).not.toMatch(/SCAN jobs\b/);
+    for (const detail of [allDetail, oneDetail]) {
+      expect(detail).toMatch(/jobs_subject_ingest_source_status_created_id_idx/);
+      expect(detail).not.toMatch(/SCAN jobs\b/);
+    }
   });
 
   it('pending_actions 按会话恢复与按状态过期清理均走索引', async () => {

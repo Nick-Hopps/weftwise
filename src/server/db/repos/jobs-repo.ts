@@ -86,23 +86,27 @@ export function reingestSourceAtomic(
 ): AtomicSourceReingestResult {
   const sqlite = getRawDb();
   const tx = sqlite.transaction((): AtomicSourceReingestResult => {
-    const previous = findPreferredSourceJobRaw(
+    const activeJobs = findActiveSourceJobsRaw(
       sqlite,
       input.subjectId,
       input.sourceId,
     );
-
-    if (
-      previous
-      && (previous.status === 'pending' || previous.status === 'running')
-    ) {
+    if (activeJobs.length > 0) {
+      const duplicate = input.isDuplicateInFlight
+        ? activeJobs.find(input.isDuplicateInFlight)
+        : undefined;
       return {
         kind: 'in-flight',
-        job: previous,
-        deduplicated: input.isDuplicateInFlight?.(previous) ?? false,
+        job: duplicate ?? activeJobs[0]!,
+        deduplicated: duplicate !== undefined,
       };
     }
 
+    const previous = findLatestSourceJobRaw(
+      sqlite,
+      input.subjectId,
+      input.sourceId,
+    );
     if (previous?.status === 'failed' && !isCancelledResult(previous.resultJson)) {
       const params = parseRecord(previous.paramsJson);
       if (!params) return { kind: 'conflict' };
@@ -663,6 +667,21 @@ function findActiveSourceJobRaw(
     LIMIT 1
   `).get(subjectId, sourceId) as JobRow | undefined;
   return row ? rowToJobFromRaw(row) : null;
+}
+
+function findActiveSourceJobsRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job[] {
+  const rows = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = 'ingest'
+      AND CASE WHEN json_valid(params_json)
+        THEN json_extract(params_json, '$.sourceId') END = ?
+      AND status IN ('pending', 'running')
+  `).all(subjectId, sourceId) as JobRow[];
+  return rows.map(rowToJobFromRaw);
 }
 
 function findPreferredSourceJobRaw(

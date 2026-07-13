@@ -667,6 +667,38 @@ describe('jobs-repo.reingestSourceAtomic', () => {
     expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(2);
   });
 
+  it('同源存在多个 active 时优先复用不是索引首条的 exact-context job', async () => {
+    const { db, repo, context, params, isDuplicateInFlight } = await setupAtomicReingest();
+    const exact = repo.enqueueJob('ingest', params, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(exact.id);
+    const other = repo.enqueueJob('ingest', {
+      ...params,
+      remediationContext: {
+        ...context,
+        findingIds: ['b'.repeat(64)],
+      },
+    }, 's1');
+    db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
+      .run('2026-07-13T10:00:00.000Z', exact.id);
+    db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
+      .run('2026-07-13T11:00:00.000Z', other.id);
+
+    const result = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+      isDuplicateInFlight,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'in-flight',
+      deduplicated: true,
+      job: { id: exact.id },
+    });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(2);
+  });
+
   it('failed 重排与 job:retrying 事件同事务成功落库', async () => {
     const { repo, context, params, isDuplicateInFlight } = await setupAtomicReingest();
     const failed = repo.enqueueJob('ingest', {
