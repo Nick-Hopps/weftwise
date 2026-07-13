@@ -14,17 +14,19 @@ const mockGet = vi.fn();
 const mockListMsgs = vi.fn();
 const mockAppend = vi.fn();
 const mockTouch = vi.fn();
+const mockEnqueue = vi.fn();
+const mockRunQuery = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null, requireCsrf: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
   resolveSubjectFromRequest: (req: unknown, opts?: unknown) => mockResolve(req, opts),
 }));
-vi.mock('@/server/jobs/queue', () => ({ enqueue: vi.fn(() => ({ id: 'job-x' })) }));
+vi.mock('@/server/jobs/queue', () => ({ enqueue: (...a: unknown[]) => mockEnqueue(...a) }));
 vi.mock('@/server/services/query-service', () => ({
   streamAgenticQuery: (...a: unknown[]) => mockAgentic(...a),
   subjectHasContent: (...a: unknown[]) => mockHasContent(...a),
   accessedToContext: (...a: unknown[]) => mockAccessedToContext(...a),
-  runQuery: vi.fn(),
+  runQuery: (...a: unknown[]) => mockRunQuery(...a),
   recordCoverageGap: (...a: unknown[]) => mockRecordCoverageGap(...a),
   assessCoverageInBackground: (...a: unknown[]) => mockAssessCoverage(...a),
   NO_QUERY_CONTEXT_ANSWER: 'NO_CONTEXT',
@@ -90,6 +92,88 @@ beforeEach(() => {
   mockListMsgs.mockReturnValue([]);
   mockAppend.mockReset();
   mockTouch.mockReset();
+  mockEnqueue.mockReset().mockReturnValue({ id: 'job-x' });
+  mockRunQuery.mockReset();
+});
+
+describe('POST /api/query 保存到 Wiki', () => {
+  it('已有回答 save-only → 仅入队 subject-scoped job，并返回 202/jobId', async () => {
+    const citations = [{ pageSlug: 'page-a', excerpt: 'Excerpt A' }];
+
+    const res = await call({
+      saveAsPage: true,
+      pageTitle: 'Saved Answer',
+      answer: 'Answer body',
+      citations,
+      subjectId: 's1',
+    });
+
+    expect(res.status).toBe(202);
+    await expect(res.json()).resolves.toMatchObject({
+      jobId: 'job-x',
+      answer: 'Answer body',
+      citations,
+      subjectId: 's1',
+    });
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      'save-to-wiki',
+      {
+        answer: 'Answer body',
+        title: 'Saved Answer',
+        citations,
+        subjectId: 's1',
+      },
+      's1',
+    );
+    expect(mockRunQuery).not.toHaveBeenCalled();
+    expect(mockAgentic).not.toHaveBeenCalled();
+  });
+
+  it('question + saveAsPage → 用生成的 answer/citations 入队并返回 saveJobId', async () => {
+    const citations = [{ pageSlug: 'page-b', excerpt: 'Excerpt B' }];
+    mockRunQuery.mockResolvedValue({
+      answer: 'Generated answer',
+      citations,
+      savedAsPage: null,
+    });
+
+    const res = await call({
+      question: 'Generate an answer',
+      saveAsPage: true,
+      pageTitle: 'Generated Page',
+      subjectId: 's1',
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      answer: 'Generated answer',
+      citations,
+      saveJobId: 'job-x',
+      subjectId: 's1',
+    });
+    expect(mockRunQuery).toHaveBeenCalledWith(
+      'Generate an answer',
+      { id: 's1', slug: 'general' },
+      undefined,
+    );
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      'save-to-wiki',
+      {
+        answer: 'Generated answer',
+        title: 'Generated Page',
+        citations,
+        subjectId: 's1',
+      },
+      's1',
+    );
+  });
+
+  it('save-only 缺 answer 且缺 question → 400，不入队', async () => {
+    const res = await call({ saveAsPage: true, pageTitle: 'Incomplete', subjectId: 's1' });
+
+    expect(res.status).toBe(400);
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/query 流式持久化', () => {
