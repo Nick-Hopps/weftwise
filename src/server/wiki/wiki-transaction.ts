@@ -37,18 +37,37 @@ import type { Changeset, ChangesetEntry, Subject } from '@/lib/contracts';
 export function createChangeset(
   jobId: string,
   subject: Pick<Subject, 'id' | 'slug'>,
-  entries: ChangesetEntry[]
+  entries: ChangesetEntry[],
+  mutationEpoch: number | null = null,
 ): Changeset {
   return {
     id: randomUUID(),
     jobId,
     subjectId: subject.id,
     subjectSlug: subject.slug,
+    mutationEpoch,
     entries,
     preHead: '',
     postHead: null,
     status: 'pending',
   };
+}
+
+/**
+ * 同步页面写在读取现状前领取 epoch；reset/delete 即使排在其后，也会在真正
+ * apply 时因 epoch 不匹配而拒绝这份旧计划。
+ */
+export function captureSubjectMutationEpoch(subjectId: string): number {
+  const state = getRawDb().prepare(`
+    SELECT maintenance_state, mutation_epoch FROM subjects WHERE id = ?
+  `).get(subjectId) as {
+    maintenance_state: string;
+    mutation_epoch: number;
+  } | undefined;
+  if (!state || state.maintenance_state !== 'active') {
+    throw new SubjectMutationUnavailableError(subjectId);
+  }
+  return state.mutation_epoch;
 }
 
 /**
@@ -207,6 +226,15 @@ export class ActionStalePreviewError extends Error {
   }
 }
 
+export class SubjectMutationUnavailableError extends Error {
+  readonly code = 'SUBJECT_MUTATION_UNAVAILABLE' as const;
+
+  constructor(readonly subjectId: string) {
+    super('Subject no longer exists or is under maintenance. Refresh before writing.');
+    this.name = 'SubjectMutationUnavailableError';
+  }
+}
+
 export async function applyChangeset(
   changeset: Changeset,
   sourceOps?: SourceLinkOps,
@@ -221,6 +249,22 @@ export async function applyChangeset(
     }
 
     const db = getRawDb();
+    const subjectState = db.prepare(`
+      SELECT maintenance_state, mutation_epoch FROM subjects WHERE id = ?
+    `).get(changeset.subjectId) as {
+      maintenance_state: string;
+      mutation_epoch: number;
+    } | undefined;
+    if (
+      !subjectState
+      || subjectState.maintenance_state !== 'active'
+      || (
+        changeset.mutationEpoch != null
+        && subjectState.mutation_epoch !== changeset.mutationEpoch
+      )
+    ) {
+      throw new SubjectMutationUnavailableError(changeset.subjectId);
+    }
     const operationId = changeset.id;
     db
       .prepare(

@@ -16,7 +16,12 @@ vi.mock('../../config/env', () => ({
   getConfig: () => ({ vaultPath: configMock.vaultPath }),
 }));
 
-import { acquireVaultLock, isStaleLock } from '../vault-mutex';
+import {
+  acquireVaultLock,
+  inspectVaultLock,
+  isStaleLock,
+  tryAcquireVaultRecoveryLock,
+} from '../vault-mutex';
 
 let tmpDir: string;
 
@@ -70,6 +75,19 @@ describe('isStaleLock 判定矩阵', () => {
 
   it('④ 进程不存活且 mtime 超 3×心跳 → 视为悬挂可夺锁', () => {
     expect(isStaleLock(fakeLockFile(DEAD_PID, 5000), TUNING)).toBe(true);
+  });
+});
+
+describe('inspectVaultLock', () => {
+  it('新鲜锁即使 PID 在本 namespace 不可见也保守视为 active', () => {
+    expect(inspectVaultLock()).toEqual({ active: false, ownerPid: null });
+    fakeLockFile(DEAD_PID, 500);
+    expect(inspectVaultLock()).toEqual({ active: true, ownerPid: DEAD_PID });
+  });
+
+  it('超过硬上限的锁不再阻止崩溃恢复', () => {
+    fakeLockFile(process.pid, 31 * 60 * 1000);
+    expect(inspectVaultLock()).toEqual({ active: false, ownerPid: null });
   });
 });
 
@@ -134,6 +152,23 @@ describe('acquireVaultLock 心跳续租', () => {
 
     // 等待若干心跳周期，确认没有残留定时器把已删除的文件重新 touch。
     await new Promise((r) => setTimeout(r, 60));
+    expect(fs.existsSync(lockFilePath())).toBe(false);
+  });
+});
+
+describe('recovery lock 所有权', () => {
+  it('旧 owner 在 stale takeover 后 release 不会删除新 owner 的锁', () => {
+    const releaseOld = tryAcquireVaultRecoveryLock();
+    expect(releaseOld).not.toBeNull();
+    const old = new Date(Date.now() - 31 * 60 * 1000);
+    fs.utimesSync(lockFilePath(), old, old);
+
+    const releaseNew = tryAcquireVaultRecoveryLock();
+    expect(releaseNew).not.toBeNull();
+
+    releaseOld?.();
+    expect(fs.existsSync(lockFilePath())).toBe(true);
+    releaseNew?.();
     expect(fs.existsSync(lockFilePath())).toBe(false);
   });
 });

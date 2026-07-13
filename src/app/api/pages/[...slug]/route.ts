@@ -7,6 +7,7 @@ import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import {
   applyChangeset,
+  captureSubjectMutationEpoch,
   createChangeset,
   validateChangeset,
 } from '@/server/wiki/wiki-transaction';
@@ -95,6 +96,7 @@ export async function PUT(
   const resolution = resolveSubjectFromRequest(request, { body });
   if (resolution.error) return resolution.error;
   const { subject } = resolution;
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
 
   const { slug: slugParts } = await params;
   const slug = slugParts.join('/');
@@ -146,7 +148,7 @@ export async function PUT(
     }
   }
 
-  const changeset = createChangeset(crypto.randomUUID(), subject, entries);
+  const changeset = createChangeset(crypto.randomUUID(), subject, entries, mutationEpoch);
 
   const validation = validateChangeset(changeset);
   if (!validation.valid) {

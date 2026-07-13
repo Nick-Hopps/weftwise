@@ -30,9 +30,13 @@ vi.mock('../indexer', () => indexerMocks);
 // 假的 better-sqlite3 句柄：prepare().run 记录调用；transaction(fn) 直接返回 fn
 const dbMocks = vi.hoisted(() => {
   const run = vi.fn();
-  const prepare = vi.fn(() => ({ run }));
+  const get = vi.fn<() => { maintenance_state: string; mutation_epoch: number } | undefined>(
+    () => ({ maintenance_state: 'active', mutation_epoch: 0 }),
+  );
+  const prepare = vi.fn(() => ({ run, get }));
   return {
     run,
+    get,
     prepare,
     getRawDb: vi.fn(() => ({
       prepare,
@@ -95,6 +99,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   // clearAllMocks 不会重置 mockImplementation，这里显式恢复默认实现，避免用例间泄漏
   dbMocks.run.mockImplementation(() => undefined);
+  dbMocks.get.mockReturnValue({ maintenance_state: 'active', mutation_epoch: 0 });
   indexerMocks.indexTouchedPages.mockImplementation(() => undefined);
   pagesRepoMocks.getAllPages.mockReturnValue([{ slug: 'known-page', title: 'Known Page' }]);
   pagesRepoMocks.getTitleToSlugMap.mockReturnValue(new Map([['Known Page', 'known-page']]));
@@ -294,6 +299,36 @@ describe('applyChangeset', () => {
       expect.stringContaining('[subject:general]'),
       ['wiki/general/a.md', 'wiki/general/old.md']
     );
+    expect(mutexMocks.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('锁内发现 Subject 已删除时拒绝写入并释放 vault 锁', async () => {
+    dbMocks.get.mockReturnValueOnce(undefined);
+    const cs = makeChangeset([
+      { action: 'create', path: 'wiki/general/a.md', content: VALID_CONTENT },
+    ]);
+
+    await expect(applyChangeset(cs)).rejects.toMatchObject({
+      code: 'SUBJECT_MUTATION_UNAVAILABLE',
+      subjectId: 's1',
+    });
+    expect(storeMocks.writeVaultFiles).not.toHaveBeenCalled();
+    expect(gitMocks.commitVaultChanges).not.toHaveBeenCalled();
+    expect(mutexMocks.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('锁内发现 mutation epoch 已变化时拒绝旧同步计划', async () => {
+    dbMocks.get.mockReturnValueOnce({ maintenance_state: 'active', mutation_epoch: 4 });
+    const cs = makeChangeset([
+      { action: 'update', path: 'wiki/general/a.md', content: VALID_CONTENT },
+    ], { mutationEpoch: 3 });
+
+    await expect(applyChangeset(cs)).rejects.toMatchObject({
+      code: 'SUBJECT_MUTATION_UNAVAILABLE',
+      subjectId: 's1',
+    });
+    expect(storeMocks.writeVaultFiles).not.toHaveBeenCalled();
+    expect(gitMocks.commitVaultChanges).not.toHaveBeenCalled();
     expect(mutexMocks.release).toHaveBeenCalledTimes(1);
   });
 

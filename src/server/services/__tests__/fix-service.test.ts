@@ -46,6 +46,7 @@ const pageOpsMock = vi.hoisted(() => ({
 }));
 vi.mock('@/server/wiki/page-ops', () => pageOpsMock);
 const txMock = vi.hoisted(() => ({
+  captureSubjectMutationEpoch: vi.fn(() => 0),
   createChangeset: vi.fn((id: string, s: { id: string; slug: string }, entries: unknown[]) => ({ id, subjectId: s.id, subjectSlug: s.slug, entries })),
   validateChangeset: vi.fn(() => ({ valid: true, errors: [] as string[], warnings: [] as string[] })),
   applyChangeset: vi.fn(async () => undefined),

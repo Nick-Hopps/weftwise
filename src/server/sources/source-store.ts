@@ -8,6 +8,8 @@ import type { Subject, SubjectId } from '@/lib/contracts';
 export interface SavedSourceResult {
   id: string;
   contentHash: string;
+  /** 本次调用是否创建了新的 canonical source 行。 */
+  created: boolean;
 }
 
 interface SourceMetadataFile {
@@ -42,57 +44,106 @@ export function saveRawSource(
   content: Buffer | string,
   extra?: { originUrl?: string },
 ): SavedSourceResult {
-  const rawDir = rawDirFor(subject.slug);
-  fs.mkdirSync(rawDir, { recursive: true });
-
   const safeFilename = path.basename(filename);
   if (!safeFilename || safeFilename === '.' || safeFilename === '..') {
     throw new Error(`Invalid filename: ${filename}`);
   }
+
+  const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
+  const contentHash = createHash('sha256').update(buf).digest('hex').slice(0, 16);
+  const existing = sourcesRepo.getSourceByIdentity(subject.id, contentHash, safeFilename);
+
+  const rawDir = rawDirFor(subject.slug);
+  fs.mkdirSync(rawDir, { recursive: true });
   const rawFilePath = path.join(rawDir, safeFilename);
   const resolved = path.resolve(rawFilePath);
   if (!resolved.startsWith(path.resolve(rawDir))) {
     throw new Error(`Filename escapes raw directory: ${filename}`);
   }
-  fs.writeFileSync(rawFilePath, content);
+  const rawExisted = fs.existsSync(rawFilePath);
+  const previousRaw = rawExisted ? fs.readFileSync(rawFilePath) : null;
+  let candidateMetaPath: string | null = null;
+  let sourceResolved = false;
+  let rawWriteAttempted = false;
+  try {
+    rawWriteAttempted = true;
+    fs.writeFileSync(rawFilePath, content);
+    if (existing) {
+      sourcesRepo.upsertSource({
+        ...existing,
+        parsedAt: null,
+      });
+      return { id: existing.id, contentHash, created: false };
+    }
 
-  const buf = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
-  const contentHash = createHash('sha256').update(buf).digest('hex').slice(0, 16);
+    const id = randomUUID();
+    const metaDir = sourcesMetaDirFor(subject.slug);
+    fs.mkdirSync(metaDir, { recursive: true });
+    candidateMetaPath = path.join(metaDir, `${id}.json`);
+    const metaContent: SourceMetadataFile = {
+      id,
+      subjectId: subject.id,
+      subjectSlug: subject.slug,
+      filename: safeFilename,
+      contentHash,
+      savedAt: new Date().toISOString(),
+      ...(extra?.originUrl ? { originUrl: extra.originUrl } : {}),
+    };
+    fs.writeFileSync(candidateMetaPath, JSON.stringify(metaContent, null, 2), 'utf-8');
 
-  const existing = sourcesRepo.getSourceByHash(subject.id, contentHash);
-  if (existing && path.basename(existing.filename) === safeFilename) {
-    sourcesRepo.upsertSource({
-      ...existing,
+    const candidate = {
+      id,
+      subjectId: subject.id,
+      filename: safeFilename,
+      contentHash,
       parsedAt: null,
-    });
-    return { id: existing.id, contentHash };
+      metadataJson: JSON.stringify(metaContent),
+    };
+    const winner = sourcesRepo.insertSourceOrGetWinner(candidate);
+    sourceResolved = true;
+    if (!winner.inserted) {
+      // 相同 raw 路径内容一致；只清理 loser 自己 UUID 命名的 sidecar。
+      try {
+        fs.rmSync(candidateMetaPath, { force: true });
+      } catch {
+        sourcesRepo.recordSourceSidecarCleanup({
+          loserId: id,
+          winnerId: winner.source.id,
+          subjectSlug: subject.slug,
+          filename: safeFilename,
+        });
+      }
+    }
+
+    return {
+      id: winner.source.id,
+      contentHash,
+      created: winner.inserted,
+    };
+  } catch (error) {
+    // winner 已确定后 raw 属于 canonical source，不能再用并发前快照覆盖。
+    if (sourceResolved) throw error;
+    try {
+      if (candidateMetaPath) fs.rmSync(candidateMetaPath, { force: true });
+    } catch {
+      // best-effort
+    }
+    if (rawWriteAttempted) restoreRawFile(rawFilePath, rawExisted, previousRaw);
+    throw error;
   }
+}
 
-  const id = randomUUID();
-  const metaDir = sourcesMetaDirFor(subject.slug);
-  fs.mkdirSync(metaDir, { recursive: true });
-  const metaFilePath = path.join(metaDir, `${id}.json`);
-  const metaContent: SourceMetadataFile = {
-    id,
-    subjectId: subject.id,
-    subjectSlug: subject.slug,
-    filename: safeFilename,
-    contentHash,
-    savedAt: new Date().toISOString(),
-    ...(extra?.originUrl ? { originUrl: extra.originUrl } : {}),
-  };
-  fs.writeFileSync(metaFilePath, JSON.stringify(metaContent, null, 2), 'utf-8');
-
-  sourcesRepo.upsertSource({
-    id,
-    subjectId: subject.id,
-    filename: safeFilename,
-    contentHash,
-    parsedAt: null,
-    metadataJson: JSON.stringify(metaContent),
-  });
-
-  return { id, contentHash };
+function restoreRawFile(
+  rawFilePath: string,
+  existed: boolean,
+  previous: Buffer | null,
+): void {
+  try {
+    if (existed && previous) fs.writeFileSync(rawFilePath, previous);
+    else fs.rmSync(rawFilePath, { force: true });
+  } catch {
+    // best-effort：保留原始 DB 异常作为主错误。
+  }
 }
 
 export function getSourceMetadata(id: string): Record<string, unknown> | null {
