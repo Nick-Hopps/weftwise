@@ -9,11 +9,16 @@
 try { process.loadEnvFile(); } catch { /* already loaded or unsupported */ }
 
 import { getDb, getRawDb } from './db/client';
-import { ensureVaultRepo } from './git/git-service';
+import { ensureVaultRepo, getVaultGit } from './git/git-service';
 import { startWorker, runningJobCount } from './jobs/worker';
 import * as queue from './jobs/queue';
 import { rebuildSearchIndex } from './wiki/indexer';
 import { recoverPendingOperation } from './wiki/recovery';
+import {
+  recoverInterruptedVaultMaintenance,
+} from './wiki/maintenance-files';
+import { acquireVaultLock } from './wiki/vault-mutex';
+import { reconcileSourceDedupSidecars } from './sources/source-dedup-cleanup';
 import type { Changeset } from '@/lib/contracts';
 
 import { join } from 'node:path';
@@ -66,6 +71,36 @@ async function main() {
 
   // Self-heal: if pages exist but FTS index is empty, rebuild it
   const sqlite = getRawDb();
+  while (!recoverInterruptedVaultMaintenance(sqlite)) {
+    log.warn('Vault maintenance recovery is waiting for the active lock or a readable manifest');
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+
+  // Git 初始化也是 vault 写操作；与 Web/Saga 共用同一跨进程锁。
+  const releaseVault = await acquireVaultLock();
+  try {
+    const pendingBeforeGitInit = sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM operations WHERE status = 'pending'
+    `).get() as { count: number };
+    if (pendingBeforeGitInit.count > 0) {
+      // 无 HEAD 时 ensureVaultRepo 会 `git add .`创建初始提交；若同时存在 pending
+      // operation，这会把崩溃残留页面误包进初始提交，因此必须先 fail-closed。
+      const existingHead = await getVaultGit()
+        .log({ maxCount: 1 })
+        .then((result) => result.latest?.hash ?? null)
+        .catch(() => null);
+      if (!existingHead) {
+        throw new Error(
+          `Vault 无可恢复 HEAD，但存在 ${pendingBeforeGitInit.count} 条 pending operation`,
+        );
+      }
+    }
+    await ensureVaultRepo();
+  } finally {
+    releaseVault();
+  }
+  log.info('Vault repository ready');
+
   const pageCount = (sqlite.prepare('SELECT COUNT(*) as n FROM pages').get() as { n: number }).n;
   const ftsCount = (sqlite.prepare('SELECT COUNT(*) as n FROM pages_fts').get() as { n: number }).n;
   if (pageCount > 0 && ftsCount === 0) {
@@ -86,25 +121,36 @@ async function main() {
   // write. Reconstruct the full Changeset (incl. subject metadata) and let
   // recoverPendingOperation() decide: roll forward / roll back / leave as an
   // orphan (see src/server/wiki/recovery.ts for the three-branch rationale).
-  const pendingOps = sqlite.prepare(
-    "SELECT * FROM operations WHERE status = 'pending'"
-  ).all() as Array<{
-    id: string;
-    job_id: string;
-    subject_id: string | null;
-    pre_head: string;
-    post_head: string | null;
-    changeset_json: string;
-    status: string;
-  }>;
   const subjectsRepo = await import('./db/repos/subjects-repo');
-  for (const op of pendingOps) {
-    if (!op.pre_head) continue;
-    try {
+  const releaseRecovery = await acquireVaultLock();
+  let dedupedSources = 0;
+  try {
+    const pendingOps = sqlite.prepare(
+      "SELECT * FROM operations WHERE status = 'pending'"
+    ).all() as Array<{
+      id: string;
+      job_id: string;
+      subject_id: string | null;
+      pre_head: string;
+      post_head: string | null;
+      changeset_json: string;
+      status: string;
+    }>;
+    for (const op of pendingOps) {
+      if (!op.pre_head) {
+        // applyChangeset 在写任何 vault 文件前就会回写 pre_head；空值只能是
+        // 更早的崩溃窗口，可直接终结，但不能静默 skip 留下 pending。
+        sqlite.prepare(`
+          UPDATE operations SET status = 'rolled-back' WHERE id = ?
+        `).run(op.id);
+        log.warn(`Marked pre-write operation ${op.id} as rolled-back (missing pre_head)`);
+        continue;
+      }
       const subject = op.subject_id ? subjectsRepo.getById(op.subject_id) : null;
       if (!subject) {
-        log.warn(`Skipping operation ${op.id}: subject ${op.subject_id} no longer exists`);
-        continue;
+        throw new Error(
+          `Cannot recover operation ${op.id}: subject ${op.subject_id} no longer exists`,
+        );
       }
       const changeset: Changeset = {
         id: op.id,
@@ -118,14 +164,30 @@ async function main() {
       };
       const outcome = await recoverPendingOperation(changeset);
       log.info(`Recovered pending operation ${op.id} (subject: ${subject.slug}): ${outcome}`);
-    } catch (err) {
-      log.error(`Failed to recover operation ${op.id}:`, err);
     }
-  }
 
-  // Ensure vault git repo exists
-  await ensureVaultRepo();
-  log.info('Vault repository ready');
+    const remainingPending = sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM operations WHERE status = 'pending'
+    `).get() as { count: number };
+    if (remainingPending.count > 0) {
+      throw new Error(
+        `Pending operation 恢复未完成，剩余 ${remainingPending.count} 条，拒绝启动 worker`,
+      );
+    }
+
+    // DB source 去重的 sidecar 补偿必须晚于 pending operation 恢复；
+    // 两者共用同一 vault 锁，防止 Web 写入在 index 检查与专用 commit 之间插入。
+    dedupedSources = await reconcileSourceDedupSidecars(
+      sqlite,
+      vaultPath(),
+      { vaultLockHeld: true },
+    );
+  } finally {
+    releaseRecovery();
+  }
+  if (dedupedSources > 0) {
+    log.info(`Reconciled ${dedupedSources} duplicate source sidecar(s)`);
+  }
 
   // Self-heal: 启动时为每个 subject 入队 embed-index 回填存量向量
   // （handler 未配置 embedding 时 no-op，永远安全）

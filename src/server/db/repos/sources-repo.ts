@@ -74,6 +74,86 @@ export function getSourceByHash(
   return row ? rowToSource(row) : null;
 }
 
+/** source 组合唯一身份的精确查询；写入去重不得只按 hash 猜测 filename。 */
+export function getSourceByIdentity(
+  subjectId: SubjectId,
+  contentHash: string,
+  filename: string,
+): Source | null {
+  const db = getDb();
+  const row = db
+    .select()
+    .from(sources)
+    .where(and(
+      eq(sources.subjectId, subjectId),
+      eq(sources.contentHash, contentHash),
+      eq(sources.filename, filename),
+    ))
+    .get();
+  return row ? rowToSource(row) : null;
+}
+
+/**
+ * 依赖 `(subject_id, content_hash, filename)` 唯一索引收敛并发写入。
+ * loser 返回 winner，调用方据此删除自己已创建的 sidecar。
+ */
+export function insertSourceOrGetWinner(source: Source): {
+  source: Source;
+  inserted: boolean;
+} {
+  const sqlite = getRawDb();
+  const result = sqlite.prepare(`
+    INSERT OR IGNORE INTO sources (
+      id, subject_id, filename, content_hash, parsed_at, metadata_json
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    source.id,
+    source.subjectId,
+    source.filename,
+    source.contentHash,
+    source.parsedAt,
+    source.metadataJson,
+  );
+
+  if (result.changes === 1) return { source, inserted: true };
+  const winner = getSourceByIdentity(
+    source.subjectId,
+    source.contentHash,
+    source.filename,
+  );
+  if (!winner) {
+    throw new Error('Source 唯一冲突后未找到 canonical winner');
+  }
+  return { source: winner, inserted: false };
+}
+
+/** 并发 loser sidecar 删除失败时持久化精确补偿记录，由 DB 启动维护重试。 */
+export function recordSourceSidecarCleanup(input: {
+  loserId: string;
+  winnerId: string;
+  subjectSlug: string;
+  filename: string;
+}): void {
+  const sqlite = getRawDb();
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS source_dedup_cleanup (
+      loser_id TEXT PRIMARY KEY NOT NULL,
+      winner_id TEXT NOT NULL,
+      subject_slug TEXT NOT NULL,
+      filename TEXT NOT NULL
+    )
+  `);
+  sqlite.prepare(`
+    INSERT INTO source_dedup_cleanup (
+      loser_id, winner_id, subject_slug, filename
+    ) VALUES (?, ?, ?, ?)
+    ON CONFLICT(loser_id) DO UPDATE SET
+      winner_id = excluded.winner_id,
+      subject_slug = excluded.subject_slug,
+      filename = excluded.filename
+  `).run(input.loserId, input.winnerId, input.subjectSlug, input.filename);
+}
+
 export function getSourcesForPage(
   subjectId: SubjectId,
   pageSlug: string

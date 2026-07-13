@@ -26,6 +26,7 @@ vi.mock('@/server/wiki/revert', () => ({
   buildRevertEntries: (...a: unknown[]) => mockBuildRevertEntries(...a),
 }));
 vi.mock('@/server/wiki/wiki-transaction', () => ({
+  captureSubjectMutationEpoch: () => 0,
   createChangeset: (...a: unknown[]) => mockCreateChangeset(...a),
   validateChangeset: (cs: unknown) => mockValidate(cs),
   applyChangeset: (cs: unknown) => mockApply(cs),

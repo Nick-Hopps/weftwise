@@ -16,6 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { getConfig } from '../config/env';
 
 type Release = () => void;
@@ -36,12 +37,28 @@ const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const STALE_HEARTBEAT_MULTIPLIER = 3;
 /** 无论进程是否"存活"（可能是 PID 复用），mtime 超过该硬上限一律视为悬挂 */
 const HARD_STALE_LOCK_MS = 30 * 60 * 1000;
+/** stale takeover/release 的原子 claim 最长保留时间。 */
+const CLAIM_STALE_MS = 30 * 60 * 1000;
 
 export interface VaultLockTuning {
   heartbeatIntervalMs?: number;
   staleHeartbeatMultiplier?: number;
   hardStaleLockMs?: number;
   retryIntervalMs?: number;
+}
+
+export interface VaultLockInspection {
+  active: boolean;
+  ownerPid: number | null;
+}
+
+function defaultTuning(): Required<VaultLockTuning> {
+  return {
+    heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+    staleHeartbeatMultiplier: STALE_HEARTBEAT_MULTIPLIER,
+    hardStaleLockMs: HARD_STALE_LOCK_MS,
+    retryIntervalMs: RETRY_INTERVAL_MS,
+  };
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -78,15 +95,164 @@ export function isStaleLock(file: string, tuning: Required<VaultLockTuning>): bo
   }
 }
 
-function touchLockFile(file: string): void {
+/**
+ * 供崩溃恢复保守判断当前锁是否仍有效。沿用 heartbeat + PID + hard cap 语义，
+ * 不能仅凭 process.kill：共享卷另一容器的活进程在本 PID namespace 中可能不可见。
+ */
+export function inspectVaultLock(): VaultLockInspection {
+  const file = lockFilePath();
+  if (claimInProgress(file)) return { active: true, ownerPid: null };
+  if (!fs.existsSync(file)) return { active: false, ownerPid: null };
+  if (isStaleLock(file, defaultTuning())) return { active: false, ownerPid: null };
   try {
+    const ownerPid = Number.parseInt(fs.readFileSync(file, 'utf8'), 10);
+    return {
+      active: true,
+      ownerPid: Number.isSafeInteger(ownerPid) && ownerPid > 0 ? ownerPid : null,
+    };
+  } catch {
+    // 文件新鲜但暂时不可读时保守视为活锁，禁止恢复正在进行的维护。
+    return { active: true, ownerPid: null };
+  }
+}
+
+function lockToken(): string {
+  return `${process.pid}:${randomUUID()}`;
+}
+
+function claimPath(file: string): string {
+  return `${file}.claim`;
+}
+
+/**
+ * claim 是 main lock 的 hard link：创建成功即同时锁定“我看到的这一代 inode”。
+ * 所有 acquire 在 claim 存在时禁止创建新 main lock，从而关闭 stale 判定到 unlink
+ * 之间删掉新 owner 锁的 TOCTOU 窗口。
+ */
+function claimInProgress(file: string): boolean {
+  const claim = claimPath(file);
+  try {
+    const age = Date.now() - fs.statSync(claim).ctimeMs;
+    if (age <= CLAIM_STALE_MS) return true;
+    fs.unlinkSync(claim);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
+}
+
+type ClaimResult = 'claimed' | 'busy' | 'missing';
+
+function tryClaimLockPath(file: string): ClaimResult {
+  if (claimInProgress(file)) return 'busy';
+  try {
+    fs.linkSync(file, claimPath(file));
+    return 'claimed';
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return 'missing';
+    if (code === 'EEXIST') return 'busy';
+    throw error;
+  }
+}
+
+function sameInode(left: string, right: string): boolean {
+  try {
+    const a = fs.statSync(left);
+    const b = fs.statSync(right);
+    return a.dev === b.dev && a.ino === b.ino;
+  } catch {
+    return false;
+  }
+}
+
+/** 只有成功 claim 了当前 inode 且二次 stale 校验仍成立时才删除。 */
+function reclaimStaleLock(
+  file: string,
+  tuning: Required<VaultLockTuning>,
+): boolean {
+  const claimed = tryClaimLockPath(file);
+  if (claimed === 'missing') return true;
+  if (claimed === 'busy') return false;
+  const claim = claimPath(file);
+  try {
+    if (!sameInode(file, claim) || !isStaleLock(file, tuning)) return false;
+    fs.unlinkSync(file);
+    return true;
+  } finally {
+    try {
+      fs.unlinkSync(claim);
+    } catch {
+      // best-effort；超时 claim 会被下一个竞争者清理。
+    }
+  }
+}
+
+/** release 同样先 claim inode 并复验 token，禁止旧 owner 删掉新锁。 */
+function releaseOwnedLock(file: string, token: string): void {
+  if (tryClaimLockPath(file) !== 'claimed') return;
+  const claim = claimPath(file);
+  try {
+    if (!sameInode(file, claim)) return;
+    if (fs.readFileSync(claim, 'utf-8') !== token) return;
+    fs.unlinkSync(file);
+  } catch {
+    // 锁已被 stale takeover 或外部清理时，旧 owner 不再动当前路径。
+  } finally {
+    try {
+      fs.unlinkSync(claim);
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+/**
+ * 启动恢复使用的非阻塞跨进程锁。与先 inspect 再恢复相比，O_EXCL 使
+ * “确认无写者”与“进入恢复”成为一个原子步骤，消除 TOCTOU 窗口。
+ */
+export function tryAcquireVaultRecoveryLock(): Release | null {
+  if (locked) return null;
+  const file = lockFilePath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  for (;;) {
+    if (claimInProgress(file)) return null;
+    const token = lockToken();
+    try {
+      const fd = fs.openSync(file, 'wx');
+      fs.writeSync(fd, token);
+      fs.closeSync(fd);
+      const heartbeat = setInterval(
+        () => touchOwnedLock(file, token),
+        HEARTBEAT_INTERVAL_MS,
+      );
+      heartbeat.unref();
+      return () => {
+        clearInterval(heartbeat);
+        releaseOwnedLock(file, token);
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (!isStaleLock(file, defaultTuning())) return null;
+      if (!reclaimStaleLock(file, defaultTuning())) return null;
+    }
+  }
+}
+
+function touchOwnedLock(file: string, token: string): void {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(file, 'r');
+    if (fs.readFileSync(fd, 'utf-8') !== token) return;
     const now = new Date();
-    fs.utimesSync(file, now, now);
+    fs.futimesSync(fd, now, now);
   } catch {
     // 心跳失败（如锁文件被外部删除）不抛进业务流，仅记录告警；
     // 下一轮持锁尝试自然会重建锁文件。
     // eslint-disable-next-line no-console
     console.warn('[vault-mutex] heartbeat failed to touch lock file:', file);
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
   }
 }
 
@@ -95,30 +261,30 @@ async function acquireFileLock(tuning: Required<VaultLockTuning>): Promise<() =>
   const file = lockFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
   for (;;) {
+    if (claimInProgress(file)) {
+      await new Promise((r) => setTimeout(r, tuning.retryIntervalMs));
+      continue;
+    }
+    const token = lockToken();
     try {
       const fd = fs.openSync(file, 'wx');
-      fs.writeSync(fd, String(process.pid));
+      fs.writeSync(fd, token);
       fs.closeSync(fd);
 
-      const heartbeat = setInterval(() => touchLockFile(file), tuning.heartbeatIntervalMs);
+      const heartbeat = setInterval(
+        () => touchOwnedLock(file, token),
+        tuning.heartbeatIntervalMs,
+      );
       heartbeat.unref();
 
       return () => {
         clearInterval(heartbeat);
-        try {
-          fs.unlinkSync(file);
-        } catch {
-          // 已被陈旧回收等情况删除 → 忽略
-        }
+        releaseOwnedLock(file, token);
       };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       if (isStaleLock(file, tuning)) {
-        try {
-          fs.unlinkSync(file);
-        } catch {
-          // 与其他等待者竞争删除 → 忽略，下轮重试
-        }
+        reclaimStaleLock(file, tuning);
         continue;
       }
       await new Promise((r) => setTimeout(r, tuning.retryIntervalMs));
@@ -134,11 +300,13 @@ async function acquireFileLock(tuning: Required<VaultLockTuning>): Promise<() =>
  * `tuning` 仅供测试注入更短的心跳/上限常量，生产调用不传即用默认值。
  */
 export function acquireVaultLock(tuning: VaultLockTuning = {}): Promise<Release> {
+  const defaults = defaultTuning();
   const resolvedTuning: Required<VaultLockTuning> = {
-    heartbeatIntervalMs: tuning.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS,
-    staleHeartbeatMultiplier: tuning.staleHeartbeatMultiplier ?? STALE_HEARTBEAT_MULTIPLIER,
-    hardStaleLockMs: tuning.hardStaleLockMs ?? HARD_STALE_LOCK_MS,
-    retryIntervalMs: tuning.retryIntervalMs ?? RETRY_INTERVAL_MS,
+    heartbeatIntervalMs: tuning.heartbeatIntervalMs ?? defaults.heartbeatIntervalMs,
+    staleHeartbeatMultiplier:
+      tuning.staleHeartbeatMultiplier ?? defaults.staleHeartbeatMultiplier,
+    hardStaleLockMs: tuning.hardStaleLockMs ?? defaults.hardStaleLockMs,
+    retryIntervalMs: tuning.retryIntervalMs ?? defaults.retryIntervalMs,
   };
 
   return new Promise<Release>((resolve, reject) => {

@@ -1,7 +1,21 @@
-import { describe, it, expect } from 'vitest';
-import { parseGitLog } from '../git-service';
+import { afterAll, describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  ensureVaultRepo,
+  getVaultGit,
+  parseGitLog,
+} from '../git-service';
 
 const US = '\x1f'; // unit separator，与 --pretty=format:%x1f 一致
+const previousVaultPath = process.env.VAULT_PATH;
+let vaultDir: string | null = null;
+
+afterAll(() => {
+  process.env.VAULT_PATH = previousVaultPath;
+  if (vaultDir) rmSync(vaultDir, { recursive: true, force: true });
+});
 
 describe('parseGitLog', () => {
   it('解析多条提交为 {sha,date,message}', () => {
@@ -29,5 +43,22 @@ describe('parseGitLog', () => {
   it('message 中的空格与标点保真', () => {
     const raw = `s1${US}2026-06-22T10:00:00Z${US}[subject:general] 拆分 A → B, C`;
     expect(parseGitLog(raw)[0].message).toBe('[subject:general] 拆分 A → B, C');
+  });
+
+  it('初始化 vault 时排除维护备份目录', async () => {
+    vaultDir = mkdtempSync(join(tmpdir(), 'git-service-vault-'));
+    process.env.VAULT_PATH = vaultDir;
+
+    await ensureVaultRepo();
+    const exclude = readFileSync(join(vaultDir, '.git', 'info', 'exclude'), 'utf-8');
+    expect(exclude.split(/\r?\n/)).toContain('.llm-wiki/maintenance/');
+
+    const maintenanceDir = join(vaultDir, '.llm-wiki', 'maintenance', 'pending');
+    mkdirSync(maintenanceDir, { recursive: true });
+    writeFileSync(join(maintenanceDir, 'manifest.json'), '{}');
+    const status = await getVaultGit().status();
+    expect(status.files.map((file) => file.path)).not.toContain(
+      '.llm-wiki/maintenance/pending/manifest.json',
+    );
   });
 });

@@ -22,7 +22,12 @@ import {
 import { rewriteBacklinkText } from './relink';
 import { serializeWikiDocument } from './markdown';
 import { readPageInSubject, scanWikiPages } from './wiki-store';
-import { applyChangeset, createChangeset, validateChangeset } from './wiki-transaction';
+import {
+  applyChangeset,
+  captureSubjectMutationEpoch,
+  createChangeset,
+  validateChangeset,
+} from './wiki-transaction';
 import { buildUnifiedDiff, type UnifiedDiffEntry } from './unified-diff';
 import {
   buildLinkEnsureEdit,
@@ -176,6 +181,7 @@ export async function planPageCreate(
     tags?: string[];
   } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ createdSlug: string }>> {
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
   const existing = new Set(pagesRepo.getAllPages(subject.id).map((page) => page.slug));
   const slug = deriveUniqueSlug(input.title, existing);
@@ -196,7 +202,7 @@ export async function planPageCreate(
   return finishPlan({
     operation: 'create',
     preHead,
-    changeset: createChangeset(jobId, subject, entries),
+    changeset: createChangeset(jobId, subject, entries, mutationEpoch),
     beforeByPath,
     summary: `创建页面 ${slug}`,
     resultHint: { createdSlug: slug },
@@ -214,6 +220,7 @@ async function planPageUpdateAtHead(
     tags?: string[];
   } & PagePlanMeta,
   preHead: string,
+  mutationEpoch: number,
   existingDoc?: WikiDocument,
 ): Promise<PlannedPageOperation<{ updatedSlug: string; referencesUpdated: number }>> {
   const doc = existingDoc ?? readPageInSubject(subject.slug, input.slug);
@@ -249,7 +256,7 @@ async function planPageUpdateAtHead(
   return finishPlan({
     operation: 'update',
     preHead,
-    changeset: createChangeset(jobId, subject, entries),
+    changeset: createChangeset(jobId, subject, entries, mutationEpoch),
     beforeByPath,
     summary: `更新页面 ${input.slug}`,
     resultHint: { updatedSlug: input.slug, referencesUpdated },
@@ -268,8 +275,9 @@ export async function planPageUpdate(
     tags?: string[];
   } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ updatedSlug: string; referencesUpdated: number }>> {
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
-  return planPageUpdateAtHead(jobId, subject, input, preHead);
+  return planPageUpdateAtHead(jobId, subject, input, preHead, mutationEpoch);
 }
 
 /**
@@ -282,6 +290,7 @@ export async function planPageMetadataPatch(
   input: MetadataPatchInput & PagePlanMeta,
 ): Promise<PlannedPageOperation<MetadataPatchResult>> {
   assertCanonicalPageSlug(input.slug, 'slug');
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
@@ -316,7 +325,7 @@ export async function planPageMetadataPatch(
   return finishPlan({
     operation: 'metadata-patch',
     preHead,
-    changeset: createChangeset(jobId, subject, entries),
+    changeset: createChangeset(jobId, subject, entries, mutationEpoch),
     beforeByPath,
     summary: `更新页面 ${input.slug} 的元数据`,
     resultHint: {
@@ -366,12 +375,13 @@ async function planPagePatchAtHead(
   } & PagePlanMeta,
   preHead: string,
   doc: WikiDocument,
+  mutationEpoch: number,
 ): Promise<PlannedPageOperation<{ updatedSlug: string; appliedEdits: number }>> {
   const updatePlan = await planPageUpdateAtHead(jobId, subject, {
     slug: input.slug,
     body: applyPatchEdits(doc.body, input.edits),
     effectiveAt: input.effectiveAt,
-  }, preHead, doc);
+  }, preHead, mutationEpoch, doc);
   return {
     ...updatePlan,
     operation: 'patch',
@@ -388,10 +398,11 @@ export async function planPagePatch(
     edits: Array<{ oldString: string; newString: string }>;
   } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ updatedSlug: string; appliedEdits: number }>> {
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
-  return planPagePatchAtHead(jobId, subject, input, preHead, doc);
+  return planPagePatchAtHead(jobId, subject, input, preHead, doc, mutationEpoch);
 }
 
 /**
@@ -404,6 +415,7 @@ export async function planPageLinkEnsure(
   input: LinkEnsureInput & PagePlanMeta,
 ): Promise<PlannedPageOperation<LinkEnsureResult>> {
   assertCanonicalPageSlug(input.sourceSlug, 'sourceSlug');
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.sourceSlug);
   if (!doc) throw new Error(`page "${input.sourceSlug}" not found`);
@@ -427,7 +439,7 @@ export async function planPageLinkEnsure(
     slug: input.sourceSlug,
     edits: [{ oldString: edit.oldString, newString: edit.newString }],
     effectiveAt: input.effectiveAt,
-  }, preHead, doc);
+  }, preHead, doc, mutationEpoch);
   return {
     ...patchPlan,
     operation: 'link-ensure',
@@ -446,6 +458,7 @@ export async function planPageDelete(
   subject: Subject,
   input: { slug: string } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ deletedSlug: string; brokenBacklinks: number }>> {
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
@@ -463,7 +476,7 @@ export async function planPageDelete(
   return finishPlan({
     operation: 'delete',
     preHead,
-    changeset: createChangeset(jobId, subject, entries),
+    changeset: createChangeset(jobId, subject, entries, mutationEpoch),
     beforeByPath,
     summary: `删除页面 ${input.slug}`,
     resultHint: { deletedSlug: input.slug, brokenBacklinks },

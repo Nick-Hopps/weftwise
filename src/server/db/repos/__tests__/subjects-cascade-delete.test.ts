@@ -72,6 +72,58 @@ function totalRowsForSubject(sqlite: BetterSqlite3.Database, subjectId: string):
 }
 
 describe('subjects-repo deleteWithContents', () => {
+  it('两阶段删除先领取维护权，再用同一 epoch 提交 DB 删除', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
+    const target = subjectsRepo.create({ slug: 'claimed-target', name: 'Claimed' });
+
+    const claim = subjectsRepo.beginDeleteMaintenance(target.id);
+
+    expect(claim).toMatchObject({ id: target.id, slug: target.slug, mutationEpoch: 0 });
+    expect(sqlite.prepare(`
+      SELECT maintenance_state, mutation_epoch FROM subjects WHERE id = ?
+    `).get(target.id)).toEqual({ maintenance_state: 'resetting', mutation_epoch: 0 });
+    subjectsRepo.deleteWithContents(target.id, {
+      expectedMutationEpoch: claim.mutationEpoch,
+    });
+    expect(subjectsRepo.getById(target.id)).toBeNull();
+  });
+
+  it('取消两阶段删除时恢复 active 并提升 epoch', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
+    const target = subjectsRepo.create({ slug: 'cancel-target', name: 'Cancel' });
+    const claim = subjectsRepo.beginDeleteMaintenance(target.id);
+
+    subjectsRepo.cancelDeleteMaintenance(target.id, claim.mutationEpoch);
+
+    expect(sqlite.prepare(`
+      SELECT maintenance_state, mutation_epoch FROM subjects WHERE id = ?
+    `).get(target.id)).toEqual({ maintenance_state: 'active', mutation_epoch: 1 });
+  });
+
+  it('领取维护权后出现 active job 时在 purge 事务内再次拒绝', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
+    const target = subjectsRepo.create({ slug: 'raced-target', name: 'Raced' });
+    const claim = subjectsRepo.beginDeleteMaintenance(target.id);
+    sqlite.prepare(`
+      INSERT INTO jobs (id, type, status, subject_id, params_json, created_at)
+      VALUES ('late-job', 'ingest', 'pending', ?, '{}', ?)
+    `).run(target.id, new Date().toISOString());
+
+    expect(() => subjectsRepo.deleteWithContents(target.id, {
+      expectedMutationEpoch: claim.mutationEpoch,
+    })).toThrow(/still active/i);
+
+    expect(subjectsRepo.getById(target.id)).not.toBeNull();
+    expect(sqlite.prepare(`SELECT mutation_epoch FROM subjects WHERE id = ?`).get(target.id))
+      .toEqual({ mutation_epoch: 0 });
+  });
+
   it('purges every subject-scoped table + the subject row, leaving general/other intact', async () => {
     const { randomUUID } = await import('crypto');
     const subjectsRepo = await import('../subjects-repo');
@@ -127,6 +179,45 @@ describe('subjects-repo deleteWithContents', () => {
 
     expect(() => subjectsRepo.deleteWithContents(target.id)).toThrow(/referenced by other subjects/i);
     expect(subjectsRepo.getById(target.id)).not.toBeNull();
+  });
+
+  it('在同一事务内拒绝 subject 或全局 active job', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
+    const target = subjectsRepo.create({ slug: 'busy-target', name: 'Busy' });
+    const now = new Date().toISOString();
+    sqlite.prepare(`INSERT INTO jobs (id, type, status, subject_id, params_json, created_at) VALUES (?,?,?,?,?,?)`)
+      .run('busy-job', 'ingest', 'pending', target.id, '{}', now);
+
+    expect(() => subjectsRepo.deleteWithContents(target.id)).toThrow(/still active/i);
+    expect(subjectsRepo.getById(target.id)).not.toBeNull();
+    sqlite.prepare(`UPDATE jobs SET status = 'completed' WHERE id = 'busy-job'`).run();
+    sqlite.prepare(`INSERT INTO jobs (id, type, status, subject_id, params_json, created_at) VALUES (?,?,?,?,?,?)`)
+      .run('global-job', 'lint', 'running', null, '{}', now);
+    expect(() => subjectsRepo.deleteWithContents(target.id)).toThrow(/global jobs/i);
+  });
+
+  it('删除 Subject 时同步清除全部 Research provenance', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
+    const target = subjectsRepo.create({ slug: 'provenance-target', name: 'Provenance' });
+    const now = new Date().toISOString();
+    sqlite.prepare(`
+      INSERT INTO research_runs (
+        id, subject_id, research_job_id, origin, candidate_set_hash, status, created_at, updated_at
+      ) VALUES (?, ?, ?, 'topic', 'hash', 'awaiting-approval', ?, ?)
+    `).run('run-delete', target.id, 'research-job-delete', now, now);
+    sqlite.prepare(`
+      INSERT INTO research_candidates (id, run_id, normalized_url, snapshot_json, rank)
+      VALUES ('candidate-delete', 'run-delete', 'https://example.com', '{}', 0)
+    `).run();
+
+    subjectsRepo.deleteWithContents(target.id);
+
+    expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM research_runs WHERE id = 'run-delete'`).get() as { count: number }).count).toBe(0);
+    expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM research_candidates WHERE run_id = 'run-delete'`).get() as { count: number }).count).toBe(0);
   });
 });
 

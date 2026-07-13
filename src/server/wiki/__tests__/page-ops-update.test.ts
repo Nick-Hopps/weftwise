@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const txMocks = vi.hoisted(() => ({
+  captureSubjectMutationEpoch: vi.fn(() => 0),
   createChangeset: vi.fn((jobId: string, subject: { id: string; slug: string }, entries: unknown[]) => ({
     id: jobId, subjectId: subject.id, subjectSlug: subject.slug, entries,
     preHead: null, postHead: null, status: 'pending',

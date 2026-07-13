@@ -2,6 +2,7 @@ import simpleGit, { SimpleGit } from 'simple-git';
 import fs from 'fs';
 import path from 'path';
 import { getConfig } from '../config/env';
+import { ensureVaultRuntimeExcludes } from './vault-runtime-excludes';
 
 /**
  * Returns a simple-git instance pinned to VAULT_PATH only.
@@ -31,6 +32,8 @@ export async function ensureVaultRepo(): Promise<void> {
   if (!fs.existsSync(gitDir)) {
     await git.init();
   }
+
+  ensureVaultRuntimeExcludes(vaultPath);
 
   // Set user config in the vault repo (local scope only)
   await git.addConfig('user.name', 'LLM Wiki', false, 'local');
@@ -88,6 +91,30 @@ export async function commitVaultChanges(
   const result = await git.commit(message);
   // result.commit may be empty on some versions; fall back to HEAD
   return result.commit || (await getVaultHead());
+}
+
+/**
+ * 只提交当前 Git index，不再执行 `git add`。仅用于已严格校验路径归属的
+ * 崩溃重放，避免已删除路径因 pathspec 不匹配而无法提交。
+ */
+export async function commitStagedVaultChanges(message: string): Promise<string> {
+  const git = getVaultGit();
+  const status = await git.status();
+  if (status.staged.length === 0) return getVaultHead();
+  const result = await git.commit(message);
+  return result.commit || (await getVaultHead());
+}
+
+/** 返回给定 vault-relative 路径中已进入 Git index 的子集。 */
+export async function listTrackedVaultFiles(files: string[]): Promise<string[]> {
+  if (files.length === 0) return [];
+  const raw = await getVaultGit().raw(['ls-files', '--', ...files]);
+  return raw.split('\n').map((file) => file.trim()).filter(Boolean);
+}
+
+/** 读取当前 Git index 中已 staged 的 vault-relative 路径。 */
+export async function listStagedVaultFiles(): Promise<string[]> {
+  return (await getVaultGit().status()).staged.map((file) => file.trim()).filter(Boolean);
 }
 
 /**

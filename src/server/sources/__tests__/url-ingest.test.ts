@@ -30,8 +30,10 @@ describe('validateUrlList', () => {
 describe('ingestUrlBatch', () => {
   const okDeps = {
     fetchSource: async (url: string) => ({ filename: `f-${url.slice(-1)}.html`, content: 'x' }),
-    save: (filename: string) => ({ id: `src-${filename}` }),
-    enqueue: (sourceId: string) => ({ id: `job-${sourceId}` }),
+    persist: (filename: string) => ({
+      sourceId: `src-${filename}`,
+      jobId: `job-src-${filename}`,
+    }),
   };
   it('全部成功：每条带 jobId/sourceId', async () => {
     const r = await ingestUrlBatch(['https://a.com/1', 'https://a.com/2'], okDeps);

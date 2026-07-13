@@ -52,7 +52,14 @@ export async function DELETE(
   try {
     deleteRawSourceFiles(subject.slug, source.filename, source.id);
     sourcesRepo.deleteSource(source.id);
-    await commitVaultChanges(`[subject:${subject.slug}] Delete orphan source ${source.filename}`);
+    await commitVaultChanges(
+      `[subject:${subject.slug}] Delete orphan source ${source.filename}`,
+      [
+        `raw/${subject.slug}/${source.filename}`,
+        `.llm-wiki/sources/${subject.slug}/${source.id}.json`,
+        `.llm-wiki/sources/${source.id}.json`,
+      ],
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: `Failed to delete source: ${msg}` }, { status: 500 });

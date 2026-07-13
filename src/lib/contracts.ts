@@ -213,7 +213,7 @@ export interface PageListResult {
 
 export interface Job {
   id: string;
-  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research';
+  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research' | 'research-import';
   status: 'pending' | 'running' | 'completed' | 'failed';
   paramsJson: string;
   resultJson: string | null;
@@ -294,7 +294,7 @@ export interface QueryResult {
   savedAsPage: string | null;
 }
 
-/** research job 输出的单条候选：只发现不写入，确认后经现有 /api/ingest urls[] 收口。 */
+/** research job 输出的单条候选：只发现不写入，批准后由 research-import 协调导入。 */
 export interface ResearchCandidate {
   url: string;
   title: string;
@@ -302,6 +302,182 @@ export interface ResearchCandidate {
   /** triage 评分 0-3；triage 降级时为 null（按搜索排名前 3 未评分）。 */
   score: number | null;
   reason: string | null;
+}
+
+export type ResearchRunOrigin = 'findings' | 'topic';
+export type ResearchRunStatus =
+  | 'awaiting-approval'
+  | 'importing'
+  | 'verifying'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'dismissed'
+  | 'empty';
+export type ResearchFindingVerificationStatus =
+  | 'pending'
+  | 'fixed'
+  | 'residual'
+  | 'unverifiable';
+export type ResearchCandidateDecision = 'pending' | 'approved' | 'rejected';
+export type ResearchCandidateIngestStatus =
+  | 'pending'
+  | 'fetching'
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed';
+
+/** Research provenance 仓储行契约；JSON 字段保持原始字符串，由 service 显式解析。 */
+export interface ResearchRunRow {
+  id: string;
+  subjectId: SubjectId;
+  researchJobId: string;
+  origin: ResearchRunOrigin;
+  lintJobId: string | null;
+  topic: string | null;
+  topicsJson: string;
+  queriesJson: string;
+  candidateSetHash: string;
+  status: ResearchRunStatus;
+  version: number;
+  verificationLintJobId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  errorJson: string | null;
+}
+
+export interface ResearchRunFindingRow {
+  runId: string;
+  findingId: string;
+  snapshotJson: string;
+  verificationStatus: ResearchFindingVerificationStatus;
+  verifiedAt: string | null;
+  verificationSnapshotJson: string | null;
+}
+
+export interface ResearchCandidateRow {
+  id: string;
+  runId: string;
+  normalizedUrl: string;
+  snapshotJson: string;
+  rank: number;
+  decision: ResearchCandidateDecision;
+  approvalId: string | null;
+  decidedAt: string | null;
+}
+
+export interface ResearchApprovalRow {
+  id: string;
+  runId: string;
+  selectedCandidateIdsJson: string;
+  payloadHash: string;
+  idempotencyKey: string;
+  coordinatorJobId: string;
+  createdAt: string;
+}
+
+export interface ResearchCandidateIngestRow {
+  approvalId: string;
+  candidateId: string;
+  runId: string;
+  normalizedUrl: string;
+  status: ResearchCandidateIngestStatus;
+  sourceId: string | null;
+  ingestJobId: string | null;
+  operationIdsJson: string;
+  touchedPagesJson: string;
+  commitSha: string | null;
+  claimToken: string | null;
+  leaseExpiresAt: string | null;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  errorJson: string | null;
+}
+
+/** 持久化候选快照；ID 由 run 与规范化 URL 稳定派生。 */
+export interface ResearchCandidateSnapshot extends ResearchCandidate {
+  id: string;
+  normalizedUrl: string;
+  rank: number;
+}
+
+/** Ingest 终态物化的页面改动；系统页保留审计但不作为 finding 已修复证据。 */
+export interface ResearchTouchedPage {
+  slug: string;
+  action: 'created' | 'updated';
+  system: boolean;
+}
+
+export interface ResearchFindingView {
+  findingId: string;
+  finding: EnrichedLintFinding;
+  verificationStatus: ResearchFindingVerificationStatus;
+  verifiedAt: string | null;
+  verificationFinding: EnrichedLintFinding | null;
+}
+
+export interface ResearchCandidateDeliveryView {
+  status: ResearchCandidateIngestStatus;
+  sourceId: string | null;
+  ingestJobId: string | null;
+  operationIds: string[];
+  touchedPages: ResearchTouchedPage[];
+  commitSha: string | null;
+  attemptCount: number;
+  completedAt: string | null;
+  error: { code?: string; message: string } | null;
+}
+
+export interface ResearchCandidateView extends ResearchCandidateSnapshot {
+  decision: ResearchCandidateDecision;
+  delivery: ResearchCandidateDeliveryView | null;
+}
+
+export interface ResearchApprovalView {
+  id: string;
+  selectedCandidateIds: string[];
+  coordinatorJobId: string;
+  createdAt: string;
+}
+
+export interface ResearchRunView {
+  id: string;
+  subjectId: SubjectId;
+  researchJobId: string;
+  origin: ResearchRunOrigin;
+  lintJobId: string | null;
+  topic: string | null;
+  topics: string[];
+  queries: string[];
+  candidateSetHash: string;
+  status: ResearchRunStatus;
+  version: number;
+  verificationLintJobId: string | null;
+  findings: ResearchFindingView[];
+  candidates: ResearchCandidateView[];
+  approval: ResearchApprovalView | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  error: { code?: string; message: string } | null;
+}
+
+export type ResearchApiErrorCode =
+  | 'RESEARCH_RUN_NOT_FOUND'
+  | 'RESEARCH_RUN_STALE'
+  | 'RESEARCH_ALREADY_APPROVED'
+  | 'RESEARCH_IDEMPOTENCY_CONFLICT'
+  | 'RESEARCH_SELECTION_INVALID'
+  | 'RESEARCH_RUN_NOT_APPROVABLE';
+
+export interface ResearchApiError {
+  error: string;
+  code: ResearchApiErrorCode;
+  run?: ResearchRunView;
 }
 
 /** T3.2 待研究问题队列条目（Ask AI 未命中信号 + 手动添加）。 */
@@ -442,6 +618,8 @@ export interface Changeset {
   jobId: string;
   subjectId: SubjectId;
   subjectSlug: string;
+  /** 规划同步写时领取的 Subject 版本；worker 内部写可留空并依赖 active-job guard。 */
+  mutationEpoch?: number | null;
   entries: ChangesetEntry[];
   preHead: string;
   postHead: string | null;
