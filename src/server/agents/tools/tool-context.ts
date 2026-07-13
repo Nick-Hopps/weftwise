@@ -1,5 +1,9 @@
 import type {
   InspectSection,
+  LinkEnsureInput,
+  LinkEnsureResult,
+  MetadataPatchInput,
+  MetadataPatchResult,
   PageListInput,
   PageListResult,
   SourceReadInput,
@@ -58,6 +62,10 @@ export interface ToolContext {
   /** 局部更新一页正文（edits 精确唯一替换，Saga）；fix runner 与 query runner 均注入。 */
   patchPage?(input: { slug: string; edits: Array<{ oldString: string; newString: string }> }):
     Promise<{ updatedSlug: string; appliedEdits: number }>;
+  /** Fix/Curate 侧元数据窄写；只改 title/summary/tags/aliases，不接收正文。 */
+  metadataPatch?(input: MetadataPatchInput): Promise<MetadataPatchResult>;
+  /** Fix/Curate 侧单链接窄写；target 仅验证，唯一写对象是 source page。 */
+  linkEnsure?(input: LinkEnsureInput): Promise<LinkEnsureResult>;
   /** query 侧只读联网检索（Tavily）；工具集只在 web search 已配置时才含 web.search，未配置时不会被调用。 */
   webSearch?(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;
 }

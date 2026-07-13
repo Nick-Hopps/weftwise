@@ -10,7 +10,10 @@ describe('createBuiltinToolRegistry', () => {
 
   it('共享写工具描述不包含 Query 专属的口头确认授权', () => {
     const registry = createBuiltinToolRegistry();
-    for (const name of ['wiki.reenrich', 'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete']) {
+    for (const name of [
+      'wiki.reenrich', 'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete',
+      'wiki.metadata.patch', 'wiki.link.ensure',
+    ]) {
       expect(registry.get(name)?.description).not.toMatch(/confirm|prior turn/i);
     }
   });
@@ -20,5 +23,11 @@ describe('createBuiltinToolRegistry', () => {
     expect(registry.get('wiki.inspect')).toBeDefined();
     expect(registry.get('source.search')).toBeDefined();
     expect(registry.get('source.read')).toBeDefined();
+  });
+
+  it('注册两个 Phase 2B 窄写工具', () => {
+    const registry = createBuiltinToolRegistry();
+    expect(registry.get('wiki.metadata.patch')).toBeDefined();
+    expect(registry.get('wiki.link.ensure')).toBeDefined();
   });
 });
