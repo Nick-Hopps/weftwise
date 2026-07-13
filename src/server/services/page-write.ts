@@ -8,6 +8,7 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import {
   executePageCreate,
   executePageDelete,
+  executePageLinkEnsure,
   executePageMetadataPatch,
   executePagePatch,
   executePageUpdate,
@@ -15,6 +16,7 @@ import {
 import {
   planPageCreate,
   planPageDelete,
+  planPageLinkEnsure,
   planPageMetadataPatch,
   planPagePatch,
   planPageUpdate,
@@ -26,6 +28,8 @@ import { enqueueEmbedIndex } from './embedding-service';
 import { META_PAGE_SLUGS, normalizeSlug } from '../wiki/page-identity';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import type {
+  LinkEnsureInput,
+  LinkEnsureResult,
   MetadataPatchInput,
   MetadataPatchResult,
   Subject,
@@ -189,6 +193,36 @@ export async function patchMetadataInSubject(
 ): Promise<MetadataPatchResult> {
   assertMetadataPatchTarget(input.slug);
   const result = await executePageMetadataPatch(crypto.randomUUID(), subject, input);
+  enqueueEmbedIndex(subject.id);
+  return result;
+}
+
+function assertLinkEnsureSource(sourceSlug: string): void {
+  if (META_PAGE_SLUGS.has(sourceSlug)) {
+    throw new Error(`Cannot update protected system page "${sourceSlug}".`);
+  }
+}
+
+/** 只生成 wikilink 窄写计划；source 保护后完全委托共享 planner。 */
+export async function planLinkEnsureInSubject(
+  subject: Subject,
+  input: LinkEnsureInput,
+  effectiveAt: string,
+): Promise<PlannedPageOperation<LinkEnsureResult>> {
+  assertLinkEnsureSource(input.sourceSlug);
+  return planPageLinkEnsure(crypto.randomUUID(), subject, { ...input, effectiveAt });
+}
+
+/**
+ * 执行 wikilink 窄写；只保护 source 系统页，target 是否存在由共享 planner 按 mode 校验。
+ * direct 成功后由本入口唯一触发一次向量回填。
+ */
+export async function ensureLinkInSubject(
+  subject: Subject,
+  input: LinkEnsureInput,
+): Promise<LinkEnsureResult> {
+  assertLinkEnsureSource(input.sourceSlug);
+  const result = await executePageLinkEnsure(crypto.randomUUID(), subject, input);
   enqueueEmbedIndex(subject.id);
   return result;
 }
