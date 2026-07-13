@@ -254,6 +254,98 @@ describe('buildHealthSnapshot', () => {
     expect(snapshot.remediations['broken-result'].status).toBe('failed');
   });
 
+  it('批量 Fix 的当前与已消失 finding 分别读取自己的 outcome', () => {
+    const current = lint([finding('semantic-residual', { type: 'contradiction' })]);
+    const related = remediationJob('partial-fix', ['deterministic-fixed', 'semantic-residual'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({
+        writes: 1,
+        postconditionStatus: 'residual',
+        semanticStatus: 'residual',
+        perFindingOutcomes: {
+          'deterministic-fixed': 'fixed',
+          'semantic-residual': 'failed',
+        },
+      }),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related]);
+
+    expect(snapshot.remediations['semantic-residual']).toMatchObject({
+      status: 'failed',
+      jobId: 'partial-fix',
+    });
+    expect(snapshot.recentOutcomes).toEqual({ 'deterministic-fixed': 'fixed' });
+  });
+
+  it('批量 Curate 的当前与已消失 orphan 分别读取自己的 outcome', () => {
+    const current = lint([finding('orphan-residual', { type: 'orphan' })]);
+    const related = remediationJob('partial-curate', ['orphan-fixed', 'orphan-residual'], {
+      action: 'curate',
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({
+        writes: 1,
+        postconditionStatus: 'residual',
+        semanticStatus: 'not-needed',
+        perFindingOutcomes: {
+          'orphan-fixed': 'fixed',
+          'orphan-residual': 'failed',
+        },
+      }),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related]);
+
+    expect(snapshot.remediations['orphan-residual']).toMatchObject({
+      status: 'failed',
+      jobId: 'partial-curate',
+    });
+    expect(snapshot.recentOutcomes).toEqual({ 'orphan-fixed': 'fixed' });
+  });
+
+  it.each([
+    ['容器损坏', []],
+    ['自身状态未知', { 'resolved-finding': 'unknown' }],
+    ['缺少自身键', { 'other-finding': 'failed' }],
+  ])('Fix perFindingOutcomes %s 时回退旧 job-level 结果', (_name, perFindingOutcomes) => {
+    const related = remediationJob('legacy-compatible-fix', ['resolved-finding'], {
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({
+        writes: 1,
+        postconditionStatus: 'clean',
+        semanticStatus: 'not-needed',
+        perFindingOutcomes,
+      }),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes)
+      .toEqual({ 'resolved-finding': 'fixed' });
+  });
+
+  it.each([
+    ['容器损坏', []],
+    ['自身状态未知', { 'resolved-orphan': 'unknown' }],
+    ['缺少自身键', { 'other-orphan': 'failed' }],
+  ])('Curate perFindingOutcomes %s 时回退旧 job-level 结果', (_name, perFindingOutcomes) => {
+    const related = remediationJob('legacy-compatible-curate', ['resolved-orphan'], {
+      action: 'curate',
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({
+        writes: 1,
+        postconditionStatus: 'clean',
+        semanticStatus: 'not-needed',
+        perFindingOutcomes,
+      }),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related]).recentOutcomes)
+      .toEqual({ 'resolved-orphan': 'fixed' });
+  });
+
   it.each([
     ['postcondition residual', { writes: 0, postconditionStatus: 'residual', semanticStatus: 'not-needed' }],
     ['semantic failed', { writes: 0, postconditionStatus: 'clean', semanticStatus: 'failed' }],

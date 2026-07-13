@@ -39,14 +39,14 @@ export function fixMissingFrontmatter(slug: string, doc: WikiDocument, now: stri
 }
 
 /** 按修复机制把 findings 分入三桶。 */
-export function partitionFindings(findings: LintFinding[]): {
-  frontmatter: LintFinding[];
-  llm: LintFinding[];
-  ignored: LintFinding[];
+export function partitionFindings<T extends LintFinding>(findings: T[]): {
+  frontmatter: T[];
+  llm: T[];
+  ignored: T[];
 } {
-  const frontmatter: LintFinding[] = [];
-  const llm: LintFinding[] = [];
-  const ignored: LintFinding[] = [];
+  const frontmatter: T[] = [];
+  const llm: T[] = [];
+  const ignored: T[] = [];
   for (const finding of findings) {
     if (DETERMINISTIC_FIX_TYPES.has(finding.type)) frontmatter.push(finding);
     else if (LLM_FIX_TYPES.has(finding.type)) llm.push(finding);
@@ -59,9 +59,9 @@ export function partitionFindings(findings: LintFinding[]): {
  * 合并工作清单：确定性新鲜重扫结果（missing-frontmatter / broken-link）∪ 快照语义结果
  * （missing-crossref / contradiction）。按 type+pageSlug+description 去重（保留同页多条不同 broken-link）。
  */
-export function buildFixWorklist(deterministic: LintFinding[], semantic: LintFinding[]): LintFinding[] {
+export function buildFixWorklist<T extends LintFinding>(deterministic: T[], semantic: T[]): T[] {
   const seen = new Set<string>();
-  const out: LintFinding[] = [];
+  const out: T[] = [];
   for (const finding of [...deterministic, ...semantic]) {
     const key = `${finding.type}::${finding.pageSlug}::${finding.description}`;
     if (seen.has(key)) continue;

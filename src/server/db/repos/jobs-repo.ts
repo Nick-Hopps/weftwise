@@ -35,6 +35,7 @@ export interface AtomicJobCreateInput {
   type: Job['type'];
   params: Record<string, unknown>;
   subjectId: SubjectId;
+  lintRanAt: string | null;
   matcher: (jobs: Job[]) => Job | null;
   beforeCreate?: () => void;
 }
@@ -52,7 +53,7 @@ export function getOrCreateJobAtomic(
 ): AtomicJobCreateResult {
   const sqlite = getRawDb();
   const tx = sqlite.transaction((): AtomicJobCreateResult => {
-    const duplicate = input.matcher(listSubjectJobsRaw(sqlite, input.subjectId));
+    const duplicate = input.matcher(listAtomicJobCandidatesRaw(sqlite, input));
     if (duplicate) return { job: duplicate, deduplicated: true };
 
     input.beforeCreate?.();
@@ -86,7 +87,8 @@ export function reingestSourceAtomic(
   const sqlite = getRawDb();
   const tx = sqlite.transaction((): AtomicSourceReingestResult => {
     const previous = findLatestSourceJobRaw(
-      listSubjectJobsRaw(sqlite, input.subjectId),
+      sqlite,
+      input.subjectId,
       input.sourceId,
     );
 
@@ -416,24 +418,13 @@ export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null
 
 /**
  * 按 params.sourceId 反查本 subject 最新一条 ingest job（orphan-source 体检/reingest 用）。
- * jobs 表无独立 source_id 列，靠解析 paramsJson 精确匹配；量级为单 subject 的 ingest
- * job 数，个人库场景全量遍历可接受。
+ * jobs 表无独立 source_id 列，通过受 json_valid 保护的 JSON 表达式索引精确匹配。
  */
 export function findLatestIngestJobForSource(
   subjectId: SubjectId,
   sourceId: string
 ): Job | null {
-  const candidates = listJobs({ type: 'ingest', subjectId }); // createdAt asc
-  let latest: Job | null = null;
-  for (const job of candidates) {
-    try {
-      const params = JSON.parse(job.paramsJson ?? '{}') as { sourceId?: unknown };
-      if (params.sourceId === sourceId) latest = job;
-    } catch {
-      // params 不可解析 → 跳过
-    }
-  }
-  return latest;
+  return findLatestSourceJobRaw(getRawDb(), subjectId, sourceId);
 }
 
 export function completeJob(
@@ -611,12 +602,26 @@ function insertJob(sqlite: RawDb, job: Job): void {
   );
 }
 
-function listSubjectJobsRaw(sqlite: RawDb, subjectId: SubjectId): Job[] {
+function listAtomicJobCandidatesRaw(
+  sqlite: RawDb,
+  input: Pick<AtomicJobCreateInput, 'subjectId' | 'type' | 'lintRanAt'>,
+): Job[] {
   const rows = sqlite.prepare(`
     SELECT * FROM jobs
-    WHERE subject_id = ?
-    ORDER BY created_at ASC, rowid ASC
-  `).all(subjectId) as JobRow[];
+    WHERE subject_id = ? AND type = ?
+      AND (
+        status IN ('pending', 'running')
+        OR (
+          status = 'completed'
+          AND (? IS NULL OR completed_at IS NULL OR completed_at > ?)
+        )
+      )
+  `).all(
+    input.subjectId,
+    input.type,
+    input.lintRanAt,
+    input.lintRanAt,
+  ) as JobRow[];
   return rows.map(rowToJobFromRaw);
 }
 
@@ -627,14 +632,20 @@ function getJobRaw(sqlite: RawDb, jobId: string): Job | null {
   return row ? rowToJobFromRaw(row) : null;
 }
 
-function findLatestSourceJobRaw(jobsForSubject: Job[], sourceId: string): Job | null {
-  let latest: Job | null = null;
-  for (const job of jobsForSubject) {
-    if (job.type !== 'ingest') continue;
-    const params = parseRecord(job.paramsJson);
-    if (params?.sourceId === sourceId) latest = job;
-  }
-  return latest;
+function findLatestSourceJobRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job | null {
+  const row = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = 'ingest'
+      AND CASE WHEN json_valid(params_json)
+        THEN json_extract(params_json, '$.sourceId') END = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(subjectId, sourceId) as JobRow | undefined;
+  return row ? rowToJobFromRaw(row) : null;
 }
 
 function insertRetryingEvent(sqlite: RawDb, jobId: string): void {

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import type { Job, LintFinding } from '@/lib/contracts';
 
 const mockEnqueue = vi.fn();
+const mockListLatestCompletedLint = vi.fn();
 const mockList = vi.fn();
 const mockResolveSubject = vi.fn();
 const mockResolveTopics = vi.fn();
@@ -25,6 +26,7 @@ vi.mock('@/server/middleware/subject', () => ({
 }));
 vi.mock('@/server/jobs/queue', () => ({
   enqueue: (...args: unknown[]) => mockEnqueue(...args),
+  listLatestCompletedLint: (...args: unknown[]) => mockListLatestCompletedLint(...args),
   list: (...args: unknown[]) => mockList(...args),
 }));
 vi.mock('@/server/search/web-search', () => ({
@@ -102,6 +104,7 @@ function lintJob(overrides: Partial<Job> = {}): Job {
 
 beforeEach(() => {
   mockEnqueue.mockReset();
+  mockListLatestCompletedLint.mockReset();
   mockList.mockReset();
   mockResolveSubject.mockReset();
   mockResolveTopics.mockReset();
@@ -110,6 +113,7 @@ beforeEach(() => {
   mockResolveTopics.mockReturnValue(['gRPC streaming']);
   mockIsConfigured.mockReturnValue(true);
   mockEnqueue.mockReturnValue({ id: 'job1' });
+  mockListLatestCompletedLint.mockReturnValue(lintJob());
   mockList.mockReturnValue([lintJob()]);
 });
 
@@ -132,7 +136,8 @@ describe('POST /api/research', () => {
       lintJobId: 'lint-1',
     }));
     expect(res.status).toBe(202);
-    expect(mockList).toHaveBeenCalledWith({ type: 'lint', status: 'completed', subjectId: 's1' });
+    expect(mockListLatestCompletedLint).toHaveBeenCalledWith('s1');
+    expect(mockList).not.toHaveBeenCalled();
     expect(mockResolveTopics).toHaveBeenCalledWith(
       's1',
       'lint-1',
@@ -214,7 +219,7 @@ describe('POST /api/research', () => {
   });
 
   it('请求 lintJobId 不是当前 subject 最新 completed 快照 → 409', async () => {
-    mockList.mockReturnValue([lintJob({ id: 'lint-new' })]);
+    mockListLatestCompletedLint.mockReturnValue(lintJob({ id: 'lint-new' }));
     const res = await POST(req({ findingIds: [GAP_ID], lintJobId: 'lint-old' }));
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: 'Research lint snapshot is stale' });

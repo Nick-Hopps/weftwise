@@ -291,6 +291,70 @@ describe('runFixJob (tool-loop)', () => {
     );
   });
 
+  it('批量 Fix 按 finding 的实际后置结果分别记录 fixed 与 failed', async () => {
+    const missingRaw = finding('missing-frontmatter', 'a', 'A 缺少 frontmatter');
+    const missing = identified(missingRaw);
+    const contradiction = identified(finding('contradiction', 'b', 'B 与 C 冲突'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([missing, contradiction]));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([missingRaw]);
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+      ...cleanReport,
+      status: 'residual',
+      residualFindings: [{
+        type: 'contradiction',
+        severity: 'warning',
+        pageSlug: 'b',
+        description: 'B 与 C 仍冲突',
+      }],
+      semanticStatus: 'residual',
+    });
+
+    const result = await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([missing.id, contradiction.id]),
+    }), vi.fn());
+
+    expect(result).toMatchObject({
+      writes: 1,
+      perFindingOutcomes: {
+        [missing.id]: 'fixed',
+        [contradiction.id]: 'failed',
+      },
+    });
+  });
+
+  it('后置校验异常时 scoped 批次全部 finding 保守记录为 failed', async () => {
+    const missingRaw = finding('missing-frontmatter', 'a', 'A 缺少 frontmatter');
+    const missing = identified(missingRaw);
+    const contradiction = identified(finding('contradiction', 'b', 'B 与 C 冲突'));
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([missing, contradiction]));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([missingRaw]);
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+      ...cleanReport,
+      status: 'residual',
+      residualFindings: [{
+        type: 'verification-error',
+        severity: 'critical',
+        pageSlug: null,
+        description: '后置校验未完成',
+      }],
+      semanticStatus: 'failed',
+      verificationError: 'verify failed',
+    });
+
+    const result = await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([missing.id, contradiction.id]),
+    }), vi.fn());
+
+    expect(result.perFindingOutcomes).toEqual({
+      [missing.id]: 'failed',
+      [contradiction.id]: 'failed',
+    });
+  });
+
   it('remediation context 只处理指定且属于 Fix 的 finding ID', async () => {
     const brokenARaw = finding('broken-link', 'a', 'A 中的坏链');
     const brokenBRaw = finding('broken-link', 'b', 'B 中的坏链');
@@ -378,7 +442,7 @@ describe('runFixJob (tool-loop)', () => {
     latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([current, stale]));
     lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([currentRaw]);
 
-    await runFixJob(job({
+    const result = await runFixJob(job({
       subjectId: 's1',
       remediationContext: context([current.id, stale.id]),
     }), vi.fn());
@@ -386,6 +450,10 @@ describe('runFixJob (tool-loop)', () => {
     const prompt = getFixPrompt();
     expect(prompt).toContain(current.description);
     expect(prompt).not.toContain(stale.description);
+    expect(result.perFindingOutcomes).toMatchObject({
+      [current.id]: 'skipped',
+      [stale.id]: 'skipped',
+    });
   });
 
   it('无 remediation context 时保留 fresh deterministic 与最新 semantic 全量行为', async () => {

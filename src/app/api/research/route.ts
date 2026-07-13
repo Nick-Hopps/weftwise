@@ -80,9 +80,8 @@ export async function POST(request: NextRequest) {
 
     const findingIds = body.findingIds as string[];
     const lintJobId = body.lintJobId;
-    const latest = selectLatestFindings(
-      queue.list({ type: 'lint', status: 'completed', subjectId: subject.id }),
-    );
+    const latestLint = queue.listLatestCompletedLint(subject.id);
+    const latest = selectLatestFindings(latestLint ? [latestLint] : []);
     if (latest.jobId !== lintJobId) {
       return NextResponse.json({ error: 'Research lint snapshot is stale' }, { status: 409 });
     }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Job } from '@/lib/contracts';
 
 let dir: string;
 let prevDb: string | undefined;
@@ -377,6 +378,7 @@ describe('jobs-repo.getOrCreateJobAtomic', () => {
       type: 'fix' as const,
       params: { subjectId: 's1', remediationContext: context },
       subjectId: 's1',
+      lintRanAt: '2026-07-13T10:00:00.000Z',
       matcher,
       beforeCreate,
     };
@@ -392,6 +394,144 @@ describe('jobs-repo.getOrCreateJobAtomic', () => {
     expect(matcher).toHaveBeenCalledTimes(2);
     expect(beforeCreate).toHaveBeenCalledTimes(1);
     expect(repo.listJobs({ subjectId: 's1' })).toHaveLength(1);
+  });
+
+  it('matcher 只接收同类型在途或 lint 后完成候选，不扫描大量历史噪声', async () => {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const repo = await import('../jobs-repo');
+    const context = {
+      lintJobId: 'lint-1',
+      findingIds: ['a'.repeat(64)],
+      action: 'fix' as const,
+    };
+    const insert = db.prepare(`
+      INSERT INTO jobs (
+        id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+      ) VALUES (?, ?, ?, 's1', ?, '{}', ?, NULL, ?, NULL, NULL, 0)
+    `);
+    const insertNoise = db.transaction(() => {
+      for (let index = 0; index < 300; index += 1) {
+        const createdAt = new Date(Date.parse('2026-07-01T00:00:00.000Z') + index).toISOString();
+        insert.run(
+          `old-fix-${index}`,
+          'fix',
+          'completed',
+          JSON.stringify({ remediationContext: context }),
+          createdAt,
+          '2026-07-12T09:00:00.000Z',
+        );
+        insert.run(
+          `other-type-${index}`,
+          'curate',
+          'pending',
+          JSON.stringify({ remediationContext: { ...context, action: 'curate' } }),
+          createdAt,
+          null,
+        );
+      }
+    });
+    insertNoise();
+    const reusable = repo.enqueueJob('fix', {
+      subjectId: 's1',
+      remediationContext: context,
+    }, 's1');
+    const seenCandidateIds: string[][] = [];
+
+    const result = repo.getOrCreateJobAtomic({
+      type: 'fix',
+      params: { subjectId: 's1', remediationContext: context },
+      subjectId: 's1',
+      lintRanAt: '2026-07-13T10:00:00.000Z',
+      matcher: (candidates) => {
+        seenCandidateIds.push(candidates.map((candidate) => candidate.id));
+        return candidates.find((candidate) => candidate.id === reusable.id) ?? null;
+      },
+    });
+
+    expect(result).toMatchObject({ deduplicated: true, job: { id: reusable.id } });
+    expect(seenCandidateIds).toEqual([[reusable.id]]);
+  });
+
+  it('两个并发幂等入口最终只创建一条相同 context job', async () => {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const repo = await import('../jobs-repo');
+    const { findDuplicateRemediationJob } = await import('../../../services/remediation-context');
+    const context = {
+      lintJobId: 'lint-1',
+      findingIds: ['a'.repeat(64)],
+      action: 'fix' as const,
+    };
+    const input = {
+      type: 'fix' as const,
+      params: { subjectId: 's1', remediationContext: context },
+      subjectId: 's1',
+      lintRanAt: '2026-07-13T10:00:00.000Z',
+      matcher: (candidates: Job[]) => findDuplicateRemediationJob(
+        candidates,
+        's1',
+        context,
+        '2026-07-13T10:00:00.000Z',
+      ),
+    };
+
+    const [left, right] = await Promise.all([
+      Promise.resolve().then(() => repo.getOrCreateJobAtomic(input)),
+      Promise.resolve().then(() => repo.getOrCreateJobAtomic(input)),
+    ]);
+
+    expect(new Set([left.job.id, right.job.id]).size).toBe(1);
+    expect([left.deduplicated, right.deduplicated].sort()).toEqual([false, true]);
+    expect(repo.listJobs({ type: 'fix', subjectId: 's1' })).toHaveLength(1);
+  });
+
+  it('completedAt 缺失或 lintRanAt 缺失时仍把 completed job 交给 matcher', async () => {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    db.prepare(
+      `INSERT INTO subjects (id, slug, name, description, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+    ).run('s1', 'sub-a', 'Sub A', '', NOW, NOW);
+    const repo = await import('../jobs-repo');
+    const completed = repo.enqueueJob('fix', { marker: 'completed' }, 's1');
+    db.prepare(`UPDATE jobs SET status = 'completed', completed_at = NULL WHERE id = ?`)
+      .run(completed.id);
+    const seenWithLint: string[][] = [];
+    const seenWithoutLint: string[][] = [];
+    const baseInput = {
+      type: 'fix' as const,
+      params: { marker: 'new' },
+      subjectId: 's1',
+    };
+
+    repo.getOrCreateJobAtomic({
+      ...baseInput,
+      lintRanAt: '2026-07-13T10:00:00.000Z',
+      matcher: (candidates) => {
+        seenWithLint.push(candidates.map((candidate) => candidate.id));
+        return candidates[0] ?? null;
+      },
+    });
+    db.prepare(`UPDATE jobs SET completed_at = ? WHERE id = ?`)
+      .run('2026-07-01T10:00:00.000Z', completed.id);
+    repo.getOrCreateJobAtomic({
+      ...baseInput,
+      lintRanAt: null,
+      matcher: (candidates) => {
+        seenWithoutLint.push(candidates.map((candidate) => candidate.id));
+        return candidates[0] ?? null;
+      },
+    });
+
+    expect(seenWithLint).toEqual([[completed.id]]);
+    expect(seenWithoutLint).toEqual([[completed.id]]);
   });
 });
 
@@ -499,6 +639,49 @@ describe('jobs-repo.reingestSourceAtomic', () => {
         dataJson: JSON.stringify({ manual: true }),
       }),
     ]);
+  });
+
+  it('大量异源与损坏 JSON 历史下仍只重排最新同源 failed job', async () => {
+    const { db, repo, context, params } = await setupAtomicReingest();
+    const insert = db.prepare(`
+      INSERT INTO jobs (
+        id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+      ) VALUES (?, 'ingest', 'completed', 's1', ?, '{}', ?, NULL, ?, NULL, NULL, 0)
+    `);
+    const insertNoise = db.transaction(() => {
+      for (let index = 0; index < 400; index += 1) {
+        const createdAt = new Date(Date.parse('2026-07-01T00:00:00.000Z') + index).toISOString();
+        insert.run(
+          `ingest-noise-${index}`,
+          index % 25 === 0 ? '{' : JSON.stringify({ sourceId: `other-${index}` }),
+          createdAt,
+          createdAt,
+        );
+      }
+    });
+    insertNoise();
+    const failed = repo.enqueueJob('ingest', {
+      sourceId: 'src-1',
+      filename: 'source.md',
+      subjectId: 's1',
+    }, 's1');
+    expect(repo.claimNextJob('ingest')?.id).toBe(failed.id);
+    repo.failJob(failed.id, new Error('boom'));
+
+    const result = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+    });
+
+    expect(result).toMatchObject({
+      kind: 'requeued',
+      job: { id: failed.id, status: 'pending' },
+    });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' }))
+      .toHaveLength(401);
   });
 
   it('cancelled failed 最新任务新建 ingest', async () => {
