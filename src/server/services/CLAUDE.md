@@ -70,7 +70,7 @@ worker-entry.ts
 - 流式分支（`streamAgenticQuery` + `/api/query`）与 `runQuery` 均在**流结束后**同步调用此解析，聊天 UI 正文内联 `[[slug]]` 由前端渲染层直接渲染成 wikilink，不再需要模型额外产出 citations 数组；
 - coverage 判定与引用解析解耦，改为**流后异步 fire-and-forget 小调用**：`assessCoverageInBackground(subject, question, answer)` 只喂问题+答案（不喂 accessed 上下文），走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（`query-prompt.ts`）判定 `coverageSufficient`；`false` 时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'；`try/catch` 包裹，写入失败/异常只 `console.error` 不影响已返回的问答响应，也不阻塞响应本身）；`done` 事件不再携带 `coverageSufficient`（T3.2 引入时曾同步携带，现已异步化）；
 - `resolveQueryTools(mode)` — `query:read` 只有 `wiki.list/search/read/inspect`、`source.search/read` 与可选 `web.search`；`query:propose` 仅额外开放 `wiki.preview_change`（`sideEffect:'propose'`）。两者都不暴露 reenrich/create/update/patch/delete/metadata.patch/link.ensure 实际写工具，也不把对话历史里的口头确认当授权；
-- 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue），走 changeset 写入对应 subject。
+- 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue）；`saveQueryAsPage` 只组装 answer + `## References` 正文和 `query-answer` tag，再调用 `page-write::createPageInSubject(..., { jobId })`，与 `wiki.create` 共用唯一 slug、create plan/apply、Saga 和 embedding 回填。页面 citation 只保留为正文 wikilink，frontmatter `sources` 继续专用于 raw source ID（本路径为空）。若 worker 在 commit 后、job complete 前重试，则按该 job 的 applied operation 恢复唯一 canonical create slug、核对页面仍存在并补 enqueue embedding，不创建后缀重复页。
 
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答（同时触发 backlog 写入）。
 `QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
@@ -283,7 +283,7 @@ src/server/services/
 ├── fix-deterministic.ts # 🆕 纯函数：fixMissingFrontmatter / buildFixWorklist / buildSubjectReportLines / createFixGuard（写 cap + 保护页；忠实度已收编到 wiki/rewrite-fidelity.ts）
 ├── fix-tools.ts         # worker 侧 ToolContext：evidence reader + 写能力经 guard 鉴权后调 page-ops
 ├── reenrich-enqueue.ts  # 🆕 纯函数 validateReenrichTarget + enqueueReenrich 入队 helper（供对话工具触发）
-├── page-write.ts        # 共享 plan/direct 包装：系统页保护 + create/update/patch/delete/metadata/link + direct embed 回填
+├── page-write.ts        # 共享 plan/direct 包装：系统页保护 + create（可贯通 worker jobId）/update/patch/delete/metadata/link + direct embed 回填
 ├── reenrich-service.ts  # 🆕 手动重新增益（re-enrich 任务：复用增益流水线、跳过 writer）
 ├── embedding-enqueue.ts # 无 handler 副作用的 embed-index 持久化 helper（可嵌套事务）
 ├── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
@@ -296,6 +296,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Query Save-to-Wiki Phase 2D：`saveQueryAsPage` 删除自建 slug/frontmatter/changeset 路径，改调可贯通真实 job ID 的 shared create command；与 `wiki.create` 统一唯一 slug、Saga 和 embedding，页面 citations 只写 References、不污染 raw `sources`；applied operation 恢复避免 worker 重试重复建页；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | Research 批准溯源 Phase 2C：持久化 run/candidate/finding 快照，candidate ID + version + idempotency 原子批准；`research-import` coordinator 以租约逐条导入并注入 child Ingest lineage，终态对账物化 operation/page/commit 与 verification finding；Health 从 run view 恢复批准、导入、验证和终态，旧 resultJson 仅作兼容回退；无新增 LLM task，示例配置不变 |
 | 2026-07-13 | Wiki 窄写 Phase 2B：Fix links 收缩为 `wiki.link.ensure`，contradiction 保留 patch/update；Curate auto/manual 增加 metadata/link 窄写与串行 update cap；Query preview/approve 支持两个新 operation，真实写工具仍不可见；PendingAction CHECK 兼容迁移，并以原子 finalizer 保证 embed job 与 applied 同进退、崩溃可重试；LLM 示例配置不变 |
 | 2026-07-12 | Health 修复闭环 Phase 2A：新增稳定 finding identity、九类纯 remediation router、统一执行与幂等 context、`MAX_REMEDIATION_JOBS=200` 状态恢复；Fix 精确消费所选 scope，Research 接受 `coverage-gap / thin-page` 的 `findingIds + lintJobId`，并与前端 active-job 恢复及 lint 复检形成闭环 |

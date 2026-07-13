@@ -62,7 +62,7 @@
 - `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；刷新不会丢卡片，也不会把聊天回复当批准
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
-- `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `save=true`，body 带 `subjectId`
+- `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
 
 ### `search/`
 
@@ -176,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Query Save-to-Wiki Phase 2D：保存按钮保留既有显式用户动作与 job 追踪，删除未被消费的 `onSaved(normalizeSlug(title))` 提前回调，避免同名页采用数字后缀时向客户端传播错误 slug |
 | 2026-07-14 | Research 批准溯源 Phase 2C：候选弹窗改用持久化 `ResearchRunView` 与 candidate ID，批准 body 无 URL；普通关闭/显式忽略分离；Health 从 job `runId` 恢复 run、稳定幂等批准、轮询导入/验证并在终态失效 pages/lint/active jobs，subject/scope 切换清理旧 view 与 key |
 | 2026-07-12 | Health 修复闭环 Phase 2A：UI 改为服务端 plan 驱动，稳定 ID 批量动作与统一 remediation API；All Subjects 只读、orphan-source 删除二次确认不变；补 active jobs 刷新恢复、hydration 安全门、subject/generation 隔离及终态 lint 闭环 |
 | 2026-07-12 | Phase 1C：Health 展示 Fix / Curate 后置校验三态；`use-job-stream` 注册四个 verify 事件；新增 `postcondition-summary` 纯函数与测试，Fix 自动 lint 刷新行为不变 |
