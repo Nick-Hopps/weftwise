@@ -46,6 +46,20 @@ function pagePlanToPreview<T extends object>(plan: PlannedPageOperation<T>): Pen
   };
 }
 
+function omitEffectiveAt<T extends { effectiveAt?: unknown }>(payload: T): Omit<T, 'effectiveAt'> {
+  const result = { ...payload };
+  delete result.effectiveAt;
+  return result;
+}
+
+function isActionStalePreviewError(error: unknown): error is Error & {
+  code: 'ACTION_STALE_PREVIEW';
+} {
+  return error instanceof Error
+    && 'code' in error
+    && error.code === 'ACTION_STALE_PREVIEW';
+}
+
 export type PendingActionErrorCode =
   | 'ACTION_NOT_FOUND'
   | 'ACTION_EXPIRED'
@@ -159,7 +173,7 @@ export async function createPendingActionPreview(input: {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const normalized = normalizePreviewInput(input.input, nowIso);
-  const { effectiveAt: _storedEffectiveAt, ...planPayload } = normalized.payload;
+  const planPayload = omitEffectiveAt(normalized.payload);
   const normalizedForPlan = {
     operation: normalized.operation,
     payload: planPayload,
@@ -242,7 +256,7 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
   const payload = JSON.parse(record.payloadJson) as Record<string, unknown>;
   const effectiveAt = String(payload.effectiveAt ?? '');
   if (!effectiveAt) throw new Error('Stored action is missing effectiveAt.');
-  const { effectiveAt: _storedEffectiveAt, ...planPayload } = payload;
+  const planPayload = omitEffectiveAt(payload);
   let pagePlan: PlannedPageOperation<object> | null = null;
   switch (record.operation) {
     case 'create':
@@ -339,7 +353,44 @@ export async function approvePendingAction(input: {
   if (replanned.pagePlan) {
     try {
       await applyPlannedPageOperation(replanned.pagePlan);
-    } catch {
+    } catch (error) {
+      if (isActionStalePreviewError(error)) {
+        let refreshedPlan: ReplannedAction;
+        try {
+          refreshedPlan = await replanRecord(approved, input.subject);
+        } catch (replanError) {
+          pendingActionsRepo.markFailed(input.id, input.subject.id,
+            JSON.stringify({ code: 'ACTION_PLAN_INVALID', message: 'Action can no longer be planned.' }), nowIso);
+          throw new PendingActionError(
+            'ACTION_PLAN_INVALID',
+            replanError instanceof Error ? replanError.message : 'Action can no longer be planned.',
+            409,
+          );
+        }
+        const refreshed = pendingActionsRepo.refreshExecutingPreview({
+          id: input.id,
+          subjectId: input.subject.id,
+          operationId: replanned.pagePlan.changeset.id,
+          payloadHash: approved.payloadHash,
+          previewJson: JSON.stringify(refreshedPlan.preview),
+          expiresAt: new Date(now.getTime() + PENDING_TTL_MS).toISOString(),
+          updatedAt: nowIso,
+        });
+        if (!refreshed) {
+          throw new PendingActionError(
+            'ACTION_IN_PROGRESS',
+            'Action state changed while refreshing the stale preview.',
+            409,
+          );
+        }
+        const refreshedAction = recordToView(scopedRecord(input.id, input.subject.id));
+        throw new PendingActionError(
+          'ACTION_STALE_PREVIEW',
+          'Vault changed during approval; review the refreshed action.',
+          409,
+          refreshedAction,
+        );
+      }
       pendingActionsRepo.markFailed(input.id, input.subject.id,
         JSON.stringify({ code: 'ACTION_APPLY_FAILED', message: 'Action execution failed.' }), nowIso);
       throw new PendingActionError('ACTION_APPLY_FAILED', 'Action execution failed.', 500);

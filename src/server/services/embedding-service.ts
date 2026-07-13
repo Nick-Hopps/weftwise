@@ -1,5 +1,4 @@
 import { registerHandler } from '@/server/jobs/worker';
-import * as queue from '@/server/jobs/queue';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import * as embeddingsRepo from '@/server/db/repos/embeddings-repo';
@@ -60,9 +59,7 @@ export async function runEmbedIndex(subjectId: string): Promise<void> {
   embeddingsRepo.pruneOrphans(subjectId, pages.map((p) => p.slug));
 }
 
-export function enqueueEmbedIndex(subjectId: string): void {
-  queue.enqueue('embed-index', { subjectId }, subjectId);
-}
+export { enqueueEmbedIndex } from './embedding-enqueue';
 
 registerHandler('embed-index', async (job) => {
   const params = JSON.parse(job.paramsJson) as { subjectId?: string };

@@ -7,6 +7,7 @@ const conversationMocks = vi.hoisted(() => ({ getConversation: vi.fn() }));
 vi.mock('../../db/repos/conversations-repo', () => conversationMocks);
 const repoMocks = vi.hoisted(() => ({
   getScoped: vi.fn(), claimApproval: vi.fn(), claimExecution: vi.fn(), refreshPreview: vi.fn(),
+  refreshExecutingPreview: vi.fn(),
   markApplied: vi.fn(), markFailed: vi.fn(), rejectPending: vi.fn(), expirePending: vi.fn(() => 0),
   listRecoverable: vi.fn((): PendingActionRecord[] => []), pruneTerminal: vi.fn(() => 0),
 }));
@@ -66,6 +67,7 @@ beforeEach(() => {
   repoMocks.markApplied.mockReturnValue(true);
   repoMocks.rejectPending.mockReturnValue(true);
   repoMocks.refreshPreview.mockReturnValue(true);
+  repoMocks.refreshExecutingPreview.mockReturnValue(true);
   repoMocks.listRecoverable.mockReturnValue([]);
   repoMocks.pruneTerminal.mockReturnValue(0);
   repoMocks.expirePending.mockReturnValue(0);
@@ -105,6 +107,50 @@ describe('approvePendingAction', () => {
       .rejects.toMatchObject({ code: 'ACTION_STALE_PREVIEW', httpStatus: 409 });
     expect(repoMocks.refreshPreview).toHaveBeenCalled();
     expect(applyMocks.applyPlannedPageOperation).not.toHaveBeenCalled();
+    expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
+  });
+
+  it('拿到 vault 锁前 HEAD 变化时从 executing 受限退回 pending', async () => {
+    const refreshedPlan = { ...pagePlan, preHead: 'head-2', diff: 'diff-2' };
+    const refreshedPreview: PendingActionPreview = {
+      kind: 'page-change',
+      preHead: 'head-2',
+      summary: refreshedPlan.summary,
+      affectedPages: refreshedPlan.affectedPages,
+      diff: 'diff-2',
+      warnings: refreshedPlan.warnings,
+    };
+    pageMocks.planDeletePageInSubject
+      .mockResolvedValueOnce(pagePlan)
+      .mockResolvedValueOnce(refreshedPlan);
+    applyMocks.applyPlannedPageOperation.mockRejectedValueOnce(Object.assign(
+      new Error('Vault HEAD changed after preview.'),
+      { code: 'ACTION_STALE_PREVIEW', expectedHead: 'head-1', actualHead: 'head-2' },
+    ));
+    repoMocks.getScoped
+      .mockReturnValueOnce(record())
+      .mockReturnValueOnce(record('pending', {
+        previewJson: JSON.stringify(refreshedPreview),
+      }));
+
+    await expect(approvePendingAction({ id: 'a1', subject, now }))
+      .rejects.toMatchObject({
+        code: 'ACTION_STALE_PREVIEW',
+        httpStatus: 409,
+        action: { status: 'pending', preHead: 'head-2' },
+      });
+
+    expect(pageMocks.planDeletePageInSubject).toHaveBeenCalledTimes(2);
+    expect(repoMocks.refreshExecutingPreview).toHaveBeenCalledWith({
+      id: 'a1',
+      subjectId: 's1',
+      operationId: 'op-1',
+      payloadHash: expect.any(String),
+      previewJson: JSON.stringify(refreshedPreview),
+      expiresAt: '2026-07-11T00:40:00.000Z',
+      updatedAt: now.toISOString(),
+    });
+    expect(repoMocks.markFailed).not.toHaveBeenCalled();
     expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
   });
 

@@ -1,6 +1,6 @@
 import { getRawDb } from '../db/client';
 import * as pendingActionsRepo from '../db/repos/pending-actions-repo';
-import { enqueueEmbedIndex } from './embedding-service';
+import { enqueueEmbedIndex } from './embedding-enqueue';
 
 /**
  * 在同一 SQLite IMMEDIATE 事务内完成页面审批的派生任务入队与状态收口。
