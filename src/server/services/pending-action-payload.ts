@@ -1,9 +1,25 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { PendingActionOperation, PreviewChangeInput } from '@/lib/contracts';
+import { normalizeMetadataPatch } from '@/server/wiki/narrow-write';
 
 const TrimmedTextSchema = z.string().trim().min(1);
 const TagsSchema = z.array(TrimmedTextSchema).optional();
+const MetadataPatchPayloadSchema = z.object({
+  slug: TrimmedTextSchema,
+  title: z.string().optional(),
+  summary: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  aliases: z.array(z.string()).optional(),
+}).strict().transform((payload) => normalizeMetadataPatch(payload));
+const LinkEnsurePayloadSchema = z.object({
+  sourceSlug: TrimmedTextSchema,
+  targetSubjectSlug: TrimmedTextSchema.optional(),
+  targetSlug: TrimmedTextSchema,
+  oldString: z.string().min(1),
+  displayText: z.string().optional(),
+  mode: z.enum(['link', 'unlink', 'retarget']),
+}).strict();
 
 export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   z.object({
@@ -42,6 +58,14 @@ export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('reenrich'),
     payload: z.object({ slug: TrimmedTextSchema }).strict(),
+  }).strict(),
+  z.object({
+    operation: z.literal('metadata-patch'),
+    payload: MetadataPatchPayloadSchema,
+  }).strict(),
+  z.object({
+    operation: z.literal('link-ensure'),
+    payload: LinkEnsurePayloadSchema,
   }).strict(),
 ]);
 

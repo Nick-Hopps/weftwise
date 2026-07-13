@@ -43,6 +43,7 @@ describe('resolveQueryTools', () => {
     expect(propose).toEqual([...read, 'wiki.preview_change']);
     expect(propose).not.toEqual(expect.arrayContaining([
       'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete', 'wiki.reenrich',
+      'wiki.metadata.patch', 'wiki.link.ensure',
     ]));
   });
 });

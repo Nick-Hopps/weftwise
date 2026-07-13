@@ -15,6 +15,21 @@ export { normalizeSlug };
 export const GENERAL_SUBJECT_SLUG = 'general';
 
 /**
+ * 页面 slug 的规范形：允许以单个 `/` 分隔的嵌套路径，但必须已完成 normalizeSlug。
+ * 因而会拒绝空值、绝对路径、`.`/`..`、反斜杠、重复斜杠及大小写/空白/标点漂移。
+ */
+export function isCanonicalPageSlug(slug: string): boolean {
+  return slug.length > 0 && normalizeSlug(slug) === slug;
+}
+
+/** 在任何路径拼接或 vault 读取前拒绝非规范页面 slug。 */
+export function assertCanonicalPageSlug(slug: string, field = 'page slug'): void {
+  if (!isCanonicalPageSlug(slug)) {
+    throw new Error(`${field} must be a non-empty canonical page slug`);
+  }
+}
+
+/**
  * Wiki 内置系统页（meta 页）的 slug 集合：`index` / `log`。由系统维护、非用户内容，
  * 在多处被排除或保护：成熟度初始化 / 邻居唤醒（indexer）、re-enrich 入队（reenrich-enqueue）、
  * 孤儿检测（lint-deterministic）、策展 scope 与 merge/split/delete 护栏（curate-plan/curate-service）、

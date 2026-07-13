@@ -78,11 +78,15 @@ export function compileToolSet(
           sideEffect: t.sideEffect,
           subjectId: opts.policy.subjectId,
           pageSlugs: extractPageSlugs(t.name, args),
-          input: sanitizeAuditValue(args),
+          input: sanitizeToolAuditInput(t.name, args),
         };
         try {
           const out = await t.handler(args, policyCtx);
-          opts.onToolCall?.({ ...audit, output: sanitizeAuditValue(out), durationMs: Date.now() - start });
+          opts.onToolCall?.({
+            ...audit,
+            output: sanitizeToolAuditOutput(t.name, out),
+            durationMs: Date.now() - start,
+          });
           return out;
         } catch (err) {
           opts.onToolCall?.({ ...audit, error: (err as Error).message, durationMs: Date.now() - start });
@@ -116,6 +120,7 @@ const SENSITIVE_AUDIT_KEYS = new Set([
   'excerpt',
   'oldString',
   'newString',
+  'displayText',
 ]);
 
 function sanitizeAuditValue(value: unknown, key?: string): unknown {
@@ -125,6 +130,35 @@ function sanitizeAuditValue(value: unknown, key?: string): unknown {
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>)
       .map(([entryKey, entryValue]) => [entryKey, sanitizeAuditValue(entryValue, entryKey)]),
+  );
+}
+
+function sanitizeToolAuditInput(toolName: string, input: unknown): unknown {
+  if (toolName !== 'wiki.metadata.patch' || !input || typeof input !== 'object') {
+    return sanitizeAuditValue(input);
+  }
+  const value = input as Record<string, unknown>;
+  const fields = ['title', 'summary', 'tags', 'aliases']
+    .filter((field) => value[field] !== undefined);
+  return {
+    slug: typeof value.slug === 'string' ? value.slug : '',
+    fields,
+  };
+}
+
+function sanitizeToolAuditOutput(toolName: string, output: unknown): unknown {
+  if (!output || typeof output !== 'object') return sanitizeAuditValue(output);
+  const fields = toolName === 'wiki.metadata.patch'
+    ? ['ok', 'updatedSlug', 'referencesUpdated', 'changedFields']
+    : toolName === 'wiki.link.ensure'
+      ? ['ok', 'updatedSlug', 'mode', 'targetSubjectSlug', 'targetSlug']
+      : null;
+  if (!fields) return sanitizeAuditValue(output);
+  const value = output as Record<string, unknown>;
+  return Object.fromEntries(
+    fields
+      .filter((field) => Object.prototype.hasOwnProperty.call(value, field))
+      .map((field) => [field, sanitizeAuditValue(value[field], field)]),
   );
 }
 
@@ -179,6 +213,14 @@ function scopeToolContext(ctx: ToolContext, policy: ToolExecutionPolicy): ToolCo
       assertAllowed([input.slug]);
       return ctx.patchPage!(input);
     }),
+    metadataPatch: ctx.metadataPatch && (async (input) => {
+      assertAllowed([input.slug]);
+      return ctx.metadataPatch!(input);
+    }),
+    linkEnsure: ctx.linkEnsure && (async (input) => {
+      assertAllowed([input.sourceSlug]);
+      return ctx.linkEnsure!(input);
+    }),
   };
 }
 
@@ -187,7 +229,11 @@ function extractPageSlugs(toolName: string, input: unknown): string[] {
   const value = input as Record<string, unknown>;
   const keys = toolName === 'wiki.merge'
     ? ['targetSlug', 'sourceSlug']
-    : ['slug', 'sourceSlug', 'targetSlug', 'pageSlug'];
+    : toolName === 'wiki.link.ensure'
+      ? ['sourceSlug']
+      : toolName === 'wiki.metadata.patch'
+        ? ['slug']
+        : ['slug', 'sourceSlug', 'targetSlug', 'pageSlug'];
   return [...new Set(keys.map((key) => value[key]).filter((slug): slug is string => typeof slug === 'string'))];
 }
 

@@ -13,8 +13,8 @@ vi.mock('../wiki-transaction', () => txMocks);
 const gitMocks = vi.hoisted(() => ({ getVaultHead: vi.fn(async () => 'head-1') }));
 vi.mock('../../git/git-service', () => gitMocks);
 
-const storeMocks = vi.hoisted(() => ({
-  readPageInSubject: vi.fn((_subjectSlug: string, slug: string) => {
+const storeMocks = vi.hoisted(() => {
+  const readPage = (_subjectSlug: string, slug: string) => {
     if (slug === 'missing') return null;
     return {
       frontmatter: {
@@ -26,8 +26,9 @@ const storeMocks = vi.hoisted(() => ({
       },
       body: slug === 'notes' ? 'See [[Page A]].' : 'old body',
     };
-  }),
-}));
+  };
+  return { readPage, readPageInSubject: vi.fn(readPage) };
+});
 vi.mock('../wiki-store', () => storeMocks);
 
 const repoMocks = vi.hoisted(() => ({
@@ -54,6 +55,7 @@ const effectiveAt = '2026-07-11T00:00:00.000Z';
 beforeEach(() => {
   vi.clearAllMocks();
   gitMocks.getVaultHead.mockResolvedValue('head-1');
+  storeMocks.readPageInSubject.mockImplementation(storeMocks.readPage);
   txMocks.validateChangeset.mockReturnValue({ valid: true, errors: [], warnings: [] });
   repoMocks.getAllPages.mockReturnValue([{ slug: 'page-a' }]);
   repoMocks.getBacklinks.mockReturnValue([]);
@@ -99,8 +101,10 @@ describe('页面操作 planner', () => {
     expect(patch.resultHint).toMatchObject({ updatedSlug: 'page-a', appliedEdits: 1 });
     expect(patch.diff).toContain('-old body');
     expect(patch.diff).toContain('+new body');
+    expect(gitMocks.getVaultHead).toHaveBeenCalledTimes(1);
 
     const deletion = await planPageDelete('job-4', subject, { slug: 'page-a', effectiveAt });
+    expect(gitMocks.getVaultHead).toHaveBeenCalledTimes(2);
     expect(deletion.diff).toContain('+++ /dev/null');
     expect(txMocks.applyChangeset).not.toHaveBeenCalled();
 
@@ -115,5 +119,23 @@ describe('页面操作 planner', () => {
   it('patch 仍要求 oldString 唯一命中', () => {
     expect(() => applyPatchEdits('x x', [{ oldString: 'x', newString: 'y' }]))
       .toThrow(/matches 2 locations/);
+  });
+
+  it('patch source 只读一次，diff before 不混入随后版本', async () => {
+    let sourceReads = 0;
+    storeMocks.readPageInSubject.mockImplementation((subjectSlug, slug) => {
+      const doc = storeMocks.readPage(subjectSlug, slug);
+      if (slug !== 'page-a' || !doc) return doc;
+      sourceReads += 1;
+      return sourceReads === 1 ? doc : { ...doc, body: 'CONCURRENT BODY' };
+    });
+
+    const plan = await planPagePatch('job-snapshot', subject, {
+      slug: 'page-a', edits: [{ oldString: 'old body', newString: 'new body' }], effectiveAt,
+    });
+    expect(sourceReads).toBe(1);
+    expect(plan.diff).toContain('-old body');
+    expect(plan.diff).toContain('+new body');
+    expect(plan.diff).not.toContain('CONCURRENT BODY');
   });
 });

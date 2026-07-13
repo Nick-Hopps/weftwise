@@ -181,6 +181,37 @@ export function refreshPreview(input: {
   return result.changes === 1;
 }
 
+/**
+ * 仅用于页面 apply 在 vault 锁内发现陈旧 HEAD 的补偿转换。
+ * operationId 必须匹配本次执行抢占，避免把其他执行者或已完成 action 退回 pending。
+ */
+export function refreshExecutingPreview(input: {
+  id: string;
+  subjectId: string;
+  operationId: string;
+  payloadHash: string;
+  previewJson: string;
+  expiresAt: string;
+  updatedAt: string;
+}): boolean {
+  const result = getRawDb().prepare(
+    `UPDATE pending_actions
+     SET status = 'pending', payload_hash = ?, preview_json = ?, expires_at = ?,
+         updated_at = ?, approved_at = NULL, applied_at = NULL,
+         operation_id = NULL, job_id = NULL, error_json = NULL
+     WHERE id = ? AND subject_id = ? AND status = 'executing' AND operation_id = ?`,
+  ).run(
+    input.payloadHash,
+    input.previewJson,
+    input.expiresAt,
+    input.updatedAt,
+    input.id,
+    input.subjectId,
+    input.operationId,
+  );
+  return result.changes === 1;
+}
+
 export function rejectPending(id: string, subjectId: string, nowIso: string): boolean {
   const result = getRawDb().prepare(
     `UPDATE pending_actions SET status = 'rejected', updated_at = ?

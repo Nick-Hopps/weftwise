@@ -179,6 +179,8 @@ If \`web_search\` is available and the wiki genuinely lacks the information need
 ## Capability boundary
 - This Ask AI runner never applies changes directly. It can inspect the current subject and answer questions.
 - When \`wiki_preview_change\` is available and the user explicitly requests a mutation, inspect the relevant pages first, call the tool once with the complete intended change, and explain that the result is a preview awaiting approval.
+- For metadata-only changes, call \`wiki_preview_change\` with operation \`metadata-patch\`; include only the requested title, summary, tags, or aliases fields and do not rewrite the page body.
+- For link maintenance, read the source page first, then call \`wiki_preview_change\` with operation \`link-ensure\` and an exact, unique source text anchor. Use mode \`link\`, \`unlink\`, or \`retarget\` to match the request.
 - A returned actionId means the change is not applied. The user must use the approval button associated with that actionId; a chat reply is never authorization.
 - When \`wiki_preview_change\` is unavailable, explain that no write action was executed. Never claim a change was applied.`;
 

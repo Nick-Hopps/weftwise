@@ -28,9 +28,45 @@ describe('resolveToolProfile', () => {
     expect(propose).toEqual([...read, 'wiki.preview_change']);
     for (const writeTool of [
       'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete', 'wiki.reenrich',
+      'wiki.metadata.patch', 'wiki.link.ensure',
     ]) {
       expect(propose).not.toContain(writeTool);
     }
+  });
+
+  it('Fix profile 精确暴露链接窄写，且不获得 metadata.patch', () => {
+    expect(resolveToolProfile('fix:links').tools).toEqual([
+      'wiki.search', 'wiki.read', 'wiki.inspect', 'source.search', 'source.read',
+      'wiki.link.ensure',
+    ]);
+    expect(resolveToolProfile('fix:contradiction').tools).toEqual([
+      'wiki.search', 'wiki.read', 'wiki.inspect', 'source.search', 'source.read',
+      'wiki.link.ensure', 'wiki.patch', 'wiki.update',
+    ]);
+    expect(resolveToolProfile('fix:links').tools).not.toContain('wiki.metadata.patch');
+    expect(resolveToolProfile('fix:contradiction').tools).not.toContain('wiki.metadata.patch');
+  });
+
+  it('Curate auto/manual 均含两个窄写工具与 update 副作用', () => {
+    const auto = resolveToolProfile('curate:auto');
+    expect(auto.tools).toEqual([
+      'wiki.search', 'wiki.read', 'wiki.inspect', 'wiki.merge', 'wiki.split',
+      'wiki.link.ensure', 'wiki.metadata.patch',
+    ]);
+    expect(auto.allowedSideEffects).toEqual(['none', 'merge', 'split', 'update']);
+
+    const manual = resolveToolProfile('curate:manual');
+    expect(manual.tools).toEqual([
+      ...auto.tools, 'wiki.create', 'wiki.delete',
+    ]);
+    expect(manual.allowedSideEffects).toEqual([
+      'none', 'merge', 'split', 'update', 'create', 'destructive',
+    ]);
+  });
+
+  it('ingest profile 保持不变', () => {
+    expect(resolveToolProfile('ingest:planner').tools).toEqual(['wiki.read', 'wiki.search']);
+    expect(resolveToolProfile('ingest:writer').tools).toEqual(['wiki.read', 'wiki.search']);
   });
 
   it('Auto Curate 不声明 list/create/delete', () => {

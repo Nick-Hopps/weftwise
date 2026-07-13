@@ -10,6 +10,8 @@ import { wikiInspectTool } from '../builtin/wiki-inspect';
 import { sourceSearchTool } from '../builtin/source-search';
 import { sourceReadTool } from '../builtin/source-read';
 import { wikiListTool } from '../builtin/wiki-list';
+import { wikiLinkEnsureTool as actualLinkEnsureTool } from '../builtin/wiki-link-ensure';
+import { wikiMetadataPatchTool as actualMetadataPatchTool } from '../builtin/wiki-metadata-patch';
 import { emptyWikiInspection } from '../evidence-results';
 
 const ctx = { subject: { id: 's', slug: 'general' } } as ToolContext;
@@ -40,6 +42,30 @@ const updateTool: ToolDef = {
   inputSchema: z.object({ slug: z.string(), body: z.string() }),
   outputSchema: z.object({ ok: z.boolean() }),
   sideEffect: 'update', handler: async () => ({ ok: true }),
+};
+const metadataPatchTool: ToolDef = {
+  name: 'wiki.metadata.patch', source: 'builtin', description: 'd',
+  inputSchema: z.object({
+    slug: z.string(), title: z.string().optional(), tags: z.array(z.string()).optional(),
+  }),
+  outputSchema: z.object({
+    updatedSlug: z.string(), referencesUpdated: z.number(), changedFields: z.array(z.string()),
+  }),
+  sideEffect: 'update',
+  handler: async (input, toolCtx) => toolCtx.metadataPatch!(input as never),
+};
+const linkEnsureTool: ToolDef = {
+  name: 'wiki.link.ensure', source: 'builtin', description: 'd',
+  inputSchema: z.object({
+    sourceSlug: z.string(), targetSubjectSlug: z.string().optional(), targetSlug: z.string(),
+    oldString: z.string(), displayText: z.string().optional(),
+    mode: z.enum(['link', 'unlink', 'retarget']),
+  }),
+  outputSchema: z.object({
+    updatedSlug: z.string(), mode: z.string(), targetSubjectSlug: z.string(), targetSlug: z.string(),
+  }),
+  sideEffect: 'update',
+  handler: async (input, toolCtx) => toolCtx.linkEnsure!(input as never),
 };
 
 describe('toProviderToolName', () => {
@@ -89,6 +115,15 @@ describe('compileToolSet', () => {
     })).toThrow(/TOOL_NOT_ALLOWED.*job capability/i);
   });
 
+  it('两个窄写工具都要求匹配 Fix/Curate job capability', () => {
+    expect(() => compileToolSet([linkEnsureTool], ctx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('fix:links'), 's'),
+    })).toThrow(/TOOL_NOT_ALLOWED.*fix job capability/i);
+    expect(() => compileToolSet([metadataPatchTool], ctx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('curate:auto'), 's'),
+    })).toThrow(/TOOL_NOT_ALLOWED.*curate job capability/i);
+  });
+
   it('审计输入不记录页面正文', async () => {
     const onToolCall = vi.fn();
     const profile = resolveToolProfile('fix:contradiction');
@@ -124,6 +159,132 @@ describe('compileToolSet', () => {
     const outside = await (set.wiki_read as any).execute({ slug: 'outside' });
     expect(outside).toEqual({ found: false, title: null, markdown: null });
     expect(readPage).not.toHaveBeenCalled();
+  });
+
+  it('metadata scope 只校验 slug；link scope 只校验 sourceSlug', async () => {
+    const metadataPatch = vi.fn(async (input) => ({
+      updatedSlug: input.slug, referencesUpdated: 0, changedFields: ['tags'],
+    }));
+    const linkEnsure = vi.fn(async (input) => ({
+      updatedSlug: input.sourceSlug,
+      mode: input.mode,
+      targetSubjectSlug: input.targetSubjectSlug ?? 'general',
+      targetSlug: input.targetSlug,
+    }));
+    const scopedCtx = { ...ctx, metadataPatch, linkEnsure } as ToolContext;
+    const allowed = new Set(['inside']);
+    const curatePolicy = createToolExecutionPolicy(resolveToolProfile('curate:auto'), 's', {
+      allowedPageSlugs: allowed,
+      jobCapability: { jobId: 'job-curate', jobType: 'curate' },
+    });
+    const set = compileToolSet([metadataPatchTool, linkEnsureTool], scopedCtx, {
+      policy: curatePolicy,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_metadata_patch as any).execute({ slug: 'inside', tags: ['x'] });
+    expect(metadataPatch).toHaveBeenCalledWith({ slug: 'inside', tags: ['x'] });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect((set.wiki_metadata_patch as any).execute({ slug: 'outside', tags: ['x'] }))
+      .rejects.toThrow(/PAGE_OUT_OF_SCOPE.*outside/);
+
+    // target 不扩大当前 Subject write scope，同主题范围外与跨主题 target 都允许验证。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_link_ensure as any).execute({
+      sourceSlug: 'inside', targetSlug: 'outside', oldString: 'anchor', mode: 'link',
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_link_ensure as any).execute({
+      sourceSlug: 'inside', targetSubjectSlug: 'other', targetSlug: 'remote',
+      oldString: 'anchor', mode: 'link',
+    });
+    expect(linkEnsure).toHaveBeenCalledTimes(2);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect((set.wiki_link_ensure as any).execute({
+      sourceSlug: 'outside', targetSlug: 'inside', oldString: 'anchor', mode: 'link',
+    })).rejects.toThrow(/PAGE_OUT_OF_SCOPE.*outside/);
+  });
+
+  it('actual builtin 捕获 scope 错误为 ok:false，且不调用底层窄写能力', async () => {
+    const metadataPatch = vi.fn();
+    const linkEnsure = vi.fn();
+    const scopedCtx = { ...ctx, metadataPatch, linkEnsure } as ToolContext;
+    const set = compileToolSet([
+      actualMetadataPatchTool as ToolDef,
+      actualLinkEnsureTool as ToolDef,
+    ], scopedCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('curate:auto'), 's', {
+        allowedPageSlugs: new Set(['inside']),
+        jobCapability: { jobId: 'job-curate', jobType: 'curate' },
+      }),
+    });
+
+    // actual handler 把 policy wrapper 的 throw 收敛为工具结果，供模型修正参数。
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const metadataResult = await (set.wiki_metadata_patch as any).execute({
+      slug: 'outside', tags: ['x'],
+    });
+    expect(metadataResult).toMatchObject({ ok: false, message: expect.stringMatching(/PAGE_OUT_OF_SCOPE/) });
+    expect(metadataPatch).not.toHaveBeenCalled();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const linkResult = await (set.wiki_link_ensure as any).execute({
+      sourceSlug: 'outside', targetSlug: 'inside', oldString: 'anchor', mode: 'link',
+    });
+    expect(linkResult).toMatchObject({ ok: false, message: expect.stringMatching(/PAGE_OUT_OF_SCOPE/) });
+    expect(linkEnsure).not.toHaveBeenCalled();
+  });
+
+  it('窄写审计记录身份与结果，但脱敏锚点和 metadata 值', async () => {
+    const onToolCall = vi.fn();
+    const auditCtx = {
+      ...ctx,
+      metadataPatch: vi.fn(async () => ({
+        updatedSlug: 'page-a', referencesUpdated: 0, changedFields: ['title', 'tags'],
+        message: '秘密 metadata 结果',
+      })),
+      linkEnsure: vi.fn(async () => ({
+        updatedSlug: 'source', mode: 'retarget',
+        targetSubjectSlug: 'other', targetSlug: 'target',
+        message: '秘密 link 结果',
+      })),
+    } as ToolContext;
+    const set = compileToolSet([metadataPatchTool, linkEnsureTool], auditCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('curate:auto'), 's', {
+        jobCapability: { jobId: 'job-curate', jobType: 'curate' },
+      }),
+      onToolCall,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_metadata_patch as any).execute({
+      slug: 'page-a', title: '秘密标题', tags: ['秘密标签'],
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_link_ensure as any).execute({
+      sourceSlug: 'source', targetSubjectSlug: 'other', targetSlug: 'target',
+      oldString: '秘密上下文', displayText: '秘密锚点', mode: 'retarget',
+    });
+
+    expect(onToolCall).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      tool: 'wiki.metadata.patch', pageSlugs: ['page-a'],
+      input: { slug: 'page-a', fields: ['title', 'tags'] },
+      output: expect.objectContaining({
+        updatedSlug: 'page-a', changedFields: ['title', 'tags'],
+      }),
+    }));
+    expect(onToolCall).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      tool: 'wiki.link.ensure', pageSlugs: ['source'],
+      input: {
+        sourceSlug: 'source', targetSubjectSlug: 'other', targetSlug: 'target',
+        oldString: '[REDACTED]', displayText: '[REDACTED]', mode: 'retarget',
+      },
+      output: expect.objectContaining({
+        updatedSlug: 'source', mode: 'retarget',
+        targetSubjectSlug: 'other', targetSlug: 'target',
+      }),
+    }));
+    expect(JSON.stringify(onToolCall.mock.calls)).not.toContain('秘密');
   });
 
   it('scope 外 inspect 返回空结果，source.pageSlug 拒绝，list 在分页前注入 allowedSet', async () => {

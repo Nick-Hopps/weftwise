@@ -8,12 +8,16 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import {
   executePageCreate,
   executePageDelete,
+  executePageLinkEnsure,
+  executePageMetadataPatch,
   executePagePatch,
   executePageUpdate,
 } from '../wiki/page-ops';
 import {
   planPageCreate,
   planPageDelete,
+  planPageLinkEnsure,
+  planPageMetadataPatch,
   planPagePatch,
   planPageUpdate,
   type PlannedPageOperation,
@@ -23,7 +27,13 @@ import { checkRewriteFidelity, collectMissingLinkTargets, FIDELITY_PROFILES } fr
 import { enqueueEmbedIndex } from './embedding-service';
 import { META_PAGE_SLUGS, normalizeSlug } from '../wiki/page-identity';
 import * as subjectsRepo from '../db/repos/subjects-repo';
-import type { Subject } from '@/lib/contracts';
+import type {
+  LinkEnsureInput,
+  LinkEnsureResult,
+  MetadataPatchInput,
+  MetadataPatchResult,
+  Subject,
+} from '@/lib/contracts';
 
 /** 纯校验：可删返回 null，否则返回面向用户的错误消息。page=null 表示该 subject 下未找到。 */
 export function validateDeleteTarget(
@@ -153,6 +163,66 @@ export async function updatePageInSubject(
     throw new Error(`Edit dropped too much content: ${fidelity.violations.join('; ')}`);
   }
   const result = await executePageUpdate(crypto.randomUUID(), subject, input);
+  enqueueEmbedIndex(subject.id);
+  return result;
+}
+
+function assertMetadataPatchTarget(slug: string): void {
+  if (META_PAGE_SLUGS.has(slug)) {
+    throw new Error(`Cannot update protected system page "${slug}".`);
+  }
+}
+
+/** 只生成 metadata 计划；不 apply、不触发向量回填。 */
+export async function planMetadataPatchInSubject(
+  subject: Subject,
+  input: MetadataPatchInput,
+  effectiveAt: string,
+): Promise<PlannedPageOperation<MetadataPatchResult>> {
+  assertMetadataPatchTarget(input.slug);
+  return planPageMetadataPatch(crypto.randomUUID(), subject, { ...input, effectiveAt });
+}
+
+/**
+ * 校验非系统现有页后执行 metadata 窄写；alias 冲突由共享 planner 校验。
+ * direct 成功后由本入口唯一触发一次向量回填。
+ */
+export async function patchMetadataInSubject(
+  subject: Subject,
+  input: MetadataPatchInput,
+): Promise<MetadataPatchResult> {
+  assertMetadataPatchTarget(input.slug);
+  const result = await executePageMetadataPatch(crypto.randomUUID(), subject, input);
+  enqueueEmbedIndex(subject.id);
+  return result;
+}
+
+function assertLinkEnsureSource(sourceSlug: string): void {
+  if (META_PAGE_SLUGS.has(sourceSlug)) {
+    throw new Error(`Cannot update protected system page "${sourceSlug}".`);
+  }
+}
+
+/** 只生成 wikilink 窄写计划；source 保护后完全委托共享 planner。 */
+export async function planLinkEnsureInSubject(
+  subject: Subject,
+  input: LinkEnsureInput,
+  effectiveAt: string,
+): Promise<PlannedPageOperation<LinkEnsureResult>> {
+  assertLinkEnsureSource(input.sourceSlug);
+  return planPageLinkEnsure(crypto.randomUUID(), subject, { ...input, effectiveAt });
+}
+
+/**
+ * 执行 wikilink 窄写；只保护 source 系统页，target 是否存在由共享 planner 按 mode 校验。
+ * direct 成功后由本入口唯一触发一次向量回填。
+ */
+export async function ensureLinkInSubject(
+  subject: Subject,
+  input: LinkEnsureInput,
+): Promise<LinkEnsureResult> {
+  assertLinkEnsureSource(input.sourceSlug);
+  const result = await executePageLinkEnsure(crypto.randomUUID(), subject, input);
   enqueueEmbedIndex(subject.id);
   return result;
 }

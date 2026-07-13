@@ -34,13 +34,14 @@ import { selectLatestFindings } from './lint-latest';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
 export const CURATE_MAX_STEPS = 40;
-const CURATE_CAPS = { merge: 5, split: 5, delete: 5, create: 5 };
+const CURATE_CAPS = { merge: 5, split: 5, delete: 5, create: 5, update: 5 };
 
 interface CurateTotals {
   merge: number;
   split: number;
   delete: number;
   create: number;
+  update: number;
   writes: number;
 }
 
@@ -208,11 +209,11 @@ export async function runCurateJob(
     count: scopeSlugs.length,
   });
 
-  if (scopeSlugs.length < 2) {
+  if (scopeSlugs.length === 0) {
     return completeCurate(
-      { merge: 0, split: 0, delete: 0, create: 0, writes: 0 },
+      { merge: 0, split: 0, delete: 0, create: 0, update: 0, writes: 0 },
       worklist,
-      'Nothing to curate (need at least 2 pages).',
+      'Nothing to curate (empty scope).',
       job,
       subject,
       emit,
@@ -272,7 +273,7 @@ export async function runCurateJob(
   return completeCurate(
     totals,
     worklist,
-    `Curation done: ${totals.merge} merge(s), ${totals.split} split(s), ${totals.delete} delete(s), ${totals.create} create(s).`,
+    `Curation done: ${totals.merge} merge(s), ${totals.split} split(s), ${totals.delete} delete(s), ${totals.create} create(s), ${totals.update} update(s).`,
     job,
     subject,
     emit,

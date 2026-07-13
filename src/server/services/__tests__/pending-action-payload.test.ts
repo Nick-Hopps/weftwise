@@ -75,4 +75,113 @@ describe('pending-action payload', () => {
     expect(() => canonicalJson({ a: undefined })).toThrow(/unsupported/i);
     expect(() => canonicalJson({ a: Number.NaN })).toThrow(/finite/i);
   });
+
+  it('规范化 metadata-patch 四类字段并写入 effectiveAt', () => {
+    expect(normalizePreviewInput({
+      operation: 'metadata-patch',
+      payload: {
+        slug: ' page-a ',
+        title: ' 新标题 ',
+        summary: ' 新摘要 ',
+        tags: [' one ', 'two'],
+        aliases: [' Alias A ', 'Alias B'],
+      },
+    } as never, '2026-07-13T00:00:00.000Z')).toEqual({
+      operation: 'metadata-patch',
+      payload: {
+        slug: 'page-a',
+        title: '新标题',
+        summary: '新摘要',
+        tags: ['one', 'two'],
+        aliases: ['Alias A', 'Alias B'],
+        effectiveAt: '2026-07-13T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('metadata 列表沿用窄写内核的 identity 去重与数量上限', () => {
+    expect(normalizePreviewInput({
+      operation: 'metadata-patch',
+      payload: {
+        slug: 'page-a',
+        tags: [' One ', 'one', ''],
+        aliases: ['Foo Bar', 'foo-bar'],
+      },
+    }, '2026-07-13T00:00:00.000Z')).toMatchObject({
+      payload: { tags: ['One'], aliases: ['Foo Bar'] },
+    });
+
+    expect(() => normalizePreviewInput({
+      operation: 'metadata-patch',
+      payload: {
+        slug: 'page-a',
+        tags: Array.from({ length: 33 }, (_, index) => `tag-${index}`),
+      },
+    }, '2026-07-13T00:00:00.000Z')).toThrow(/32/);
+  });
+
+  it('规范化 link-ensure 标识字段，逐字保留 oldString/displayText', () => {
+    expect(normalizePreviewInput({
+      operation: 'link-ensure',
+      payload: {
+        sourceSlug: ' source ',
+        targetSubjectSlug: ' other-subject ',
+        targetSlug: ' target ',
+        oldString: '  唯一锚点  ',
+        displayText: '  展示文本  ',
+        mode: 'retarget',
+      },
+    } as never, '2026-07-13T00:00:00.000Z')).toEqual({
+      operation: 'link-ensure',
+      payload: {
+        sourceSlug: 'source',
+        targetSubjectSlug: 'other-subject',
+        targetSlug: 'target',
+        oldString: '  唯一锚点  ',
+        displayText: '  展示文本  ',
+        mode: 'retarget',
+        effectiveAt: '2026-07-13T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('新 operation 两层 strict，metadata 空提交与非法 link mode 均拒绝', () => {
+    const timestamp = '2026-07-13T00:00:00.000Z';
+    expect(() => normalizePreviewInput({
+      operation: 'metadata-patch', payload: { slug: 'a', body: '禁止字段' },
+    } as never, timestamp)).toThrow();
+    expect(() => normalizePreviewInput({
+      operation: 'metadata-patch', payload: { slug: 'a' }, extra: true,
+    } as never, timestamp)).toThrow();
+    expect(() => normalizePreviewInput({
+      operation: 'link-ensure',
+      payload: { sourceSlug: 'a', targetSlug: 'b', oldString: 'B', mode: 'invalid' },
+    } as never, timestamp)).toThrow();
+    expect(() => normalizePreviewInput({
+      operation: 'link-ensure',
+      payload: {
+        sourceSlug: 'a', targetSlug: 'b', oldString: 'B', mode: 'link', unknown: true,
+      },
+    } as never, timestamp)).toThrow();
+  });
+
+  it('新 operation 规范化后 canonical hash 稳定且 operation 参与 hash', () => {
+    const effectiveAt = '2026-07-13T00:00:00.000Z';
+    const normalized = normalizePreviewInput({
+      operation: 'metadata-patch', payload: { slug: ' a ', tags: [' x '] },
+    } as never, effectiveAt);
+    const left = hashPendingActionPayload({
+      conversationId: 'c1', subjectId: 's1',
+      operation: normalized.operation, payload: normalized.payload,
+    });
+    const right = hashPendingActionPayload({
+      subjectId: 's1', conversationId: 'c1', payload: normalized.payload,
+      operation: normalized.operation,
+    });
+    expect(left).toBe(right);
+    expect(left).not.toBe(hashPendingActionPayload({
+      conversationId: 'c1', subjectId: 's1',
+      operation: 'link-ensure', payload: normalized.payload,
+    }));
+  });
 });

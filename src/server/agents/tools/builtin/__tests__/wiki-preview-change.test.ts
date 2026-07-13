@@ -9,6 +9,33 @@ const action = {
 } as const;
 
 describe('wiki.preview_change', () => {
+  it('schema 接受 metadata/link 提案且保持严格 payload', () => {
+    expect(wikiPreviewChangeTool.inputSchema.parse({
+      operation: 'metadata-patch',
+      payload: { slug: 'page-a', aliases: ['Alias A'] },
+    })).toEqual({
+      operation: 'metadata-patch',
+      payload: { slug: 'page-a', aliases: ['Alias A'] },
+    });
+    expect(wikiPreviewChangeTool.inputSchema.parse({
+      operation: 'link-ensure',
+      payload: {
+        sourceSlug: 'page-a', targetSlug: 'page-b', oldString: 'Page B', mode: 'link',
+      },
+    })).toMatchObject({ operation: 'link-ensure' });
+    expect(() => wikiPreviewChangeTool.inputSchema.parse({
+      operation: 'metadata-patch',
+      payload: { slug: 'page-a', summary: 'Summary', unexpected: true },
+    })).toThrow();
+  });
+
+  it('描述明确支持两个窄写 operation，且仍只是审批提案', () => {
+    expect(wikiPreviewChangeTool.description).toContain('metadata-patch');
+    expect(wikiPreviewChangeTool.description).toContain('link-ensure');
+    expect(wikiPreviewChangeTool.sideEffect).toBe('propose');
+    expect(wikiPreviewChangeTool.description).toMatch(/does not modify/i);
+  });
+
   it('只转发到 context 并在持久化后触发回调', async () => {
     const previewChange = vi.fn(async () => action);
     const onPendingAction = vi.fn();
