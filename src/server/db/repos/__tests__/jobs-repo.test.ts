@@ -186,6 +186,8 @@ describe('jobs-repo.findLatestIngestJobForSource', () => {
       .run('2026-07-13T10:00:00.000Z', j1.id);
     db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
       .run('2026-07-13T10:00:01.000Z', j2.id);
+    db.prepare(`UPDATE jobs SET status = 'completed', completed_at = created_at WHERE id IN (?, ?)`)
+      .run(j1.id, j2.id);
     repo.enqueueJob('ingest', { sourceId: 'src-y', filename: 'b.md', subjectId: 's1' }, 's1');
     repo.enqueueJob('lint', { sourceId: 'src-x' }, 's1'); // 非 ingest 不算
 
@@ -198,6 +200,29 @@ describe('jobs-repo.findLatestIngestJobForSource', () => {
     const { repo } = await setupJobs();
     repo.enqueueJob('ingest', { sourceId: 'src-a', filename: 'a.md', subjectId: 's1' }, 's1');
     expect(repo.findLatestIngestJobForSource('s2', 'src-a')).toBeNull();
+  });
+
+  it('更老的同源 active 优先于更新的 terminal，供删除路由保持 in-flight 守卫', async () => {
+    const { db, repo } = await setupJobs();
+    const active = repo.enqueueJob('ingest', {
+      sourceId: 'src-active', filename: 'a.md', subjectId: 's1',
+    }, 's1');
+    const terminal = repo.enqueueJob('ingest', {
+      sourceId: 'src-active', filename: 'a.md', subjectId: 's1',
+    }, 's1');
+    db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
+      .run('2026-07-13T10:00:00.000Z', active.id);
+    db.prepare(`
+      UPDATE jobs SET status = 'completed', created_at = ?, completed_at = ?
+      WHERE id = ?
+    `).run(
+      '2026-07-13T11:00:00.000Z',
+      '2026-07-13T11:01:00.000Z',
+      terminal.id,
+    );
+
+    expect(repo.findLatestIngestJobForSource('s1', 'src-active'))
+      .toMatchObject({ id: active.id, status: 'pending' });
   });
 });
 
@@ -609,6 +634,37 @@ describe('jobs-repo.reingestSourceAtomic', () => {
       deduplicated: false,
       job: { id: first.job.id },
     });
+  });
+
+  it('更老同源 active 不被更新 terminal 遮蔽，禁止新建第三条 ingest', async () => {
+    const { db, repo, context, params, isDuplicateInFlight } = await setupAtomicReingest();
+    const active = repo.enqueueJob('ingest', params, 's1');
+    const terminal = repo.enqueueJob('ingest', params, 's1');
+    db.prepare(`UPDATE jobs SET created_at = ? WHERE id = ?`)
+      .run('2026-07-13T10:00:00.000Z', active.id);
+    db.prepare(`
+      UPDATE jobs SET status = 'completed', created_at = ?, completed_at = ?
+      WHERE id = ?
+    `).run(
+      '2026-07-13T11:00:00.000Z',
+      '2026-07-13T11:01:00.000Z',
+      terminal.id,
+    );
+
+    const result = repo.reingestSourceAtomic({
+      subjectId: 's1',
+      sourceId: 'src-1',
+      createParams: params,
+      paramsPatch: { remediationContext: context },
+      isDuplicateInFlight,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'in-flight',
+      deduplicated: true,
+      job: { id: active.id },
+    });
+    expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(2);
   });
 
   it('failed 重排与 job:retrying 事件同事务成功落库', async () => {

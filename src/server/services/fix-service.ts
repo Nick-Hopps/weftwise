@@ -75,7 +75,6 @@ function hasOwn(record: Record<string, unknown>, key: string): boolean {
 /** 依据实际工作清单与后置校验，为批量 Fix 中每个稳定 finding ID 单独归因。 */
 function buildPerFindingOutcomes(
   worklist: EnrichedLintFinding[],
-  writes: number,
   postcondition: PostconditionReport,
 ): Record<string, FixFindingOutcome> {
   const residualKeys = new Set(
@@ -83,6 +82,13 @@ function buildPerFindingOutcomes(
       (finding) => JSON.stringify([finding.type, finding.pageSlug]),
     ),
   );
+  const touchedSlugs = postcondition.scope.touchedSlugs.length > 0
+    ? new Set(postcondition.scope.touchedSlugs)
+    : new Set([
+      ...postcondition.scope.createdSlugs,
+      ...postcondition.scope.updatedSlugs,
+      ...postcondition.scope.deletedSlugs,
+    ]);
   const outcomes: Record<string, FixFindingOutcome> = {};
 
   for (const finding of worklist) {
@@ -92,14 +98,15 @@ function buildPerFindingOutcomes(
     if (
       postcondition.verificationError !== null
       || hasMatchingResidual
-      || (
-        postcondition.semanticStatus === 'failed'
-        && SEMANTIC_FIX_TYPES.has(finding.type)
-      )
     ) {
       outcomes[finding.id] = 'failed';
-    } else if (writes === 0 && postcondition.residualFindings.length === 0) {
+    } else if (!touchedSlugs.has(finding.pageSlug)) {
       outcomes[finding.id] = 'skipped';
+    } else if (
+      postcondition.semanticStatus === 'failed'
+      && SEMANTIC_FIX_TYPES.has(finding.type)
+    ) {
+      outcomes[finding.id] = 'failed';
     } else {
       outcomes[finding.id] = 'fixed';
     }
@@ -360,7 +367,7 @@ export async function runFixJob(
     semanticFindings: selectedScope.semantic,
     emit,
   });
-  const perFindingOutcomes = buildPerFindingOutcomes(worklist, writes, postcondition);
+  const perFindingOutcomes = buildPerFindingOutcomes(worklist, postcondition);
   if (remediationContext) {
     for (const findingId of remediationContext.findingIds) {
       if (!hasOwn(perFindingOutcomes, findingId)) {

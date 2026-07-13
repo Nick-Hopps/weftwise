@@ -69,7 +69,6 @@ async function completeCurate(
   });
   const perFindingOutcomes = buildCuratePerFindingOutcomes(
     worklist,
-    totals.writes,
     postcondition,
   );
   const result = {
@@ -125,7 +124,6 @@ function resolveCurateWorklist(
 /** 按 residual 的 pageSlug / relatedSlugs 将 Curate 批次结果归因到原 orphan。 */
 function buildCuratePerFindingOutcomes(
   worklist: EnrichedLintFinding[],
-  writes: number,
   postcondition: PostconditionReport,
 ): Record<string, CurateFindingOutcome> {
   const outcomes: Record<string, CurateFindingOutcome> = {};
@@ -138,6 +136,13 @@ function buildCuratePerFindingOutcomes(
     );
   const failedIds = new Set<string>();
   let hasUnattributedResidual = false;
+  const touchedSlugs = postcondition.scope.touchedSlugs.length > 0
+    ? new Set(postcondition.scope.touchedSlugs)
+    : new Set([
+      ...postcondition.scope.createdSlugs,
+      ...postcondition.scope.updatedSlugs,
+      ...postcondition.scope.deletedSlugs,
+    ]);
 
   if (!allFailed) {
     for (const residual of postcondition.residualFindings) {
@@ -154,13 +159,10 @@ function buildCuratePerFindingOutcomes(
     }
   }
 
-  const cleanWithoutWrites = writes === 0
-    && postcondition.status === 'clean'
-    && postcondition.residualFindings.length === 0;
   for (const finding of worklist) {
     if (allFailed || hasUnattributedResidual || failedIds.has(finding.id)) {
       outcomes[finding.id] = 'failed';
-    } else if (cleanWithoutWrites) {
+    } else if (!touchedSlugs.has(finding.pageSlug)) {
       outcomes[finding.id] = 'skipped';
     } else {
       outcomes[finding.id] = 'fixed';

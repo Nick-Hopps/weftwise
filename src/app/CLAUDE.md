@@ -45,7 +45,7 @@
 | `/api/research-backlog` | GET | 🆕 T3.2：列出当前 subject 待研究问题队列（`?status=open\|researched\|dismissed` 过滤，缺省返回全部） |
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
-| `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源 ingest 在途 409 `in-flight`，对称于 reingest）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
+| `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源查询 active 优先，故即使存在更新 terminal，只要任意旧 pending/running 仍返回 409 `in-flight`）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
 | `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试（`queue.requeue`，绕过 worker 的 `isRetryableError` 判定）：仅 `type==='ingest'` + `status==='failed'`；已被用户终结（`result.cancelled`）409；job 引用的 source 已被删除（如经 orphan-source 的 Delete source）409，避免 requeue 后 worker 读盘 "Source file not found" |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
