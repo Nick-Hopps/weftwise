@@ -7,6 +7,7 @@ const mockAuth = vi.fn();
 const mockListLatestCompletedLint = vi.fn();
 const mockListRecent = vi.fn();
 const mockResolve = vi.fn();
+const mockGetResearchRunsByJobIds = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
   requireAuth: (...args: unknown[]) => mockAuth(...args),
@@ -18,11 +19,15 @@ vi.mock('@/server/jobs/queue', () => ({
 vi.mock('@/server/middleware/subject', () => ({
   resolveSubjectFromRequest: (...args: unknown[]) => mockResolve(...args),
 }));
+vi.mock('@/server/services/research-approval-service', () => ({
+  getResearchRunsByJobIds: (...args: unknown[]) => mockGetResearchRunsByJobIds(...args),
+}));
 
 import { GET } from '../route';
 
 const SUBJECT_ONE_FINDING_ID = 'edad80746d1269f205fb92b2925ff1479057b336ea7c17915e7374f62a297133';
 const SUBJECT_TWO_FINDING_ID = 'fac9b0cfcfc6f3b1516c5d9ee0e6cfa8361cb08e061c1f010f50b01ba20b199e';
+const COVERAGE_GAP_FINDING_ID = 'ab60ee82e27a3772fd7ecde79913840340a5458fd7b0a0a47828bd58c26fcc15';
 const LINT_RAN_AT = '2026-07-13T12:00:00.000Z';
 const BEFORE_LINT = '2026-07-13T11:00:00.000Z';
 
@@ -107,6 +112,8 @@ beforeEach(() => {
   mockListLatestCompletedLint.mockReset();
   mockListRecent.mockReset();
   mockResolve.mockReset();
+  mockGetResearchRunsByJobIds.mockReset();
+  mockGetResearchRunsByJobIds.mockReturnValue([]);
 });
 
 describe('GET /api/lint/latest', () => {
@@ -276,6 +283,41 @@ describe('GET /api/lint/latest', () => {
       MAX_REMEDIATION_JOBS,
     );
     expect(mockListRecent).toHaveBeenCalledTimes(1);
+  });
+
+  it('按 subject 批量读取 Research run 并使用持久化审批状态', async () => {
+    const currentFinding = finding({ type: 'coverage-gap' });
+    const lint = lintJob('lint-1', 's1', [currentFinding]);
+    const research = remediationJob('research-1', 's1', [COVERAGE_GAP_FINDING_ID], {
+      action: 'research',
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({ runId: 'run-1' }),
+    });
+    mockResolve.mockReturnValue({
+      subject: { id: 's1', slug: 'general' },
+      error: null,
+    });
+    mockListLatestCompletedLint.mockReturnValue(lint);
+    mockListRecent.mockReturnValue([research]);
+    mockGetResearchRunsByJobIds.mockReturnValue([{
+      id: 'run-1', subjectId: 's1', researchJobId: 'research-1', origin: 'findings',
+      lintJobId: 'lint-previous', topic: null, topics: [], queries: [],
+      candidateSetHash: 'hash', status: 'importing', version: 2,
+      verificationLintJobId: null, findings: [], candidates: [], approval: {
+        id: 'approval-1', selectedCandidateIds: [], coordinatorJobId: 'coordinator-1',
+        createdAt: BEFORE_LINT,
+      }, createdAt: BEFORE_LINT, updatedAt: BEFORE_LINT, completedAt: null, error: null,
+    }]);
+
+    const response = await call();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(mockGetResearchRunsByJobIds).toHaveBeenCalledWith(['research-1'], 's1');
+    expect(Object.values(body.remediations)).toContainEqual(
+      expect.objectContaining({ workflow: 'research', status: 'queued', jobId: 'research-1' }),
+    );
   });
 
   it('鉴权失败时直接返回且不解析 subject、不查询 jobs', async () => {

@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 
 const mockMaintainPendingActions = vi.fn();
+const mockReconcileResearchProvenance = vi.fn();
+const mockReconcileForJob = vi.fn();
+const mockPruneOldOperations = vi.fn(() => 0);
 
 vi.mock('@/server/services/pending-action-maintenance', () => ({
   maintainPendingActions: (...args: unknown[]) => mockMaintainPendingActions(...args),
@@ -8,13 +11,25 @@ vi.mock('@/server/services/pending-action-maintenance', () => ({
 vi.mock('../queue', () => ({
   pruneEvents: vi.fn(() => 0),
   claim: vi.fn(() => null),
+  complete: vi.fn(),
+  fail: vi.fn(),
+  requestCancel: vi.fn(),
+  requeue: vi.fn(),
+  updateHeartbeat: vi.fn(),
 }));
 vi.mock('../events', () => ({ emit: vi.fn() }));
 vi.mock('@/server/services/maintenance-scheduler', () => ({
   runMaintenanceSweep: vi.fn(() => 0),
 }));
 vi.mock('@/server/db/repos/operations-repo', () => ({
-  pruneOldOperations: vi.fn(() => 0),
+  pruneOldOperations: (...args: Parameters<typeof mockPruneOldOperations>) =>
+    mockPruneOldOperations(...args),
+}));
+vi.mock('@/server/services/research-provenance-reconciler', () => ({
+  reconcileResearchProvenance: (...args: Parameters<typeof mockReconcileResearchProvenance>) =>
+    mockReconcileResearchProvenance(...args),
+  reconcileResearchProvenanceForJob: (...args: Parameters<typeof mockReconcileForJob>) =>
+    mockReconcileForJob(...args),
 }));
 vi.mock('@/server/db/repos/usage-repo', () => ({
   pruneOldUsage: vi.fn(() => 0),
@@ -29,7 +44,8 @@ vi.mock('@/server/db/repos/settings-repo', () => ({
   getIngestConcurrency: vi.fn(() => 1),
 }));
 
-import { decideJobFailureAction, startWorker, stopWorker } from '../worker';
+import { decideJobFailureAction, registerHandler, startWorker, stopWorker } from '../worker';
+import * as queue from '../queue';
 
 class AgentCancelled extends Error {
   constructor() {
@@ -119,6 +135,9 @@ describe('startWorker - pending_actions 卫生维护', () => {
       recovered: 0,
       pruned: 0,
     });
+    mockReconcileResearchProvenance.mockReset().mockReturnValue(0);
+    mockReconcileForJob.mockReset();
+    mockPruneOldOperations.mockClear();
   });
 
   afterEach(() => {
@@ -133,6 +152,41 @@ describe('startWorker - pending_actions 卫生维护', () => {
 
     vi.advanceTimersByTime(60_000);
     expect(mockMaintainPendingActions).toHaveBeenCalledTimes(2);
+    expect(mockReconcileResearchProvenance).toHaveBeenCalledTimes(2);
+  });
+
+  it('启动与维护 tick 均先对账，再清理 operations', () => {
+    startWorker(2_000);
+    expect(mockReconcileResearchProvenance.mock.invocationCallOrder[0])
+      .toBeLessThan(mockPruneOldOperations.mock.invocationCallOrder[0]!);
+
+    vi.advanceTimersByTime(60_000);
+    expect(mockReconcileResearchProvenance.mock.invocationCallOrder[1])
+      .toBeLessThan(mockPruneOldOperations.mock.invocationCallOrder[1]!);
+  });
+
+  it('job 真正 completed 后触发终态对账，对账异常不覆盖 completed', async () => {
+    const claimed = {
+      id: 'research-import-1', type: 'research-import', status: 'running', subjectId: 's1',
+      paramsJson: '{}', resultJson: null, createdAt: '', startedAt: '', completedAt: null,
+      leaseExpiresAt: null, heartbeatAt: null, attemptCount: 1,
+    } as const;
+    vi.mocked(queue.claim).mockReturnValueOnce(claimed).mockReturnValue(null);
+    registerHandler('research-import', async () => ({ deliveries: [] }));
+    mockReconcileForJob.mockImplementation(() => { throw new Error('reconcile failed'); });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    startWorker(10);
+
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.complete).toHaveBeenCalledWith(claimed.id, { deliveries: [] });
+    expect(mockReconcileForJob).toHaveBeenCalledWith(claimed.id);
+    expect(queue.fail).not.toHaveBeenCalled();
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[research-provenance] terminal reconcile failed',
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 
   it('维护异常仅记录错误，不中止 worker 后续 tick', () => {

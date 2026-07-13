@@ -4,6 +4,7 @@ import { mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { randomUUID } from 'crypto';
 import * as schema from './schema';
+import { recoverInterruptedVaultMaintenance } from '../wiki/maintenance-files';
 
 type DrizzleDb = ReturnType<typeof createDb>;
 
@@ -121,6 +122,12 @@ function ensureSubjectsAndGeneral(): string {
     } catch {
       // 已存在或不支持
     }
+  }
+  if (!tableColumns('subjects').includes('maintenance_state')) {
+    sqlite.exec(`ALTER TABLE subjects ADD COLUMN maintenance_state TEXT NOT NULL DEFAULT 'active'`);
+  }
+  if (!tableColumns('subjects').includes('mutation_epoch')) {
+    sqlite.exec(`ALTER TABLE subjects ADD COLUMN mutation_epoch INTEGER NOT NULL DEFAULT 0`);
   }
 
   const existing = sqlite
@@ -558,6 +565,170 @@ function migrateResearchBacklog(): void {
   `);
 }
 
+/** Phase 2C：Research 候选批准、导入与验证 provenance。 */
+function migrateResearchProvenance(): void {
+  const sqlite = rawSqlite!;
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS research_runs (
+      id TEXT PRIMARY KEY NOT NULL,
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      research_job_id TEXT NOT NULL,
+      origin TEXT NOT NULL CHECK (origin IN ('findings','topic')),
+      lint_job_id TEXT,
+      topic TEXT,
+      topics_json TEXT NOT NULL DEFAULT '[]',
+      queries_json TEXT NOT NULL DEFAULT '[]',
+      candidate_set_hash TEXT NOT NULL,
+      status TEXT NOT NULL
+        CHECK (status IN ('awaiting-approval','importing','verifying','completed','partial','failed','dismissed','empty')),
+      version INTEGER NOT NULL DEFAULT 1,
+      verification_lint_job_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      error_json TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS research_run_findings (
+      run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE CASCADE,
+      finding_id TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      verification_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (verification_status IN ('pending','fixed','residual','unverifiable')),
+      verified_at TEXT,
+      verification_snapshot_json TEXT,
+      PRIMARY KEY (run_id, finding_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS research_approvals (
+      id TEXT PRIMARY KEY NOT NULL,
+      run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE CASCADE,
+      selected_candidate_ids_json TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      coordinator_job_id TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS research_candidates (
+      id TEXT PRIMARY KEY NOT NULL,
+      run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE CASCADE,
+      normalized_url TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      rank INTEGER NOT NULL,
+      decision TEXT NOT NULL DEFAULT 'pending'
+        CHECK (decision IN ('pending','approved','rejected')),
+      approval_id TEXT,
+      decided_at TEXT,
+      CONSTRAINT research_candidates_approval_run_fk
+        FOREIGN KEY (approval_id, run_id)
+        REFERENCES research_approvals(id, run_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS research_candidate_ingests (
+      approval_id TEXT NOT NULL,
+      candidate_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      normalized_url TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','fetching','queued','running','completed','failed')),
+      source_id TEXT,
+      ingest_job_id TEXT,
+      operation_ids_json TEXT NOT NULL DEFAULT '[]',
+      touched_pages_json TEXT NOT NULL DEFAULT '[]',
+      commit_sha TEXT,
+      claim_token TEXT,
+      lease_expires_at TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      completed_at TEXT,
+      error_json TEXT,
+      PRIMARY KEY (approval_id, candidate_id),
+      CONSTRAINT research_candidate_ingests_approval_run_fk
+        FOREIGN KEY (approval_id, run_id)
+        REFERENCES research_approvals(id, run_id) ON DELETE CASCADE,
+      CONSTRAINT research_candidate_ingests_candidate_run_fk
+        FOREIGN KEY (candidate_id, run_id)
+        REFERENCES research_candidates(id, run_id) ON DELETE CASCADE
+    );
+  `);
+}
+
+/**
+ * 创建 source identity 唯一索引前收敛历史重复行。DB 引用迁移原子化；
+ * loser sidecar 的文件清理由 source-store 维护步骤补偿。
+ */
+function dedupeSourcesForUniqueIdentity(): void {
+  const sqlite = rawSqlite!;
+  const duplicates = sqlite.prepare(`
+    SELECT loser.id AS loser_id, winner.id AS winner_id, subject.slug AS subject_slug
+    FROM sources loser
+    JOIN sources winner
+      ON winner.subject_id = loser.subject_id
+     AND winner.content_hash = loser.content_hash
+     AND winner.filename = loser.filename
+     AND winner.id = (
+       SELECT MIN(candidate.id)
+       FROM sources candidate
+       WHERE candidate.subject_id = loser.subject_id
+         AND candidate.content_hash = loser.content_hash
+         AND candidate.filename = loser.filename
+     )
+    JOIN subjects subject ON subject.id = loser.subject_id
+    WHERE loser.id != winner.id
+    ORDER BY loser.id
+  `).all() as Array<{
+    loser_id: string;
+    winner_id: string;
+    subject_slug: string;
+  }>;
+  if (duplicates.length === 0) return;
+
+  sqlite.transaction(() => {
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS source_dedup_cleanup (
+        loser_id TEXT PRIMARY KEY NOT NULL,
+        winner_id TEXT NOT NULL,
+        subject_slug TEXT NOT NULL,
+        filename TEXT NOT NULL
+      )
+    `);
+    for (const duplicate of duplicates) {
+      const {
+        loser_id: loserId,
+        winner_id: winnerId,
+        subject_slug: subjectSlug,
+      } = duplicate;
+      const filename = sqlite.prepare(`SELECT filename FROM sources WHERE id = ?`)
+        .pluck()
+        .get(loserId) as string;
+      sqlite.prepare(`
+        INSERT OR IGNORE INTO source_dedup_cleanup (
+          loser_id, winner_id, subject_slug, filename
+        ) VALUES (?, ?, ?, ?)
+      `).run(loserId, winnerId, subjectSlug, filename);
+      sqlite.prepare(`
+        INSERT OR IGNORE INTO page_sources (subject_id, page_slug, source_id)
+        SELECT subject_id, page_slug, ? FROM page_sources WHERE source_id = ?
+      `).run(winnerId, loserId);
+      sqlite.prepare(`DELETE FROM page_sources WHERE source_id = ?`).run(loserId);
+      sqlite.prepare(`
+        UPDATE jobs
+        SET params_json = json_set(params_json, '$.sourceId', ?)
+        WHERE json_valid(params_json)
+          AND json_extract(params_json, '$.sourceId') = ?
+      `).run(winnerId, loserId);
+      if (tableExists('research_candidate_ingests')) {
+        sqlite.prepare(`
+          UPDATE research_candidate_ingests SET source_id = ? WHERE source_id = ?
+        `).run(winnerId, loserId);
+      }
+      sqlite.prepare(`DELETE FROM sources WHERE id = ?`).run(loserId);
+    }
+  })();
+}
+
 // LLM 用量明细表（设置页 Usage 统计）。
 function migrateLlmUsage(): void {
   const sqlite = rawSqlite!;
@@ -643,6 +814,28 @@ function ensureIndexes(): void {
       WHERE type = 'ingest';
     CREATE INDEX IF NOT EXISTS research_backlog_subject_status_idx
       ON research_backlog(subject_id, status, created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS sources_subject_hash_filename_unique
+      ON sources(subject_id, content_hash, filename);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_runs_research_job_id_unique
+      ON research_runs(research_job_id);
+    CREATE INDEX IF NOT EXISTS research_runs_subject_status_updated_idx
+      ON research_runs(subject_id, status, updated_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_approvals_run_unique
+      ON research_approvals(run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_approvals_id_run_unique
+      ON research_approvals(id, run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_approvals_run_idempotency_unique
+      ON research_approvals(run_id, idempotency_key);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_candidates_run_url_unique
+      ON research_candidates(run_id, normalized_url);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_candidates_id_run_unique
+      ON research_candidates(id, run_id);
+    CREATE INDEX IF NOT EXISTS research_candidates_run_rank_idx
+      ON research_candidates(run_id, rank);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_candidate_ingests_ingest_job_unique
+      ON research_candidate_ingests(ingest_job_id);
+    CREATE INDEX IF NOT EXISTS research_candidate_ingests_status_lease_idx
+      ON research_candidate_ingests(status, lease_expires_at);
     CREATE INDEX IF NOT EXISTS pending_actions_conversation_status_idx
       ON pending_actions(conversation_id, status, created_at);
     CREATE INDEX IF NOT EXISTS pending_actions_subject_status_expiry_idx
@@ -657,32 +850,40 @@ function ensureTables() {
 
   rawSqlite.pragma('foreign_keys = OFF');
   try {
-    const generalId = ensureSubjectsAndGeneral();
-    migratePages(generalId);
-    migratePageAliases(generalId);
-    migrateWikiLinks(generalId);
-    migrateSources(generalId);
-    migratePageSources(generalId);
-    migrateJobs();
-    migrateJobEvents();
-    migrateOperations();
-    migrateAppSettings();
-    migrateIngestCheckpoints();
-    migrateConversations();
-    migrateMessages();
-    migratePendingActions();
-    migratePageEmbeddings();
-    migratePageMaturity();
-    migrateUserProfiles();
-    migratePageRenditions();
-    migrateProfileSignals();
-    migrateResearchBacklog();
-    migrateLlmUsage();
-    ensurePagesFts();
-    ensureIndexes();
+    const migrate = rawSqlite.transaction(() => {
+      const generalId = ensureSubjectsAndGeneral();
+      migratePages(generalId);
+      migratePageAliases(generalId);
+      migrateWikiLinks(generalId);
+      migrateSources(generalId);
+      migratePageSources(generalId);
+      migrateJobs();
+      migrateJobEvents();
+      migrateOperations();
+      migrateAppSettings();
+      migrateIngestCheckpoints();
+      migrateConversations();
+      migrateMessages();
+      migratePendingActions();
+      migratePageEmbeddings();
+      migratePageMaturity();
+      migrateUserProfiles();
+      migratePageRenditions();
+      migrateProfileSignals();
+      migrateResearchBacklog();
+      migrateResearchProvenance();
+      dedupeSourcesForUniqueIdentity();
+      migrateLlmUsage();
+      ensurePagesFts();
+      ensureIndexes();
+    });
+    migrate.immediate();
   } finally {
     rawSqlite.pragma('foreign_keys = ON');
   }
+
+  // 先恢复中断维护，reset/delete 未补偿完成时 Subject 保持 fail-closed。
+  recoverInterruptedVaultMaintenance(rawSqlite);
 }
 
 export function getDb(): DrizzleDb {

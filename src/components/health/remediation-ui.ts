@@ -3,7 +3,7 @@ import type {
   Job,
   RemediationAction,
   RemediationActionType,
-  ResearchCandidate,
+  ResearchRunView,
 } from '@/lib/contracts';
 
 export type ExecutableRemediationAction = Exclude<RemediationActionType, 'review-source'>;
@@ -138,7 +138,11 @@ export function selectRecoverableHealthJobs(
 
   for (const finding of snapshot.findings) {
     const plan = snapshot.remediations[finding.id];
-    if (plan?.status !== 'queued' || !plan.jobId) continue;
+    if (
+      !plan?.jobId
+      || (plan.status !== 'queued'
+        && !(plan.workflow === 'research' && plan.status === 'awaiting-approval'))
+    ) continue;
     const workflow = executableWorkflow(plan.workflow);
     if (!workflow || activeWorkflows.has(workflow)) continue;
     const current = selected[workflow];
@@ -297,7 +301,7 @@ export function nextDeleteArmed(
   return event === 'arm' ? !current : false;
 }
 
-export async function readResearchCandidates(response: Response): Promise<ResearchCandidate[]> {
+export async function readResearchRunId(response: Response): Promise<string> {
   if (!response.ok) throw new Error(`Research result request failed (${response.status}).`);
 
   let json: unknown;
@@ -320,14 +324,42 @@ export async function readResearchCandidates(response: Response): Promise<Resear
   } catch {
     throw new Error('Research result is invalid.');
   }
-  if (
-    typeof parsed !== 'object'
-    || parsed === null
-    || !Array.isArray((parsed as { candidates?: unknown }).candidates)
-  ) {
+  if (!isRecord(parsed) || typeof parsed.runId !== 'string' || !parsed.runId) {
     throw new Error('Research result is invalid.');
   }
-  return (parsed as { candidates: ResearchCandidate[] }).candidates;
+  return parsed.runId;
+}
+
+export async function readResearchRun(response: Response): Promise<ResearchRunView> {
+  if (!response.ok) throw new Error(`Research run request failed (${response.status}).`);
+
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    throw new Error('Research run response is invalid.');
+  }
+  const run = isRecord(json) ? json.run : null;
+  if (!isResearchRunView(run)) throw new Error('Research run is invalid.');
+  return run;
+}
+
+export function researchApprovalBody(
+  run: Pick<ResearchRunView, 'version' | 'subjectId'>,
+  candidateIds: string[],
+  idempotencyKey: string,
+): {
+  candidateIds: string[];
+  expectedVersion: number;
+  idempotencyKey: string;
+  subjectId: string;
+} {
+  return {
+    candidateIds: [...candidateIds],
+    expectedVersion: run.version,
+    idempotencyKey,
+    subjectId: run.subjectId,
+  };
 }
 
 export function researchBacklogPatchBody(
@@ -340,4 +372,141 @@ export function researchBacklogPatchBody(
     ...(researchJobId ? { researchJobId } : {}),
     subjectId,
   };
+}
+
+const RESEARCH_RUN_STATUSES = new Set([
+  'awaiting-approval',
+  'importing',
+  'verifying',
+  'completed',
+  'partial',
+  'failed',
+  'dismissed',
+  'empty',
+]);
+
+function isResearchRunView(value: unknown): value is ResearchRunView {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.id !== 'string'
+    || !value.id
+    || typeof value.subjectId !== 'string'
+    || !value.subjectId
+    || typeof value.researchJobId !== 'string'
+    || !value.researchJobId
+    || (value.origin !== 'findings' && value.origin !== 'topic')
+    || typeof value.candidateSetHash !== 'string'
+    || typeof value.status !== 'string'
+    || !RESEARCH_RUN_STATUSES.has(value.status)
+    || typeof value.version !== 'number'
+    || !Number.isSafeInteger(value.version)
+    || value.version < 1
+    || !Array.isArray(value.findings)
+    || !Array.isArray(value.candidates)
+    || !Array.isArray(value.topics)
+    || !value.topics.every((item) => typeof item === 'string')
+    || !Array.isArray(value.queries)
+    || !value.queries.every((item) => typeof item === 'string')
+    || !isNullableString(value.lintJobId)
+    || !isNullableString(value.topic)
+    || !isNullableString(value.verificationLintJobId)
+    || typeof value.createdAt !== 'string'
+    || typeof value.updatedAt !== 'string'
+    || !isNullableString(value.completedAt)
+    || (value.error !== null && !isSafeError(value.error))
+    || (value.approval !== null && !isResearchApproval(value.approval))
+  ) return false;
+
+  if (!value.candidates.every((candidate) => (
+    isRecord(candidate)
+    && typeof candidate.id === 'string'
+    && typeof candidate.url === 'string'
+    && typeof candidate.normalizedUrl === 'string'
+    && typeof candidate.title === 'string'
+    && typeof candidate.snippet === 'string'
+    && (candidate.score === null || (
+      typeof candidate.score === 'number'
+      && Number.isInteger(candidate.score)
+      && candidate.score >= 0
+      && candidate.score <= 3
+    ))
+    && (candidate.reason === null || typeof candidate.reason === 'string')
+    && typeof candidate.rank === 'number'
+    && Number.isSafeInteger(candidate.rank)
+    && (candidate.decision === 'pending'
+      || candidate.decision === 'approved'
+      || candidate.decision === 'rejected')
+    && (candidate.delivery === null || isResearchDelivery(candidate.delivery))
+  ))) return false;
+
+  return value.findings.every((finding) => (
+    isRecord(finding)
+    && typeof finding.findingId === 'string'
+    && isEnrichedFinding(finding.finding)
+    && (finding.verificationStatus === 'pending'
+      || finding.verificationStatus === 'fixed'
+      || finding.verificationStatus === 'residual'
+      || finding.verificationStatus === 'unverifiable')
+    && isNullableString(finding.verifiedAt)
+    && (finding.verificationFinding === null
+      || isEnrichedFinding(finding.verificationFinding))
+  ));
+}
+
+function isResearchApproval(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && Array.isArray(value.selectedCandidateIds)
+    && value.selectedCandidateIds.every((item) => typeof item === 'string')
+    && typeof value.coordinatorJobId === 'string'
+    && typeof value.createdAt === 'string';
+}
+
+function isResearchDelivery(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    (value.status === 'pending'
+      || value.status === 'fetching'
+      || value.status === 'queued'
+      || value.status === 'running'
+      || value.status === 'completed'
+      || value.status === 'failed')
+    && isNullableString(value.sourceId)
+    && isNullableString(value.ingestJobId)
+    && Array.isArray(value.operationIds)
+    && value.operationIds.every((item) => typeof item === 'string')
+    && Array.isArray(value.touchedPages)
+    && value.touchedPages.every((page) => isRecord(page)
+      && typeof page.slug === 'string'
+      && (page.action === 'created' || page.action === 'updated')
+      && typeof page.system === 'boolean')
+    && isNullableString(value.commitSha)
+    && typeof value.attemptCount === 'number'
+    && Number.isSafeInteger(value.attemptCount)
+    && value.attemptCount >= 0
+    && isNullableString(value.completedAt)
+    && (value.error === null || isSafeError(value.error))
+  );
+}
+
+function isEnrichedFinding(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && typeof value.subjectId === 'string'
+    && typeof value.subjectSlug === 'string'
+    && typeof value.type === 'string'
+    && (value.severity === 'critical' || value.severity === 'warning' || value.severity === 'info')
+    && typeof value.pageSlug === 'string'
+    && typeof value.description === 'string'
+    && isNullableString(value.suggestedFix);
+}
+
+function isSafeError(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.message === 'string'
+    && (value.code === undefined || typeof value.code === 'string');
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string';
 }

@@ -16,6 +16,11 @@ describe('validateUrlList', () => {
     expect(r).toHaveProperty('error');
     expect((r as { error: string }).error).toContain('ftp://a.com');
   });
+  it('拒绝 userinfo 与 private IP literal', () => {
+    expect(validateUrlList(['https://user:pass@example.com'])).toHaveProperty('error');
+    expect(validateUrlList(['http://127.0.0.1/secret'])).toHaveProperty('error');
+    expect(validateUrlList(['http://[::1]/secret'])).toHaveProperty('error');
+  });
   it('超上限报错', () => {
     const many = Array.from({ length: MAX_URLS_PER_REQUEST + 1 }, (_, i) => `https://a.com/${i}`);
     expect(validateUrlList(many)).toHaveProperty('error');
@@ -25,8 +30,10 @@ describe('validateUrlList', () => {
 describe('ingestUrlBatch', () => {
   const okDeps = {
     fetchSource: async (url: string) => ({ filename: `f-${url.slice(-1)}.html`, content: 'x' }),
-    save: (filename: string) => ({ id: `src-${filename}` }),
-    enqueue: (sourceId: string) => ({ id: `job-${sourceId}` }),
+    persist: (filename: string) => ({
+      sourceId: `src-${filename}`,
+      jobId: `job-src-${filename}`,
+    }),
   };
   it('全部成功：每条带 jobId/sourceId', async () => {
     const r = await ingestUrlBatch(['https://a.com/1', 'https://a.com/2'], okDeps);

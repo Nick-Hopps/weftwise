@@ -12,8 +12,11 @@ export interface UrlIngestResult {
 
 export interface UrlIngestDeps {
   fetchSource: (url: string) => Promise<{ filename: string; content: string }>;
-  save: (filename: string, content: string, url: string) => { id: string };
-  enqueue: (sourceId: string, filename: string) => { id: string };
+  persist: (
+    filename: string,
+    content: string,
+    url: string,
+  ) => { sourceId: string; jobId: string };
 }
 
 /** 校验 urls 请求体：trim / 去空 / 去重 / 协议校验 / 上限。 */
@@ -45,8 +48,7 @@ export async function ingestUrlBatch(urls: string[], deps: UrlIngestDeps): Promi
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
       const { filename, content } = await deps.fetchSource(url);
-      const { id: sourceId } = deps.save(filename, content, url);
-      const { id: jobId } = deps.enqueue(sourceId, filename);
+      const { sourceId, jobId } = deps.persist(filename, content, url);
       return { url, sourceId, jobId } satisfies UrlIngestResult;
     }),
   );
