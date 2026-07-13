@@ -11,6 +11,8 @@ export function toolActivityIcon(tool: string): string {
     case 'wiki_create': return '➕';
     case 'wiki_update': return '✏️';
     case 'wiki_patch': return '✏️';
+    case 'wiki_metadata_patch': return '✏️';
+    case 'wiki_link_ensure': return '🔗';
     case 'wiki_delete': return '🗑';
     case 'wiki_merge': return '🔗';
     case 'wiki_split': return '✂️';
@@ -28,6 +30,8 @@ export function toolActivityVerb(tool: string): string {
     case 'wiki_create': return 'Creating';
     case 'wiki_update': return 'Editing';
     case 'wiki_patch': return 'Patching';
+    case 'wiki_metadata_patch': return 'Editing metadata';
+    case 'wiki_link_ensure': return 'Maintaining link';
     case 'wiki_delete': return 'Deleting';
     case 'wiki_merge': return 'Merging';
     case 'wiki_split': return 'Splitting';
@@ -45,6 +49,20 @@ export function summarizeToolArgs(tool: string, args: unknown): string {
   if (tool === 'wiki_create') return typeof a.title === 'string' ? a.title : '';
   if (tool === 'wiki_update') return typeof a.slug === 'string' ? a.slug : '';
   if (tool === 'wiki_patch') return typeof a.slug === 'string' ? a.slug : '';
+  if (tool === 'wiki_metadata_patch') {
+    const slug = typeof a.slug === 'string' ? a.slug : '';
+    const fields = ['title', 'summary', 'tags', 'aliases']
+      .filter((field) => a[field] !== undefined);
+    return slug && fields.length > 0 ? `${slug} (${fields.join(', ')})` : slug;
+  }
+  if (tool === 'wiki_link_ensure') {
+    const source = typeof a.sourceSlug === 'string' ? a.sourceSlug : '';
+    const mode = typeof a.mode === 'string' ? a.mode : '';
+    const targetSlug = typeof a.targetSlug === 'string' ? a.targetSlug : '';
+    const targetSubject = typeof a.targetSubjectSlug === 'string' ? a.targetSubjectSlug : '';
+    const target = targetSubject && targetSlug ? `${targetSubject}:${targetSlug}` : targetSlug;
+    return [source, mode, target].filter(Boolean).join(' ');
+  }
   if (tool === 'wiki_merge') {
     const s = typeof a.sourceSlug === 'string' ? a.sourceSlug : '';
     const t = typeof a.targetSlug === 'string' ? a.targetSlug : '';

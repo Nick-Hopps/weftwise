@@ -35,6 +35,29 @@ vi.mock('@/server/wiki/wiki-store', () => ({
 vi.mock('@/server/db/repos/settings-repo', () => ({ getWikiLanguage: vi.fn(() => 'English') }));
 const embedMock = vi.hoisted(() => ({ enqueueEmbedIndex: vi.fn() }));
 vi.mock('@/server/services/embedding-service', () => embedMock);
+const pageOpsMock = vi.hoisted(() => ({
+  executePageMerge: vi.fn(),
+  executePageSplit: vi.fn(),
+  executePageDelete: vi.fn(),
+  executePageCreate: vi.fn(),
+  executePageMetadataPatch: vi.fn(async (_jobId: string, _subject: unknown, input: { slug: string }) => ({
+    updatedSlug: input.slug,
+    referencesUpdated: 0,
+    changedFields: ['summary'],
+  })),
+  executePageLinkEnsure: vi.fn(async (_jobId: string, _subject: unknown, input: {
+    sourceSlug: string;
+    targetSubjectSlug?: string;
+    targetSlug: string;
+    mode: 'link' | 'unlink' | 'retarget';
+  }) => ({
+    updatedSlug: input.sourceSlug,
+    mode: input.mode,
+    targetSubjectSlug: input.targetSubjectSlug ?? 'general',
+    targetSlug: input.targetSlug,
+  })),
+}));
+vi.mock('@/server/wiki/page-ops', () => pageOpsMock);
 // curate-tools 透传引入；本测试不触发搜索，mock 防 import-time 副作用
 vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
 const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
@@ -107,8 +130,22 @@ const cleanReport: PostconditionReport = {
 
 describe('runCurateJob (tool-loop)', () => {
   beforeEach(() => {
-    genMock.generateTextWithTools.mockClear();
+    genMock.generateTextWithTools.mockReset();
+    genMock.generateTextWithTools.mockResolvedValue({ text: 'done' });
     embedMock.enqueueEmbedIndex.mockClear();
+    pageOpsMock.executePageMetadataPatch.mockReset();
+    pageOpsMock.executePageMetadataPatch.mockImplementation(async (_jobId, _subject, input) => ({
+      updatedSlug: input.slug,
+      referencesUpdated: 0,
+      changedFields: ['summary'],
+    }));
+    pageOpsMock.executePageLinkEnsure.mockReset();
+    pageOpsMock.executePageLinkEnsure.mockImplementation(async (_jobId, _subject, input) => ({
+      updatedSlug: input.sourceSlug,
+      mode: input.mode,
+      targetSubjectSlug: input.targetSubjectSlug ?? 'general',
+      targetSlug: input.targetSlug,
+    }));
     queueMock.get.mockReset();
     queueMock.get.mockReturnValue(null);
     queueMock.isCancelRequested.mockReset();
@@ -125,6 +162,7 @@ describe('runCurateJob (tool-loop)', () => {
     expect(task).toBe('curate');
     expect(Object.keys(opts.tools)).toEqual(expect.arrayContaining([
       'wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read', 'wiki_inspect',
+      'wiki_metadata_patch', 'wiki_link_ensure',
     ]));
     expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('curate:complete', expect.any(String), expect.any(Object));
@@ -139,13 +177,71 @@ describe('runCurateJob (tool-loop)', () => {
       emit,
     }));
   });
-  it('scope<2 → 提前 complete，不调 LLM', async () => {
-    pagesMock.getAllPages.mockReturnValueOnce([{ slug: 'a', tags: [] }]);
+  it.each([
+    ['manual', { scope: 'subject', subjectId: 's1' }],
+    ['auto', { scope: 'pages', slugs: ['a'], subjectId: 's1' }],
+  ] as const)('单页 %s scope 仍运行两个窄写工具，并只在 job 末尾入队一次', async (mode, params) => {
+    if (mode === 'manual') {
+      pagesMock.getAllPages.mockReturnValueOnce([{ slug: 'a', tags: [] }]);
+    }
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const metadata = await opts.tools.wiki_metadata_patch!.execute({
+        slug: 'a',
+        summary: '单页新摘要',
+      });
+      expect(metadata).toEqual(expect.objectContaining({ ok: true, updatedSlug: 'a' }));
+      expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
+
+      const link = await opts.tools.wiki_link_ensure!.execute({
+        sourceSlug: 'a',
+        targetSubjectSlug: 'other-subject',
+        targetSlug: 'outside-target',
+        oldString: '唯一自然锚点',
+        mode: 'link',
+      });
+      expect(link).toEqual(expect.objectContaining({
+        ok: true,
+        updatedSlug: 'a',
+        targetSubjectSlug: 'other-subject',
+        targetSlug: 'outside-target',
+      }));
+      expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
+      return { text: 'done' };
+    });
+
+    const result = await runCurateJob(job(params), vi.fn());
+
+    expect(genMock.generateTextWithTools).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ update: 2, writes: 2 });
+    expect(embedMock.enqueueEmbedIndex).toHaveBeenCalledTimes(1);
+    expect(embedMock.enqueueEmbedIndex).toHaveBeenCalledWith('s1');
+  });
+
+  it.each([
+    ['显式 pages 空集合', { scope: 'pages', slugs: [], subjectId: 's1' }],
+    ['subject 无页面', { scope: 'subject', subjectId: 's1' }],
+  ] as const)('%s 时早退为零写入，不调模型、不入队', async (caseName, params) => {
+    if (caseName === 'subject 无页面') {
+      pagesMock.getAllPages.mockReturnValueOnce([]);
+    }
     const emit = vi.fn();
-    const result = await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), emit);
+
+    const result = await runCurateJob(job(params), emit);
+
     expect(genMock.generateTextWithTools).not.toHaveBeenCalled();
-    expect(emit).toHaveBeenCalledWith('curate:complete', expect.stringMatching(/Nothing to curate/), expect.any(Object));
-    expect(result).toMatchObject({ postconditionStatus: 'clean', postcondition: cleanReport });
+    expect(emit).toHaveBeenCalledWith(
+      'curate:complete',
+      expect.stringMatching(/Nothing to curate \(empty scope\)/),
+      expect.any(Object),
+    );
+    expect(emit).not.toHaveBeenCalledWith(
+      'curate:complete',
+      expect.stringMatching(/need at least 2 pages/),
+      expect.any(Object),
+    );
+    expect(result).toMatchObject({ update: 0, writes: 0 });
+    expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
     expect(postconditionMock.verifyJobPostconditions).toHaveBeenCalledOnce();
   });
   it('auto（scope:pages）：seed 驱动 → 用户消息为 AUTOMATIC 模式', async () => {
@@ -161,6 +257,7 @@ describe('runCurateJob (tool-loop)', () => {
     const toolKeys = Object.keys(opts.tools);
     expect(toolKeys).toEqual(expect.arrayContaining([
       'wiki_merge', 'wiki_split', 'wiki_read', 'wiki_inspect',
+      'wiki_metadata_patch', 'wiki_link_ensure',
     ]));
     expect(toolKeys).not.toContain('wiki_create');
     expect(toolKeys).not.toContain('wiki_delete');
@@ -169,6 +266,62 @@ describe('runCurateJob (tool-loop)', () => {
     expect(userMsg).toMatch(/AUTOMATIC/);        // 证明 {auto:true} 传入 → seedSet!==null
     expect(userMsg).toMatch(/do NOT create/i);   // auto 禁建页提示
     expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.objectContaining({ scope: 'pages' }));
+    expect(emit).toHaveBeenCalledWith(
+      'curate:agent:start',
+      expect.stringContaining('update≤5'),
+      expect.objectContaining({ caps: expect.objectContaining({ update: 5 }) }),
+    );
+  });
+
+  it('两个窄写能力不自行入队，job 末尾按 totals.writes 统一入队一次', async () => {
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const metadata = await opts.tools.wiki_metadata_patch!.execute({ slug: 'a', summary: '新摘要' });
+      expect(metadata).toEqual(expect.objectContaining({ ok: true, updatedSlug: 'a' }));
+      expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
+
+      const link = await opts.tools.wiki_link_ensure!.execute({
+        sourceSlug: 'a',
+        targetSlug: 'b',
+        oldString: 'B',
+        mode: 'link',
+      });
+      expect(link).toEqual(expect.objectContaining({ ok: true, updatedSlug: 'a' }));
+      expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
+      return { text: 'done' };
+    });
+    const emit = vi.fn();
+
+    const result = await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), emit);
+
+    expect(result).toMatchObject({ update: 2, writes: 2 });
+    expect(embedMock.enqueueEmbedIndex).toHaveBeenCalledTimes(1);
+    expect(embedMock.enqueueEmbedIndex).toHaveBeenCalledWith('s1');
+    expect(emit).toHaveBeenCalledWith(
+      'curate:complete',
+      expect.stringContaining('2 update(s)'),
+      expect.objectContaining({ update: 2, writes: 2 }),
+    );
+  });
+
+  it('窄写失败时 totals 保持零且不入队', async () => {
+    pageOpsMock.executePageLinkEnsure.mockRejectedValueOnce(new Error('anchor is not unique'));
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const result = await opts.tools.wiki_link_ensure!.execute({
+        sourceSlug: 'a',
+        targetSlug: 'b',
+        oldString: 'B',
+        mode: 'link',
+      });
+      expect(result).toEqual(expect.objectContaining({ ok: false, message: 'anchor is not unique' }));
+      return { text: 'done' };
+    });
+
+    const result = await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), vi.fn());
+
+    expect(result).toMatchObject({ update: 0, writes: 0 });
+    expect(embedMock.enqueueEmbedIndex).not.toHaveBeenCalled();
   });
 
   it('residual 报告仍正常完成并进入结果与 complete 事件', async () => {

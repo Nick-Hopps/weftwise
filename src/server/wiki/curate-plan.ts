@@ -31,6 +31,7 @@ export interface CurateCaps {
   split: number;
   delete: number;
   create: number;
+  update: number;
 }
 
 export interface GuardDecision {
@@ -44,8 +45,9 @@ export interface CurateGuard {
   canSplit(slug: string): GuardDecision;
   canDelete(slug: string): GuardDecision;
   canCreate(): GuardDecision;
-  record(op: 'merge' | 'split' | 'delete' | 'create'): void;
-  totals(): { merge: number; split: number; delete: number; create: number; writes: number };
+  canEditPage(slug: string): GuardDecision;
+  record(op: 'merge' | 'split' | 'delete' | 'create' | 'update'): void;
+  totals(): { merge: number; split: number; delete: number; create: number; update: number; writes: number };
 }
 
 /**
@@ -58,7 +60,7 @@ export function createCurateGuard(opts: {
   caps: CurateCaps;
 }): CurateGuard {
   const { seedSet, allowedSet, caps } = opts;
-  const counts = { merge: 0, split: 0, delete: 0, create: 0 };
+  const counts = { merge: 0, split: 0, delete: 0, create: 0, update: 0 };
   const seedOk = (slug: string) => seedSet === null || seedSet.has(slug);
   return {
     isAllowed(slug) {
@@ -91,11 +93,20 @@ export function createCurateGuard(opts: {
       if (counts.create >= caps.create) return { ok: false, reason: `reached the limit of ${caps.create} creates` };
       return { ok: true };
     },
+    canEditPage(slug) {
+      if (META_PAGE_SLUGS.has(slug)) return { ok: false, reason: 'cannot edit a protected page (index/log)' };
+      if (counts.update >= caps.update) return { ok: false, reason: `reached the limit of ${caps.update} updates` };
+      if (!allowedSet.has(slug)) return { ok: false, reason: 'update target must be inside the allowed scope' };
+      return { ok: true };
+    },
     record(op) {
       counts[op] += 1;
     },
     totals() {
-      return { ...counts, writes: counts.merge + counts.split + counts.delete + counts.create };
+      return {
+        ...counts,
+        writes: counts.merge + counts.split + counts.delete + counts.create + counts.update,
+      };
     },
   };
 }

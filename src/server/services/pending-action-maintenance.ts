@@ -1,5 +1,9 @@
 import * as operationsRepo from '../db/repos/operations-repo';
 import * as pendingActionsRepo from '../db/repos/pending-actions-repo';
+import { createLogger } from '../logging';
+import { finalizeAppliedPageAction } from './pending-action-finalizer';
+
+const log = createLogger('pending-action-maintenance');
 
 export function recoverPendingActions(now = new Date()): number {
   const nowIso = now.toISOString();
@@ -9,7 +13,16 @@ export function recoverPendingActions(now = new Date()): number {
     if (action.status === 'executing' && action.operationId) {
       const operation = operationsRepo.getById(action.operationId);
       if (operation?.status === 'applied') {
-        recovered += Number(pendingActionsRepo.markApplied(action.id, action.subjectId, nowIso));
+        try {
+          finalizeAppliedPageAction({
+            actionId: action.id,
+            subjectId: action.subjectId,
+            nowIso,
+          });
+          recovered += 1;
+        } catch (error) {
+          log.warn(`页面审批 ${action.id} 最终化失败，保留 executing 等待重试`, error);
+        }
         continue;
       }
       if (operation && ['rolled-back', 'failed'].includes(operation.status)) {

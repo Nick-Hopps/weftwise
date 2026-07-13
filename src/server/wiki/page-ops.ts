@@ -16,6 +16,8 @@ import {
   applyPlannedPageOperation,
   planPageCreate,
   planPageDelete,
+  planPageLinkEnsure,
+  planPageMetadataPatch,
   planPagePatch,
   planPageUpdate,
 } from './page-operation-plan';
@@ -23,7 +25,16 @@ import { generateStructuredOutput } from '../llm/provider-registry';
 import { MergeResultSchema, MERGE_SYSTEM_PROMPT, buildMergeUserPrompt } from '../llm/prompts/merge-prompt';
 import { SplitResultSchema, SPLIT_SYSTEM_PROMPT, buildSplitUserPrompt } from '../llm/prompts/split-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
-import type { ChangesetEntry, Subject, TitleResolver, WikiFrontmatter } from '@/lib/contracts';
+import type {
+  ChangesetEntry,
+  LinkEnsureInput,
+  LinkEnsureResult,
+  MetadataPatchInput,
+  MetadataPatchResult,
+  Subject,
+  TitleResolver,
+  WikiFrontmatter,
+} from '@/lib/contracts';
 
 export { applyPatchEdits } from './page-operation-plan';
 
@@ -240,6 +251,49 @@ export async function executePageUpdate(
   });
   const result = await applyPlannedPageOperation(plan);
   return { updatedSlug: result.updatedSlug, referencesUpdated: result.referencesUpdated };
+}
+
+/**
+ * 元数据窄写 direct 内核：从同一 planner 构造计划后立即 apply，不复制 changeset 逻辑。
+ * 本层不触发向量回填，由调用方按入口语义唯一负责。
+ */
+export async function executePageMetadataPatch(
+  jobId: string,
+  subject: Subject,
+  input: MetadataPatchInput,
+): Promise<MetadataPatchResult> {
+  const plan = await planPageMetadataPatch(jobId, subject, {
+    ...input,
+    effectiveAt: new Date().toISOString(),
+  });
+  const result = await applyPlannedPageOperation(plan);
+  return {
+    updatedSlug: result.updatedSlug,
+    referencesUpdated: result.referencesUpdated,
+    changedFields: result.changedFields,
+  };
+}
+
+/**
+ * wikilink 窄写 direct 内核：严格复用 planner 生成的快照与 changeset 后 apply。
+ * 本层不触发向量回填，由 page-write 等入口唯一负责。
+ */
+export async function executePageLinkEnsure(
+  jobId: string,
+  subject: Subject,
+  input: LinkEnsureInput,
+): Promise<LinkEnsureResult> {
+  const plan = await planPageLinkEnsure(jobId, subject, {
+    ...input,
+    effectiveAt: new Date().toISOString(),
+  });
+  const result = await applyPlannedPageOperation(plan);
+  return {
+    updatedSlug: result.updatedSlug,
+    mode: result.mode,
+    targetSubjectSlug: result.targetSubjectSlug,
+    targetSlug: result.targetSlug,
+  };
 }
 
 /**

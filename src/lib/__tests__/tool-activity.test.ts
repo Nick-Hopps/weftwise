@@ -61,6 +61,28 @@ describe('tool-activity - wiki_patch', () => {
   });
 });
 
+describe('tool-activity - narrow writes', () => {
+  it('metadata 摘要只显示 slug 与字段名', () => {
+    const args = { slug: 'page-a', title: '秘密标题', tags: ['秘密标签'] };
+    expect(toolActivityIcon('wiki_metadata_patch')).toBe('✏️');
+    expect(toolActivityVerb('wiki_metadata_patch')).toBe('Editing metadata');
+    expect(summarizeToolArgs('wiki_metadata_patch', args)).toBe('page-a (title, tags)');
+    expect(toolActivityLine('wiki_metadata_patch', args)).not.toContain('秘密');
+  });
+
+  it('link 摘要只显示 source/mode/target identity，不泄漏锚点', () => {
+    const args = {
+      sourceSlug: 'source', mode: 'retarget', targetSubjectSlug: 'other',
+      targetSlug: 'target', oldString: '秘密上下文', displayText: '秘密锚点',
+    };
+    expect(toolActivityIcon('wiki_link_ensure')).toBe('🔗');
+    expect(toolActivityVerb('wiki_link_ensure')).toBe('Maintaining link');
+    expect(summarizeToolArgs('wiki_link_ensure', args))
+      .toBe('source retarget other:target');
+    expect(toolActivityLine('wiki_link_ensure', args)).not.toContain('秘密');
+  });
+});
+
 describe('tool-activity - web_search', () => {
   it('图标/动词/参数摘要', () => {
     expect(toolActivityIcon('web_search')).toBe('🌐');

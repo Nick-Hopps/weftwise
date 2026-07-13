@@ -14,6 +14,17 @@ const opsMocks = vi.hoisted(() => ({
   executePageUpdate: vi.fn(async (_j: string, _s: unknown, input: { slug: string }) => ({ updatedSlug: input.slug, referencesUpdated: 0 })),
   executePageCreate: vi.fn(async () => ({ createdSlug: 'new-page' })),
   executePagePatch: vi.fn(async (_j: string, _s: unknown, input: { slug: string; edits: unknown[] }) => ({ updatedSlug: input.slug, appliedEdits: input.edits.length })),
+  executePageLinkEnsure: vi.fn(async (_j: string, _s: unknown, input: {
+    sourceSlug: string;
+    targetSubjectSlug?: string;
+    targetSlug: string;
+    mode: 'link' | 'unlink' | 'retarget';
+  }) => ({
+    updatedSlug: input.sourceSlug,
+    mode: input.mode,
+    targetSubjectSlug: input.targetSubjectSlug ?? 'general',
+    targetSlug: input.targetSlug,
+  })),
 }));
 vi.mock('@/server/wiki/page-ops', () => opsMocks);
 
@@ -27,6 +38,7 @@ describe('buildFixToolContext', () => {
     opsMocks.executePageUpdate.mockClear();
     opsMocks.executePageCreate.mockClear();
     opsMocks.executePagePatch.mockClear();
+    opsMocks.executePageLinkEnsure.mockClear();
     storeMocks.readPageInSubject.mockReturnValue({ frontmatter: { title: 'Eigen' }, body: LONG });
   });
 
@@ -119,6 +131,100 @@ describe('buildFixToolContext', () => {
   it('不注入 createPage（fix 禁止补建 stub 页）', () => {
     const ctx = buildFixToolContext(subject, { guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit: vi.fn() });
     expect(ctx.createPage).toBeUndefined();
+  });
+
+  it('linkEnsure：Guard 放行后直接调用内核，并记录 update 与 emit', async () => {
+    const emit = vi.fn();
+    const guard = createFixGuard({ caps: { writes: 5 } });
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
+    const input = {
+      sourceSlug: 'eigen',
+      targetSlug: 'matrix',
+      oldString: 'matrix',
+      displayText: 'matrix',
+      mode: 'link' as const,
+    };
+
+    await expect(ctx.linkEnsure!(input)).resolves.toMatchObject({
+      updatedSlug: 'eigen',
+      targetSlug: 'matrix',
+    });
+    expect(opsMocks.executePageLinkEnsure).toHaveBeenCalledWith('j1', subject, input);
+    expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
+    expect(emit).toHaveBeenCalledWith(
+      'fix:page',
+      expect.any(String),
+      expect.objectContaining({ slug: 'eigen' }),
+    );
+  });
+
+  it('linkEnsure：Guard 拒绝保护页时不调用内核、不计数', async () => {
+    const emit = vi.fn();
+    const guard = createFixGuard({ caps: { writes: 5 } });
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit });
+
+    await expect(ctx.linkEnsure!({
+      sourceSlug: 'index',
+      targetSlug: 'matrix',
+      oldString: 'matrix',
+      mode: 'link',
+    })).rejects.toThrow(/protected/);
+
+    expect(opsMocks.executePageLinkEnsure).not.toHaveBeenCalled();
+    expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+    expect(emit).toHaveBeenCalledWith(
+      'fix:skip',
+      expect.any(String),
+      expect.objectContaining({ slug: 'index' }),
+    );
+  });
+
+  it('linkEnsure：写 cap 耗尽时不调用内核', async () => {
+    const guard = createFixGuard({ caps: { writes: 1 } });
+    guard.record('update');
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit: vi.fn() });
+
+    await expect(ctx.linkEnsure!({
+      sourceSlug: 'eigen',
+      targetSlug: 'matrix',
+      oldString: 'matrix',
+      mode: 'link',
+    })).rejects.toThrow(/limit of 1 edits/);
+    expect(opsMocks.executePageLinkEnsure).not.toHaveBeenCalled();
+  });
+
+  it('Fix 不注入 metadataPatch', () => {
+    const ctx = buildFixToolContext(subject, {
+      guard: createFixGuard({ caps: { writes: 5 } }), jobId: 'j1', emit: vi.fn(),
+    });
+    expect(ctx.metadataPatch).toBeUndefined();
+  });
+
+  it('并发写在 writes cap=1 下完整串行，不会突破 FixGuard', async () => {
+    const guard = createFixGuard({ caps: { writes: 1 } });
+    const ctx = buildFixToolContext(subject, { guard, jobId: 'j1', emit: vi.fn() });
+    let release: (() => void) | undefined;
+    opsMocks.executePagePatch.mockImplementationOnce(async (_j, _s, input) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { updatedSlug: input.slug, appliedEdits: input.edits.length };
+    });
+
+    const first = ctx.patchPage!({ slug: 'eigen', edits: [{ oldString: 'a', newString: 'b' }] });
+    const second = ctx.linkEnsure!({
+      sourceSlug: 'eigen', targetSlug: 'matrix', oldString: 'matrix', mode: 'link',
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    release!();
+    const settled = await Promise.allSettled([first, second]);
+
+    expect(settled[0]).toMatchObject({ status: 'fulfilled' });
+    expect(settled[1]).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: expect.stringMatching(/limit of 1 edits/) }),
+    });
+    expect(opsMocks.executePagePatch).toHaveBeenCalledOnce();
+    expect(opsMocks.executePageLinkEnsure).not.toHaveBeenCalled();
+    expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
   });
 
   it('注入当前 Subject 的 inspect/source/list 证据能力', () => {

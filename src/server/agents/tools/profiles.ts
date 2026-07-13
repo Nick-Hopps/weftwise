@@ -46,7 +46,7 @@ const FIX_LINK_TOOLS = [
   'wiki.inspect',
   'source.search',
   'source.read',
-  'wiki.patch',
+  'wiki.link.ensure',
 ] as const;
 
 const CURATE_AUTO_TOOLS = [
@@ -55,6 +55,8 @@ const CURATE_AUTO_TOOLS = [
   'wiki.inspect',
   'wiki.merge',
   'wiki.split',
+  'wiki.link.ensure',
+  'wiki.metadata.patch',
 ] as const;
 
 const PROFILES: Record<ToolProfileId, ToolProfile> = {
@@ -78,20 +80,20 @@ const PROFILES: Record<ToolProfileId, ToolProfile> = {
   },
   'fix:contradiction': {
     id: 'fix:contradiction',
-    tools: [...FIX_LINK_TOOLS, 'wiki.update'],
+    tools: [...FIX_LINK_TOOLS, 'wiki.patch', 'wiki.update'],
     allowedSideEffects: ['none', 'update'],
     requiresApproval: false,
   },
   'curate:auto': {
     id: 'curate:auto',
     tools: CURATE_AUTO_TOOLS,
-    allowedSideEffects: ['none', 'merge', 'split'],
+    allowedSideEffects: ['none', 'merge', 'split', 'update'],
     requiresApproval: false,
   },
   'curate:manual': {
     id: 'curate:manual',
     tools: [...CURATE_AUTO_TOOLS, 'wiki.create', 'wiki.delete'],
-    allowedSideEffects: ['none', 'merge', 'split', 'create', 'destructive'],
+    allowedSideEffects: ['none', 'merge', 'split', 'update', 'create', 'destructive'],
     requiresApproval: false,
   },
   'ingest:planner': {

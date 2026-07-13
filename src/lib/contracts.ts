@@ -87,6 +87,40 @@ export interface WikiLink {
   targetSubjectId: SubjectId;
 }
 
+export type MetadataPatchField = 'title' | 'summary' | 'tags' | 'aliases';
+
+export interface MetadataPatchInput {
+  slug: string;
+  title?: string;
+  summary?: string;
+  tags?: string[];
+  aliases?: string[];
+}
+
+export interface MetadataPatchResult {
+  updatedSlug: string;
+  referencesUpdated: number;
+  changedFields: MetadataPatchField[];
+}
+
+export type LinkEnsureMode = 'link' | 'unlink' | 'retarget';
+
+export interface LinkEnsureInput {
+  sourceSlug: string;
+  targetSubjectSlug?: string;
+  targetSlug: string;
+  oldString: string;
+  displayText?: string;
+  mode: LinkEnsureMode;
+}
+
+export interface LinkEnsureResult {
+  updatedSlug: string;
+  mode: LinkEnsureMode;
+  targetSubjectSlug: string;
+  targetSlug: string;
+}
+
 export type InspectSection = 'links' | 'backlinks' | 'sources' | 'health';
 
 export interface WikiInspection {
@@ -446,7 +480,14 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
-export type PendingActionOperation = 'create' | 'update' | 'patch' | 'delete' | 'reenrich';
+export type PendingActionOperation =
+  | 'create'
+  | 'update'
+  | 'patch'
+  | 'delete'
+  | 'reenrich'
+  | 'metadata-patch'
+  | 'link-ensure';
 
 export type PendingActionStatus =
   | 'pending'
@@ -471,7 +512,9 @@ export type PreviewChangeInput =
       payload: { slug: string; edits: Array<{ oldString: string; newString: string }> };
     }
   | { operation: 'delete'; payload: { slug: string } }
-  | { operation: 'reenrich'; payload: { slug: string } };
+  | { operation: 'reenrich'; payload: { slug: string } }
+  | { operation: 'metadata-patch'; payload: MetadataPatchInput }
+  | { operation: 'link-ensure'; payload: LinkEnsureInput };
 
 export interface PendingActionPreview {
   kind: 'page-change' | 'workflow';
