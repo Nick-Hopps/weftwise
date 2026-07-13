@@ -93,6 +93,41 @@ describe('POST /api/reset', () => {
     await expect(response.json()).resolves.toMatchObject({ code: 'active-jobs' });
   });
 
+  it('领取维护权后出现 active job 时返回 409 并恢复目录', async () => {
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const { getRawDb } = await import('@/server/db/client');
+    const subject = subjectsRepo.getBySlug('general')!;
+    mocks.resolveSubject.mockReturnValue({ subject, error: null });
+    const sqlite = getRawDb();
+    const wikiDir = join(dir, 'vault', 'wiki', 'general');
+    mkdirSync(wikiDir, { recursive: true });
+    writeFileSync(join(wikiDir, 'old.md'), '# Old');
+    const realWriteFileSync = fs.writeFileSync.bind(fs);
+    let injected = false;
+    const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementation((target, data, options) => {
+      const result = realWriteFileSync(target, data, options);
+      if (!injected && String(target).endsWith(join('wiki', 'general', 'index.md'))) {
+        injected = true;
+        sqlite.prepare(`
+          INSERT INTO jobs (id, type, status, subject_id, params_json, created_at)
+          VALUES ('late-ingest', 'ingest', 'pending', ?, '{}', ?)
+        `).run(subject.id, new Date().toISOString());
+      }
+      return result;
+    });
+    const { POST } = await import('../route');
+
+    const response = await POST(request({ subjectId: subject.id }));
+
+    writeSpy.mockRestore();
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: 'active-jobs' });
+    expect(readFileSync(join(wikiDir, 'old.md'), 'utf-8')).toBe('# Old');
+    expect(sqlite.prepare(`
+      SELECT maintenance_state, mutation_epoch FROM subjects WHERE id = ?
+    `).get(subject.id)).toEqual({ maintenance_state: 'active', mutation_epoch: 1 });
+  });
+
   it('无 active job 时清除 source/job/Research provenance 并恢复 active', async () => {
     const subjectsRepo = await import('@/server/db/repos/subjects-repo');
     const { getRawDb } = await import('@/server/db/client');

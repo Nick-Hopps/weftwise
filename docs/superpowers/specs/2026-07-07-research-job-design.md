@@ -1,8 +1,10 @@
 # Research Job：缺口 → 联网研究 → ingest（T3.1）— 设计文档
 
 - 日期：2026-07-07
-- 状态：已确认（Nick 批准）
+- 状态：历史方案；候选批准与导入收口已由 `2026-07-13-research-approval-provenance-phase2c-design.md` 取代
 - 范围：新任务类型 `research`（只发现不写入）+ Health 页触发与候选确认 UI + 复用现有 URL ingest 收口
+
+> 当前实现仍保留本 spec 的 Research discovery/triage，但不再允许客户端提交 URL 到通用 Ingest。批准必须使用稳定 candidate ID、run version 与幂等键，经专用 Research run API 持久化后由 `research-import` coordinator 从服务端快照读取 URL。
 
 ## 背景与问题
 
