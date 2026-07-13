@@ -79,6 +79,121 @@ describe('热路径查询走索引（非全表扫描）', () => {
     expect(detail).toMatch(/USING (COVERING )?INDEX/);
   });
 
+  it('jobs 最新 subject lint 与全局 lint 按完成时间走稳定排序索引', async () => {
+    const db = await bootstrap();
+    const subjectLatest = planDetail(
+      db,
+      `SELECT * FROM jobs
+       WHERE subject_id = ? AND type = ? AND status = ?
+       ORDER BY completed_at DESC, id DESC LIMIT 1`,
+      'general',
+      'lint',
+      'completed',
+    );
+    const globalLatest = planDetail(
+      db,
+      `SELECT * FROM jobs
+       WHERE subject_id IS NULL AND type = ? AND status = ?
+       ORDER BY completed_at DESC, id DESC LIMIT 1`,
+      'lint',
+      'completed',
+    );
+
+    expect(subjectLatest).toMatch(/jobs_subject_type_status_completed_id_idx/);
+    expect(globalLatest).toMatch(/jobs_subject_type_status_completed_id_idx/);
+    expect(subjectLatest).not.toMatch(/USE TEMP B-TREE/);
+    expect(globalLatest).not.toMatch(/USE TEMP B-TREE/);
+    expect(subjectLatest).not.toMatch(/SCAN jobs\b/);
+    expect(globalLatest).not.toMatch(/SCAN jobs\b/);
+  });
+
+  it('jobs 最近状态快照在 subject 与全量路径均走稳定排序索引', async () => {
+    const db = await bootstrap();
+    const subjectRecent = planDetail(
+      db,
+      `SELECT * FROM jobs WHERE subject_id = ?
+       ORDER BY created_at DESC, id DESC LIMIT 200`,
+      'general',
+    );
+    const allRecent = planDetail(
+      db,
+      `SELECT * FROM jobs ORDER BY created_at DESC, id DESC LIMIT 200`,
+    );
+
+    expect(subjectRecent).toMatch(/jobs_subject_created_id_idx/);
+    expect(allRecent).toMatch(/jobs_created_id_idx/);
+    expect(subjectRecent).not.toMatch(/USE TEMP B-TREE/);
+    expect(allRecent).not.toMatch(/USE TEMP B-TREE/);
+  });
+
+  it('remediation CAS 候选查询按 subject/type/status/completed_at 走索引', async () => {
+    const db = await bootstrap();
+    const detail = planDetail(
+      db,
+      `SELECT * FROM jobs
+       WHERE subject_id = ? AND type = ?
+         AND (status IN ('pending', 'running')
+           OR (status = 'completed'
+             AND (? IS NULL OR completed_at IS NULL OR completed_at > ?)))`,
+      'general',
+      'fix',
+      '2026-07-13T10:00:00.000Z',
+      '2026-07-13T10:00:00.000Z',
+    );
+
+    expect(detail).toMatch(/jobs_subject_type_status_completed_id_idx/);
+    expect(detail).not.toMatch(/SCAN jobs\b/);
+  });
+
+  it('同源 ingest 最新任务查询走 JSON 表达式索引且损坏历史参数安全', async () => {
+    const db = await bootstrap();
+    expect(() => db.prepare(`
+      INSERT INTO jobs (id, type, status, subject_id, params_json, created_at)
+      VALUES (?, 'ingest', 'failed', NULL, ?, ?)
+    `).run('invalid-json-job', '{', '2026-07-13T09:00:00.000Z')).not.toThrow();
+
+    const detail = planDetail(
+      db,
+      `SELECT * FROM jobs
+       WHERE subject_id = ? AND type = 'ingest'
+         AND CASE WHEN json_valid(params_json)
+           THEN json_extract(params_json, '$.sourceId') END = ?
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      'general',
+      'source-1',
+    );
+
+    expect(detail).toMatch(/jobs_subject_ingest_source_created_id_idx/);
+    expect(detail).not.toMatch(/USE TEMP B-TREE/);
+    expect(detail).not.toMatch(/SCAN jobs\b/);
+  });
+
+  it('同源 ingest 全量 active 与任一 active 查询都走 source+status 表达式索引', async () => {
+    const db = await bootstrap();
+    const activeSql = `SELECT * FROM jobs
+       WHERE subject_id = ? AND type = 'ingest'
+         AND CASE WHEN json_valid(params_json)
+           THEN json_extract(params_json, '$.sourceId') END = ?
+         AND status IN ('pending', 'running')`;
+    const allDetail = planDetail(
+      db,
+      activeSql,
+      'general',
+      'source-1',
+    );
+    const oneDetail = planDetail(
+      db,
+      `${activeSql} LIMIT 1`,
+      'general',
+      'source-1',
+    );
+
+    for (const detail of [allDetail, oneDetail]) {
+      expect(detail).toMatch(/jobs_subject_ingest_source_status_created_id_idx/);
+      expect(detail).not.toMatch(/SCAN jobs\b/);
+    }
+  });
+
   it('pending_actions 按会话恢复与按状态过期清理均走索引', async () => {
     const db = await bootstrap();
     const conversation = planDetail(

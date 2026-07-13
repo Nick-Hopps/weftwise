@@ -29,8 +29,38 @@ export function list(filter?: jobsRepo.JobFilter): Job[] {
   return jobsRepo.listJobs(filter);
 }
 
+export function listRecent(
+  filter: jobsRepo.JobFilter | undefined,
+  limit: number,
+): Job[] {
+  return jobsRepo.listRecentJobs(filter, limit);
+}
+
+export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null {
+  return jobsRepo.listLatestCompletedLint(subjectId);
+}
+
 export function requeue(jobId: string): void {
   jobsRepo.requeueJob(jobId);
+}
+
+export function requeueJobWithParams(
+  jobId: string,
+  patch: Record<string, unknown>
+): Job | null {
+  return jobsRepo.requeueJobWithParams(jobId, patch);
+}
+
+export function getOrCreateJobAtomic(
+  input: jobsRepo.AtomicJobCreateInput,
+): jobsRepo.AtomicJobCreateResult {
+  return jobsRepo.getOrCreateJobAtomic(input);
+}
+
+export function reingestSourceAtomic(
+  input: jobsRepo.AtomicSourceReingestInput,
+): jobsRepo.AtomicSourceReingestResult {
+  return jobsRepo.reingestSourceAtomic(input);
 }
 
 export function reclaimExpired(): number {

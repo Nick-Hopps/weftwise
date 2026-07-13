@@ -46,7 +46,9 @@ describe('selectLatestFindings', () => {
       id: 'new',
       createdAt: '2026-02-01T00:00:00.000Z',
       completedAt: '2026-02-01T00:05:00.000Z',
-      resultJson: JSON.stringify({ findings: [finding('critical'), finding('info')] }),
+      resultJson: JSON.stringify({
+        findings: [finding('critical'), { ...finding('info'), pageSlug: 'p2' }],
+      }),
     });
     const res = selectLatestFindings([older, newer]);
     expect(res.jobId).toBe('new');
@@ -59,6 +61,14 @@ describe('selectLatestFindings', () => {
     const a = job({ id: 'a', completedAt: '2026-03-01T00:05:00.000Z' });
     const b = job({ id: 'b', completedAt: '2026-01-01T00:05:00.000Z' });
     expect(selectLatestFindings([a, b]).jobId).toBe('a');
+  });
+
+  it('completedAt 相同时按 id DESC 稳定决胜且不依赖输入顺序', () => {
+    const a = job({ id: 'lint-a', completedAt: '2026-03-01T00:05:00.000Z' });
+    const z = job({ id: 'lint-z', completedAt: '2026-03-01T00:05:00.000Z' });
+
+    expect(selectLatestFindings([a, z]).jobId).toBe('lint-z');
+    expect(selectLatestFindings([z, a]).jobId).toBe('lint-z');
   });
 
   it('忽略非 completed 的 job', () => {
@@ -79,6 +89,99 @@ describe('selectLatestFindings', () => {
     const nullResult = job({ id: 'nullres', resultJson: null });
     const res = selectLatestFindings([nullResult]);
     expect(res.jobId).toBe('nullres');
+    expect(res.findings).toEqual([]);
+    expect(res.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
+  });
+
+  it('重新计算旧快照 finding ID，覆盖伪造 ID 并按规范 ID 去重', () => {
+    const original = finding('warning');
+    const legacy = job({
+      id: 'legacy',
+      resultJson: JSON.stringify({
+        findings: [
+          { ...original, id: 'forged-id' },
+          { ...original, description: '  d\r\n\t' },
+        ],
+      }),
+    });
+
+    const res = selectLatestFindings([legacy]);
+
+    expect(res.findings).toHaveLength(1);
+    expect(res.findings[0]).toMatchObject({ ...original });
+    expect(res.findings[0].id).toMatch(/^[0-9a-f]{64}$/);
+    expect(res.findings[0].id).not.toBe('forged-id');
+    expect(res.bySeverity).toEqual({ critical: 0, warning: 1, info: 0 });
+  });
+
+  it('混合快照逐项丢弃 description 非字符串的 finding，保留合法 finding', () => {
+    const valid = finding('warning');
+    const mixed = job({
+      id: 'mixed',
+      resultJson: JSON.stringify({
+        findings: [valid, { ...valid, description: 42 }],
+      }),
+    });
+
+    const res = selectLatestFindings([mixed]);
+
+    expect(res.jobId).toBe('mixed');
+    expect(res.findings).toHaveLength(1);
+    expect(res.findings[0]).toMatchObject(valid);
+    expect(res.bySeverity).toEqual({ critical: 0, warning: 1, info: 0 });
+  });
+
+  it('丢弃缺少必填字段的 finding', () => {
+    const invalid = job({
+      id: 'missing-required',
+      resultJson: JSON.stringify({ findings: [{ description: 'only description' }] }),
+    });
+
+    expect(selectLatestFindings([invalid]).findings).toEqual([]);
+  });
+
+  it('丢弃 type 或 severity 非法的 finding', () => {
+    const valid = finding('info');
+    const invalid = job({
+      id: 'invalid-enums',
+      resultJson: JSON.stringify({
+        findings: [
+          { ...valid, type: 'unknown-type' },
+          { ...valid, severity: 'urgent' },
+        ],
+      }),
+    });
+
+    expect(selectLatestFindings([invalid]).findings).toEqual([]);
+  });
+
+  it('丢弃可选来源字段类型非法的 finding', () => {
+    const valid = finding('info');
+    const invalid = job({
+      id: 'invalid-optional',
+      resultJson: JSON.stringify({
+        findings: [
+          { ...valid, sourceId: 1 },
+          { ...valid, sourceFilename: false },
+          { ...valid, failedJobId: 99 },
+        ],
+      }),
+    });
+
+    expect(selectLatestFindings([invalid]).findings).toEqual([]);
+  });
+
+  it('全部 finding 非法时返回空统计并保留 jobId', () => {
+    const invalid = job({
+      id: 'all-invalid',
+      resultJson: JSON.stringify({
+        findings: [null, [], { description: 'missing fields' }],
+      }),
+    });
+
+    const res = selectLatestFindings([invalid]);
+
+    expect(res.jobId).toBe('all-invalid');
     expect(res.findings).toEqual([]);
     expect(res.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
   });

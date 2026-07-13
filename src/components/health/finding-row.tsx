@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
@@ -10,17 +10,21 @@ import {
   FileWarning,
   FileX,
   Link2,
-  RefreshCw,
-  Search,
   Trash2,
   Unlink,
   Unplug,
   type LucideIcon,
 } from 'lucide-react';
-import type { EnrichedLintFinding, LintFinding } from '@/lib/contracts';
+import type {
+  EnrichedLintFinding,
+  LintFinding,
+  RemediationAction,
+  RemediationPlan,
+} from '@/lib/contracts';
 import { Tag } from '@/components/ui/tag';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { findingHref, SEVERITY_TONE } from './lint-findings';
+import { nextDeleteArmed, type ExecutableRemediationAction } from './remediation-ui';
 
 const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
   'broken-link': Unlink,
@@ -45,29 +49,48 @@ const TYPE_LABEL: Record<LintFinding['type'], string> = {
   'orphan-source': 'Orphan source',
   'thin-page': 'Thin page',
 };
+const NO_ACTING_ACTIONS = new Set<ExecutableRemediationAction>();
 
 export function FindingRow({
   finding,
+  plan,
   showSubject = false,
-  onResearch,
-  researching = false,
-  onReingestSource,
+  acting = NO_ACTING_ACTIONS,
+  deleting = false,
+  busyActions,
+  onAction,
   onDeleteSource,
-  sourceActing = false,
 }: {
   finding: EnrichedLintFinding;
+  plan?: RemediationPlan;
   showSubject?: boolean;
-  /** coverage-gap / thin-page 专属：触发针对本条 finding 的 research job。未传则不渲染按钮。 */
-  onResearch?: () => void;
-  researching?: boolean;
-  /** orphan-source 专属：重新触发 ingest / 删除 source。未传则不渲染按钮。 */
-  onReingestSource?: () => void;
+  acting?: ReadonlySet<ExecutableRemediationAction>;
+  deleting?: boolean;
+  busyActions?: ReadonlySet<ExecutableRemediationAction>;
+  onAction?: (action: RemediationAction) => void;
   onDeleteSource?: () => void;
-  sourceActing?: boolean;
 }) {
   const [deleteArmed, setDeleteArmed] = useState(false);
   const Icon = TYPE_ICON[finding.type];
   const href = findingHref(finding);
+  const planActionBusy = plan?.actions.some(
+    (action) => action.type !== 'review-source' && busyActions?.has(action.type),
+  ) ?? false;
+  const statusTone = plan?.status === 'failed'
+    ? 'danger'
+    : plan?.status === 'fixed'
+      ? 'success'
+      : plan?.status === 'queued'
+        ? 'accent'
+        : plan?.status === 'awaiting-approval'
+          ? 'warning'
+          : 'neutral';
+
+  useEffect(() => {
+    if (deleting || acting.size > 0 || planActionBusy) {
+      setDeleteArmed((current) => nextDeleteArmed(current, 'acting'));
+    }
+  }, [acting, deleting, planActionBusy]);
 
   return (
     <div className="flex gap-3 px-3 py-2.5 rounded-md hover:bg-subtle transition-colors">
@@ -104,38 +127,82 @@ export function FindingRow({
             <span className="font-medium">Fix:</span> {finding.suggestedFix}
           </p>
         )}
-        {(finding.type === 'coverage-gap' || finding.type === 'thin-page') && onResearch && (
-          <Button intent="secondary" size="sm" onClick={onResearch} loading={researching} className="mt-1">
-            {!researching && <Search className="h-3 w-3" />}
-            {finding.type === 'coverage-gap' ? 'Research this gap' : 'Research this topic'}
-          </Button>
+        {plan ? (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Tag tone={statusTone} size="sm">
+                {plan.status}
+              </Tag>
+              <span className="text-xs text-foreground-tertiary">{plan.workflow}</span>
+            </div>
+            <p className="text-xs text-foreground-tertiary">{plan.reason}</p>
+          </>
+        ) : (
+          <>
+            <Tag tone="neutral" size="sm">plan unavailable</Tag>
+            <p className="text-xs text-foreground-tertiary">
+              Re-run the health check before choosing a remediation.
+            </p>
+          </>
         )}
-        {finding.type === 'orphan-source' && (onReingestSource || onDeleteSource) && (
-          <div className="mt-1 flex items-center gap-2">
-            {onReingestSource && (
-              <Button intent="secondary" size="sm" onClick={onReingestSource} loading={sourceActing}>
-                {!sourceActing && <RefreshCw className="h-3 w-3" />}
-                Retry ingest
-              </Button>
-            )}
-            {onDeleteSource && (
-              <Button
-                intent={deleteArmed ? 'danger' : 'secondary'}
-                size="sm"
-                disabled={sourceActing}
-                onClick={() => {
-                  if (!deleteArmed) {
-                    setDeleteArmed(true);
-                    return;
+        {plan && plan.actions.length > 0 && (
+          <div className="mt-1 flex items-center gap-2 flex-wrap">
+            {plan.actions.map((item) =>
+              item.type === 'review-source' && item.href ? (
+                <Link
+                  key={item.type}
+                  href={item.href}
+                  aria-disabled={deleting}
+                  tabIndex={deleting ? -1 : undefined}
+                  onClick={(event) => {
+                    if (deleting) event.preventDefault();
+                  }}
+                  className={`${buttonVariants({ intent: 'secondary', size: 'sm' })}${
+                    deleting ? ' pointer-events-none opacity-50' : ''
+                  }`}
+                >
+                  {item.label}
+                </Link>
+              ) : (
+                <Button
+                  key={item.type}
+                  intent="secondary"
+                  size="sm"
+                  loading={item.type !== 'review-source' && acting.has(item.type)}
+                  disabled={
+                    deleting
+                    || (item.type !== 'review-source' && busyActions?.has(item.type))
                   }
-                  setDeleteArmed(false);
-                  onDeleteSource();
-                }}
-              >
-                <Trash2 className="h-3 w-3" />
-                {deleteArmed ? 'Confirm delete' : 'Delete source'}
-              </Button>
+                  onClick={() => {
+                    setDeleteArmed((current) => nextDeleteArmed(current, 'action'));
+                    onAction?.(item);
+                  }}
+                >
+                  {item.label}
+                </Button>
+              ),
             )}
+          </div>
+        )}
+        {plan && onDeleteSource && (
+          <div className="mt-1 flex items-center gap-2">
+            <Button
+              intent={deleteArmed ? 'danger' : 'secondary'}
+              size="sm"
+              loading={deleting}
+              disabled={deleting || acting.size > 0 || planActionBusy}
+              onClick={() => {
+                if (!deleteArmed) {
+                  setDeleteArmed((current) => nextDeleteArmed(current, 'arm'));
+                  return;
+                }
+                setDeleteArmed((current) => nextDeleteArmed(current, 'action'));
+                onDeleteSource();
+              }}
+            >
+              <Trash2 className="h-3 w-3" />
+              {deleteArmed ? 'Confirm delete' : 'Delete source'}
+            </Button>
           </div>
         )}
       </div>
