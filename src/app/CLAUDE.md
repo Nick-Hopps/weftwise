@@ -37,16 +37,19 @@
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，锁内复核 HEAD 后同步执行页面 Saga 或仅入队 re-enrich；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
-| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`：稳定 ID findings、bySeverity、服务端 `remediations` plans 与 `recentOutcomes`；从未跑过返回字段完整的空快照。All Subjects 的 plans 只读、actions 为空 |
+| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；先有界读取近期 jobs，再按 subject 批量读取关联 Research run view 交给纯 builder 映射审批/导入/验证终态，避免 N+1；从未跑过返回完整空快照，All Subjects plans 只读 |
 | `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
 | `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |
-| `/api/research` | POST | 入队 `research` 任务（缺口/薄页/主题→联网研究候选清单，只发现不写入）；body 二选一 `{ findingIds: string[], lintJobId: string, subjectId }`（稳定 ID 必须全部命中当前 subject 最新 lint，且每项均为 `coverage-gap` 或 `thin-page`）或 `{ topic: string, subjectId }`；旧 `gapIds` 数组下标协议已退役，显式出现即 400；web search 未配置 → 422；202 返回 `{ jobId, subjectId, subjectSlug }` |
+| `/api/research` | POST | 入队 `research` 任务（缺口/薄页/主题→联网研究候选快照，只发现不写入）；body 二选一 `{ findingIds, lintJobId, subjectId }` 或 `{ topic, subjectId }`；完成后持久化 run/candidate/finding evidence，job result 只用 `runId` 定位；旧 `gapIds` 400，web search 未配置 422 |
+| `/api/research-runs/[id]` | GET | 按 required subject 读取脱敏 `ResearchRunView`；包含稳定 candidate ID、批准、逐 candidate delivery lineage 与逐 finding 验证结果，跨 subject/不存在统一 404 |
+| `/api/research-runs/[id]/approve` | POST | 只接受 `{ candidateIds, expectedVersion, idempotencyKey, subjectId }`；candidate ID 必须为稳定 64 位 hex，服务端回读 URL 快照；原子 CAS 批准并创建唯一 `research-import` coordinator，首次 202、幂等 replay 200 |
+| `/api/research-runs/[id]/dismiss` | POST | 显式忽略仍为 awaiting-approval 的 run；普通 UI 关闭不会调用；写请求要求 auth + CSRF + required subject |
 | `/api/research-backlog` | GET | 🆕 T3.2：列出当前 subject 待研究问题队列（`?status=open\|researched\|dismissed` 过滤，缺省返回全部） |
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
 | `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源查询 active 优先，故即使存在更新 terminal，只要任意旧 pending/running 仍返回 409 `in-flight`）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
-| `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试（`queue.requeue`，绕过 worker 的 `isRetryableError` 判定）：仅 `type==='ingest'` + `status==='failed'`；已被用户终结（`result.cancelled`）409；job 引用的 source 已被删除（如经 orphan-source 的 Delete source）409，避免 requeue 后 worker 读盘 "Source file not found" |
+| `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试：仅普通 failed Ingest；cancelled、source 已删除或携带服务端 `researchProvenance` 的 Research child 均 409，后者只能由 run coordinator/reconciler 恢复，避免绕过候选状态机 |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：从 preHead 重建 inverse changeset、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -63,7 +66,7 @@
 | `/api/conversations/[id]` | GET / PATCH / DELETE | 🆕 读单个会话含 messages / 重命名（仅 title）/ 删除（跨 subject→404，PATCH 空 title→400）|
 | `/api/query` | POST | 默认流式分支扩展：body 加 `conversationId?`（无/跨 subject 静默当新会话防泄漏）→ 载末 8 条历史注入 prompt → 流末 best-effort 落库 → done 回传 `{subjectId, conversationId}`；save-as-page/save-to-wiki 模式不持久化 |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
-| `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录（需 auth + CSRF） |
+| `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录；两种模式都按外键顺序清理 Research provenance 五表（需 auth + CSRF） |
 
 ### `POST /api/health/remediations` 错误契约
 
@@ -128,6 +131,9 @@ src/app/
     ├── curate/route.ts                  # 🆕 POST 入队 curate（agent 策展）
     ├── fix/route.ts                     # 🆕 POST 入队 fix（一键修复 lint findings）
     ├── research/route.ts                # 联网研究：稳定 finding scope 或自由 topic
+    ├── research-runs/[id]/route.ts      # Research run view
+    ├── research-runs/[id]/approve/route.ts # candidate ID 原子批准
+    ├── research-runs/[id]/dismiss/route.ts # 显式忽略
     ├── jobs/route.ts
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
@@ -151,6 +157,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Research 批准溯源 Phase 2C：新增 run 读取/批准/忽略 API，批准只接受稳定 candidate ID + version + idempotency key；`lint/latest` 批量注入 run 状态；通用 Ingest route 拒绝客户端 provenance，Research child 禁止独立 retry，coordinator cancel 后立即对账；reset/subject 删除覆盖 provenance 五表 |
 | 2026-07-12 | Health 修复闭环 Phase 2A：`GET /api/lint/latest` 升级为完整 `HealthSnapshot`；新增 `POST /api/health/remediations` 统一校验、幂等执行入口；`POST /api/research` 改用稳定 `findingIds + lintJobId` 并接受 `coverage-gap / thin-page`，旧数组下标协议退役 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：`/api/query` 新增 read/propose 模式与 `pending-action` SSE；新增 pending-actions 列表/批准/拒绝三个 subject-scoped API，写请求均 requireAuth+CSRF，批准只消费服务端预览而不信任客户端 payload |
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |

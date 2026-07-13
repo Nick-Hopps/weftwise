@@ -6,6 +6,7 @@ import type {
   RemediationPlan,
   RemediationStatus,
   ResearchCandidate,
+  ResearchRunView,
 } from '@/lib/contracts';
 import { readRemediationContext } from './remediation-context';
 import { routeFinding } from './remediation-router';
@@ -37,7 +38,7 @@ const WRITE_SEMANTIC_STATUSES = new Set([
 export function buildHealthSnapshot(
   lint: LintLatestResult,
   jobs: Job[],
-  options: { readOnly?: boolean } = {},
+  options: { readOnly?: boolean; researchRuns?: ResearchRunView[] } = {},
 ): HealthSnapshot {
   const contextJobs = [...jobs]
     .sort(compareJobs)
@@ -47,6 +48,10 @@ export function buildHealthSnapshot(
       return context && job.subjectId ? [{ job, context }] : [];
     });
   const latestByFinding = new Map<string, FindingContextJob>();
+  const researchRunsByJob = new Map<string, ResearchRunView>();
+  for (const run of options.researchRuns ?? []) {
+    researchRunsByJob.set(researchJobKey(run.subjectId, run.researchJobId), run);
+  }
 
   for (const contextJob of contextJobs) {
     for (const findingId of contextJob.context.findingIds) {
@@ -67,7 +72,7 @@ export function buildHealthSnapshot(
     const initial = routeFinding(finding, options);
     const related = latestByFinding.get(key);
     remediations[finding.id] = related
-      ? applyCurrentJob(initial, related, lint.ranAt)
+      ? applyCurrentJob(initial, related, lint.ranAt, researchRunsByJob)
       : initial;
   }
 
@@ -77,7 +82,7 @@ export function buildHealthSnapshot(
   for (const [key, contextJob] of latestByFinding) {
     if (currentKeys.has(key)) continue;
 
-    const outcome = readRecentOutcome(contextJob, lint.ranAt);
+    const outcome = readRecentOutcome(contextJob, lint.ranAt, researchRunsByJob);
     if (!outcome) continue;
 
     recentEntries.push({
@@ -106,6 +111,7 @@ function applyCurrentJob(
   plan: RemediationPlan,
   { job, context, findingId }: FindingContextJob,
   lintRanAt: string | null,
+  researchRunsByJob: Map<string, ResearchRunView>,
 ): RemediationPlan {
   let status: RemediationStatus;
 
@@ -114,7 +120,10 @@ function applyCurrentJob(
   } else if (job.status === 'failed') {
     status = 'failed';
   } else if (context.action === 'research') {
-    status = researchOutcome(job.resultJson);
+    const run = researchRunsByJob.get(researchJobKey(job.subjectId!, job.id));
+    status = run
+      ? researchRunOutcome(run, findingId)
+      : researchOutcome(job.resultJson);
   } else if (
     lintRanAt === null
     || job.completedAt === null
@@ -135,9 +144,17 @@ function applyCurrentJob(
 function readRecentOutcome(
   { job, context, findingId }: FindingContextJob,
   lintRanAt: string | null,
+  researchRunsByJob: Map<string, ResearchRunView>,
 ): RemediationStatus | null {
-  if (context.action === 'research') return null;
   if (job.status === 'pending' || job.status === 'running') return null;
+  if (context.action === 'research') {
+    const run = researchRunsByJob.get(researchJobKey(job.subjectId!, job.id));
+    if (!run) return null;
+    const outcome = researchRunOutcome(run, findingId);
+    return outcome === 'fixed' || outcome === 'failed' || outcome === 'skipped'
+      ? outcome
+      : null;
+  }
   if (
     lintRanAt === null
     || job.completedAt === null
@@ -208,6 +225,22 @@ function researchOutcome(
     : 'failed';
 }
 
+function researchRunOutcome(
+  run: ResearchRunView,
+  findingId: string,
+): RemediationStatus {
+  if (run.status === 'awaiting-approval') return 'awaiting-approval';
+  if (run.status === 'importing' || run.status === 'verifying') return 'queued';
+  if (run.status === 'dismissed' || run.status === 'empty') return 'skipped';
+
+  if (run.origin === 'topic') {
+    return run.status === 'completed' ? 'fixed' : 'failed';
+  }
+  const finding = run.findings.find((item) => item.findingId === findingId);
+  if (!finding) return 'failed';
+  return finding.verificationStatus === 'fixed' ? 'fixed' : 'failed';
+}
+
 function isResearchCandidate(value: unknown): value is ResearchCandidate {
   if (!isRecord(value)) return false;
   return (
@@ -243,6 +276,10 @@ function compareJobs(left: Job, right: Job): number {
 
 function findingKey(subjectId: string, findingId: string): string {
   return JSON.stringify([subjectId, findingId]);
+}
+
+function researchJobKey(subjectId: string, researchJobId: string): string {
+  return JSON.stringify([subjectId, researchJobId]);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

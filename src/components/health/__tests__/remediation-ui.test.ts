@@ -7,6 +7,7 @@ import type {
   Job,
   RemediationActionType,
   RemediationPlan,
+  ResearchRunView,
 } from '@/lib/contracts';
 import {
   activeJobsHydrationBusyActions,
@@ -17,13 +18,15 @@ import {
   fetchActiveHealthJobs,
   isHealthOriginCurrent,
   nextDeleteArmed,
-  readResearchCandidates,
+  readResearchRun,
+  readResearchRunId,
   recentOutcomeBannerTone,
   recentOutcomeCounts,
   persistedBusyActions,
   healthTerminalInvalidationKeys,
   selectRecoverableHealthJobs,
   researchBacklogPatchBody,
+  researchApprovalBody,
 } from '../remediation-ui';
 import { FindingRow } from '../finding-row';
 
@@ -198,18 +201,44 @@ describe('Health remediation UI helper', () => {
     expect(nextDeleteArmed(true, 'action')).toBe(false);
   });
 
-  it('Research 结果读取区分 HTTP、响应 JSON 与 resultJson 错误', async () => {
-    await expect(readResearchCandidates(new Response('', { status: 503 })))
+  it('Research job 结果只读取 runId，并区分 HTTP、响应 JSON 与 resultJson 错误', async () => {
+    await expect(readResearchRunId(new Response('', { status: 503 })))
       .rejects.toThrow('Research result request failed (503).');
-    await expect(readResearchCandidates(new Response('{', {
+    await expect(readResearchRunId(new Response('{', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     }))).rejects.toThrow('Research result response is invalid.');
-    await expect(readResearchCandidates(Response.json({ resultJson: '{' })))
+    await expect(readResearchRunId(Response.json({ resultJson: '{' })))
       .rejects.toThrow('Research result is invalid.');
-    await expect(readResearchCandidates(Response.json({
-      resultJson: JSON.stringify({ candidates: [{ title: 'Result' }] }),
-    }))).resolves.toEqual([{ title: 'Result' }]);
+    await expect(readResearchRunId(Response.json({
+      resultJson: JSON.stringify({ runId: 'run-1', candidates: [] }),
+    }))).resolves.toBe('run-1');
+  });
+
+  it('Research run 响应严格校验，批准 body 不包含 URL', async () => {
+    const run = {
+      id: 'run-1', subjectId: 'subject-1', researchJobId: 'research-1', origin: 'topic',
+      lintJobId: null, topic: 'topic', topics: ['topic'], queries: ['query'],
+      candidateSetHash: 'hash', status: 'awaiting-approval', version: 2,
+      verificationLintJobId: null, findings: [], candidates: [{
+        id: 'candidate-1', url: 'https://example.com', normalizedUrl: 'https://example.com/',
+        title: 'Example', snippet: 'Snippet', score: 3, reason: null, rank: 0,
+        decision: 'pending', delivery: null,
+      }], approval: null, createdAt: '2026-07-14T00:00:00.000Z',
+      updatedAt: '2026-07-14T00:00:00.000Z', completedAt: null, error: null,
+    } satisfies ResearchRunView;
+
+    await expect(readResearchRun(Response.json({ run }))).resolves.toEqual(run);
+    await expect(readResearchRun(Response.json({ run: { ...run, candidates: [{ url: 'x' }] } })))
+      .rejects.toThrow('Research run is invalid.');
+    expect(researchApprovalBody(run, ['candidate-1'], 'key-1')).toEqual({
+      candidateIds: ['candidate-1'],
+      expectedVersion: 2,
+      idempotencyKey: 'key-1',
+      subjectId: 'subject-1',
+    });
+    expect(JSON.stringify(researchApprovalBody(run, ['candidate-1'], 'key-1')))
+      .not.toContain('https://');
   });
 
   it('Research backlog PATCH body 固定携带 render 时的 subjectId', () => {
@@ -348,6 +377,25 @@ describe('Health remediation UI helper', () => {
 
     expect(selectRecoverableHealthJobs(queuedSnapshot, []).fix).toMatchObject({
       jobId: 'fix-from-plan',
+      source: 'remediation',
+    });
+  });
+
+  it('刷新后从 awaiting-approval Research plan 恢复完成 job 以读取 run', () => {
+    const awaitingSnapshot: HealthSnapshot = {
+      ...snapshot,
+      remediations: {
+        ...snapshot.remediations,
+        [gap.id]: {
+          ...snapshot.remediations[gap.id],
+          status: 'awaiting-approval',
+          jobId: 'research-completed',
+        },
+      },
+    };
+
+    expect(selectRecoverableHealthJobs(awaitingSnapshot, []).research).toMatchObject({
+      jobId: 'research-completed',
       source: 'remediation',
     });
   });

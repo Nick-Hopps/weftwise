@@ -19,7 +19,7 @@ import type {
   Job,
   LintFinding,
   PostconditionReport,
-  ResearchCandidate,
+  ResearchRunView,
 } from '@/lib/contracts';
 import {
   buildPostconditionNotice,
@@ -34,9 +34,11 @@ import {
   healthTerminalInvalidationKeys,
   isHealthOriginCurrent,
   persistedBusyActions,
-  readResearchCandidates,
+  readResearchRun,
+  readResearchRunId,
   recentOutcomeBannerTone,
   recentOutcomeCounts,
+  researchApprovalBody,
   selectRecoverableHealthJobs,
   type ExecutableRemediationAction,
   type HealthOrigin,
@@ -47,10 +49,28 @@ type ResearchOrigin = 'manual' | 'backlog' | 'remediation';
 type ActionJobMeta = { jobId: string; origin: HealthOrigin };
 type ResearchJobMeta = ActionJobMeta & { source: ResearchOrigin };
 type CandidateResult = {
-  candidates: ResearchCandidate[];
-  subjectId: string;
+  run: ResearchRunView;
   origin: HealthOrigin;
 };
+type ResearchApprovalAttempt = {
+  runId: string;
+  selection: string;
+  idempotencyKey: string;
+};
+
+function isTerminalResearchRun(run: ResearchRunView): boolean {
+  return run.status === 'completed'
+    || run.status === 'partial'
+    || run.status === 'failed'
+    || run.status === 'dismissed'
+    || run.status === 'empty';
+}
+
+function createResearchIdempotencyKey(runId: string): string {
+  const random = globalThis.crypto?.randomUUID?.()
+    ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${runId}:${random}`;
+}
 
 function PostconditionBanner({
   label,
@@ -94,7 +114,8 @@ export function HealthView() {
   const researchFetchJobIdRef = useRef<string | null>(null);
   const lintJobMetaRef = useRef<ActionJobMeta | null>(null);
   const lintRerunQueueRef = useRef(createLintRerunQueue());
-  const ingestOriginRef = useRef<HealthOrigin | null>(null);
+  const researchActionOriginRef = useRef<HealthOrigin | null>(null);
+  const researchApprovalAttemptRef = useRef<ResearchApprovalAttempt | null>(null);
   const deleteOriginsRef = useRef(new Map<string, HealthOrigin>());
   const settledJobIdsRef = useRef(new Set<string>());
   const originKey = `${originSubjectId}\u0000${scope}`;
@@ -115,7 +136,8 @@ export function HealthView() {
     researchFetchJobIdRef.current = null;
     lintJobMetaRef.current = null;
     lintRerunQueueRef.current.reset();
-    ingestOriginRef.current = null;
+    researchActionOriginRef.current = null;
+    researchApprovalAttemptRef.current = null;
     deleteOriginsRef.current.clear();
     settledJobIdsRef.current.clear();
   }
@@ -223,7 +245,8 @@ export function HealthView() {
     researchFetchJobIdRef.current = null;
     lintJobMetaRef.current = null;
     lintRerunQueueRef.current.reset();
-    ingestOriginRef.current = null;
+    researchActionOriginRef.current = null;
+    researchApprovalAttemptRef.current = null;
     deleteOriginsRef.current.clear();
     settledJobIdsRef.current.clear();
   }
@@ -423,7 +446,7 @@ export function HealthView() {
   const [researchError, setResearchError] = useState<string | null>(null);
   const [candidateResult, setCandidateResult] = useState<CandidateResult | null>(null);
   const [topicInput, setTopicInput] = useState('');
-  const [ingesting, setIngesting] = useState(false);
+  const [researchActing, setResearchActing] = useState(false);
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
   const { status: researchStatus } = useJobStream(researchJobId);
@@ -489,13 +512,11 @@ export function HealthView() {
         try {
           const res = await apiFetch(`/api/jobs/${researchJobId}`);
           if (!isCurrentOrigin(meta.origin)) return;
-          const nextCandidates = await readResearchCandidates(res);
+          const runId = await readResearchRunId(res);
           if (!isCurrentOrigin(meta.origin)) return;
-          setCandidateResult({
-            candidates: nextCandidates,
-            subjectId: meta.origin.subjectId,
-            origin: meta.origin,
-          });
+          const run = await loadResearchRun(runId, meta.origin);
+          if (!isCurrentOrigin(meta.origin)) return;
+          setCandidateResult({ run, origin: meta.origin });
         } catch (error) {
           if (isCurrentOrigin(meta.origin)) {
             showResearchError(
@@ -528,6 +549,55 @@ export function HealthView() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [researchStatus]);
+
+  useEffect(() => {
+    const result = candidateResult;
+    if (
+      !result
+      || !isCurrentOrigin(result.origin)
+      || (result.run.status !== 'importing' && result.run.status !== 'verifying')
+    ) return;
+
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      try {
+        const run = await loadResearchRun(result.run.id, result.origin);
+        if (cancelled || !isCurrentOrigin(result.origin)) return;
+        setCandidateResult((current) => current?.run.id === run.id
+          ? { ...current, run }
+          : current);
+        if (isTerminalResearchRun(run)) {
+          queryClient.invalidateQueries({ queryKey: ['pages'] });
+          invalidateWorkflowLifecycle(result.origin);
+          return;
+        }
+      } catch (error) {
+        if (!cancelled && isCurrentOrigin(result.origin)) {
+          showResearchError(
+            result.run.origin === 'findings' ? 'remediation' : 'manual',
+            error instanceof Error ? error.message : 'Research run could not be refreshed.',
+          );
+        }
+      }
+      if (!cancelled) timer = setTimeout(poll, 2_000);
+    };
+
+    timer = setTimeout(poll, 2_000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+    // 只在 run 身份或阶段改变时重建轮询；内容刷新不重置计时器。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidateResult?.run.id, candidateResult?.run.status]);
+
+  async function loadResearchRun(runId: string, origin: HealthOrigin): Promise<ResearchRunView> {
+    const response = await apiFetch(
+      `/api/research-runs/${encodeURIComponent(runId)}?subjectId=${encodeURIComponent(origin.subjectId)}`,
+    );
+    return readResearchRun(response);
+  }
 
   async function startResearch(topic: string, source: Exclude<ResearchOrigin, 'remediation'>): Promise<string | null> {
     const origin = captureOrigin();
@@ -642,26 +712,113 @@ export function HealthView() {
     }
   }
 
-  async function confirmIngest(urls: string[]) {
+  async function approveResearchCandidates(candidateIds: string[]) {
     const result = candidateResult;
-    if (!result || !isCurrentOrigin(result.origin) || ingestOriginRef.current) return;
-    ingestOriginRef.current = result.origin;
-    setIngesting(true);
+    if (
+      !result
+      || result.run.status !== 'awaiting-approval'
+      || !isCurrentOrigin(result.origin)
+      || researchActionOriginRef.current
+    ) return;
+    researchActionOriginRef.current = result.origin;
+    setResearchActing(true);
+    const selection = [...candidateIds].sort().join('\u0000');
+    const previousAttempt = researchApprovalAttemptRef.current;
+    const idempotencyKey = previousAttempt?.runId === result.run.id
+      && previousAttempt.selection === selection
+      ? previousAttempt.idempotencyKey
+      : createResearchIdempotencyKey(result.run.id);
+    researchApprovalAttemptRef.current = { runId: result.run.id, selection, idempotencyKey };
+
     try {
-      const res = await apiFetch('/api/ingest', {
+      const res = await apiFetch(`/api/research-runs/${encodeURIComponent(result.run.id)}/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls, subjectId: result.subjectId }),
+        body: JSON.stringify(researchApprovalBody(result.run, candidateIds, idempotencyKey)),
       });
-      if (isCurrentOrigin(result.origin) && (res.ok || res.status === 202)) {
-        setCandidateResult(null);
-        queryClient.invalidateQueries({ queryKey: ['pages'] });
+      if (!isCurrentOrigin(result.origin)) return;
+      if (res.ok) {
+        const run = await readResearchRun(res);
+        if (isCurrentOrigin(result.origin)) {
+          setCandidateResult({ run, origin: result.origin });
+          invalidateWorkflowLifecycle(result.origin);
+        }
+        return;
+      }
+
+      const latest = await loadResearchRun(result.run.id, result.origin);
+      if (!isCurrentOrigin(result.origin)) return;
+      setCandidateResult({ run: latest, origin: result.origin });
+      if (latest.status === 'awaiting-approval') {
+        showResearchError(
+          result.run.origin === 'findings' ? 'remediation' : 'manual',
+          `Research approval failed (${res.status}).`,
+        );
+      }
+    } catch (error) {
+      try {
+        const latest = await loadResearchRun(result.run.id, result.origin);
+        if (isCurrentOrigin(result.origin)) {
+          setCandidateResult({ run: latest, origin: result.origin });
+          if (latest.status === 'awaiting-approval') {
+            showResearchError(
+              result.run.origin === 'findings' ? 'remediation' : 'manual',
+              'Research approval result is uncertain. Review the current run before retrying.',
+            );
+          }
+        }
+      } catch {
+        if (isCurrentOrigin(result.origin)) {
+          showResearchError(
+            result.run.origin === 'findings' ? 'remediation' : 'manual',
+            error instanceof Error ? error.message : 'Research approval failed.',
+          );
+        }
       }
     } finally {
-      const held = ingestOriginRef.current;
+      const held = researchActionOriginRef.current;
       if (held && isHealthOriginCurrent(held, result.origin)) {
-        ingestOriginRef.current = null;
-        if (isCurrentOrigin(result.origin)) setIngesting(false);
+        researchActionOriginRef.current = null;
+        if (isCurrentOrigin(result.origin)) setResearchActing(false);
+      }
+    }
+  }
+
+  async function dismissResearchCandidates() {
+    const result = candidateResult;
+    if (
+      !result
+      || result.run.status !== 'awaiting-approval'
+      || !isCurrentOrigin(result.origin)
+      || researchActionOriginRef.current
+    ) return;
+    researchActionOriginRef.current = result.origin;
+    setResearchActing(true);
+    try {
+      const response = await apiFetch(
+        `/api/research-runs/${encodeURIComponent(result.run.id)}/dismiss`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subjectId: result.run.subjectId }),
+        },
+      );
+      const run = await readResearchRun(response);
+      if (!isCurrentOrigin(result.origin)) return;
+      setCandidateResult({ run, origin: result.origin });
+      invalidateWorkflowLifecycle(result.origin);
+    } catch (error) {
+      if (isCurrentOrigin(result.origin)) {
+        showResearchError(
+          result.run.origin === 'findings' ? 'remediation' : 'manual',
+          error instanceof Error ? error.message : 'Research dismiss failed.',
+        );
+      }
+    } finally {
+      const held = researchActionOriginRef.current;
+      if (held && isHealthOriginCurrent(held, result.origin)) {
+        researchActionOriginRef.current = null;
+        if (isCurrentOrigin(result.origin)) setResearchActing(false);
       }
     }
   }
@@ -714,7 +871,7 @@ export function HealthView() {
     setFixPostcondition(null);
     setResearchJobId(null);
     setCandidateResult(null);
-    setIngesting(false);
+    setResearchActing(false);
     setResearchError(null);
     setRemediationError(null);
     setBusyActions(new Set());
@@ -929,10 +1086,11 @@ export function HealthView() {
 
       {candidateResult && (
         <ResearchCandidatesDialog
-          candidates={candidateResult.candidates}
+          run={candidateResult.run}
           onClose={() => setCandidateResult(null)}
-          onConfirm={confirmIngest}
-          confirming={ingesting}
+          onApprove={approveResearchCandidates}
+          onDismiss={dismissResearchCandidates}
+          acting={researchActing}
         />
       )}
 

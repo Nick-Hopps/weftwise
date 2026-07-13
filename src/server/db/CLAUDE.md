@@ -157,6 +157,11 @@
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 | `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
+| `research_runs` | `id` | `research_job_id` UNIQUE；subject/origin/status/version/candidate_set_hash；finding run 可关联来源 lint 与唯一 verification lint |
+| `research_run_findings` | `(run_id, finding_id)` | 原始 finding snapshot + `pending/fixed/residual/unverifiable` 验证终态；随 run 级联删除 |
+| `research_candidates` | `id` | `(run_id, normalized_url)` UNIQUE；稳定候选快照、rank、decision 与 approval 复合外键，客户端不能改 URL |
+| `research_approvals` | `id` | 每 run 唯一；保存 canonical candidate ID selection、payload hash、idempotency key 与 coordinator job ID |
+| `research_candidate_ingests` | `(approval_id, candidate_id)` | run/candidate/approval 复合外键；claim token/lease、source/child job、operation/page/commit lineage；`ingest_job_id` UNIQUE |
 | `llm_usage` | `id`（自增） | app 级资源，非 subject-scoped，无 FK；一次 LLM 调用一行：`task` + `model` + `input_tokens` + `output_tokens` + `created_at`（epoch ms）；90 天 GC（`pruneOldUsage`，worker 低频 sweep） |
 
 ## 扩展指南
@@ -172,7 +177,7 @@
 
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
-- repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations（含 `pruneOldOperations` 边界：未超上限不删/超出只删多出的最旧行/`pending` 永不删/按 subject 隔离）/ conversations / embeddings / maturity / checkpoints / settings。
+- repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations（含 `pruneOldOperations` 边界）/ conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
 - `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描），包含 remediation CAS 候选与同源 ingest JSON 表达式查询；后者同时覆盖损坏历史参数安全性。
 - `rebuild.test.ts`：`rebuildDatabaseFromVault` 核心逻辑（wipe + reindex + 侧车恢复统计）；`scripts/rebuild-cache.ts` 入口脚本本身（CLI 输出 + 锁获取）未覆盖，逻辑极薄，说明即可。
 
@@ -205,6 +210,7 @@ src/server/db/
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
     ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
     ├── maturity-repo.ts       # 页面成熟度 CRUD（get / ensureRow / listDue / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
+    ├── research-provenance-repo.ts # Research 五表 run/批准/delivery/验证原子状态机
     └── usage-repo.ts          # LLM 用量明细：recordUsage（best-effort 记账）/ summarizeUsage（按 task+model 聚合）/ pruneOldUsage（90 天 GC）
 ```
 
@@ -212,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Research 批准溯源 Phase 2C：新增 `research_runs / research_run_findings / research_candidates / research_approvals / research_candidate_ingests` 五表、复合外键与热路径索引；Drizzle migration 与启动期原子兼容迁移同构；subject 删除/reset 和重复 source 合并同步维护 provenance 引用；repo 提供 run 批量读取、批准/忽略、delivery 租约、source+child job 唯一入队和 verification CAS |
 | 2026-07-13 | Health remediation 原子查询去除 subject 全历史扫描：CAS 只读取同 type 的可复用状态候选；同源 ingest 改走受 `json_valid` 保护的 sourceId/sourceId+status 表达式索引，reingest 全量读取 active 并优先 exact-context，DELETE 只取任一 active，仅在无 active 时取最新 terminal；补历史噪声、双入口去重、requeue 与 EQP 回归 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 `pending_actions` 表、热路径索引与 repo 条件状态流转；预览 30 分钟 TTL，终态保留 30 天，operation/job 双引用支持 worker 崩溃恢复 |
 | 2026-07-12 | Phase 1C：`operations-repo.listAppliedForJob` 提供 Job/Subject 已应用 Changeset 权威范围；`sources-repo.listPageSourceIntegrityRows` 提供定向 provenance 完整性快照 |

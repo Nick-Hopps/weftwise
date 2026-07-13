@@ -7,6 +7,7 @@ import { getFileAtCommit } from '@/server/git/git-service';
 import { buildRevertEntries } from '@/server/wiki/revert';
 import {
   createChangeset,
+  captureSubjectMutationEpoch,
   validateChangeset,
   applyChangeset,
 } from '@/server/wiki/wiki-transaction';
@@ -43,6 +44,7 @@ export async function POST(
   if (op.status === 'reverted') {
     return NextResponse.json({ error: 'Operation already reverted' }, { status: 409 });
   }
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
 
   let original: ChangesetEntry[] = [];
   try {
@@ -69,7 +71,7 @@ export async function POST(
     (p) => existsSync(vaultPath(p)),
   );
 
-  const changeset = createChangeset(crypto.randomUUID(), subject, entries);
+  const changeset = createChangeset(crypto.randomUUID(), subject, entries, mutationEpoch);
   const validation = validateChangeset(changeset);
   if (!validation.valid) {
     return NextResponse.json(

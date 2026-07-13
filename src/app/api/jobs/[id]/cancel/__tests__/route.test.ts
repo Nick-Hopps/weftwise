@@ -4,6 +4,7 @@ import { NextRequest } from 'next/server';
 const mockGet = vi.fn();
 const mockRequestCancel = vi.fn();
 const mockEmit = vi.fn();
+const mockReconcileForJob = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
   requireAuth: () => null,
@@ -15,6 +16,10 @@ vi.mock('@/server/jobs/queue', () => ({
 }));
 vi.mock('@/server/jobs/events', () => ({
   emit: (...args: Parameters<typeof mockEmit>) => mockEmit(...args),
+}));
+vi.mock('@/server/services/research-provenance-reconciler', () => ({
+  reconcileResearchProvenanceForJob: (...args: Parameters<typeof mockReconcileForJob>) =>
+    mockReconcileForJob(...args),
 }));
 
 import { POST } from '../route';
@@ -28,6 +33,7 @@ beforeEach(() => {
   mockGet.mockReset();
   mockRequestCancel.mockReset();
   mockEmit.mockReset();
+  mockReconcileForJob.mockReset();
 });
 
 describe('POST /api/jobs/[id]/cancel', () => {
@@ -61,5 +67,24 @@ describe('POST /api/jobs/[id]/cancel', () => {
       expect.any(String),
       expect.objectContaining({ manual: true }),
     );
+    expect(mockReconcileForJob).toHaveBeenCalledWith('j1');
+  });
+
+  it('对账异常不改写已经成功的取消响应', async () => {
+    mockGet
+      .mockReturnValueOnce({ id: 'j1', type: 'research-import', status: 'running' })
+      .mockReturnValueOnce({ id: 'j1', type: 'research-import', status: 'failed' });
+    mockRequestCancel.mockReturnValue('cancelled');
+    mockReconcileForJob.mockImplementation(() => { throw new Error('reconcile failed'); });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await call();
+
+    expect(res.status).toBe(200);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[research-provenance] cancel reconcile failed',
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 });

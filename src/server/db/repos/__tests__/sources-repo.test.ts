@@ -170,3 +170,46 @@ describe('sources-repo.listUnreferencedSources / deleteSource', () => {
     expect(repo.listUnreferencedSources('s2').map((s) => s.id)).toEqual(['src-orphan-2']);
   });
 });
+
+describe('sources-repo source identity', () => {
+  it('按 subject/hash/filename 精确查询，filename 不同不误命中', async () => {
+    const repo = await setup();
+    expect(repo.getSourceByIdentity('s1', 'h1', 'a.md')?.id).toBe('src1');
+    expect(repo.getSourceByIdentity('s1', 'h1', 'renamed.md')).toBeNull();
+    expect(repo.getSourceByIdentity('s2', 'h1', 'a.md')).toBeNull();
+  });
+
+  it('insertSourceOrGetWinner 在组合冲突时返回 canonical winner', async () => {
+    const repo = await setup();
+    const result = repo.insertSourceOrGetWinner({
+      id: 'loser',
+      subjectId: 's1',
+      filename: 'a.md',
+      contentHash: 'h1',
+      parsedAt: null,
+      metadataJson: '{}',
+    });
+    expect(result).toMatchObject({ inserted: false, source: { id: 'src1' } });
+  });
+
+  it('持久化 loser sidecar 补偿记录供启动维护重试', async () => {
+    const repo = await setup();
+    const { getRawDb } = await import('../../client');
+    repo.recordSourceSidecarCleanup({
+      loserId: 'loser-sidecar',
+      winnerId: 'src1',
+      subjectSlug: 'sub-a',
+      filename: 'a.md',
+    });
+    expect(getRawDb().prepare(`
+      SELECT loser_id, winner_id, subject_slug, filename
+      FROM source_dedup_cleanup
+      WHERE loser_id = 'loser-sidecar'
+    `).get()).toEqual({
+      loser_id: 'loser-sidecar',
+      winner_id: 'src1',
+      subject_slug: 'sub-a',
+      filename: 'a.md',
+    });
+  });
+});

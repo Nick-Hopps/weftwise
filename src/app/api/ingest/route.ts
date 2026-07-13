@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as queue from '@/server/jobs/queue';
-import { saveRawSource } from '@/server/sources/source-store';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { fetchUrlSource } from '@/server/sources/url-fetcher';
 import { validateUrlList, ingestUrlBatch } from '@/server/sources/url-ingest';
+import {
+  acquireSubjectWriteLease,
+  persistSourceAndEnqueueIngest,
+  SubjectWriteLeaseError,
+} from '@/server/sources/source-ingest-transaction';
 
 export const runtime = 'nodejs';
 
@@ -85,12 +88,20 @@ export async function POST(request: NextRequest) {
         const resolution = resolveSubjectFromRequest(request, { body });
         if (resolution.error) return resolution.error;
         const { subject } = resolution;
+        const lease = acquireSubjectWriteLease(subject.id);
 
         const results = await ingestUrlBatch(validated.urls, {
           fetchSource: (url) => fetchUrlSource(url),
-          save: (filename, content, url) => saveRawSource(subject, filename, content, { originUrl: url }),
-          enqueue: (sourceId, filename) =>
-            queue.enqueue('ingest', { sourceId, filename, subjectId: subject.id }, subject.id),
+          persist: (filename, content, url) => {
+            const result = persistSourceAndEnqueueIngest({
+              subject,
+              lease,
+              filename,
+              content,
+              originUrl: url,
+            });
+            return { sourceId: result.sourceId, jobId: result.job.id };
+          },
         });
 
         const anySuccess = results.some((r) => r.jobId);
@@ -126,13 +137,13 @@ export async function POST(request: NextRequest) {
     if (resolution.error) return resolution.error;
     const { subject } = resolution;
 
-    const { id: sourceId } = saveRawSource(subject, filename, content);
-
-    const job = queue.enqueue(
-      'ingest',
-      { sourceId, filename, subjectId: subject.id },
-      subject.id,
-    );
+    const lease = acquireSubjectWriteLease(subject.id);
+    const { sourceId, job } = persistSourceAndEnqueueIngest({
+      subject,
+      lease,
+      filename,
+      content,
+    });
 
     return NextResponse.json(
       { jobId: job.id, sourceId, subjectId: subject.id, subjectSlug: subject.slug },
@@ -140,6 +151,12 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof SubjectWriteLeaseError) {
+      return NextResponse.json(
+        { error: `Ingest conflict: ${message}`, code: error.code },
+        { status: 409 },
+      );
+    }
     return NextResponse.json(
       { error: `Ingest failed: ${message}` },
       { status: 500 }

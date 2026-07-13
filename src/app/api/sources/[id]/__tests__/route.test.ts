@@ -86,7 +86,14 @@ describe('DELETE /api/sources/[id]', () => {
     expect((await res.json()).deleted).toBe(true);
     expect(mockDeleteFiles).toHaveBeenCalledWith('general', 'a.md', 'src1');
     expect(mockDeleteSource).toHaveBeenCalledWith('src1');
-    expect(mockCommit).toHaveBeenCalledWith('[subject:general] Delete orphan source a.md');
+    expect(mockCommit).toHaveBeenCalledWith(
+      '[subject:general] Delete orphan source a.md',
+      [
+        'raw/general/a.md',
+        '.llm-wiki/sources/general/src1.json',
+        '.llm-wiki/sources/src1.json',
+      ],
+    );
     expect(mockRelease).toHaveBeenCalled();
   });
 

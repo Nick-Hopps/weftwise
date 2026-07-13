@@ -43,6 +43,7 @@ stopWorker()
 - **并发调度**：`runningJobs` Map 跟踪当前在跑任务（id→type）；每 tick 用纯函数 `decideClaim(runningTypes, ingestLimit)` 三态决策（可 claim ingest / 可 claim 非 ingest / 都不行）——非 ingest 类型独占（跑着任何非 ingest 任务时不再 claim）、ingest 之间允许并发但受 `app_settings.ingestConcurrency`（默认 2，范围 1-4，每 tick 实时读）上限约束；vault 写入安全靠 `vault-mutex`（进程内队列 + 跨进程文件锁）兜底，而非串行调度。
 - **心跳**：每 30s 调 `queue.updateHeartbeat` 续租。
 - **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / 524 / terminated / other side closed / failed to process successful response / fetch failed / aborted / rate limit，关键字同时搜 `error.message` 和 `error.cause`）；AI SDK 的 `AI_RetryError` 按 `.reason` 精确判定（`maxRetriesExceeded`→retry，`errorNotRetryable`→fail，不猜关键字）；调 `queue.requeue(jobId)` 保持 job ID，前端 SSE 不会丢踪。
+- **Research 对账**：job 真正完成或最终失败后调用 `reconcileResearchProvenanceForJob(jobId)`；自动 retry 中间态不对账。worker 启动和维护 tick 再扫描未完成 run，补偿 cancel route、进程崩溃和终态 hook 失败；该扫描先于 operation GC，确保 operation IDs 仍可物化。
 
 ### `events.ts`
 
@@ -57,7 +58,7 @@ emit(jobId, type, message, data?): void
 | 字段 | 说明 |
 |------|------|
 | `id` | UUID |
-| `type` | `'ingest' \| 'lint' \| 'save-to-wiki' \| 'curate' \| 'embed-index' \| 're-enrich' \| 'fix' \| 'research'`（来自 `lib/contracts.Job`） |
+| `type` | `'ingest' \| 'lint' \| 'save-to-wiki' \| 'curate' \| 'embed-index' \| 're-enrich' \| 'fix' \| 'research' \| 'research-import'`（来自 `lib/contracts.Job`） |
 | `status` | `'pending' \| 'running' \| 'completed' \| 'failed'` |
 | `params_json` / `result_json` | 任意 JSON 入参与结果 |
 | `lease_expires_at` | 租约过期时间（`claim` 时写） |
@@ -89,6 +90,7 @@ emit(jobId, type, message, data?): void
 - `__tests__/maintenance-tick.test.ts`：`shouldSweep` 节律闸门边界。
 - `job_events` 保留清扫（`pruneJobEvents`）与 jobs 表 CRUD/查询见 `db/repos/__tests__/jobs-repo.test.ts`（queue/worker 是对 jobs-repo 的薄封装）。
 - `__tests__/worker.test.ts::decideJobFailureAction`：`isRetryableError` 分类（含 `AI_RetryError.reason` 精确判定、cause 里才有真实原因的网络错误）。
+- `services/__tests__/research-provenance-reconciler.test.ts`：终态 hook、维护扫描、delivery/verification 聚合与 operation lineage；`jobs/[id]` cancel/retry 路由测试覆盖 coordinator 立即对账及 Research child 禁止独立复活。
 - `lib/__tests__/error-format.test.ts` + `db/repos/__tests__/jobs-repo-fail.test.ts`：`describeErrorMessage` 补全 `AI_RetryError` 因 lastError message 为空而丢失的真实原因（见下方 2026-07-09 变更）。
 
 仍待补充：
@@ -120,6 +122,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Phase 2C 新增 `research-import` coordinator job；worker 终态 hook、启动与维护扫描执行幂等 Research provenance 对账，且早于 operation GC；自动 retry 中间态不提前终结 delivery，携带 provenance 的 child Ingest 禁止通用手动 retry，coordinator cancel 后 route 立即对账 |
 | 2026-07-13 | queue 暴露最新 lint 单行读取与两类原子 get-or-create；repo 候选 SQL 避免扫描 subject 全历史，同源 ingest 走 JSON 表达式索引 |
 | 2026-04-22 | 初始化 |
 | 2026-06-24 | 新增 `job_events` 保留清扫（worker 维护 tick 调 `queue.pruneEvents` → `jobs-repo.pruneJobEvents`，独立于成熟度维护开关，启动清一次积压）|
