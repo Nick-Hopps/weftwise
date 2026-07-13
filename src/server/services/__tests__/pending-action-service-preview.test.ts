@@ -17,11 +17,19 @@ const pagePlanMocks = vi.hoisted(() => ({
   planUpdatePageInSubject: vi.fn(),
   planPatchPageInSubject: vi.fn(),
   planDeletePageInSubject: vi.fn(),
+  planMetadataPatchInSubject: vi.fn(),
+  planLinkEnsureInSubject: vi.fn(),
 }));
 vi.mock('../page-write', () => pagePlanMocks);
 
 const reenrichMocks = vi.hoisted(() => ({ planReenrich: vi.fn() }));
 vi.mock('../reenrich-enqueue', () => reenrichMocks);
+const operationPlanMocks = vi.hoisted(() => ({
+  applyPlannedPageOperation: vi.fn(),
+}));
+vi.mock('../../wiki/page-operation-plan', () => operationPlanMocks);
+const embeddingMocks = vi.hoisted(() => ({ enqueueEmbedIndex: vi.fn() }));
+vi.mock('../embedding-service', () => embeddingMocks);
 
 import {
   PendingActionError,
@@ -47,6 +55,20 @@ beforeEach(() => {
     operation: 'delete',
     changeset: { id: 'cs-1' },
     resultHint: { deletedSlug: 'page-a', brokenBacklinks: 0 },
+  });
+  pagePlanMocks.planMetadataPatchInSubject.mockResolvedValue({
+    ...pagePreview,
+    operation: 'metadata-patch',
+    changeset: { id: 'cs-metadata' },
+    resultHint: { updatedSlug: 'page-a', referencesUpdated: 0, changedFields: ['summary'] },
+  });
+  pagePlanMocks.planLinkEnsureInSubject.mockResolvedValue({
+    ...pagePreview,
+    operation: 'link-ensure',
+    changeset: { id: 'cs-link' },
+    resultHint: {
+      updatedSlug: 'page-a', mode: 'link', targetSubjectSlug: 'general', targetSlug: 'page-b',
+    },
   });
   repoMocks.createPendingAction.mockImplementation((input: Record<string, unknown>) => ({
     ...input,
@@ -98,6 +120,88 @@ describe('createPendingActionPreview', () => {
 
     expect(reenrichMocks.planReenrich).toHaveBeenCalledWith('s1', 'page-a');
     expect(view).toMatchObject({ kind: 'workflow', diff: null, operation: 'reenrich' });
+  });
+
+  it('metadata/link 预览复用共享 planner，绝不 apply 或触发 embedding', async () => {
+    const metadata = await createPendingActionPreview({
+      conversationId: 'c1', subject, now,
+      input: {
+        operation: 'metadata-patch',
+        payload: { slug: ' page-a ', summary: ' 新摘要 ' },
+      },
+    });
+    const link = await createPendingActionPreview({
+      conversationId: 'c1', subject, now,
+      input: {
+        operation: 'link-ensure',
+        payload: {
+          sourceSlug: ' page-a ', targetSlug: ' page-b ', oldString: 'Page B', mode: 'link',
+        },
+      },
+    });
+
+    expect(pagePlanMocks.planMetadataPatchInSubject).toHaveBeenCalledWith(
+      subject,
+      { slug: 'page-a', summary: '新摘要' },
+      now.toISOString(),
+    );
+    expect(pagePlanMocks.planLinkEnsureInSubject).toHaveBeenCalledWith(
+      subject,
+      {
+        sourceSlug: 'page-a', targetSlug: 'page-b', oldString: 'Page B', mode: 'link',
+      },
+      now.toISOString(),
+    );
+    expect(metadata).toMatchObject({ operation: 'metadata-patch', kind: 'page-change' });
+    expect(link).toMatchObject({ operation: 'link-ensure', kind: 'page-change' });
+    expect(operationPlanMocks.applyPlannedPageOperation).not.toHaveBeenCalled();
+    expect(embeddingMocks.enqueueEmbedIndex).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['metadata-patch', { slug: 'index', summary: 'x' }, 'planMetadataPatchInSubject'],
+    ['link-ensure', {
+      sourceSlug: 'log', targetSlug: 'page-b', oldString: 'Page B', mode: 'link',
+    }, 'planLinkEnsureInSubject'],
+  ] as const)('%s 系统页预览由 page-write 保护层拒绝，且不落库', async (
+    operation,
+    actionPayload,
+    plannerName,
+  ) => {
+    pagePlanMocks[plannerName].mockRejectedValueOnce(new Error('protected system page'));
+
+    await expect(createPendingActionPreview({
+      conversationId: 'c1', subject, now,
+      input: { operation, payload: actionPayload } as never,
+    })).rejects.toMatchObject({ code: 'ACTION_PLAN_INVALID' });
+
+    expect(pagePlanMocks[plannerName]).toHaveBeenCalledOnce();
+    expect(repoMocks.createPendingAction).not.toHaveBeenCalled();
+    expect(operationPlanMocks.applyPlannedPageOperation).not.toHaveBeenCalled();
+    expect(embeddingMocks.enqueueEmbedIndex).not.toHaveBeenCalled();
+  });
+
+  it('metadata path traversal 规划失败时返回 ACTION_PLAN_INVALID 且无副作用', async () => {
+    pagePlanMocks.planMetadataPatchInSubject.mockRejectedValueOnce(
+      new Error('slug must be a non-empty canonical page slug'),
+    );
+
+    await expect(createPendingActionPreview({
+      conversationId: 'c1', subject, now,
+      input: {
+        operation: 'metadata-patch',
+        payload: { slug: '../other/page', summary: '越界' },
+      },
+    })).rejects.toMatchObject({ code: 'ACTION_PLAN_INVALID' });
+
+    expect(pagePlanMocks.planMetadataPatchInSubject).toHaveBeenCalledWith(
+      subject,
+      { slug: '../other/page', summary: '越界' },
+      now.toISOString(),
+    );
+    expect(repoMocks.createPendingAction).not.toHaveBeenCalled();
+    expect(operationPlanMocks.applyPlannedPageOperation).not.toHaveBeenCalled();
+    expect(embeddingMocks.enqueueEmbedIndex).not.toHaveBeenCalled();
   });
 
   it('跨 Subject conversation 与 planner 失败均不落库', async () => {

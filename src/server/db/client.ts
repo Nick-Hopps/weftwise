@@ -400,13 +400,13 @@ function migrateMessages(): void {
 
 function migratePendingActions(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('pending_actions')) return;
-  sqlite.exec(`
-    CREATE TABLE pending_actions (
+  const createTableSql = (table: string) => `
+    CREATE TABLE ${table} (
       id TEXT PRIMARY KEY NOT NULL,
       conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
       subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
-      operation TEXT NOT NULL CHECK (operation IN ('create','update','patch','delete','reenrich')),
+      operation TEXT NOT NULL
+        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure')),
       payload_json TEXT NOT NULL,
       payload_hash TEXT NOT NULL,
       preview_json TEXT NOT NULL,
@@ -420,8 +420,40 @@ function migratePendingActions(): void {
       operation_id TEXT,
       job_id TEXT,
       error_json TEXT
-    );
-  `);
+    )`;
+
+  if (!tableExists('pending_actions')) {
+    sqlite.exec(`${createTableSql('pending_actions')};`);
+    return;
+  }
+
+  const definition = sqlite.prepare(
+    `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pending_actions'`,
+  ).get() as { sql: string | null } | undefined;
+  const currentSql = definition?.sql?.toLowerCase() ?? '';
+  if (currentSql.includes("'metadata-patch'") && currentSql.includes("'link-ensure'")) {
+    return;
+  }
+
+  // CHECK 不能 ALTER；完整重建必须原子化，copy 任一行失败时保留旧表与全部历史。
+  sqlite.transaction(() => {
+    sqlite.exec(`
+      DROP TABLE IF EXISTS pending_actions_new;
+      ${createTableSql('pending_actions_new')};
+      INSERT INTO pending_actions_new (
+        id, conversation_id, subject_id, operation, payload_json, payload_hash,
+        preview_json, status, created_at, updated_at, expires_at, approved_at,
+        applied_at, operation_id, job_id, error_json
+      )
+      SELECT
+        id, conversation_id, subject_id, operation, payload_json, payload_hash,
+        preview_json, status, created_at, updated_at, expires_at, approved_at,
+        applied_at, operation_id, job_id, error_json
+      FROM pending_actions;
+      DROP TABLE pending_actions;
+      ALTER TABLE pending_actions_new RENAME TO pending_actions;
+    `);
+  })();
 }
 
 function migratePageEmbeddings(): void {

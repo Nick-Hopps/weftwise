@@ -512,7 +512,9 @@ export type PreviewChangeInput =
       payload: { slug: string; edits: Array<{ oldString: string; newString: string }> };
     }
   | { operation: 'delete'; payload: { slug: string } }
-  | { operation: 'reenrich'; payload: { slug: string } };
+  | { operation: 'reenrich'; payload: { slug: string } }
+  | { operation: 'metadata-patch'; payload: MetadataPatchInput }
+  | { operation: 'link-ensure'; payload: LinkEnsureInput };
 
 export interface PendingActionPreview {
   kind: 'page-change' | 'workflow';

@@ -281,6 +281,7 @@ export async function planPageMetadataPatch(
   subject: Subject,
   input: MetadataPatchInput & PagePlanMeta,
 ): Promise<PlannedPageOperation<MetadataPatchResult>> {
+  assertCanonicalPageSlug(input.slug, 'slug');
   const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
