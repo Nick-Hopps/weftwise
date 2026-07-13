@@ -139,4 +139,13 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/approval button/i);
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toMatch(/reply.*confirm/i);
   });
+
+  it('窄写请求只指导 preview_change 的 operation，不暴露真实窄写工具', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('metadata-patch');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('link-ensure');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_metadata_patch');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_link_ensure');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/wiki_preview_change[\s\S]*metadata-patch/);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/wiki_preview_change[\s\S]*link-ensure/);
+  });
 });

@@ -86,6 +86,17 @@ beforeEach(() => {
 });
 
 describe('planPageMetadataPatch', () => {
+  it('path traversal slug 在读取 HEAD/页面或构造 changeset 前拒绝', async () => {
+    await expect(planPageMetadataPatch('job-traversal', subject, {
+      slug: '../other/page', summary: '越界', effectiveAt,
+    })).rejects.toThrow(/canonical page slug/i);
+
+    expect(gitMocks.getVaultHead).not.toHaveBeenCalled();
+    expect(storeMocks.readPageInSubject).not.toHaveBeenCalled();
+    expect(txMocks.createChangeset).not.toHaveBeenCalled();
+    expect(txMocks.applyChangeset).not.toHaveBeenCalled();
+  });
+
   it('正文逐字保留，title relink 与 metadata 更新进入同一 changeset', async () => {
     repoMocks.getBacklinks.mockReturnValue([{ subjectId: 's1', slug: 'notes' }]);
     const reads = new Map<string, number>();
