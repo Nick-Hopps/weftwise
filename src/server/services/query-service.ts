@@ -6,8 +6,8 @@
  * save-as-page all operate within a single Subject.
  */
 
-import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
+import * as operationsRepo from '../db/repos/operations-repo';
 import {
   generateStructuredOutput,
   streamTextWithTools,
@@ -37,17 +37,18 @@ import { extractCitationsFromAnswer } from './citation-extract';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 import {
-  createChangeset,
-  validateChangeset,
-  applyChangeset,
-} from '../wiki/wiki-transaction';
-import { buildWikiPath, slugFromTitle } from '../wiki/page-identity';
-import { serializeFrontmatter } from '../wiki/frontmatter';
+  buildWikiPath,
+  isCanonicalPageSlug,
+  parseWikiPath,
+} from '../wiki/page-identity';
+import { readPageInSubject } from '../wiki/wiki-store';
 import { registerHandler } from '../jobs/worker';
 import type { PendingActionView, QueryResult, Job, Subject } from '@/lib/contracts';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 import type { QueryMode } from './query-intent';
+import { createPageInSubject } from './page-write';
+import { enqueueEmbedIndex } from './embedding-enqueue';
 
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
@@ -216,20 +217,58 @@ export async function saveQueryAsPage(
   subject: Subject,
   jobId: string,
 ): Promise<string> {
-  const slug = slugFromTitle(title);
-  const now = new Date().toISOString();
-  const wikiPath = buildWikiPath(subject.slug, slug);
+  const applied = operationsRepo.listAppliedForJob(jobId, subject.id);
+  if (applied.length > 0) {
+    const createPaths: string[] = [];
+    for (const operation of applied) {
+      let entries: unknown;
+      try {
+        entries = JSON.parse(operation.changesetJson);
+      } catch {
+        throw new Error(`Cannot recover save-to-wiki job "${jobId}": applied operation is invalid.`);
+      }
+      if (!Array.isArray(entries)) {
+        throw new Error(`Cannot recover save-to-wiki job "${jobId}": applied operation is invalid.`);
+      }
+      for (const entry of entries) {
+        if (typeof entry !== 'object' || entry === null || !('action' in entry)) continue;
+        if (entry.action === 'create') {
+          if (!('path' in entry) || typeof entry.path !== 'string') {
+            throw new Error(`Cannot recover save-to-wiki job "${jobId}": applied operation is invalid.`);
+          }
+          createPaths.push(entry.path);
+        }
+      }
+    }
 
-  const existing = pagesRepo.getPageBySlug(subject.id, slug);
-  if (existing) {
-    throw new Error(
-      `A page with slug "${slug}" already exists in subject "${subject.slug}" ("${existing.title}"). Choose a different title or update the existing page.`,
-    );
+    if (createPaths.length !== 1) {
+      throw new Error(`Cannot recover save-to-wiki job "${jobId}": expected exactly one created page.`);
+    }
+    const path = createPaths[0]!;
+    const parsed = parseWikiPath(path);
+    if (
+      !parsed
+      || parsed.subjectSlug !== subject.slug
+      || !isCanonicalPageSlug(parsed.slug)
+      || buildWikiPath(parsed.subjectSlug, parsed.slug) !== path
+    ) {
+      throw new Error(`Cannot recover save-to-wiki job "${jobId}": created page path is invalid.`);
+    }
+    if (!readPageInSubject(subject.slug, parsed.slug)) {
+      throw new Error(
+        `Cannot recover save-to-wiki job "${jobId}": created page "${parsed.slug}" no longer exists.`,
+      );
+    }
+
+    // 页面已提交但 job 尚未收口时，重试只补派生索引，绝不能再创建后缀重复页。
+    enqueueEmbedIndex(subject.id);
+    return parsed.slug;
   }
 
   const citationsSection =
     citations.length > 0
       ? [
+          '',
           '',
           '## References',
           '',
@@ -238,31 +277,12 @@ export async function saveQueryAsPage(
       : '';
 
   const body = `${answer}${citationsSection}\n`;
-
-  const content = serializeFrontmatter(
-    {
-      title,
-      created: now,
-      updated: now,
-      tags: ['query-answer'],
-      sources: citations.map((c) => c.pageSlug),
-    },
-    body,
+  const result = await createPageInSubject(
+    subject,
+    { title, body, tags: ['query-answer'] },
+    { jobId },
   );
-
-  const changeset = createChangeset(jobId, subject, [
-    { action: 'create', path: wikiPath, content },
-  ]);
-
-  const validation = validateChangeset(changeset);
-  if (!validation.valid) {
-    throw new Error(
-      `Changeset validation failed: ${validation.errors.join('; ')}`,
-    );
-  }
-
-  await applyChangeset(changeset);
-  return slug;
+  return result.createdSlug;
 }
 
 async function runSaveToWikiJob(
