@@ -1,22 +1,35 @@
 import * as pagesRepo from '../db/repos/pages-repo';
 import { getVaultHead } from '../git/git-service';
-import type { Changeset, ChangesetEntry, Subject, WikiFrontmatter } from '@/lib/contracts';
-import { serializeFrontmatter, stampSystemFrontmatter } from './frontmatter';
+import type {
+  Changeset,
+  ChangesetEntry,
+  MetadataPatchInput,
+  MetadataPatchResult,
+  Subject,
+  WikiDocument,
+  WikiFrontmatter,
+} from '@/lib/contracts';
+import { parseFrontmatter, serializeFrontmatter, stampSystemFrontmatter } from './frontmatter';
 import { buildWikiPath, deriveUniqueSlug, parseWikiPath } from './page-identity';
 import { rewriteBacklinkText } from './relink';
 import { serializeWikiDocument } from './markdown';
-import { readPageInSubject } from './wiki-store';
+import { readPageInSubject, scanWikiPages } from './wiki-store';
 import { applyChangeset, createChangeset, validateChangeset } from './wiki-transaction';
 import { buildUnifiedDiff, type UnifiedDiffEntry } from './unified-diff';
+import {
+  normalizeMetadataPatch,
+  prepareMetadataPatch,
+  type MetadataPageIdentity,
+} from './narrow-write';
 
 export interface PagePlanMeta {
   effectiveAt: string;
 }
 
 export interface PlannedPageOperation<
-  ResultHint extends Record<string, unknown> = Record<string, unknown>,
+  ResultHint extends object = Record<string, unknown>,
 > {
-  operation: 'create' | 'update' | 'patch' | 'delete';
+  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch';
   preHead: string;
   changeset: Changeset;
   summary: string;
@@ -26,25 +39,30 @@ export interface PlannedPageOperation<
   resultHint: ResultHint;
 }
 
-function buildDiffEntries(subject: Subject, entries: ChangesetEntry[]): UnifiedDiffEntry[] {
+type BeforeSnapshotByPath = ReadonlyMap<string, string | null>;
+
+function buildDiffEntries(
+  entries: ChangesetEntry[],
+  beforeByPath: BeforeSnapshotByPath,
+): UnifiedDiffEntry[] {
   return entries.map((entry) => {
-    const identity = parseWikiPath(entry.path);
-    const current = identity
-      ? readPageInSubject(subject.slug, identity.slug)
-      : null;
+    if (!beforeByPath.has(entry.path)) {
+      throw new Error(`Missing before snapshot for planned path: ${entry.path}`);
+    }
     return {
       action: entry.action,
       path: entry.path,
-      before: entry.action === 'create' || !current ? null : serializeWikiDocument(current),
+      before: beforeByPath.get(entry.path) ?? null,
       after: entry.action === 'delete' ? null : entry.content,
     };
   });
 }
 
-async function finishPlan<T extends Record<string, unknown>>(input: {
+async function finishPlan<T extends object>(input: {
   operation: PlannedPageOperation<T>['operation'];
-  subject: Subject;
+  preHead: string;
   changeset: Changeset;
+  beforeByPath: BeforeSnapshotByPath;
   summary: string;
   resultHint: T;
   rejectSelfUnresolvedPath?: string;
@@ -66,7 +84,6 @@ async function finishPlan<T extends Record<string, unknown>>(input: {
     }
   }
 
-  const preHead = await getVaultHead();
   const affectedPages = input.changeset.entries.map((entry) => {
     const identity = parseWikiPath(entry.path);
     if (!identity) throw new Error(`Invalid planned wiki path: ${entry.path}`);
@@ -75,14 +92,69 @@ async function finishPlan<T extends Record<string, unknown>>(input: {
 
   return {
     operation: input.operation,
-    preHead,
+    preHead: input.preHead,
     changeset: input.changeset,
     summary: input.summary,
     affectedPages,
-    diff: buildUnifiedDiff(buildDiffEntries(input.subject, input.changeset.entries)),
+    diff: buildUnifiedDiff(buildDiffEntries(input.changeset.entries, input.beforeByPath)),
     warnings,
     resultHint: input.resultHint,
   };
+}
+
+/** 把改标题引发的 backlink 机械重写追加到同一 changeset；update/metadata 共用。 */
+function appendTitleRelinkEntries(input: {
+  subject: Subject;
+  pageSlug: string;
+  oldTitle: string;
+  newTitle: string;
+  entries: ChangesetEntry[];
+  beforeByPath: Map<string, string | null>;
+}): number {
+  if (input.newTitle === input.oldTitle) return 0;
+  let referencesUpdated = 0;
+  const backlinks = pagesRepo
+    .getBacklinks(input.subject.id, input.pageSlug)
+    .filter((backlink) => (
+      backlink.subjectId === input.subject.id && backlink.slug !== input.pageSlug
+    ));
+  for (const backlink of backlinks) {
+    const backlinkDoc = readPageInSubject(input.subject.slug, backlink.slug);
+    if (!backlinkDoc) continue;
+    const raw = serializeWikiDocument(backlinkDoc);
+    const rewritten = rewriteBacklinkText(
+      raw,
+      input.oldTitle,
+      input.newTitle,
+      input.subject.slug,
+    );
+    if (rewritten !== raw) {
+      const path = buildWikiPath(input.subject.slug, backlink.slug);
+      input.entries.push({
+        action: 'update',
+        path,
+        content: rewritten,
+      });
+      input.beforeByPath.set(path, raw);
+      referencesUpdated += 1;
+    }
+  }
+  return referencesUpdated;
+}
+
+/** 从 vault frontmatter 构造同 Subject 页面身份快照，aliases 不依赖 DB 缓存。 */
+function scanMetadataPageIdentities(subjectSlug: string): MetadataPageIdentity[] {
+  return scanWikiPages(subjectSlug).map((page) => {
+    try {
+      const { data } = parseFrontmatter(page.content);
+      return { slug: page.slug, title: data.title, aliases: data.aliases };
+    } catch (cause) {
+      throw new Error(
+        `Failed to parse metadata identity for page "${page.slug}" at ${page.relativePath}`,
+        { cause },
+      );
+    }
+  });
 }
 
 export async function planPageCreate(
@@ -95,6 +167,7 @@ export async function planPageCreate(
     tags?: string[];
   } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ createdSlug: string }>> {
+  const preHead = await getVaultHead();
   const existing = new Set(pagesRepo.getAllPages(subject.id).map((page) => page.slug));
   const slug = deriveUniqueSlug(input.title, existing);
   const frontmatter: WikiFrontmatter = {
@@ -110,16 +183,18 @@ export async function planPageCreate(
     path: buildWikiPath(subject.slug, slug),
     content: serializeFrontmatter(frontmatter, input.body),
   }];
+  const beforeByPath = new Map<string, string | null>([[entries[0]!.path, null]]);
   return finishPlan({
     operation: 'create',
-    subject,
+    preHead,
     changeset: createChangeset(jobId, subject, entries),
+    beforeByPath,
     summary: `创建页面 ${slug}`,
     resultHint: { createdSlug: slug },
   });
 }
 
-export async function planPageUpdate(
+async function planPageUpdateAtHead(
   jobId: string,
   subject: Subject,
   input: {
@@ -129,8 +204,10 @@ export async function planPageUpdate(
     summary?: string;
     tags?: string[];
   } & PagePlanMeta,
+  preHead: string,
+  existingDoc?: WikiDocument,
 ): Promise<PlannedPageOperation<{ updatedSlug: string; referencesUpdated: number }>> {
-  const doc = readPageInSubject(subject.slug, input.slug);
+  const doc = existingDoc ?? readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
 
   const oldTitle = doc.frontmatter.title;
@@ -147,35 +224,96 @@ export async function planPageUpdate(
   });
   const selfPath = buildWikiPath(subject.slug, input.slug);
   const entries: ChangesetEntry[] = [{ action: 'update', path: selfPath, content }];
+  const beforeByPath = new Map<string, string | null>([
+    [selfPath, serializeWikiDocument(doc)],
+  ]);
 
-  let referencesUpdated = 0;
-  if (newTitle !== oldTitle) {
-    const backlinks = pagesRepo
-      .getBacklinks(subject.id, input.slug)
-      .filter((backlink) => backlink.subjectId === subject.id && backlink.slug !== input.slug);
-    for (const backlink of backlinks) {
-      const backlinkDoc = readPageInSubject(subject.slug, backlink.slug);
-      if (!backlinkDoc) continue;
-      const raw = serializeWikiDocument(backlinkDoc);
-      const rewritten = rewriteBacklinkText(raw, oldTitle, newTitle, subject.slug);
-      if (rewritten !== raw) {
-        entries.push({
-          action: 'update',
-          path: buildWikiPath(subject.slug, backlink.slug),
-          content: rewritten,
-        });
-        referencesUpdated += 1;
-      }
-    }
-  }
+  const referencesUpdated = appendTitleRelinkEntries({
+    subject,
+    pageSlug: input.slug,
+    oldTitle,
+    newTitle,
+    entries,
+    beforeByPath,
+  });
 
   return finishPlan({
     operation: 'update',
-    subject,
+    preHead,
     changeset: createChangeset(jobId, subject, entries),
+    beforeByPath,
     summary: `更新页面 ${input.slug}`,
     resultHint: { updatedSlug: input.slug, referencesUpdated },
     rejectSelfUnresolvedPath: selfPath,
+  });
+}
+
+export async function planPageUpdate(
+  jobId: string,
+  subject: Subject,
+  input: {
+    slug: string;
+    title?: string;
+    body: string;
+    summary?: string;
+    tags?: string[];
+  } & PagePlanMeta,
+): Promise<PlannedPageOperation<{ updatedSlug: string; referencesUpdated: number }>> {
+  const preHead = await getVaultHead();
+  return planPageUpdateAtHead(jobId, subject, input, preHead);
+}
+
+/**
+ * 只规划 metadata 更新：正文逐字复用当前 doc.body，aliases 冲突以 vault frontmatter 为准。
+ * title 变化时与既有 update 共用 backlink relink，并纳入同一 changeset。
+ */
+export async function planPageMetadataPatch(
+  jobId: string,
+  subject: Subject,
+  input: MetadataPatchInput & PagePlanMeta,
+): Promise<PlannedPageOperation<MetadataPatchResult>> {
+  const preHead = await getVaultHead();
+  const doc = readPageInSubject(subject.slug, input.slug);
+  if (!doc) throw new Error(`page "${input.slug}" not found`);
+
+  const normalized = normalizeMetadataPatch(input);
+  const identities = normalized.aliases && normalized.aliases.length > 0
+    ? scanMetadataPageIdentities(subject.slug)
+    : [];
+  const prepared = prepareMetadataPatch(
+    doc.frontmatter,
+    normalized,
+    identities,
+  );
+  const content = stampSystemFrontmatter(
+    serializeFrontmatter(prepared.frontmatter, doc.body),
+    { now: input.effectiveAt, existingCreated: doc.frontmatter.created },
+  );
+  const selfPath = buildWikiPath(subject.slug, input.slug);
+  const entries: ChangesetEntry[] = [{ action: 'update', path: selfPath, content }];
+  const beforeByPath = new Map<string, string | null>([
+    [selfPath, serializeWikiDocument(doc)],
+  ]);
+  const referencesUpdated = appendTitleRelinkEntries({
+    subject,
+    pageSlug: input.slug,
+    oldTitle: doc.frontmatter.title,
+    newTitle: prepared.frontmatter.title,
+    entries,
+    beforeByPath,
+  });
+
+  return finishPlan({
+    operation: 'metadata-patch',
+    preHead,
+    changeset: createChangeset(jobId, subject, entries),
+    beforeByPath,
+    summary: `更新页面 ${input.slug} 的元数据`,
+    resultHint: {
+      updatedSlug: input.slug,
+      referencesUpdated,
+      changedFields: prepared.changedFields,
+    },
   });
 }
 
@@ -217,13 +355,14 @@ export async function planPagePatch(
     edits: Array<{ oldString: string; newString: string }>;
   } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ updatedSlug: string; appliedEdits: number }>> {
+  const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
-  const updatePlan = await planPageUpdate(jobId, subject, {
+  const updatePlan = await planPageUpdateAtHead(jobId, subject, {
     slug: input.slug,
     body: applyPatchEdits(doc.body, input.edits),
     effectiveAt: input.effectiveAt,
-  });
+  }, preHead, doc);
   return {
     ...updatePlan,
     operation: 'patch',
@@ -237,6 +376,9 @@ export async function planPageDelete(
   subject: Subject,
   input: { slug: string } & PagePlanMeta,
 ): Promise<PlannedPageOperation<{ deletedSlug: string; brokenBacklinks: number }>> {
+  const preHead = await getVaultHead();
+  const doc = readPageInSubject(subject.slug, input.slug);
+  if (!doc) throw new Error(`page "${input.slug}" not found`);
   const brokenBacklinks = pagesRepo
     .getBacklinks(subject.id, input.slug)
     .filter((backlink) => backlink.slug !== input.slug).length;
@@ -245,16 +387,20 @@ export async function planPageDelete(
     path: buildWikiPath(subject.slug, input.slug),
     content: null,
   }];
+  const beforeByPath = new Map<string, string | null>([
+    [entries[0]!.path, serializeWikiDocument(doc)],
+  ]);
   return finishPlan({
     operation: 'delete',
-    subject,
+    preHead,
     changeset: createChangeset(jobId, subject, entries),
+    beforeByPath,
     summary: `删除页面 ${input.slug}`,
     resultHint: { deletedSlug: input.slug, brokenBacklinks },
   });
 }
 
-export async function applyPlannedPageOperation<T extends Record<string, unknown>>(
+export async function applyPlannedPageOperation<T extends object>(
   plan: PlannedPageOperation<T>,
 ): Promise<T & { operationId: string }> {
   const applied = await applyChangeset(

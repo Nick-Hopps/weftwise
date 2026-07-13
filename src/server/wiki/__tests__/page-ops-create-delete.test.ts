@@ -20,6 +20,18 @@ const repoMocks = vi.hoisted(() => ({
 }));
 vi.mock('../../db/repos/pages-repo', () => repoMocks);
 
+vi.mock('../wiki-store', () => ({
+  readPageInSubject: vi.fn(() => ({
+    frontmatter: {
+      title: 'Eigen', created: '2020-01-01', updated: '2020-01-02',
+      tags: ['math'], sources: [],
+    },
+    body: 'captured body',
+    links: [],
+  })),
+  scanWikiPages: vi.fn(() => []),
+}));
+
 // 中和 import-time 重依赖（page-ops 顶层为 merge/split 引入，create/delete 不调用）
 vi.mock('../../llm/provider-registry', () => ({ generateStructuredOutput: vi.fn() }));
 vi.mock('../../db/repos/settings-repo', () => ({ getWikiLanguage: vi.fn(() => 'English') }));
