@@ -50,7 +50,7 @@
 - `getJob / listJobs({ status?, type?, subjectId? })`
 - `listRecentJobs(filter, limit)` / `listLatestCompletedLint(subjectId)` —— 分别用于有界状态恢复与单行最新 lint CAS
 - `getOrCreateJobAtomic(...)` —— `BEGIN IMMEDIATE` 内只查同 subject/type 的在途或仍可复用 completed 候选，再由 matcher 精确匹配 context
-- `reingestSourceAtomic(...)` / `findLatestIngestJobForSource(subjectId, sourceId)` —— 通过 JSON 表达式索引精确读取同源 ingest；任意 active 优先，只有无 active 才取最新 terminal，再原子复用、重排或创建
+- `reingestSourceAtomic(...)` / `findLatestIngestJobForSource(subjectId, sourceId)` —— 通过 JSON 表达式索引精确读取同源 ingest；reingest 会读取全部 active 并优先复用 exact-context job，否则任取 active 阻止新建；DELETE 查询只需任一 active；只有无 active 才取最新 terminal，再原子重排或创建
 - `listJobEvents(jobId, afterId?)`
 
 ### `sources-repo.ts`
@@ -212,7 +212,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
-| 2026-07-13 | Health remediation 原子查询去除 subject 全历史扫描：CAS 只读取同 type 的可复用状态候选；同源 ingest 改走受 `json_valid` 保护的 sourceId/sourceId+status 表达式索引，active 优先且仅在无 active 时取最新 terminal；补历史噪声、双入口去重、requeue 与 EQP 回归 |
+| 2026-07-13 | Health remediation 原子查询去除 subject 全历史扫描：CAS 只读取同 type 的可复用状态候选；同源 ingest 改走受 `json_valid` 保护的 sourceId/sourceId+status 表达式索引，reingest 全量读取 active 并优先 exact-context，DELETE 只取任一 active，仅在无 active 时取最新 terminal；补历史噪声、双入口去重、requeue 与 EQP 回归 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 `pending_actions` 表、热路径索引与 repo 条件状态流转；预览 30 分钟 TTL，终态保留 30 天，operation/job 双引用支持 worker 崩溃恢复 |
 | 2026-07-12 | Phase 1C：`operations-repo.listAppliedForJob` 提供 Job/Subject 已应用 Changeset 权威范围；`sources-repo.listPageSourceIntegrityRows` 提供定向 provenance 完整性快照 |
 | 2026-04-22 | 初始化 |

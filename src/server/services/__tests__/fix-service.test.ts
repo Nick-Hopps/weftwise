@@ -330,10 +330,13 @@ describe('runFixJob (tool-loop)', () => {
   });
 
   it('批量 Fix 只有实际触达页为 fixed，未触达 finding 为 skipped', async () => {
-    const touched = identified(finding('contradiction', 'a', 'A 与来源冲突'));
-    const untouched = identified(finding('contradiction', 'b', 'B 与来源冲突'));
+    const touchedRaw = finding('broken-link', 'a', 'A 中的坏链');
+    const untouchedRaw = finding('broken-link', 'b', 'B 中的坏链');
+    const touched = identified(touchedRaw);
+    const untouched = identified(untouchedRaw);
     queueMock.get.mockReturnValueOnce(lintJob());
     latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([touched, untouched]));
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([touchedRaw, untouchedRaw]);
     postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
       ...cleanReport,
       scope: {
