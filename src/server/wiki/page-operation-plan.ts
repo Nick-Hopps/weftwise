@@ -1,8 +1,11 @@
 import * as pagesRepo from '../db/repos/pages-repo';
+import * as subjectsRepo from '../db/repos/subjects-repo';
 import { getVaultHead } from '../git/git-service';
 import type {
   Changeset,
   ChangesetEntry,
+  LinkEnsureInput,
+  LinkEnsureResult,
   MetadataPatchInput,
   MetadataPatchResult,
   Subject,
@@ -10,13 +13,19 @@ import type {
   WikiFrontmatter,
 } from '@/lib/contracts';
 import { parseFrontmatter, serializeFrontmatter, stampSystemFrontmatter } from './frontmatter';
-import { buildWikiPath, deriveUniqueSlug, parseWikiPath } from './page-identity';
+import {
+  assertCanonicalPageSlug,
+  buildWikiPath,
+  deriveUniqueSlug,
+  parseWikiPath,
+} from './page-identity';
 import { rewriteBacklinkText } from './relink';
 import { serializeWikiDocument } from './markdown';
 import { readPageInSubject, scanWikiPages } from './wiki-store';
 import { applyChangeset, createChangeset, validateChangeset } from './wiki-transaction';
 import { buildUnifiedDiff, type UnifiedDiffEntry } from './unified-diff';
 import {
+  buildLinkEnsureEdit,
   normalizeMetadataPatch,
   prepareMetadataPatch,
   type MetadataPageIdentity,
@@ -29,7 +38,7 @@ export interface PagePlanMeta {
 export interface PlannedPageOperation<
   ResultHint extends object = Record<string, unknown>,
 > {
-  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch';
+  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch' | 'link-ensure';
   preHead: string;
   changeset: Changeset;
   summary: string;
@@ -347,6 +356,29 @@ export function applyPatchEdits(
   return current;
 }
 
+async function planPagePatchAtHead(
+  jobId: string,
+  subject: Subject,
+  input: {
+    slug: string;
+    edits: Array<{ oldString: string; newString: string }>;
+  } & PagePlanMeta,
+  preHead: string,
+  doc: WikiDocument,
+): Promise<PlannedPageOperation<{ updatedSlug: string; appliedEdits: number }>> {
+  const updatePlan = await planPageUpdateAtHead(jobId, subject, {
+    slug: input.slug,
+    body: applyPatchEdits(doc.body, input.edits),
+    effectiveAt: input.effectiveAt,
+  }, preHead, doc);
+  return {
+    ...updatePlan,
+    operation: 'patch',
+    summary: `局部更新页面 ${input.slug}`,
+    resultHint: { updatedSlug: input.slug, appliedEdits: input.edits.length },
+  };
+}
+
 export async function planPagePatch(
   jobId: string,
   subject: Subject,
@@ -358,16 +390,53 @@ export async function planPagePatch(
   const preHead = await getVaultHead();
   const doc = readPageInSubject(subject.slug, input.slug);
   if (!doc) throw new Error(`page "${input.slug}" not found`);
-  const updatePlan = await planPageUpdateAtHead(jobId, subject, {
-    slug: input.slug,
-    body: applyPatchEdits(doc.body, input.edits),
+  return planPagePatchAtHead(jobId, subject, input, preHead, doc);
+}
+
+/**
+ * 只规划 wikilink 窄写：HEAD 与 source 快照各取一次，link/retarget 才校验目标存在。
+ * 实际正文变更复用 patch/update 的同一 changeset 与 diff 快照路径。
+ */
+export async function planPageLinkEnsure(
+  jobId: string,
+  subject: Subject,
+  input: LinkEnsureInput & PagePlanMeta,
+): Promise<PlannedPageOperation<LinkEnsureResult>> {
+  assertCanonicalPageSlug(input.sourceSlug, 'sourceSlug');
+  const preHead = await getVaultHead();
+  const doc = readPageInSubject(subject.slug, input.sourceSlug);
+  if (!doc) throw new Error(`page "${input.sourceSlug}" not found`);
+
+  const edit = buildLinkEnsureEdit(doc.body, input, subject.slug);
+  if (input.mode !== 'unlink') {
+    const targetSubject = edit.targetSubjectSlug === subject.slug
+      ? subject
+      : subjectsRepo.getBySlug(edit.targetSubjectSlug);
+    if (!targetSubject) {
+      throw new Error(`target subject "${edit.targetSubjectSlug}" not found`);
+    }
+    if (!pagesRepo.getPageBySlug(targetSubject.id, edit.targetSlug)) {
+      throw new Error(
+        `target page "${edit.targetSubjectSlug}:${edit.targetSlug}" not found`,
+      );
+    }
+  }
+
+  const patchPlan = await planPagePatchAtHead(jobId, subject, {
+    slug: input.sourceSlug,
+    edits: [{ oldString: edit.oldString, newString: edit.newString }],
     effectiveAt: input.effectiveAt,
   }, preHead, doc);
   return {
-    ...updatePlan,
-    operation: 'patch',
-    summary: `局部更新页面 ${input.slug}`,
-    resultHint: { updatedSlug: input.slug, appliedEdits: input.edits.length },
+    ...patchPlan,
+    operation: 'link-ensure',
+    summary: `确保页面 ${input.sourceSlug} 的链接状态`,
+    resultHint: {
+      updatedSlug: input.sourceSlug,
+      mode: input.mode,
+      targetSubjectSlug: edit.targetSubjectSlug,
+      targetSlug: edit.targetSlug,
+    },
   };
 }
 
