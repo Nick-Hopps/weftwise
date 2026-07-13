@@ -6,8 +6,8 @@
 
 **设计文档：** `docs/superpowers/specs/2026-07-13-research-approval-provenance-phase2c-design.md`
 
-**分支：** `feat/research-approval-provenance-phase2c`  
-**worktree：** `.worktrees/research-approval-provenance-phase2c`  
+**分支：** `feat/research-approval-provenance-phase2c`
+**worktree：** `.worktrees/research-approval-provenance-phase2c`
 **基线：** `1f0c170`
 
 ## Task 1：收紧 URL 抓取的 SSRF 出网边界
