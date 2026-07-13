@@ -103,6 +103,29 @@ describe('pending-actions-repo', () => {
     });
   });
 
+  it('锁内 stale 只能用匹配的 operationId 把 executing 退回 pending', async () => {
+    const { repo, now } = await createPending();
+    repo.claimApproval('a1', 's1', now);
+    repo.claimExecution('a1', 's1', 'op-1', null, now);
+    const refreshed = { ...preview, preHead: 'head-2', summary: '锁内刷新后的删除预览' };
+    const input = {
+      id: 'a1',
+      subjectId: 's1',
+      operationId: 'op-other',
+      payloadHash: 'hash-1',
+      previewJson: JSON.stringify(refreshed),
+      expiresAt: '2026-07-11T00:45:00.000Z',
+      updatedAt: '2026-07-11T00:15:00.000Z',
+    };
+
+    expect(repo.refreshExecutingPreview(input)).toBe(false);
+    expect(repo.getScoped('a1', 's1')?.status).toBe('executing');
+    expect(repo.refreshExecutingPreview({ ...input, operationId: 'op-1' })).toBe(true);
+    expect(repo.getScoped('a1', 's1')).toMatchObject({
+      status: 'pending', approvedAt: null, operationId: null, previewJson: JSON.stringify(refreshed),
+    });
+  });
+
   it('拒绝、过期、失败与成功只接受合法来源状态', async () => {
     const rejected = await createPending();
     expect(rejected.repo.rejectPending('a1', 's1', rejected.now)).toBe(true);
