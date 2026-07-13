@@ -6,8 +6,8 @@
  *   2. Tavily 搜索每条 query（Promise.allSettled；单条失败 → 跳过该 query，不失败整个 job）
  *   3. LLM 相关性/质量 triage（generateObject；失败 → 降级按搜索排名取前 3 未评分）
  *
- * 全程零 vault/DB 写入（除 jobs/job_events 自身）——候选清单只活在 job resultJson 里，
- * 确认后由前端调用现有 POST /api/ingest { urls } 落地，本 service 不触碰 wiki-transaction。
+ * 研究本身不写 vault；最终候选与 finding 快照会先原子写入 Research provenance，
+ * 批准后再由 research-import coordinator 调度 Ingest Saga。
  *
  * side-effect import：worker-entry import 本文件即完成 registerHandler('research', ...)。
  */
@@ -24,11 +24,18 @@ import {
   buildResearchTriageUserPrompt,
 } from '../llm/prompts/research-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
+import * as researchProvenanceRepo from '../db/repos/research-provenance-repo';
 import { normalizeRemediationContext } from './remediation-context';
 import {
   MAX_RESEARCH_FINDING_IDS,
-  resolveTopicsFromFindingIds,
+  resolveResearchScopeFromFindingIds,
 } from './research-scope';
+import {
+  parseResearchFindingSnapshot,
+  prepareResearchCandidates,
+  validateStoredResearchCandidates,
+} from './research-provenance';
+import { findingId } from './finding-identity';
 import {
   dedupeQueries,
   dedupeCandidates,
@@ -36,7 +43,12 @@ import {
   fallbackTriage,
   type RawCandidate,
 } from '@/lib/research-plan';
-import type { Job, RemediationContext, ResearchCandidate } from '@/lib/contracts';
+import type {
+  Job,
+  RemediationContext,
+  ResearchCandidate,
+  ResearchCandidateSnapshot,
+} from '@/lib/contracts';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 
 interface ResearchParams {
@@ -170,16 +182,20 @@ export async function runResearchJob(
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
   const params = parseResearchParams(job);
+  const persisted = researchProvenanceRepo.findResearchRunByJobId(job.id, params.subjectId);
+  if (persisted) return resultFromPersistedRun(persisted);
+
   const subject = subjectsRepo.getById(params.subjectId);
   if (!subject) throw new Error(`Subject ${params.subjectId} not found`);
 
-  const topics: string[] = params.topic
-    ? [params.topic]
-    : resolveTopicsFromFindingIds(
+  const scope = params.topic
+    ? { topics: [params.topic], findings: [] }
+    : resolveResearchScopeFromFindingIds(
       params.subjectId,
       params.lintJobId!,
       params.findingIds!,
     );
+  const topics = scope.topics;
 
   if (topics.length === 0) {
     throw new Error('No topics resolved for research job');
@@ -221,32 +237,85 @@ export async function runResearchJob(
   const candidates = dedupeCandidates(rawCandidates);
   emit('research:search', `Found ${candidates.length} unique candidate(s)`, { count: candidates.length });
 
-  if (candidates.length === 0) {
-    return { candidates: [] as ResearchCandidate[], topics, queries };
-  }
-
   // ③ triage — 失败降级为按排名前 3 未评分
-  emit('research:triage', `Triaging ${candidates.length} candidate(s)...`);
-  let results: ResearchCandidate[];
-  try {
-    const triage = await generateStructuredOutput(
-      'research:triage',
-      ResearchTriageSchema,
-      RESEARCH_TRIAGE_SYSTEM_PROMPT,
-      buildResearchTriageUserPrompt(topics, candidates, promptCtx),
-    );
-    results = applyTriage(candidates, triage.results);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    emit('research:triage', `Triage failed, falling back to top-3 unscored: ${msg}`);
-    results = fallbackTriage(candidates);
+  let results: ResearchCandidate[] = [];
+  if (candidates.length > 0) {
+    emit('research:triage', `Triaging ${candidates.length} candidate(s)...`);
+    try {
+      const triage = await generateStructuredOutput(
+        'research:triage',
+        ResearchTriageSchema,
+        RESEARCH_TRIAGE_SYSTEM_PROMPT,
+        buildResearchTriageUserPrompt(topics, candidates, promptCtx),
+      );
+      results = applyTriage(candidates, triage.results);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      emit('research:triage', `Triage failed, falling back to top-3 unscored: ${msg}`);
+      results = fallbackTriage(candidates);
+    }
   }
 
+  const stored = researchProvenanceRepo.persistResearchRun({
+    subjectId: params.subjectId,
+    researchJobId: job.id,
+    origin: params.topic ? 'topic' : 'findings',
+    lintJobId: params.lintJobId ?? null,
+    topic: params.topic ?? null,
+    topics,
+    queries,
+    findings: scope.findings,
+    candidates: prepareResearchCandidates(results),
+  });
   emit('research:complete', `Research complete: ${results.length} candidate(s) proposed`, {
+    runId: stored.run.id,
     count: results.length,
   });
 
-  return { candidates: results, topics, queries };
+  return resultFromPersistedRun(stored);
+}
+
+function resultFromPersistedRun(
+  stored: researchProvenanceRepo.StoredResearchRun,
+): {
+  runId: string;
+  candidates: ResearchCandidateSnapshot[];
+  topics: string[];
+  queries: string[];
+} {
+  const topics = parseStringArray(stored.run.topicsJson, 'topics');
+  const queries = parseStringArray(stored.run.queriesJson, 'queries');
+  const candidates = validateStoredResearchCandidates(
+    stored.run.id,
+    stored.run.candidateSetHash,
+    stored.candidates,
+  );
+  for (const finding of stored.findings) {
+    let snapshot: unknown;
+    try {
+      snapshot = JSON.parse(finding.snapshotJson);
+    } catch {
+      throw new Error(`Persisted Research finding snapshot is invalid: ${finding.findingId}`);
+    }
+    const parsed = parseResearchFindingSnapshot(snapshot);
+    if (findingId({ ...parsed, subjectId: stored.run.subjectId }) !== finding.findingId) {
+      throw new Error(`Persisted Research finding ID is invalid: ${finding.findingId}`);
+    }
+  }
+  return { runId: stored.run.id, candidates, topics, queries };
+}
+
+function parseStringArray(json: string, label: string): string[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch {
+    throw new Error(`Persisted Research ${label} snapshot is invalid`);
+  }
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === 'string')) {
+    throw new Error(`Persisted Research ${label} snapshot is invalid`);
+  }
+  return value;
 }
 
 registerHandler('research', runResearchJob);

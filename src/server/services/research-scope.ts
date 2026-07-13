@@ -1,6 +1,10 @@
 import type { LintFinding } from '@/lib/contracts';
 import * as queue from '../jobs/queue';
 import { selectLatestFindings } from './lint-latest';
+import {
+  researchFindingSnapshot,
+  type ResearchFindingSnapshot,
+} from './research-provenance';
 
 export const MAX_RESEARCH_FINDING_IDS = 100;
 
@@ -26,12 +30,22 @@ export class ResearchScopeError extends Error {
   }
 }
 
-/** 从指定 subject 的指定 completed lint 快照精确解析可 Research finding 主题。 */
-export function resolveTopicsFromFindingIds(
+export interface ResolvedResearchFinding {
+  findingId: string;
+  snapshot: ResearchFindingSnapshot;
+}
+
+export interface ResolvedResearchScope {
+  topics: string[];
+  findings: ResolvedResearchFinding[];
+}
+
+/** 从指定 subject 的 completed lint 精确解析主题，并物化不依赖原 job 的 finding 快照。 */
+export function resolveResearchScopeFromFindingIds(
   subjectId: string,
   lintJobId: string,
   findingIds: string[],
-): string[] {
+): ResolvedResearchScope {
   if (findingIds.length === 0 || findingIds.length > MAX_RESEARCH_FINDING_IDS) {
     throw new ResearchScopeError(
       'invalid-finding-count',
@@ -73,5 +87,20 @@ export function resolveTopicsFromFindingIds(
     );
   }
 
-  return [...new Set(matches.map((finding) => finding.description))];
+  return {
+    topics: [...new Set(matches.map((finding) => finding.description))],
+    findings: matches.map((finding) => ({
+      findingId: finding.id,
+      snapshot: researchFindingSnapshot(finding),
+    })),
+  };
+}
+
+/** 兼容只消费主题的内部调用；新 Research 落地应使用完整 scope。 */
+export function resolveTopicsFromFindingIds(
+  subjectId: string,
+  lintJobId: string,
+  findingIds: string[],
+): string[] {
+  return resolveResearchScopeFromFindingIds(subjectId, lintJobId, findingIds).topics;
 }

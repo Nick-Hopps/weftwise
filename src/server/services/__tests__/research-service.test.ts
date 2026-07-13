@@ -23,12 +23,25 @@ vi.mock('@/server/search/web-search', () => searchMock);
 const genMock = vi.hoisted(() => ({ generateStructuredOutput: vi.fn() }));
 vi.mock('@/server/llm/provider-registry', () => genMock);
 
+const provenanceRepoMock = vi.hoisted(() => ({
+  findResearchRunByJobId: vi.fn(),
+  persistResearchRun: vi.fn(),
+}));
+vi.mock('@/server/db/repos/research-provenance-repo', () => provenanceRepoMock);
+
 import { findingId } from '../finding-identity';
 import { runResearchJob } from '../research-service';
 import {
   ResearchScopeError,
+  resolveResearchScopeFromFindingIds,
   resolveTopicsFromFindingIds,
 } from '../research-scope';
+import {
+  prepareResearchCandidates,
+  researchCandidateId,
+  researchCandidateSetHash,
+  type PreparedResearchCandidate,
+} from '../research-provenance';
 
 const RAW_FINDINGS = [
   {
@@ -139,6 +152,61 @@ function remediationContext(
   };
 }
 
+function storedRun(input: {
+  subjectId: string;
+  researchJobId: string;
+  origin: 'findings' | 'topic';
+  lintJobId: string | null;
+  topic: string | null;
+  topics: string[];
+  queries: string[];
+  findings: Array<{ findingId: string; snapshot: unknown }>;
+  candidates: PreparedResearchCandidate[];
+}) {
+  const runId = `run-${input.researchJobId}`;
+  const now = '2026-07-14T00:00:00.000Z';
+  return {
+    run: {
+      id: runId,
+      subjectId: input.subjectId,
+      researchJobId: input.researchJobId,
+      origin: input.origin,
+      lintJobId: input.lintJobId,
+      topic: input.topic,
+      topicsJson: JSON.stringify(input.topics),
+      queriesJson: JSON.stringify(input.queries),
+      candidateSetHash: researchCandidateSetHash(input.candidates),
+      status: input.candidates.length === 0 ? 'empty' : 'awaiting-approval',
+      version: 1,
+      verificationLintJobId: null,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: input.candidates.length === 0 ? now : null,
+      errorJson: null,
+    },
+    findings: input.findings.map((finding) => ({
+      runId,
+      findingId: finding.findingId,
+      snapshotJson: JSON.stringify(finding.snapshot),
+      verificationStatus: 'pending',
+      verifiedAt: null,
+      verificationSnapshotJson: null,
+    })),
+    candidates: input.candidates.map((candidate) => ({
+      id: researchCandidateId(runId, candidate.normalizedUrl),
+      runId,
+      normalizedUrl: candidate.normalizedUrl,
+      snapshotJson: JSON.stringify(candidate.snapshot),
+      rank: candidate.rank,
+      decision: 'pending',
+      approvalId: null,
+      decidedAt: null,
+    })),
+    approval: null,
+    deliveries: [],
+  };
+}
+
 describe('resolveTopicsFromFindingIds', () => {
   beforeEach(() => {
     queueMock.get.mockReset();
@@ -162,6 +230,24 @@ describe('resolveTopicsFromFindingIds', () => {
   it('coverage-gap 与 thin-page 可在同一批次按快照顺序解析', () => {
     expect(resolveTopicsFromFindingIds('s1', 'lint-1', [THIN_PAGE_ID, GAP_ID]))
       .toEqual(['gRPC streaming', 'Thin page without sources']);
+  });
+
+  it('返回已验证 finding ID 与不依赖 lint job 的可解释快照', () => {
+    const scope = resolveResearchScopeFromFindingIds('s1', 'lint-1', [THIN_PAGE_ID]);
+    expect(scope).toEqual({
+      topics: ['Thin page without sources'],
+      findings: [{
+        findingId: THIN_PAGE_ID,
+        snapshot: {
+          type: 'thin-page',
+          severity: 'info',
+          pageSlug: 'thin-without-sources',
+          description: 'Thin page without sources',
+          suggestedFix: null,
+          subjectSlug: 'general',
+        },
+      }],
+    });
   });
 
   it.each([
@@ -217,6 +303,10 @@ describe('runResearchJob', () => {
     queueMock.get.mockReturnValue(lintJob());
     queueMock.list.mockReset();
     queueMock.list.mockReturnValue([]);
+    provenanceRepoMock.findResearchRunByJobId.mockReset();
+    provenanceRepoMock.findResearchRunByJobId.mockReturnValue(null);
+    provenanceRepoMock.persistResearchRun.mockReset();
+    provenanceRepoMock.persistResearchRun.mockImplementation(storedRun);
   });
 
   it('manual topic：三阶段成功 → 返回 triage 过滤后的候选', async () => {
@@ -236,9 +326,13 @@ describe('runResearchJob', () => {
     const emit = vi.fn();
     const result = await runResearchJob(researchJob({ topic: '  Rust async runtimes  ', subjectId: 's1' }), emit);
 
-    expect(result.candidates).toEqual([
-      { url: 'https://a.com', title: 'A', snippet: 'a', score: 3, reason: 'great' },
-    ]);
+    expect(result.runId).toBe('run-research-1');
+    expect(result.candidates).toEqual([expect.objectContaining({
+      id: researchCandidateId('run-research-1', 'https://a.com'),
+      normalizedUrl: 'https://a.com',
+      rank: 0,
+      url: 'https://a.com', title: 'A', snippet: 'a', score: 3, reason: 'great',
+    })]);
     expect(result.topics).toEqual(['Rust async runtimes']);
     expect(emit).toHaveBeenCalledWith('research:complete', expect.any(String), expect.any(Object));
   });
@@ -256,6 +350,15 @@ describe('runResearchJob', () => {
     expect(result.topics).toEqual(['gRPC streaming', 'Reactive backpressure']);
     expect(queueMock.get).toHaveBeenCalledWith('lint-1');
     expect(genMock.generateStructuredOutput).toHaveBeenCalledTimes(1);
+    expect(provenanceRepoMock.persistResearchRun).toHaveBeenCalledWith(expect.objectContaining({
+      origin: 'findings',
+      lintJobId: 'lint-1',
+      topic: null,
+      findings: expect.arrayContaining([
+        expect.objectContaining({ findingId: GAP_ID }),
+        expect.objectContaining({ findingId: SECOND_GAP_ID }),
+      ]),
+    }));
   });
 
   it('thin-page remediation context 可由 worker scope 解析并消费', async () => {
@@ -285,9 +388,9 @@ describe('runResearchJob', () => {
       .mockResolvedValueOnce([{ title: 'OK', url: 'https://ok.com', snippet: 'ok' }]);
 
     const result = await runResearchJob(researchJob({ topic: 'x' }), vi.fn());
-    expect(result.candidates).toEqual([
-      { url: 'https://ok.com', title: 'OK', snippet: 'ok', score: 3, reason: 'ok' },
-    ]);
+    expect(result.candidates).toEqual([expect.objectContaining({
+      url: 'https://ok.com', title: 'OK', snippet: 'ok', score: 3, reason: 'ok',
+    })]);
   });
 
   it('triage 失败 → 降级为按排名前 3 未评分', async () => {
@@ -301,8 +404,8 @@ describe('runResearchJob', () => {
 
     const result = await runResearchJob(researchJob({ topic: 'x' }), vi.fn());
     expect(result.candidates).toEqual([
-      { url: 'https://a.com', title: 'A', snippet: 'a', score: null, reason: null },
-      { url: 'https://b.com', title: 'B', snippet: 'b', score: null, reason: null },
+      expect.objectContaining({ url: 'https://a.com', title: 'A', snippet: 'a', score: null, reason: null }),
+      expect.objectContaining({ url: 'https://b.com', title: 'B', snippet: 'b', score: null, reason: null }),
     ]);
   });
 
@@ -310,7 +413,40 @@ describe('runResearchJob', () => {
     genMock.generateStructuredOutput.mockResolvedValueOnce({ queries: ['q1'] });
     const result = await runResearchJob(researchJob({ topic: 'x' }), vi.fn());
     expect(result.candidates).toEqual([]);
+    expect(result.runId).toBe('run-research-1');
+    expect(provenanceRepoMock.persistResearchRun).toHaveBeenCalledWith(expect.objectContaining({
+      candidates: [],
+    }));
     expect(genMock.generateStructuredOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it('researchJobId 已落地时直接恢复完整结果，不重复调用 LLM/search', async () => {
+    const candidates = prepareResearchCandidates([
+      { url: 'https://example.com/persisted', title: 'Persisted', snippet: 'saved', score: 3, reason: 'stable' },
+    ]);
+    provenanceRepoMock.findResearchRunByJobId.mockReturnValue(storedRun({
+      subjectId: 's1',
+      researchJobId: 'research-1',
+      origin: 'topic',
+      lintJobId: null,
+      topic: 'persisted topic',
+      topics: ['persisted topic'],
+      queries: ['persisted query'],
+      findings: [],
+      candidates,
+    }));
+
+    const result = await runResearchJob(researchJob({ topic: 'persisted topic' }), vi.fn());
+
+    expect(result).toMatchObject({
+      runId: 'run-research-1',
+      topics: ['persisted topic'],
+      queries: ['persisted query'],
+    });
+    expect(genMock.generateStructuredOutput).not.toHaveBeenCalled();
+    expect(searchMock.webSearch).not.toHaveBeenCalled();
+    expect(queueMock.get).not.toHaveBeenCalled();
+    expect(provenanceRepoMock.persistResearchRun).not.toHaveBeenCalled();
   });
 
   it.each([
