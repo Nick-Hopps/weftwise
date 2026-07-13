@@ -27,7 +27,9 @@ import {
 import {
   actionFindingIds,
   createActionGate,
+  createLintRerunQueue,
   isHealthOriginCurrent,
+  persistedBusyActions,
   readResearchCandidates,
   recentOutcomeBannerTone,
   recentOutcomeCounts,
@@ -86,7 +88,7 @@ export function HealthView() {
   const researchJobMetaRef = useRef<ResearchJobMeta | null>(null);
   const researchFetchJobIdRef = useRef<string | null>(null);
   const lintJobMetaRef = useRef<ActionJobMeta | null>(null);
-  const lintRequestOriginRef = useRef<HealthOrigin | null>(null);
+  const lintRerunQueueRef = useRef(createLintRerunQueue());
   const ingestOriginRef = useRef<HealthOrigin | null>(null);
   const deleteOriginsRef = useRef(new Map<string, HealthOrigin>());
   const originKey = `${originSubjectId}\u0000${scope}`;
@@ -106,12 +108,20 @@ export function HealthView() {
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
     lintJobMetaRef.current = null;
-    lintRequestOriginRef.current = null;
+    lintRerunQueueRef.current.reset();
     ingestOriginRef.current = null;
     deleteOriginsRef.current.clear();
   }
 
   const { data, isLoading } = useLintSummary(allSubjects);
+  const snapshotBusyActions = useMemo(
+    () => data ? persistedBusyActions(data) : new Set<ExecutableRemediationAction>(),
+    [data],
+  );
+  const effectiveBusyActions = useMemo(
+    () => new Set([...snapshotBusyActions, ...busyActions]),
+    [snapshotBusyActions, busyActions],
+  );
 
   function captureOrigin(): HealthOrigin {
     return { ...originRef.current };
@@ -126,6 +136,7 @@ export function HealthView() {
     origin: HealthOrigin,
     findingId?: string,
   ): boolean {
+    if (effectiveBusyActions.has(action)) return false;
     if (!actionGateRef.current.tryAcquire(action, origin)) return false;
     setBusyActions((current) => new Set(current).add(action));
     if (findingId) {
@@ -160,13 +171,14 @@ export function HealthView() {
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
     lintJobMetaRef.current = null;
-    lintRequestOriginRef.current = null;
+    lintRerunQueueRef.current.reset();
     ingestOriginRef.current = null;
     deleteOriginsRef.current.clear();
   }
 
   const [jobId, setJobId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [lintError, setLintError] = useState<string | null>(null);
   const [semanticErrored, setSemanticErrored] = useState(false);
   const { status: streamStatus, events, latestMessage } = useJobStream(jobId);
 
@@ -181,13 +193,16 @@ export function HealthView() {
         queryKey: ['lint-latest', meta.origin.scope === 'all' ? 'all' : meta.origin.subjectId],
       });
       lintJobMetaRef.current = null;
-      lintRequestOriginRef.current = null;
       setJobId(null);
+      const rerun = lintRerunQueueRef.current.finish(meta.origin, captureOrigin());
+      if (rerun) void runLint(rerun);
     } else if (streamStatus === 'failed') {
       if (!isCurrentOrigin(meta.origin)) return;
+      setLintError('Health check failed — see job details for the underlying error.');
       lintJobMetaRef.current = null;
-      lintRequestOriginRef.current = null;
       setJobId(null);
+      const rerun = lintRerunQueueRef.current.finish(meta.origin, captureOrigin());
+      if (rerun) void runLint(rerun);
     }
     // jobId 变化时 useJobStream 尚可能保留上个任务的终态，不能据此提前结算新任务。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,10 +211,12 @@ export function HealthView() {
   const running = starting || (jobId !== null && streamStatus !== 'completed' && streamStatus !== 'failed');
 
   async function runLint(expectedOrigin: HealthOrigin = captureOrigin()) {
-    if (!isCurrentOrigin(expectedOrigin) || lintRequestOriginRef.current) return;
-    lintRequestOriginRef.current = expectedOrigin;
+    if (!isCurrentOrigin(expectedOrigin)) return;
+    const decision = lintRerunQueueRef.current.request(expectedOrigin);
+    if (decision !== 'start') return;
     setStarting(true);
     setSemanticErrored(false);
+    setLintError(null);
     let accepted = false;
     try {
       const res = await apiFetch('/api/lint', {
@@ -211,18 +228,42 @@ export function HealthView() {
             : { subjectId: expectedOrigin.subjectId },
         ),
       });
-      if (res.ok && isCurrentOrigin(expectedOrigin)) {
-        const json = (await res.json()) as { jobId: string };
-        if (!isCurrentOrigin(expectedOrigin) || !json.jobId) return;
-        accepted = true;
-        lintJobMetaRef.current = { jobId: json.jobId, origin: expectedOrigin };
-        setJobId(json.jobId);
+      if (!isCurrentOrigin(expectedOrigin)) return;
+      if (!res.ok) {
+        setLintError(`Health check request failed (${res.status}).`);
+        return;
+      }
+
+      let json: unknown;
+      try {
+        json = await res.json();
+      } catch {
+        setLintError('Health check response is invalid.');
+        return;
+      }
+      if (
+        !isCurrentOrigin(expectedOrigin)
+        || typeof json !== 'object'
+        || json === null
+        || typeof (json as { jobId?: unknown }).jobId !== 'string'
+        || !(json as { jobId: string }).jobId
+      ) {
+        if (isCurrentOrigin(expectedOrigin)) setLintError('Health check response is invalid.');
+        return;
+      }
+      accepted = true;
+      const nextJobId = (json as { jobId: string }).jobId;
+      lintJobMetaRef.current = { jobId: nextJobId, origin: expectedOrigin };
+      setJobId(nextJobId);
+    } catch {
+      if (isCurrentOrigin(expectedOrigin)) {
+        setLintError('Health check request failed. Please try again.');
       }
     } finally {
       if (isCurrentOrigin(expectedOrigin)) setStarting(false);
-      const held = lintRequestOriginRef.current;
-      if (!accepted && held && isHealthOriginCurrent(held, expectedOrigin)) {
-        lintRequestOriginRef.current = null;
+      if (!accepted) {
+        const rerun = lintRerunQueueRef.current.finish(expectedOrigin, captureOrigin());
+        if (rerun) void runLint(rerun);
       }
     }
   }
@@ -230,13 +271,13 @@ export function HealthView() {
   const [curateJobId, setCurateJobId] = useState<string | null>(null);
   const [curatePostcondition, setCuratePostcondition] = useState<PostconditionReport | null>(null);
   const { status: curateStatus, events: curateEvents, latestMessage: curateMessage } = useJobStream(curateJobId);
-  const curating = busyActions.has('curate');
+  const curating = effectiveBusyActions.has('curate');
 
   const [fixJobId, setFixJobId] = useState<string | null>(null);
   const [fixSummary, setFixSummary] = useState<{ fixed: number; skipped: number; failed: number } | null>(null);
   const [fixPostcondition, setFixPostcondition] = useState<PostconditionReport | null>(null);
   const { status: fixStatus, events: fixEvents, latestMessage: fixMessage } = useJobStream(fixJobId);
-  const fixing = busyActions.has('fix');
+  const fixing = effectiveBusyActions.has('fix');
 
   useEffect(() => {
     const meta = actionJobMetaRef.current.curate;
@@ -322,7 +363,7 @@ export function HealthView() {
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
   const { status: researchStatus } = useJobStream(researchJobId);
-  const researching = busyActions.has('research');
+  const researching = effectiveBusyActions.has('research');
 
   function showResearchError(source: ResearchOrigin, message: string): void {
     if (source === 'remediation') setRemediationError(message);
@@ -518,7 +559,10 @@ export function HealthView() {
     deleteOriginsRef.current.set(sourceId, origin);
     setDeletingSourceIds((current) => new Set(current).add(sourceId));
     try {
-      const res = await apiFetch(`/api/sources/${sourceId}`, { method: 'DELETE' });
+      const res = await apiFetch(
+        `/api/sources/${sourceId}?subjectId=${encodeURIComponent(origin.subjectId)}`,
+        { method: 'DELETE' },
+      );
       if (res.ok && isCurrentOrigin(origin)) {
         setHandledSourceIds((prev) => new Set(prev).add(sourceId));
         queryClient.invalidateQueries({ queryKey: ['sources'] });
@@ -548,6 +592,7 @@ export function HealthView() {
   useEffect(() => {
     setJobId(null);
     setStarting(false);
+    setLintError(null);
     setSemanticErrored(false);
     setCurateJobId(null);
     setCuratePostcondition(null);
@@ -715,6 +760,12 @@ export function HealthView() {
         </div>
       )}
 
+      {lintError && (
+        <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
+          {lintError}
+        </div>
+      )}
+
       {remediationError && (
         <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
           {remediationError}
@@ -870,7 +921,7 @@ export function HealthView() {
                         showSubject={allSubjects}
                         acting={actingActions}
                         deleting={deleting}
-                        busyActions={busyActions}
+                        busyActions={effectiveBusyActions}
                         onAction={!allSubjects ? (action) => {
                           if (action.type !== 'review-source') {
                             void runRemediation(action.type, [finding.id], finding.id);

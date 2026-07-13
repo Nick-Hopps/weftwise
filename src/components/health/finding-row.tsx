@@ -73,6 +73,9 @@ export function FindingRow({
   const [deleteArmed, setDeleteArmed] = useState(false);
   const Icon = TYPE_ICON[finding.type];
   const href = findingHref(finding);
+  const planActionBusy = plan?.actions.some(
+    (action) => action.type !== 'review-source' && busyActions?.has(action.type),
+  ) ?? false;
   const statusTone = plan?.status === 'failed'
     ? 'danger'
     : plan?.status === 'fixed'
@@ -84,10 +87,10 @@ export function FindingRow({
           : 'neutral';
 
   useEffect(() => {
-    if (deleting || acting.size > 0) {
+    if (deleting || acting.size > 0 || planActionBusy) {
       setDeleteArmed((current) => nextDeleteArmed(current, 'acting'));
     }
-  }, [acting, deleting]);
+  }, [acting, deleting, planActionBusy]);
 
   return (
     <div className="flex gap-3 px-3 py-2.5 rounded-md hover:bg-subtle transition-colors">
@@ -149,7 +152,14 @@ export function FindingRow({
                 <Link
                   key={item.type}
                   href={item.href}
-                  className={buttonVariants({ intent: 'secondary', size: 'sm' })}
+                  aria-disabled={deleting}
+                  tabIndex={deleting ? -1 : undefined}
+                  onClick={(event) => {
+                    if (deleting) event.preventDefault();
+                  }}
+                  className={`${buttonVariants({ intent: 'secondary', size: 'sm' })}${
+                    deleting ? ' pointer-events-none opacity-50' : ''
+                  }`}
                 >
                   {item.label}
                 </Link>
@@ -159,7 +169,10 @@ export function FindingRow({
                   intent="secondary"
                   size="sm"
                   loading={item.type !== 'review-source' && acting.has(item.type)}
-                  disabled={item.type !== 'review-source' && busyActions?.has(item.type)}
+                  disabled={
+                    deleting
+                    || (item.type !== 'review-source' && busyActions?.has(item.type))
+                  }
                   onClick={() => {
                     setDeleteArmed((current) => nextDeleteArmed(current, 'action'));
                     onAction?.(item);
@@ -177,7 +190,7 @@ export function FindingRow({
               intent={deleteArmed ? 'danger' : 'secondary'}
               size="sm"
               loading={deleting}
-              disabled={deleting || acting.size > 0}
+              disabled={deleting || acting.size > 0 || planActionBusy}
               onClick={() => {
                 if (!deleteArmed) {
                   setDeleteArmed((current) => nextDeleteArmed(current, 'arm'));
