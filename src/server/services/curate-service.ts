@@ -21,8 +21,16 @@ import { generateTextWithTools } from '../llm/provider-registry';
 import { CURATE_AGENTIC_SYSTEM_PROMPT, buildCurateAgenticUserPrompt } from '../llm/prompts/curate-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import { toolActivityLine } from '@/lib/tool-activity';
-import type { Job, Subject } from '@/lib/contracts';
+import type {
+  EnrichedLintFinding,
+  Job,
+  PostconditionReport,
+  RemediationContext,
+  Subject,
+} from '@/lib/contracts';
 import { verifyJobPostconditions } from './postcondition-service';
+import { readRemediationContext } from './remediation-context';
+import { selectLatestFindings } from './lint-latest';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
 export const CURATE_MAX_STEPS = 40;
@@ -36,6 +44,8 @@ interface CurateTotals {
   writes: number;
 }
 
+type CurateFindingOutcome = 'fixed' | 'failed' | 'skipped';
+
 type CurateEmit = (
   type: string,
   message: string,
@@ -44,6 +54,7 @@ type CurateEmit = (
 
 async function completeCurate(
   totals: CurateTotals,
+  worklist: EnrichedLintFinding[],
   baseMessage: string,
   job: Job,
   subject: Subject,
@@ -56,11 +67,16 @@ async function completeCurate(
     semanticFindings: undefined,
     emit,
   });
+  const perFindingOutcomes = buildCuratePerFindingOutcomes(
+    worklist,
+    postcondition,
+  );
   const result = {
     ...totals,
     postconditionStatus: postcondition.status,
     residualCount: postcondition.residualFindings.length,
     semanticStatus: postcondition.semanticStatus,
+    perFindingOutcomes,
     postcondition,
   };
   const verificationText = postcondition.status === 'clean'
@@ -68,6 +84,91 @@ async function completeCurate(
     : `Postcondition residual: ${postcondition.residualFindings.length} issue(s).`;
   emit('curate:complete', `${baseMessage} ${verificationText}`, result);
   return result;
+}
+
+/** 从精确 lint 快照恢复 scoped orphan worklist；legacy Curate 没有 context 时返回空清单。 */
+function resolveCurateWorklist(
+  subjectId: string,
+  context: RemediationContext | null,
+): EnrichedLintFinding[] {
+  if (!context) return [];
+  if (context.action !== 'curate') {
+    throw new Error('Curate remediation action mismatch');
+  }
+
+  const lintJob = queue.get(context.lintJobId);
+  if (
+    !lintJob
+    || lintJob.type !== 'lint'
+    || lintJob.status !== 'completed'
+    || lintJob.subjectId !== subjectId
+  ) {
+    throw new Error('Curate lint snapshot is missing or belongs to another subject');
+  }
+  const snapshot = selectLatestFindings([lintJob]);
+  if (snapshot.jobId !== context.lintJobId) {
+    throw new Error('Curate lint snapshot mismatch');
+  }
+
+  const requestedIds = new Set(context.findingIds);
+  const worklist = snapshot.findings.filter((finding) => requestedIds.has(finding.id));
+  if (worklist.length !== requestedIds.size) {
+    throw new Error('Curate finding scope is stale');
+  }
+  if (worklist.some((finding) => finding.type !== 'orphan')) {
+    throw new Error('Curate remediation contains a non-orphan finding');
+  }
+  return worklist;
+}
+
+/** 按 residual 的 pageSlug / relatedSlugs 将 Curate 批次结果归因到原 orphan。 */
+function buildCuratePerFindingOutcomes(
+  worklist: EnrichedLintFinding[],
+  postcondition: PostconditionReport,
+): Record<string, CurateFindingOutcome> {
+  const outcomes: Record<string, CurateFindingOutcome> = {};
+  if (worklist.length === 0) return outcomes;
+
+  const allFailed = postcondition.verificationError !== null
+    || (
+      postcondition.status === 'residual'
+      && postcondition.residualFindings.length === 0
+    );
+  const failedIds = new Set<string>();
+  let hasUnattributedResidual = false;
+  const touchedSlugs = postcondition.scope.touchedSlugs.length > 0
+    ? new Set(postcondition.scope.touchedSlugs)
+    : new Set([
+      ...postcondition.scope.createdSlugs,
+      ...postcondition.scope.updatedSlugs,
+      ...postcondition.scope.deletedSlugs,
+    ]);
+
+  if (!allFailed) {
+    for (const residual of postcondition.residualFindings) {
+      const relatedSlugs = new Set([
+        ...(residual.pageSlug ? [residual.pageSlug] : []),
+        ...(residual.relatedSlugs ?? []),
+      ]);
+      const matches = worklist.filter((finding) => relatedSlugs.has(finding.pageSlug));
+      if (matches.length === 0) {
+        hasUnattributedResidual = true;
+        break;
+      }
+      for (const finding of matches) failedIds.add(finding.id);
+    }
+  }
+
+  for (const finding of worklist) {
+    if (allFailed || hasUnattributedResidual || failedIds.has(finding.id)) {
+      outcomes[finding.id] = 'failed';
+    } else if (!touchedSlugs.has(finding.pageSlug)) {
+      outcomes[finding.id] = 'skipped';
+    } else {
+      outcomes[finding.id] = 'fixed';
+    }
+  }
+  return outcomes;
 }
 
 export async function runCurateJob(
@@ -79,6 +180,15 @@ export async function runCurateJob(
   if (!subjectId) throw new Error('curate job missing subjectId');
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) throw new Error(`Subject ${subjectId} not found`);
+  const hasRemediationContext = Object.prototype.hasOwnProperty.call(
+    params,
+    'remediationContext',
+  );
+  const remediationContext = readRemediationContext(job);
+  if (hasRemediationContext && !remediationContext) {
+    throw new Error('Curate remediation context is invalid');
+  }
+  const worklist = resolveCurateWorklist(subject.id, remediationContext);
 
   // 1. 解析 scope + seedSet
   let scopeSlugs: string[];
@@ -101,6 +211,7 @@ export async function runCurateJob(
   if (scopeSlugs.length < 2) {
     return completeCurate(
       { merge: 0, split: 0, delete: 0, create: 0, writes: 0 },
+      worklist,
       'Nothing to curate (need at least 2 pages).',
       job,
       subject,
@@ -160,6 +271,7 @@ export async function runCurateJob(
 
   return completeCurate(
     totals,
+    worklist,
     `Curation done: ${totals.merge} merge(s), ${totals.split} split(s), ${totals.delete} delete(s), ${totals.create} create(s).`,
     job,
     subject,

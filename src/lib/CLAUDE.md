@@ -10,7 +10,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / Changeset / ChangesetEntry / PostconditionScope / PostconditionFinding / PostconditionReport / Conversation / ConversationMessage` |
+| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / EnrichedLintFinding / RemediationAction / RemediationPlan / HealthSnapshot / Changeset / ChangesetEntry / PostconditionScope / PostconditionFinding / PostconditionReport / Conversation / ConversationMessage` |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
@@ -29,7 +29,7 @@ SubjectId      = string  // uuid 或 'subject-general' / 'subject-<uuid>' legacy
 Subject        { id: SubjectId, slug, name, description, createdAt, updatedAt }
 WikiPage       { subjectId, slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
 WikiLink       { subjectId, sourceSlug, targetSubjectId, targetSlug, context }
-Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'curate'|'embed-index'|'re-enrich'|'fix', status, subjectId: SubjectId|null,
+Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'embed-index'|'curate'|'re-enrich'|'fix'|'research', status, subjectId: SubjectId|null,
                  paramsJson, resultJson, createdAt, startedAt, completedAt,
                  leaseExpiresAt, heartbeatAt, attemptCount }
 JobEvent       { id, jobId, type, message, dataJson, createdAt }
@@ -38,6 +38,10 @@ IngestResult   { pagesCreated: string[], pagesUpdated: string[],
                  linksAdded: number, commitSha: string }
 QueryResult    { answer, citations: { pageSlug, excerpt }[], savedAsPage }
 LintFinding    { type, severity, pageSlug, description, suggestedFix }
+EnrichedLintFinding { ...LintFinding, id, subjectId, subjectSlug }
+RemediationAction { type: 'fix'|'curate'|'research'|'re-ingest'|'review-source', label, destructive:false, href? }
+RemediationPlan { findingId, workflow, status, actions, reason, jobId? }
+HealthSnapshot { ...LintLatestResult, remediations: Record<findingId,RemediationPlan>, recentOutcomes: Record<string,RemediationStatus> }
 PostconditionScope { jobId, subjectId, createdSlugs, updatedSlugs, deletedSlugs, touchedSlugs, operationIds }
 PostconditionFinding { type, severity, pageSlug|null, description, relatedSlugs? }
 PostconditionReport { status: 'clean'|'residual', checkedAt, scope, residualFindings, semanticStatus, verificationError }
@@ -53,6 +57,14 @@ ConversationMessage { id, conversationId, role: 'user'|'assistant', content, cit
 > **扩展规则**：
 > - 任何需要跨 server/client 共享的类型，都应定义在这里而非 server 某处；
 > - 不要 import `server/*` 或任何 node-only 包（这里可能被 client bundle 打包）。
+
+#### Health finding 与处置契约（Phase 2A）
+
+- `EnrichedLintFinding.id` 是 64 位小写 SHA-256 hex。服务端以 `lint-finding:v1 + subjectId + type + pageSlug + (sourceId ?? sourceFilename ?? '') + normalizedDescription` 生成；description 依次执行 Unicode NFKC、换行统一、连续空白折叠和 trim。`severity`、`suggestedFix`、`failedJobId`、`subjectSlug` 与数组位置不参与身份。
+- 新 lint 快照写入和历史快照读取都调用同一 identity 算法；读取时不信任 JSON 内已有 ID，并按计算后的 ID 去重、保留首次出现顺序。因此排序、筛选、序列化和旧快照补算不会改变 ID；LLM 改写 description 则会形成新身份。
+- `RemediationStatus` 为 `fixed | queued | awaiting-approval | skipped | failed`；`RemediationPlan` 由服务端提供 workflow、状态、原因、动作和可选关联 `jobId`，客户端不得按 finding type 猜测替代动作。
+- `RemediationAction.destructive` 当前恒为 `false`。`delete-source` 不属于通用 action union；orphan-source 删除继续走专用 API 与二次确认。
+- `HealthSnapshot` 扩展 `LintLatestResult`：`remediations` 以当前 finding ID 索引逐条 plan，`recentOutcomes` 记录已从新快照消失的近期处置结果；`RemediationContext` 用 `{ lintJobId, findingIds, action }` 把任务绑定到来源快照和 subject 范围。
 
 ### `api-fetch.ts`
 
@@ -118,6 +130,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-12 | Health 修复闭环 Phase 2A：`EnrichedLintFinding` 增加稳定 `id`；新增 `RemediationStatus / Workflow / Action / Plan / Context` 与 `HealthSnapshot` 共享契约，彻底移除数组位置身份语义 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：contracts 增加 `Subject` / `SubjectId` 与 `subjectId` 字段；`useApiFetch()` hook 自动注入 subjectId；markdown-client 跨主题 `?s=` href |
 | 2026-06-22 | contracts 新增 `HistoryEntry` / `HistoryAffectedPage` 类型（⑥ 版本历史/diff）|

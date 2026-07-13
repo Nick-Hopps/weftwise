@@ -23,7 +23,11 @@ claim(type?): Job | null              // 原子"pending → running" + 租约
 complete(id, result)
 fail(id, error)
 get(id): Job | null
-list({ status?, type? }): Job[]
+list({ status?, type?, subjectId? }): Job[]
+listRecent(filter, limit): Job[]          // 有界近期状态恢复
+listLatestCompletedLint(subjectId): Job | null // 按 completedAt/id 单行读取
+getOrCreateJobAtomic(input)               // IMMEDIATE 事务内过滤候选 + 精确幂等 matcher
+reingestSourceAtomic(input)               // 同源 ingest 原子复用/requeue/create
 requeue(id)                           // retry 专用：保留 job ID
 reclaimExpired(): number              // 回收租约过期的 running 任务
 ```
@@ -53,7 +57,7 @@ emit(jobId, type, message, data?): void
 | 字段 | 说明 |
 |------|------|
 | `id` | UUID |
-| `type` | `'ingest' \| 'lint' \| 'save-to-wiki' \| 'curate' \| 'embed-index' \| 're-enrich' \| 'fix'`（来自 `lib/contracts.Job`） |
+| `type` | `'ingest' \| 'lint' \| 'save-to-wiki' \| 'curate' \| 'embed-index' \| 're-enrich' \| 'fix' \| 'research'`（来自 `lib/contracts.Job`） |
 | `status` | `'pending' \| 'running' \| 'completed' \| 'failed'` |
 | `params_json` / `result_json` | 任意 JSON 入参与结果 |
 | `lease_expires_at` | 租约过期时间（`claim` 时写） |
@@ -116,6 +120,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-13 | queue 暴露最新 lint 单行读取与两类原子 get-or-create；repo 候选 SQL 避免扫描 subject 全历史，同源 ingest 走 JSON 表达式索引 |
 | 2026-04-22 | 初始化 |
 | 2026-06-24 | 新增 `job_events` 保留清扫（worker 维护 tick 调 `queue.pruneEvents` → `jobs-repo.pruneJobEvents`，独立于成熟度维护开关，启动清一次积压）|
 | 2026-07-06 | Ingest 多任务支持：worker 由单任务串行改并发调度——新增 `runningJobs` Map + 纯函数 `decideClaim(runningTypes, ingestLimit)`（ingest 之间并发、上限 `app_settings.ingestConcurrency` 默认 2、非 ingest 独占）；vault 写入安全改靠 `vault-mutex` 兜底。spec/plan 见 docs/superpowers/{specs,plans}/2026-07-06-ingest-multi-task* |

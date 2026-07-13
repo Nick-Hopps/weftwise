@@ -1,4 +1,4 @@
-import { eq, and, asc } from 'drizzle-orm';
+import { eq, and, asc, desc, isNull } from 'drizzle-orm';
 import { getDb, getRawDb } from '../client';
 import { jobs, jobEvents } from '../schema';
 import type { Job, JobEvent, SubjectId } from '@/lib/contracts';
@@ -10,24 +10,7 @@ export function enqueueJob(
   subjectId: SubjectId | null = null
 ): Job {
   const db = getDb();
-  const id = crypto.randomUUID();
-  const createdAt = new Date().toISOString();
-
-  const job: Job = {
-    id,
-    type,
-    status: 'pending',
-    subjectId,
-    paramsJson: JSON.stringify(params),
-    resultJson: null,
-    createdAt,
-    startedAt: null,
-    completedAt: null,
-    leaseExpiresAt: null,
-    heartbeatAt: null,
-    attemptCount: 0,
-  };
-
+  const job = makePendingJob(type, params, subjectId);
   db
     .insert(jobs)
     .values({
@@ -45,8 +28,113 @@ export function enqueueJob(
       attemptCount: job.attemptCount,
     })
     .run();
-
   return job;
+}
+
+export interface AtomicJobCreateInput {
+  type: Job['type'];
+  params: Record<string, unknown>;
+  subjectId: SubjectId;
+  lintRanAt: string | null;
+  matcher: (jobs: Job[]) => Job | null;
+  beforeCreate?: () => void;
+}
+
+export interface AtomicJobCreateResult {
+  job: Job;
+  deduplicated: boolean;
+}
+
+/**
+ * 在 subject 写锁内重新读取任务并执行同步幂等 matcher；只有确认无重复后才插入。
+ */
+export function getOrCreateJobAtomic(
+  input: AtomicJobCreateInput,
+): AtomicJobCreateResult {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): AtomicJobCreateResult => {
+    const duplicate = input.matcher(listAtomicJobCandidatesRaw(sqlite, input));
+    if (duplicate) return { job: duplicate, deduplicated: true };
+
+    input.beforeCreate?.();
+    const job = makePendingJob(input.type, input.params, input.subjectId);
+    insertJob(sqlite, job);
+    return { job, deduplicated: false };
+  });
+  return tx.immediate();
+}
+
+export type AtomicSourceReingestResult =
+  | { kind: 'in-flight'; job: Job; deduplicated: boolean }
+  | { kind: 'requeued'; job: Job }
+  | { kind: 'created'; job: Job }
+  | { kind: 'conflict' };
+
+export interface AtomicSourceReingestInput {
+  subjectId: SubjectId;
+  sourceId: string;
+  createParams: Record<string, unknown>;
+  paramsPatch: Record<string, unknown>;
+  isDuplicateInFlight?: (job: Job) => boolean;
+}
+
+/**
+ * 在同一 IMMEDIATE 事务内完成同源 ingest 判定、续传/新建与 retrying 事件写入。
+ */
+export function reingestSourceAtomic(
+  input: AtomicSourceReingestInput,
+): AtomicSourceReingestResult {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): AtomicSourceReingestResult => {
+    const activeJobs = findActiveSourceJobsRaw(
+      sqlite,
+      input.subjectId,
+      input.sourceId,
+    );
+    if (activeJobs.length > 0) {
+      const duplicate = input.isDuplicateInFlight
+        ? activeJobs.find(input.isDuplicateInFlight)
+        : undefined;
+      return {
+        kind: 'in-flight',
+        job: duplicate ?? activeJobs[0]!,
+        deduplicated: duplicate !== undefined,
+      };
+    }
+
+    const previous = findLatestSourceJobRaw(
+      sqlite,
+      input.subjectId,
+      input.sourceId,
+    );
+    if (previous?.status === 'failed' && !isCancelledResult(previous.resultJson)) {
+      const params = parseRecord(previous.paramsJson);
+      if (!params) return { kind: 'conflict' };
+
+      const update = sqlite.prepare(`
+        UPDATE jobs
+        SET params_json = ?, status = 'pending', lease_expires_at = NULL,
+            heartbeat_at = NULL, cancel_requested = 0
+        WHERE id = ? AND status = 'failed' AND cancel_requested = 0
+      `).run(JSON.stringify({ ...params, ...input.paramsPatch }), previous.id);
+      if (update.changes !== 1) return { kind: 'conflict' };
+
+      insertRetryingEvent(sqlite, previous.id);
+      const requeued = getJobRaw(sqlite, previous.id);
+      return requeued
+        ? { kind: 'requeued', job: requeued }
+        : { kind: 'conflict' };
+    }
+
+    const created = makePendingJob(
+      'ingest',
+      input.createParams,
+      input.subjectId,
+    );
+    insertJob(sqlite, created);
+    return { kind: 'created', job: created };
+  });
+  return tx.immediate();
 }
 
 const LEASE_DURATION_MS = 2 * 60 * 1000; // 2 minutes
@@ -99,6 +187,68 @@ export function requeueJob(jobId: string): void {
       cancel_requested = 0
     WHERE id = ?
   `).run(jobId);
+}
+
+export function requeueJobWithParams(
+  jobId: string,
+  patch: Record<string, unknown>
+): Job | null {
+  const sqlite = getRawDb();
+  const tx = sqlite.transaction((): Job | null => {
+    const existing = sqlite
+      .prepare(`
+        SELECT params_json, result_json FROM jobs
+        WHERE id = ? AND status = 'failed' AND cancel_requested = 0
+      `)
+      .get(jobId) as
+      | { params_json: string; result_json: string | null }
+      | undefined;
+    if (!existing) return null;
+
+    if (existing.result_json) {
+      try {
+        const result: unknown = JSON.parse(existing.result_json);
+        if (
+          typeof result === 'object' &&
+          result !== null &&
+          !Array.isArray(result) &&
+          (result as Record<string, unknown>).cancelled === true
+        ) {
+          return null;
+        }
+      } catch {
+        // 旧 result 无法解析时不阻断普通失败任务重排。
+      }
+    }
+
+    let params: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(existing.params_json);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return null;
+      }
+      params = parsed as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+
+    const result = sqlite
+      .prepare(`
+        UPDATE jobs
+        SET params_json = ?, status = 'pending', lease_expires_at = NULL,
+            heartbeat_at = NULL, cancel_requested = 0
+        WHERE id = ? AND status = 'failed' AND cancel_requested = 0
+      `)
+      .run(JSON.stringify({ ...params, ...patch }), jobId);
+    if (result.changes !== 1) return null;
+
+    const row = sqlite.prepare(`SELECT * FROM jobs WHERE id = ?`).get(jobId) as
+      | JobRow
+      | undefined;
+    return row ? rowToJobFromRaw(row) : null;
+  });
+
+  return tx.immediate();
 }
 
 export type CancelResult = 'cancelled' | 'already-terminal' | 'not-found';
@@ -196,7 +346,7 @@ export function getJob(id: string): Job | null {
 export interface JobFilter {
   status?: Job['status'];
   type?: Job['type'];
-  subjectId?: SubjectId;
+  subjectId?: SubjectId | null;
 }
 
 export function listJobs(filter?: JobFilter): Job[] {
@@ -206,7 +356,8 @@ export function listJobs(filter?: JobFilter): Job[] {
   const clauses = [];
   if (filter?.status) clauses.push(eq(jobs.status, filter.status));
   if (filter?.type) clauses.push(eq(jobs.type, filter.type));
-  if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
+  if (filter?.subjectId === null) clauses.push(isNull(jobs.subjectId));
+  else if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
 
   if (clauses.length === 1) {
     query = query.where(clauses[0]);
@@ -219,25 +370,66 @@ export function listJobs(filter?: JobFilter): Job[] {
 }
 
 /**
- * 按 params.sourceId 反查本 subject 最新一条 ingest job（orphan-source 体检/reingest 用）。
- * jobs 表无独立 source_id 列，靠解析 paramsJson 精确匹配；量级为单 subject 的 ingest
- * job 数，个人库场景全量遍历可接受。
+ * 按创建时间与 ID 稳定倒序读取有界近期任务，避免状态快照扫描全部历史任务。
+ */
+export function listRecentJobs(filter: JobFilter | undefined, limit: number): Job[] {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new RangeError('listRecentJobs limit 必须是正安全整数');
+  }
+
+  const db = getDb();
+  let query = db.select().from(jobs).$dynamic();
+  const clauses = [];
+  if (filter?.status) clauses.push(eq(jobs.status, filter.status));
+  if (filter?.type) clauses.push(eq(jobs.type, filter.type));
+  if (filter?.subjectId === null) clauses.push(isNull(jobs.subjectId));
+  else if (filter?.subjectId) clauses.push(eq(jobs.subjectId, filter.subjectId));
+
+  if (clauses.length === 1) {
+    query = query.where(clauses[0]);
+  } else if (clauses.length > 1) {
+    query = query.where(and(...clauses));
+  }
+
+  const rows = query
+    .orderBy(desc(jobs.createdAt), desc(jobs.id))
+    .limit(limit)
+    .all();
+  return rows.map(rowToJob);
+}
+
+/**
+ * 按完成时间稳定选择指定 scope 最近完成的一次 lint；创建时间不参与快照新旧判断。
+ */
+export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null {
+  const db = getDb();
+  const subjectClause = subjectId === null
+    ? isNull(jobs.subjectId)
+    : eq(jobs.subjectId, subjectId);
+  const rows = db
+    .select()
+    .from(jobs)
+    .where(and(
+      subjectClause,
+      eq(jobs.type, 'lint'),
+      eq(jobs.status, 'completed'),
+    ))
+    .orderBy(desc(jobs.completedAt), desc(jobs.id))
+    .limit(1)
+    .all();
+  return rows[0] ? rowToJob(rows[0]) : null;
+}
+
+/**
+ * 按 params.sourceId 反查本 subject ingest job（orphan-source 体检/reingest 用）。
+ * 任意 pending/running 优先；仅在没有 active 时返回最新 terminal。
+ * jobs 表无独立 source_id 列，通过受 json_valid 保护的 JSON 表达式索引精确匹配。
  */
 export function findLatestIngestJobForSource(
   subjectId: SubjectId,
   sourceId: string
 ): Job | null {
-  const candidates = listJobs({ type: 'ingest', subjectId }); // createdAt asc
-  let latest: Job | null = null;
-  for (const job of candidates) {
-    try {
-      const params = JSON.parse(job.paramsJson ?? '{}') as { sourceId?: unknown };
-      if (params.sourceId === sourceId) latest = job;
-    } catch {
-      // params 不可解析 → 跳过
-    }
-  }
-  return latest;
+  return findPreferredSourceJobRaw(getRawDb(), subjectId, sourceId);
 }
 
 export function completeJob(
@@ -368,6 +560,167 @@ export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
     .all();
 
   return rows.map(rowToJobEvent);
+}
+
+type RawDb = ReturnType<typeof getRawDb>;
+
+function makePendingJob(
+  type: Job['type'],
+  params: Record<string, unknown>,
+  subjectId: SubjectId | null,
+): Job {
+  return {
+    id: crypto.randomUUID(),
+    type,
+    status: 'pending',
+    subjectId,
+    paramsJson: JSON.stringify(params),
+    resultJson: null,
+    createdAt: new Date().toISOString(),
+    startedAt: null,
+    completedAt: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    attemptCount: 0,
+  };
+}
+
+function insertJob(sqlite: RawDb, job: Job): void {
+  sqlite.prepare(`
+    INSERT INTO jobs (
+      id, type, status, subject_id, params_json, result_json, created_at,
+      started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    job.id,
+    job.type,
+    job.status,
+    job.subjectId,
+    job.paramsJson,
+    job.resultJson,
+    job.createdAt,
+    job.startedAt,
+    job.completedAt,
+    job.leaseExpiresAt,
+    job.heartbeatAt,
+    job.attemptCount,
+  );
+}
+
+function listAtomicJobCandidatesRaw(
+  sqlite: RawDb,
+  input: Pick<AtomicJobCreateInput, 'subjectId' | 'type' | 'lintRanAt'>,
+): Job[] {
+  const rows = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = ?
+      AND (
+        status IN ('pending', 'running')
+        OR (
+          status = 'completed'
+          AND (? IS NULL OR completed_at IS NULL OR completed_at > ?)
+        )
+      )
+  `).all(
+    input.subjectId,
+    input.type,
+    input.lintRanAt,
+    input.lintRanAt,
+  ) as JobRow[];
+  return rows.map(rowToJobFromRaw);
+}
+
+function getJobRaw(sqlite: RawDb, jobId: string): Job | null {
+  const row = sqlite.prepare(`SELECT * FROM jobs WHERE id = ?`).get(jobId) as
+    | JobRow
+    | undefined;
+  return row ? rowToJobFromRaw(row) : null;
+}
+
+function findLatestSourceJobRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job | null {
+  const row = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = 'ingest'
+      AND CASE WHEN json_valid(params_json)
+        THEN json_extract(params_json, '$.sourceId') END = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(subjectId, sourceId) as JobRow | undefined;
+  return row ? rowToJobFromRaw(row) : null;
+}
+
+function findActiveSourceJobRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job | null {
+  const row = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = 'ingest'
+      AND CASE WHEN json_valid(params_json)
+        THEN json_extract(params_json, '$.sourceId') END = ?
+      AND status IN ('pending', 'running')
+    LIMIT 1
+  `).get(subjectId, sourceId) as JobRow | undefined;
+  return row ? rowToJobFromRaw(row) : null;
+}
+
+function findActiveSourceJobsRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job[] {
+  const rows = sqlite.prepare(`
+    SELECT * FROM jobs
+    WHERE subject_id = ? AND type = 'ingest'
+      AND CASE WHEN json_valid(params_json)
+        THEN json_extract(params_json, '$.sourceId') END = ?
+      AND status IN ('pending', 'running')
+  `).all(subjectId, sourceId) as JobRow[];
+  return rows.map(rowToJobFromRaw);
+}
+
+function findPreferredSourceJobRaw(
+  sqlite: RawDb,
+  subjectId: SubjectId,
+  sourceId: string,
+): Job | null {
+  return findActiveSourceJobRaw(sqlite, subjectId, sourceId)
+    ?? findLatestSourceJobRaw(sqlite, subjectId, sourceId);
+}
+
+function insertRetryingEvent(sqlite: RawDb, jobId: string): void {
+  sqlite.prepare(`
+    INSERT INTO job_events (id, job_id, type, message, data_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    crypto.randomUUID(),
+    jobId,
+    'job:retrying',
+    'Manual re-ingest — resuming from checkpoint',
+    JSON.stringify({ manual: true }),
+    new Date().toISOString(),
+  );
+}
+
+function parseRecord(json: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(json);
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function isCancelledResult(resultJson: string | null): boolean {
+  if (!resultJson) return false;
+  return parseRecord(resultJson)?.cancelled === true;
 }
 
 interface JobRow {

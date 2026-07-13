@@ -75,6 +75,7 @@ describe('DELETE /api/sources/[id]', () => {
     const res = await call('src1');
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('in-flight');
+    expect(mockFindJob).toHaveBeenCalledWith('s1', 'src1');
     expect(mockAcquire).not.toHaveBeenCalled();
     expect(mockDeleteSource).not.toHaveBeenCalled();
   });

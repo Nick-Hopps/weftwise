@@ -1,5 +1,5 @@
 /**
- * Research service — 任务类型 'research'：缺口 → 联网研究 → 候选清单（只发现不写入）。
+ * Research service — 任务类型 'research'：覆盖缺口/零来源薄页 → 联网研究 → 候选清单（只发现不写入）。
  *
  * 三阶段：
  *   1. LLM 生成检索 query（generateObject 无 tools；失败 → job 失败）
@@ -12,9 +12,7 @@
  * side-effect import：worker-entry import 本文件即完成 registerHandler('research', ...)。
  */
 import { registerHandler } from '../jobs/worker';
-import * as queue from '../jobs/queue';
 import * as subjectsRepo from '../db/repos/subjects-repo';
-import { selectLatestFindings } from './lint-latest';
 import { webSearch } from '../search/web-search';
 import { generateStructuredOutput } from '../llm/provider-registry';
 import {
@@ -26,6 +24,11 @@ import {
   buildResearchTriageUserPrompt,
 } from '../llm/prompts/research-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
+import { normalizeRemediationContext } from './remediation-context';
+import {
+  MAX_RESEARCH_FINDING_IDS,
+  resolveTopicsFromFindingIds,
+} from './research-scope';
 import {
   dedupeQueries,
   dedupeCandidates,
@@ -33,45 +36,153 @@ import {
   fallbackTriage,
   type RawCandidate,
 } from '@/lib/research-plan';
-import type { Job, ResearchCandidate } from '@/lib/contracts';
+import type { Job, RemediationContext, ResearchCandidate } from '@/lib/contracts';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 
 interface ResearchParams {
-  gapIds?: string[];
+  findingIds?: string[];
+  lintJobId?: string;
   topic?: string;
   subjectId?: string;
+  remediationContext?: RemediationContext;
 }
 
-/**
- * gapIds 引用最近 lint 快照里 coverage-gap findings 的数组下标（EnrichedLintFinding[] 索引，
- * 十进制字符串）。findings 本身无稳定 id，索引即位置，对应快照过期即天然失效（越界被过滤）。
- */
-export function resolveTopicsFromGapIds(subjectId: string, gapIds: string[]): string[] {
-  const latest = selectLatestFindings(queue.list({ type: 'lint', status: 'completed', subjectId }));
-  const indices = new Set(gapIds);
-  const descriptions = latest.findings
-    .map((f, i) => ({ f, i }))
-    .filter(({ f, i }) => f.type === 'coverage-gap' && indices.has(String(i)))
-    .map(({ f }) => f.description);
-  return [...new Set(descriptions)]; // 防重复引用同一 gap
+const FINDING_ID_PATTERN = /^[0-9a-f]{64}$/;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function sameStringArray(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/** 严格解析 Research 参数，禁止畸形 job 参数降级到另一条执行路径。 */
+function parseResearchParams(job: Job): ResearchParams & { subjectId: string } {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(job.paramsJson);
+  } catch {
+    throw new Error('Research params are not valid JSON');
+  }
+  if (!isRecord(raw)) throw new Error('Research params must be an object');
+  if (hasOwn(raw, 'gapIds')) {
+    throw new Error('gapIds is no longer supported; use findingIds with lintJobId');
+  }
+
+  if (!job.subjectId) throw new Error('research job missing subjectId');
+
+  if (hasOwn(raw, 'subjectId')) {
+    if (typeof raw.subjectId !== 'string' || raw.subjectId.trim().length === 0) {
+      throw new Error('Research params subjectId must be a non-empty string');
+    }
+    if (raw.subjectId !== job.subjectId) {
+      throw new Error('Research params subjectId does not match job subjectId');
+    }
+  }
+  const subjectId = job.subjectId;
+
+  const hasFindingIds = hasOwn(raw, 'findingIds');
+  const hasTopic = hasOwn(raw, 'topic');
+  if (hasFindingIds === hasTopic) {
+    throw new Error('Research params must provide exactly one of findingIds or topic');
+  }
+
+  if (hasTopic) {
+    if (typeof raw.topic !== 'string' || raw.topic.trim().length === 0) {
+      throw new Error('Research topic must be a non-empty string');
+    }
+    if (hasOwn(raw, 'remediationContext')) {
+      throw new Error('Research topic params cannot include remediation context');
+    }
+    if (hasOwn(raw, 'lintJobId')) {
+      throw new Error('Research topic params cannot include lintJobId');
+    }
+    return { subjectId, topic: raw.topic.trim() };
+  }
+
+  if (
+    !Array.isArray(raw.findingIds)
+    || raw.findingIds.length === 0
+    || !raw.findingIds.every(
+      (findingId) => typeof findingId === 'string' && FINDING_ID_PATTERN.test(findingId),
+    )
+  ) {
+    throw new Error('Research findingIds must contain valid finding IDs');
+  }
+  if (raw.findingIds.length > MAX_RESEARCH_FINDING_IDS) {
+    throw new Error(`Research findingIds must contain at most ${MAX_RESEARCH_FINDING_IDS} values`);
+  }
+  if (typeof raw.lintJobId !== 'string' || raw.lintJobId.trim().length === 0) {
+    throw new Error('Research findingIds require a non-empty lintJobId');
+  }
+
+  const findingIds = raw.findingIds as string[];
+  const lintJobId = raw.lintJobId;
+  if (!hasOwn(raw, 'remediationContext')) {
+    throw new Error('Research findingIds require remediation context');
+  }
+  const context = raw.remediationContext;
+  if (!isRecord(context)) {
+    throw new Error('Research remediation context must be an object');
+  }
+  if (context.action !== 'research') {
+    throw new Error('Research remediation action mismatch');
+  }
+  if (
+    typeof context.lintJobId !== 'string'
+    || !Array.isArray(context.findingIds)
+    || context.findingIds.length === 0
+    || context.findingIds.length > MAX_RESEARCH_FINDING_IDS
+    || !context.findingIds.every(
+      (findingId) => typeof findingId === 'string' && FINDING_ID_PATTERN.test(findingId),
+    )
+  ) {
+    throw new Error('Research remediation context is invalid');
+  }
+
+  const remediationContext = normalizeRemediationContext({
+    lintJobId: context.lintJobId,
+    findingIds: context.findingIds,
+    action: 'research',
+  });
+  const normalizedParams = normalizeRemediationContext({
+    lintJobId,
+    findingIds,
+    action: 'research',
+  });
+  if (
+    remediationContext.lintJobId !== normalizedParams.lintJobId
+    || !sameStringArray(remediationContext.findingIds, normalizedParams.findingIds)
+  ) {
+    throw new Error('Research remediation context does not match finding params');
+  }
+
+  return { subjectId, findingIds, lintJobId, remediationContext };
 }
 
 export async function runResearchJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
-  const params = JSON.parse(job.paramsJson) as ResearchParams;
-  const subjectId = params.subjectId ?? job.subjectId;
-  if (!subjectId) throw new Error('research job missing subjectId');
-  const subject = subjectsRepo.getById(subjectId);
-  if (!subject) throw new Error(`Subject ${subjectId} not found`);
+  const params = parseResearchParams(job);
+  const subject = subjectsRepo.getById(params.subjectId);
+  if (!subject) throw new Error(`Subject ${params.subjectId} not found`);
 
   const topics: string[] = params.topic
     ? [params.topic]
-    : resolveTopicsFromGapIds(subjectId, params.gapIds ?? []);
+    : resolveTopicsFromFindingIds(
+      params.subjectId,
+      params.lintJobId!,
+      params.findingIds!,
+    );
 
   if (topics.length === 0) {
-    throw new Error('No topics resolved for research job (missing/invalid gapIds and no topic)');
+    throw new Error('No topics resolved for research job');
   }
 
   const promptCtx: PromptContext = {

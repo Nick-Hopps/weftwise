@@ -82,6 +82,38 @@ describe('runDeterministicChecksForSubject', () => {
   });
 });
 
+describe('checkStaleSourcesForPage', () => {
+  it('stale-source finding 带精确的 sourceId 和 sourceFilename', async () => {
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const pagesRepo = await import('@/server/db/repos/pages-repo');
+    const sourcesRepo = await import('@/server/db/repos/sources-repo');
+    const subject = subjectsRepo.create({ slug: 's-stale', name: 'S' });
+    const wikiPage = page(subject.id, 'stale-page');
+    const source = {
+      id: 'src-stale',
+      subjectId: subject.id,
+      filename: 'stale-source.md',
+      contentHash: 'original-hash',
+      parsedAt: NOW,
+      metadataJson: '{}',
+    };
+    pagesRepo.upsertPage(wikiPage);
+    sourcesRepo.upsertSource(source);
+    sourcesRepo.linkPageSource(subject.id, wikiPage.slug, source.id);
+
+    const { checkStaleSourcesForPage } = await import(
+      '@/server/services/lint-deterministic'
+    );
+    const finding = checkStaleSourcesForPage(subject, wikiPage)[0];
+
+    expect(finding).toMatchObject({
+      type: 'stale-source',
+      sourceId: source.id,
+      sourceFilename: source.filename,
+    });
+  });
+});
+
 describe('checkOrphanSources', () => {
   async function setupOrphans() {
     const subjectsRepo = await import('@/server/db/repos/subjects-repo');
