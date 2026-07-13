@@ -34,7 +34,7 @@ import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
 import { compileToolSet } from '@/server/agents/tools/compile';
 import { createToolExecutionPolicy, resolveToolProfile } from '@/server/agents/tools/profiles';
 import { generateTextWithTools } from '../llm/provider-registry';
-import { FIX_AGENTIC_SYSTEM_PROMPT, buildFixAgenticUserPrompt } from '../llm/prompts/fix-prompt';
+import { buildFixAgenticSystemPrompt, buildFixAgenticUserPrompt } from '../llm/prompts/fix-prompt';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import { toolActivityLine } from '@/lib/tool-activity';
 import type {
@@ -248,6 +248,11 @@ function scopeFixWrites(
       assertAllowed(input.slug);
       return context.patchPage!(input);
     }),
+    linkEnsure: context.linkEnsure && (async (input) => {
+      // target 只用于存在性验证；唯一写对象是 source page。
+      assertAllowed(input.sourceSlug);
+      return context.linkEnsure!(input);
+    }),
   };
 }
 
@@ -344,7 +349,7 @@ export async function runFixJob(
     });
 
     await generateTextWithTools('fix', {
-      system: FIX_AGENTIC_SYSTEM_PROMPT,
+      system: buildFixAgenticSystemPrompt(profile.id === 'fix:contradiction'),
       messages: [{ role: 'user', content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx) }],
       tools,
       maxSteps: FIX_MAX_STEPS,

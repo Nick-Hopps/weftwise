@@ -3,14 +3,30 @@ import { describe, expect, it } from 'vitest';
 import { CURATE_AGENTIC_SYSTEM_PROMPT, buildCurateAgenticUserPrompt } from '../curate-prompt';
 
 describe('CURATE_AGENTIC_SYSTEM_PROMPT', () => {
-  it('列出四个写工具且强调保守 + 无人确认', () => {
-    for (const t of ['wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read']) {
+  it('列出结构写与两个窄写工具，且强调保守 + 无人确认', () => {
+    for (const t of [
+      'wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read',
+      'wiki_metadata_patch', 'wiki_link_ensure',
+    ]) {
       expect(CURATE_AGENTIC_SYSTEM_PROMPT).toContain(t);
     }
     expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/conservative/i);
     expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/no human|NO human/);
     expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/index|log/);
     expect(CURATE_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_list');
+  });
+
+  it('窄写要求先读、唯一自然锚点、target 只验证且禁止 Related 段', () => {
+    expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/wiki_read[\s\S]*(unique|uniquely)[\s\S]*natural anchor/i);
+    expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/target[\s\S]*(validation|verify|verified)[\s\S]*source page/i);
+    expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/(never|do not)[\s\S]*(append|create|add)[\s\S]*Related/i);
+  });
+
+  it('metadata patch 仅允许四个 metadata 字段且不得改正文', () => {
+    for (const field of ['title', 'summary', 'tags', 'aliases']) {
+      expect(CURATE_AGENTIC_SYSTEM_PROMPT).toContain(field);
+    }
+    expect(CURATE_AGENTIC_SYSTEM_PROMPT).toMatch(/metadata[\s\S]*(only|ONLY)[\s\S]*(body|prose)[\s\S]*(unchanged|never)/i);
   });
 });
 

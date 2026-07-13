@@ -5,6 +5,22 @@ const opsMocks = vi.hoisted(() => ({
   executePageSplit: vi.fn(async () => ({ sourceSlug: 'a', pageSlugs: ['a', 'a-2'], primarySlug: 'a', referencesRepointed: 0 })),
   executePageDelete: vi.fn(async () => ({ deletedSlug: 'x', brokenBacklinks: 0 })),
   executePageCreate: vi.fn(async () => ({ createdSlug: 'new' })),
+  executePageMetadataPatch: vi.fn(async (_j: string, _s: unknown, input: { slug: string }) => ({
+    updatedSlug: input.slug,
+    referencesUpdated: 0,
+    changedFields: ['summary'],
+  })),
+  executePageLinkEnsure: vi.fn(async (_j: string, _s: unknown, input: {
+    sourceSlug: string;
+    targetSubjectSlug?: string;
+    targetSlug: string;
+    mode: 'link' | 'unlink' | 'retarget';
+  }) => ({
+    updatedSlug: input.sourceSlug,
+    mode: input.mode,
+    targetSubjectSlug: input.targetSubjectSlug ?? 'general',
+    targetSlug: input.targetSlug,
+  })),
 }));
 const pagesMocks = vi.hoisted(() => ({
   getPageBySlug: vi.fn(() => ({ slug: 'inside', title: 'Inside', summary: '', tags: [] })),
@@ -26,8 +42,8 @@ const subject = { id: 's1', slug: 'general', name: 'G', description: '', created
 
 function ctxWith(seedSet: Set<string> | null, allowedSet = new Set(['a', 'b', 'x', 'inside'])) {
   const emit = vi.fn();
-  const guard = createCurateGuard({ seedSet, allowedSet, caps: { merge: 5, split: 5, delete: 5, create: 5 } });
-  return { ctx: buildCurateToolContext(subject, { guard, jobId: 'j1', emit }), emit };
+  const guard = createCurateGuard({ seedSet, allowedSet, caps: { merge: 5, split: 5, delete: 5, create: 5, update: 5 } });
+  return { ctx: buildCurateToolContext(subject, { guard, jobId: 'j1', emit }), emit, guard };
 }
 
 describe('buildCurateToolContext write capabilities', () => {
@@ -79,6 +95,126 @@ describe('buildCurateToolContext write capabilities', () => {
     expect(opsMocks.executePageMerge).not.toHaveBeenCalled();
     expect(opsMocks.executePageSplit).not.toHaveBeenCalled();
     expect(opsMocks.executePageDelete).not.toHaveBeenCalled();
+  });
+
+  it('metadataPatch：source 在 allowedSet 时直接执行、记录 update 并 emit', async () => {
+    const { ctx, emit, guard } = ctxWith(new Set(['a']), new Set(['a', 'b']));
+
+    await expect(ctx.metadataPatch!({ slug: 'b', summary: '新的摘要' })).resolves.toMatchObject({
+      updatedSlug: 'b',
+      changedFields: ['summary'],
+    });
+    expect(opsMocks.executePageMetadataPatch).toHaveBeenCalledWith(
+      'j1', subject, { slug: 'b', summary: '新的摘要' },
+    );
+    expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
+    expect(emit).toHaveBeenCalledWith(
+      'curate:update',
+      expect.any(String),
+      expect.objectContaining({ slug: 'b' }),
+    );
+  });
+
+  it('metadataPatch：source 在 allowedSet 外时不执行内核', async () => {
+    const { ctx, guard } = ctxWith(null, new Set(['inside']));
+
+    await expect(ctx.metadataPatch!({ slug: 'outside', tags: ['x'] }))
+      .rejects.toThrow(/allowed scope/);
+    expect(opsMocks.executePageMetadataPatch).not.toHaveBeenCalled();
+    expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+  });
+
+  it('linkEnsure：只校验 source，允许 allowedSet 外与跨主题 target', async () => {
+    const { ctx, guard } = ctxWith(new Set(['inside']), new Set(['inside']));
+    const input = {
+      sourceSlug: 'inside',
+      targetSubjectSlug: 'other-subject',
+      targetSlug: 'outside-target',
+      oldString: '现有唯一锚点',
+      mode: 'link' as const,
+    };
+
+    await expect(ctx.linkEnsure!(input)).resolves.toMatchObject({
+      updatedSlug: 'inside',
+      targetSubjectSlug: 'other-subject',
+      targetSlug: 'outside-target',
+    });
+    expect(opsMocks.executePageLinkEnsure).toHaveBeenCalledWith('j1', subject, input);
+    expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
+  });
+
+  it('linkEnsure：source 在 allowedSet 外时不执行内核', async () => {
+    const { ctx, guard } = ctxWith(null, new Set(['inside']));
+
+    await expect(ctx.linkEnsure!({
+      sourceSlug: 'outside',
+      targetSlug: 'inside',
+      oldString: 'inside',
+      mode: 'link',
+    })).rejects.toThrow(/allowed scope/);
+    expect(opsMocks.executePageLinkEnsure).not.toHaveBeenCalled();
+    expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+  });
+
+  it('并发窄写在 update cap=1 下完整串行，只有首个底层写成功', async () => {
+    const emit = vi.fn();
+    const guard = createCurateGuard({
+      seedSet: null,
+      allowedSet: new Set(['a']),
+      caps: { merge: 5, split: 5, delete: 5, create: 5, update: 1 },
+    });
+    const ctx = buildCurateToolContext(subject, { guard, jobId: 'j1', emit });
+    let release: (() => void) | undefined;
+    opsMocks.executePageMetadataPatch.mockImplementationOnce(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return { updatedSlug: 'a', referencesUpdated: 0, changedFields: ['summary'] };
+    });
+
+    const first = ctx.metadataPatch!({ slug: 'a', summary: '新摘要' });
+    const second = ctx.linkEnsure!({
+      sourceSlug: 'a', targetSlug: 'b', oldString: 'B', mode: 'link',
+    });
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    release!();
+    const settled = await Promise.allSettled([first, second]);
+
+    expect(settled[0]).toMatchObject({ status: 'fulfilled' });
+    expect(settled[1]).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: expect.stringMatching(/limit of 1 updates/) }),
+    });
+    expect(opsMocks.executePageMetadataPatch).toHaveBeenCalledOnce();
+    expect(opsMocks.executePageLinkEnsure).not.toHaveBeenCalled();
+    expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
+  });
+
+  it('首个写失败会释放串行队列，后续写可执行且仅后者计数', async () => {
+    const order: string[] = [];
+    opsMocks.executePageMetadataPatch.mockImplementationOnce(async () => {
+      order.push('metadata:start');
+      await Promise.resolve();
+      order.push('metadata:fail');
+      throw new Error('metadata failed');
+    });
+    opsMocks.executePageLinkEnsure.mockImplementationOnce(async (_j, _s, input) => {
+      order.push('link:start');
+      return {
+        updatedSlug: input.sourceSlug,
+        mode: input.mode,
+        targetSubjectSlug: input.targetSubjectSlug ?? 'general',
+        targetSlug: input.targetSlug,
+      };
+    });
+    const { ctx, guard } = ctxWith(null, new Set(['a']));
+
+    const settled = await Promise.allSettled([
+      ctx.metadataPatch!({ slug: 'a', summary: '新摘要' }),
+      ctx.linkEnsure!({ sourceSlug: 'a', targetSlug: 'b', oldString: 'B', mode: 'link' }),
+    ]);
+
+    expect(settled.map((item) => item.status)).toEqual(['rejected', 'fulfilled']);
+    expect(order).toEqual(['metadata:start', 'metadata:fail', 'link:start']);
+    expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
   });
 
   it('注入当前 Subject 的 inspect/source/list 证据能力', () => {

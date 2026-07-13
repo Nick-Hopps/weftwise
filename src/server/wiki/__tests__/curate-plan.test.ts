@@ -24,7 +24,7 @@ describe('expandScopeWithNeighbors', () => {
 });
 
 describe('createCurateGuard', () => {
-  const caps = { merge: 2, split: 2, delete: 2, create: 2 };
+  const caps = { merge: 2, split: 2, delete: 2, create: 2, update: 2 };
   it('manual（seedSet=null）放行，达 cap 后拒', () => {
     const g = createCurateGuard({ seedSet: null, allowedSet: new Set(['a', 'b']), caps });
     expect(g.canMerge('a', 'b').ok).toBe(true);
@@ -62,8 +62,31 @@ describe('createCurateGuard', () => {
   });
   it('totals 累加准确', () => {
     const g = createCurateGuard({ seedSet: null, allowedSet: new Set(['a', 'b']), caps });
-    g.record('merge'); g.record('split'); g.record('delete');
-    expect(g.totals()).toEqual({ merge: 1, split: 1, delete: 1, create: 0, writes: 3 });
+    g.record('merge'); g.record('split'); g.record('delete'); g.record('update');
+    expect(g.totals()).toEqual({ merge: 1, split: 1, delete: 1, create: 0, update: 1, writes: 4 });
+  });
+
+  it('canEditPage 仅要求 source 在 allowedSet，不要求属于 seed', () => {
+    const g = createCurateGuard({
+      seedSet: new Set(['seed']),
+      allowedSet: new Set(['seed', 'neighbor']),
+      caps,
+    });
+    expect(g.canEditPage('neighbor').ok).toBe(true);
+    expect(g.canEditPage('outside').reason).toMatch(/allowed scope/);
+    expect(g.canEditPage('index').reason).toMatch(/protected/);
+  });
+
+  it('update 使用独立 cap，record 后同步 totals 与 writes', () => {
+    const g = createCurateGuard({
+      seedSet: null,
+      allowedSet: new Set(['a']),
+      caps: { ...caps, update: 1 },
+    });
+    expect(g.canEditPage('a').ok).toBe(true);
+    g.record('update');
+    expect(g.canEditPage('a').reason).toMatch(/limit of 1 updates/);
+    expect(g.totals()).toEqual({ merge: 0, split: 0, delete: 0, create: 0, update: 1, writes: 1 });
   });
 
   it('manual 删除也不能越过 allowedSet', () => {

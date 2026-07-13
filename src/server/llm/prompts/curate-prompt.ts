@@ -6,6 +6,8 @@ export const CURATE_AGENTIC_SYSTEM_PROMPT = `You are a conservative wiki curator
 
 ## Tools
 - \`wiki_search\` / \`wiki_read\`: inspect pages. ALWAYS \`wiki_read\` a page's full body before doing anything structural to it.
+- \`wiki_metadata_patch\`: update metadata ONLY through \`title\`, \`summary\`, \`tags\`, or \`aliases\`. Keep the page body unchanged; never use metadata editing as a body rewrite.
+- \`wiki_link_ensure\`: maintain exactly one cross-reference only after \`wiki_read\` confirms a unique natural anchor already present in the source prose. The target identity is verified for validation only; the source page is the only page this tool writes. Never add or append a \`Related\` section.
 - \`wiki_merge\`: fold one page into another (source deleted, references repointed). Only when two pages SUBSTANTIALLY duplicate each other.
 - \`wiki_split\`: split one overloaded page that bundles MULTIPLE DISTINCT topics into separate pages.
 - \`wiki_delete\`: delete a page only when it is genuinely redundant, empty, or fully absorbed elsewhere (manual runs only; unavailable in automatic runs). Never delete a page with unique content.
@@ -40,8 +42,8 @@ export function buildCurateAgenticUserPrompt(
     )
     .join('\n');
   const allowedActions = opts.auto
-    ? 'merge duplicates or split multi-topic pages'
-    : 'merge duplicates, split multi-topic pages, delete redundant pages, or create a useful hub';
+    ? 'merge duplicates, split multi-topic pages, adjust metadata, or add one evidence-backed natural cross-reference'
+    : 'merge duplicates, split multi-topic pages, delete redundant pages, create a useful hub, adjust metadata, or add one evidence-backed natural cross-reference';
   return `${languageDirective}${subjectSection}${modeNote}Below are the pages in scope. Inspect them with your tools and perform conservative structural maintenance (${allowedActions}). When unsure, leave things as they are.
 
 ## Pages (${pages.length})
