@@ -7,6 +7,8 @@ import {
   buildHealthSnapshot,
   MAX_REMEDIATION_JOBS,
 } from '@/server/services/remediation-status';
+import { getResearchRunsByJobIds } from '@/server/services/research-approval-service';
+import type { Job, ResearchRunView } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
@@ -27,11 +29,12 @@ export async function GET(request: NextRequest) {
     const lint = selectLatestFindings(
       latestLint ? [latestLint] : [],
     );
+    const recentJobs = queue.listRecent(undefined, MAX_REMEDIATION_JOBS);
     return NextResponse.json(
       buildHealthSnapshot(
         lint,
-        queue.listRecent(undefined, MAX_REMEDIATION_JOBS),
-        { readOnly: true },
+        recentJobs,
+        { readOnly: true, researchRuns: readResearchRuns(recentJobs) },
       ),
     );
   }
@@ -43,13 +46,30 @@ export async function GET(request: NextRequest) {
   const lint = selectLatestFindings(
     latestLint ? [latestLint] : [],
   );
+  const recentJobs = queue.listRecent(
+    { subjectId: resolution.subject.id },
+    MAX_REMEDIATION_JOBS,
+  );
   return NextResponse.json(
     buildHealthSnapshot(
       lint,
-      queue.listRecent(
-        { subjectId: resolution.subject.id },
-        MAX_REMEDIATION_JOBS,
-      ),
+      recentJobs,
+      { researchRuns: readResearchRuns(recentJobs) },
     ),
+  );
+}
+
+/** route 层按 subject 批量读取，保持 snapshot builder 纯函数并避免逐 finding 查询。 */
+function readResearchRuns(jobs: Job[]): ResearchRunView[] {
+  const idsBySubject = new Map<string, Set<string>>();
+  for (const job of jobs) {
+    if (job.type !== 'research' || !job.subjectId) continue;
+    const ids = idsBySubject.get(job.subjectId) ?? new Set<string>();
+    ids.add(job.id);
+    idsBySubject.set(job.subjectId, ids);
+  }
+
+  return [...idsBySubject.entries()].flatMap(([subjectId, ids]) =>
+    getResearchRunsByJobIds([...ids], subjectId),
   );
 }
