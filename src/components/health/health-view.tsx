@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Activity, RefreshCw, Search, Wand2, Wrench } from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
@@ -16,6 +16,7 @@ import { ResearchCandidatesDialog } from './research-candidates-dialog';
 import { ResearchBacklogSection } from './research-backlog-section';
 import { blockImeEnterSubmit } from '@/lib/keyboard';
 import type {
+  Job,
   LintFinding,
   PostconditionReport,
   ResearchCandidate,
@@ -28,11 +29,13 @@ import {
   actionFindingIds,
   createActionGate,
   createLintRerunQueue,
+  healthTerminalInvalidationKeys,
   isHealthOriginCurrent,
   persistedBusyActions,
   readResearchCandidates,
   recentOutcomeBannerTone,
   recentOutcomeCounts,
+  selectRecoverableHealthJobs,
   type ExecutableRemediationAction,
   type HealthOrigin,
 } from './remediation-ui';
@@ -91,6 +94,7 @@ export function HealthView() {
   const lintRerunQueueRef = useRef(createLintRerunQueue());
   const ingestOriginRef = useRef<HealthOrigin | null>(null);
   const deleteOriginsRef = useRef(new Map<string, HealthOrigin>());
+  const settledJobIdsRef = useRef(new Set<string>());
   const originKey = `${originSubjectId}\u0000${scope}`;
   const originKeyRef = useRef(originKey);
   const originRef = useRef<HealthOrigin>({ generation: 0, subjectId: originSubjectId, scope });
@@ -111,16 +115,54 @@ export function HealthView() {
     lintRerunQueueRef.current.reset();
     ingestOriginRef.current = null;
     deleteOriginsRef.current.clear();
+    settledJobIdsRef.current.clear();
   }
 
   const { data, isLoading } = useLintSummary(allSubjects);
+  const { data: activeJobs = [] } = useQuery({
+    queryKey: ['health-active-jobs', originSubjectId],
+    queryFn: async (): Promise<Job[]> => {
+      const encodedSubjectId = encodeURIComponent(originSubjectId);
+      const [runningResponse, pendingResponse] = await Promise.all([
+        apiFetch(`/api/jobs?status=running&subjectId=${encodedSubjectId}`),
+        apiFetch(`/api/jobs?status=pending&subjectId=${encodedSubjectId}`),
+      ]);
+      if (!runningResponse.ok || !pendingResponse.ok) {
+        throw new Error('Active jobs request failed');
+      }
+      const [running, pending] = await Promise.all([
+        runningResponse.json(),
+        pendingResponse.json(),
+      ]);
+      return [
+        ...(Array.isArray(running) ? running as Job[] : []),
+        ...(Array.isArray(pending) ? pending as Job[] : []),
+      ];
+    },
+    enabled: !allSubjects && !!originSubjectId,
+    refetchInterval: 5_000,
+    staleTime: 2_000,
+  });
+  const recoverableJobs = useMemo(
+    () => !allSubjects
+      ? selectRecoverableHealthJobs(
+          data ?? { findings: [], remediations: {}, ranAt: null },
+          activeJobs,
+        )
+      : {},
+    [allSubjects, data, activeJobs],
+  );
   const snapshotBusyActions = useMemo(
     () => data ? persistedBusyActions(data) : new Set<ExecutableRemediationAction>(),
     [data],
   );
   const effectiveBusyActions = useMemo(
-    () => new Set([...snapshotBusyActions, ...busyActions]),
-    [snapshotBusyActions, busyActions],
+    () => new Set([
+      ...snapshotBusyActions,
+      ...(Object.keys(recoverableJobs) as ExecutableRemediationAction[]),
+      ...busyActions,
+    ]),
+    [snapshotBusyActions, recoverableJobs, busyActions],
   );
 
   function captureOrigin(): HealthOrigin {
@@ -129,6 +171,13 @@ export function HealthView() {
 
   function isCurrentOrigin(origin: HealthOrigin): boolean {
     return isHealthOriginCurrent(originRef.current, origin);
+  }
+
+  function invalidateWorkflowLifecycle(origin: HealthOrigin): void {
+    if (!isCurrentOrigin(origin)) return;
+    for (const queryKey of healthTerminalInvalidationKeys(origin.subjectId)) {
+      void queryClient.invalidateQueries({ queryKey });
+    }
   }
 
   function acquireAction(
@@ -174,6 +223,7 @@ export function HealthView() {
     lintRerunQueueRef.current.reset();
     ingestOriginRef.current = null;
     deleteOriginsRef.current.clear();
+    settledJobIdsRef.current.clear();
   }
 
   const [jobId, setJobId] = useState<string | null>(null);
@@ -288,11 +338,15 @@ export function HealthView() {
         .find((event) => event.type === 'curate:verify:complete');
       setCuratePostcondition(extractPostconditionReport(verification));
       queryClient.invalidateQueries({ queryKey: ['pages'] });
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.curate;
       setCurateJobId(null);
       releaseAction('curate', meta.origin);
       void runLint(meta.origin);
     } else if (curateStatus === 'failed') {
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.curate;
       setCurateJobId(null);
       releaseAction('curate', meta.origin);
@@ -320,12 +374,16 @@ export function HealthView() {
         failed: d?.semanticStatus === 'failed' ? 1 : 0,
       });
       queryClient.invalidateQueries({ queryKey: ['pages'] });
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.fix;
       setFixJobId(null);
       releaseAction('fix', meta.origin);
       // 闭环：修复后自动重跑体检刷新 findings
       void runLint(meta.origin);
     } else if (fixStatus === 'failed') {
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.fix;
       setFixJobId(null);
       releaseAction('fix', meta.origin);
@@ -342,11 +400,15 @@ export function HealthView() {
     if (!reingestJobId || !meta || meta.jobId !== reingestJobId || !isCurrentOrigin(meta.origin)) return;
     if (reingestStatus === 'completed') {
       queryClient.invalidateQueries({ queryKey: ['pages'] });
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current['re-ingest'];
       setReingestJobId(null);
       releaseAction('re-ingest', meta.origin);
       void runLint(meta.origin);
     } else if (reingestStatus === 'failed') {
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current['re-ingest'];
       setReingestJobId(null);
       releaseAction('re-ingest', meta.origin);
@@ -369,6 +431,51 @@ export function HealthView() {
     if (source === 'remediation') setRemediationError(message);
     else setResearchError(message);
   }
+
+  useEffect(() => {
+    if (allSubjects || !originSubjectId) return;
+    const origin = captureOrigin();
+    const recoverableIds = new Set(
+      Object.values(recoverableJobs).map((candidate) => candidate?.jobId).filter(Boolean),
+    );
+    for (const settledId of settledJobIdsRef.current) {
+      if (!recoverableIds.has(settledId)) settledJobIdsRef.current.delete(settledId);
+    }
+
+    for (const [workflow, candidate] of Object.entries(recoverableJobs) as Array<
+      [ExecutableRemediationAction, NonNullable<(typeof recoverableJobs)[ExecutableRemediationAction]>]
+    >) {
+      if (!candidate || settledJobIdsRef.current.has(candidate.jobId)) continue;
+      const existing = actionJobMetaRef.current[workflow];
+      if (existing?.jobId === candidate.jobId) continue;
+
+      if (!actionGateRef.current.isBusy(workflow)) {
+        actionGateRef.current.tryAcquire(workflow, origin);
+      }
+      setBusyActions((current) => new Set(current).add(workflow));
+      const meta = { jobId: candidate.jobId, origin };
+      actionJobMetaRef.current[workflow] = meta;
+
+      switch (workflow) {
+        case 'fix':
+          setFixJobId(candidate.jobId);
+          break;
+        case 'curate':
+          setCurateJobId(candidate.jobId);
+          break;
+        case 'research':
+          researchFetchJobIdRef.current = null;
+          researchJobMetaRef.current = { ...meta, source: candidate.source };
+          setResearchJobId(candidate.jobId);
+          break;
+        case 're-ingest':
+          setReingestJobId(candidate.jobId);
+          break;
+      }
+    }
+    // 恢复动作只由服务端 job/snapshot 列表变化驱动，不能依赖本地 job state 形成循环。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recoverableJobs, allSubjects, originSubjectId, scope]);
 
   useEffect(() => {
     const meta = researchJobMetaRef.current;
@@ -396,6 +503,8 @@ export function HealthView() {
           }
         } finally {
           if (researchJobMetaRef.current?.jobId === researchJobId) {
+            settledJobIdsRef.current.add(meta.jobId);
+            invalidateWorkflowLifecycle(meta.origin);
             researchJobMetaRef.current = null;
             delete actionJobMetaRef.current.research;
             setResearchJobId(null);
@@ -408,6 +517,8 @@ export function HealthView() {
       })();
     } else if (researchStatus === 'failed') {
       showResearchError(meta.source, 'Research failed — see job details for the underlying error.');
+      settledJobIdsRef.current.add(meta.jobId);
+      invalidateWorkflowLifecycle(meta.origin);
       researchJobMetaRef.current = null;
       delete actionJobMetaRef.current.research;
       setResearchJobId(null);

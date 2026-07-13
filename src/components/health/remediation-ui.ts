@@ -1,5 +1,6 @@
 import type {
   HealthSnapshot,
+  Job,
   RemediationAction,
   RemediationActionType,
   ResearchCandidate,
@@ -11,6 +12,13 @@ export interface HealthOrigin {
   generation: number;
   subjectId: string;
   scope: HealthScope;
+}
+
+export interface RecoverableHealthJob {
+  jobId: string;
+  workflow: ExecutableRemediationAction;
+  source: 'manual' | 'remediation';
+  createdAt: string;
 }
 
 export function isHealthOriginCurrent(current: HealthOrigin, candidate: HealthOrigin): boolean {
@@ -55,6 +63,115 @@ export function persistedBusyActions(
     }
   }
   return busy;
+}
+
+export function selectRecoverableHealthJobs(
+  snapshot: Pick<HealthSnapshot, 'findings' | 'remediations' | 'ranAt'>,
+  activeJobs: Job[],
+): Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>> {
+  const selected: Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>> = {};
+  const activeWorkflows = new Set<ExecutableRemediationAction>();
+
+  for (const job of activeJobs) {
+    if (job.status !== 'running' && job.status !== 'pending') continue;
+    const candidate = recoverableFromActiveJob(job);
+    if (!candidate) continue;
+    activeWorkflows.add(candidate.workflow);
+    const current = selected[candidate.workflow];
+    if (
+      !current
+      || candidate.createdAt > current.createdAt
+      || (candidate.createdAt === current.createdAt && candidate.jobId > current.jobId)
+    ) {
+      selected[candidate.workflow] = candidate;
+    }
+  }
+
+  for (const finding of snapshot.findings) {
+    const plan = snapshot.remediations[finding.id];
+    if (plan?.status !== 'queued' || !plan.jobId) continue;
+    const workflow = executableWorkflow(plan.workflow);
+    if (!workflow || activeWorkflows.has(workflow)) continue;
+    const current = selected[workflow];
+    const candidate: RecoverableHealthJob = {
+      jobId: plan.jobId,
+      workflow,
+      source: 'remediation',
+      createdAt: snapshot.ranAt ?? '',
+    };
+    if (!current || candidate.jobId > current.jobId) selected[workflow] = candidate;
+  }
+  return selected;
+}
+
+export function healthTerminalInvalidationKeys(subjectId: string): string[][] {
+  return [
+    ['lint-latest', subjectId],
+    ['health-active-jobs', subjectId],
+  ];
+}
+
+function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
+  if (job.type === 'fix' || job.type === 'curate') {
+    return {
+      jobId: job.id,
+      workflow: job.type,
+      source: readStrictRemediationAction(job.paramsJson) === job.type ? 'remediation' : 'manual',
+      createdAt: job.createdAt,
+    };
+  }
+  if (job.type === 'research') {
+    return {
+      jobId: job.id,
+      workflow: 'research',
+      source: readStrictRemediationAction(job.paramsJson) === 'research' ? 'remediation' : 'manual',
+      createdAt: job.createdAt,
+    };
+  }
+  if (job.type === 'ingest' && readStrictRemediationAction(job.paramsJson) === 're-ingest') {
+    return {
+      jobId: job.id,
+      workflow: 're-ingest',
+      source: 'remediation',
+      createdAt: job.createdAt,
+    };
+  }
+  return null;
+}
+
+function readStrictRemediationAction(paramsJson: string): ExecutableRemediationAction | null {
+  try {
+    const params: unknown = JSON.parse(paramsJson);
+    if (!isRecord(params) || !isRecord(params.remediationContext)) return null;
+    const context = params.remediationContext;
+    if (typeof context.lintJobId !== 'string' || !context.lintJobId) return null;
+    if (
+      !Array.isArray(context.findingIds)
+      || context.findingIds.length === 0
+      || !context.findingIds.every((id) => typeof id === 'string' && id.length > 0)
+    ) return null;
+    return context.action === 'fix'
+      || context.action === 'curate'
+      || context.action === 'research'
+      || context.action === 're-ingest'
+      ? context.action
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function executableWorkflow(workflow: string): ExecutableRemediationAction | null {
+  return workflow === 'fix'
+    || workflow === 'curate'
+    || workflow === 'research'
+    || workflow === 're-ingest'
+    ? workflow
+    : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function createLintRerunQueue() {
