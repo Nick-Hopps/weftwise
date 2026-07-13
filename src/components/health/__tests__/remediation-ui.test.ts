@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type {
   EnrichedLintFinding,
   HealthSnapshot,
+  Job,
   RemediationActionType,
   RemediationPlan,
 } from '@/lib/contracts';
@@ -18,6 +19,8 @@ import {
   recentOutcomeBannerTone,
   recentOutcomeCounts,
   persistedBusyActions,
+  healthTerminalInvalidationKeys,
+  selectRecoverableHealthJobs,
   researchBacklogPatchBody,
 } from '../remediation-ui';
 import { FindingRow } from '../finding-row';
@@ -61,6 +64,28 @@ function plan(
     status: 'queued',
     actions,
     reason: '由服务端计划决定',
+  };
+}
+
+function job(
+  id: string,
+  type: Job['type'],
+  params: unknown,
+  createdAt: string,
+): Job {
+  return {
+    id,
+    type,
+    status: 'running',
+    paramsJson: JSON.stringify(params),
+    resultJson: null,
+    createdAt,
+    startedAt: createdAt,
+    completedAt: null,
+    leaseExpiresAt: null,
+    heartbeatAt: null,
+    attemptCount: 1,
+    subjectId: 'subject-1',
   };
 }
 
@@ -259,5 +284,63 @@ describe('Health remediation UI helper', () => {
     expect(queue.request(origin)).toBe('queued');
     expect(queue.request(nextOrigin)).toBe('ignored');
     expect(queue.finish(origin, nextOrigin)).toBeNull();
+  });
+
+  it('active manual Research 恢复 research workflow busy', () => {
+    const selected = selectRecoverableHealthJobs(snapshot, [
+      job('research-manual', 'research', { topic: 'Graph RAG' }, '2026-07-13T01:00:00Z'),
+    ]);
+
+    expect(selected.research).toMatchObject({
+      jobId: 'research-manual',
+      source: 'manual',
+    });
+  });
+
+  it('active 查询缺失时从 queued plan jobId 恢复 workflow', () => {
+    const queuedSnapshot: HealthSnapshot = {
+      ...snapshot,
+      remediations: {
+        ...snapshot.remediations,
+        [broken.id]: {
+          ...snapshot.remediations[broken.id],
+          status: 'queued',
+          jobId: 'fix-from-plan',
+        },
+      },
+    };
+
+    expect(selectRecoverableHealthJobs(queuedSnapshot, []).fix).toMatchObject({
+      jobId: 'fix-from-plan',
+      source: 'remediation',
+    });
+  });
+
+  it('ingest 的非法 remediation params 不误判为 re-ingest', () => {
+    const invalid = job(
+      'ingest-invalid',
+      'ingest',
+      { remediationContext: { action: 'fix', lintJobId: 'lint-1', findingIds: ['finding-1'] } },
+      '2026-07-13T01:00:00Z',
+    );
+
+    expect(selectRecoverableHealthJobs(snapshot, [invalid])['re-ingest']).toBeUndefined();
+  });
+
+  it('同 workflow 确定性选择 createdAt 最新、同时间 id 最大的 job', () => {
+    const selected = selectRecoverableHealthJobs(snapshot, [
+      job('fix-a', 'fix', {}, '2026-07-13T01:00:00Z'),
+      job('fix-b', 'fix', {}, '2026-07-13T02:00:00Z'),
+      job('fix-c', 'fix', {}, '2026-07-13T02:00:00Z'),
+    ]);
+
+    expect(selected.fix?.jobId).toBe('fix-c');
+  });
+
+  it('workflow 终态同时失效 lint snapshot 与 active jobs', () => {
+    expect(healthTerminalInvalidationKeys('subject-1')).toEqual([
+      ['lint-latest', 'subject-1'],
+      ['health-active-jobs', 'subject-1'],
+    ]);
   });
 });
