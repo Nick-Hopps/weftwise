@@ -29,6 +29,14 @@ export interface PersistSourceAndEnqueueInput {
   originUrl?: string;
   /** 仅供受信任的服务端协调器补充 lineage；受控字段始终由本函数覆盖。 */
   jobParams?: Record<string, unknown>;
+  /** 仅供服务端协调器维持跨表事务边界；Route 不得透传。 */
+  transactionHooks?: {
+    beforePersist?: (sqlite: ReturnType<typeof getRawDb>) => void;
+    afterEnqueue?: (
+      sqlite: ReturnType<typeof getRawDb>,
+      result: PersistSourceAndEnqueueResult,
+    ) => void;
+  };
 }
 
 export interface PersistSourceAndEnqueueResult {
@@ -93,6 +101,8 @@ export function persistSourceAndEnqueueIngest(
       throw new SubjectWriteLeaseError('subject-maintenance', 'Subject 正在维护，请稍后重试');
     }
 
+    input.transactionHooks?.beforePersist?.(sqlite);
+
     rawExisted = fs.existsSync(rawPath);
     previousRaw = rawExisted ? fs.readFileSync(rawPath) : null;
     const saved = saveRawSource(
@@ -142,7 +152,9 @@ export function persistSourceAndEnqueueIngest(
       job.heartbeatAt,
       job.attemptCount,
     );
-    return { sourceId: saved.id, job };
+    const result = { sourceId: saved.id, job };
+    input.transactionHooks?.afterEnqueue?.(sqlite, result);
+    return result;
   });
 
   try {

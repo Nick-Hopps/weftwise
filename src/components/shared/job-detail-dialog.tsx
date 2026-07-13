@@ -19,6 +19,7 @@ import { cn } from '@/lib/cn';
 import type { Job } from '@/lib/contracts';
 import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
 import { eventLogLine, parseJobError } from '@/lib/job-log';
+import { jobActivityTitle } from '@/lib/tool-activity';
 
 interface JobDetailDialogProps {
   jobId: string;
@@ -26,15 +27,6 @@ interface JobDetailDialogProps {
   status: JobStreamStatus;
   open: boolean;
   onClose: () => void;
-}
-
-/** 与 progress-toast 的 detectJobType 保持一致的类型识别（本地实现，避免跨组件依赖）。 */
-function jobTitle(events: JobStreamEvent[]): string {
-  for (const e of events) {
-    if (e.type.startsWith('ingest')) return 'Ingesting';
-    if (e.type.startsWith('lint')) return 'Linting';
-  }
-  return 'Processing';
 }
 
 export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDetailDialogProps) {
@@ -95,7 +87,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
     }
   };
 
-  const title = jobTitle(events);
+  const title = jobActivityTitle(events);
 
   // 经 portal 渲染到 body：挂载点（JobsPanel/ProgressToast）祖先带 transform 类，
   // 会劫持 position:fixed 的包含块，导致全屏遮罩被钉在右下角小面板内。

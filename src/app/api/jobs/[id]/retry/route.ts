@@ -45,12 +45,29 @@ export async function POST(
     );
   }
 
+  let jobParams: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(job.paramsJson ?? '{}');
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      jobParams = parsed as Record<string, unknown>;
+    }
+  } catch {
+    // 损坏 params 保持既有兼容路径，后续 worker 会给出权威错误。
+  }
+  if (jobParams && Object.prototype.hasOwnProperty.call(jobParams, 'researchProvenance')) {
+    return NextResponse.json(
+      { error: 'Research candidate ingests cannot be retried independently. Start a new Research run.' },
+      { status: 409 },
+    );
+  }
+
   // source 已被删除（如通过 Health 页 orphan-source 的 Delete source）时不可重试：
   // 原始文件已不在磁盘，requeue 会让 worker 在 loadCleanText 立即报 "Source file not found"。
   // 与 POST /api/sources/[id]/reingest 的存在性校验保持一致，堵住这一条独立的重试路径。
   let sourceId: string | undefined;
   try {
-    sourceId = (JSON.parse(job.paramsJson ?? '{}') as { sourceId?: string }).sourceId;
+    sourceId = (jobParams ?? JSON.parse(job.paramsJson ?? '{}') as Record<string, unknown>)
+      .sourceId as string | undefined;
   } catch {
     // params 不可解析 → 跳过校验（不太可能发生，ingest job 入队时总是写合法 JSON）
   }

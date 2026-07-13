@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { toolActivityIcon, toolActivityVerb, summarizeToolArgs, toolActivityLine } from '../tool-activity';
+import {
+  jobActivityTitle,
+  summarizeToolArgs,
+  toolActivityIcon,
+  toolActivityLine,
+  toolActivityVerb,
+} from '../tool-activity';
 
 describe('tool-activity', () => {
   it('已知工具映射 icon/verb（含 wiki_reenrich）', () => {
@@ -104,5 +110,18 @@ describe('toolActivityLine', () => {
 
   it('未知工具回落工具名', () => {
     expect(toolActivityLine('mystery_tool', { x: 1 })).toBe('• mystery_tool…');
+  });
+});
+
+describe('jobActivityTitle', () => {
+  it('识别 research-import 事件并优先于通用 Research', () => {
+    expect(jobActivityTitle([{ type: 'research-import:start' }])).toBe('Importing research');
+    expect(jobActivityTitle([{ type: 'research:start' }])).toBe('Researching');
+  });
+
+  it('保留 Ingest/Lint 与未知事件回退', () => {
+    expect(jobActivityTitle([{ type: 'ingest:start' }])).toBe('Ingesting');
+    expect(jobActivityTitle([{ type: 'lint:scope' }])).toBe('Linting');
+    expect(jobActivityTitle([{ type: 'job:completed' }])).toBe('Processing');
   });
 });

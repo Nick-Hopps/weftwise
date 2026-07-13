@@ -106,4 +106,22 @@ describe('POST /api/jobs/[id]/retry', () => {
     expect(res.status).toBe(202);
     expect(mockRequeue).toHaveBeenCalledWith('j1');
   });
+
+  it('409 当 failed Ingest 携带 Research provenance，禁止手动复活 delivery', async () => {
+    mockGet.mockReturnValue({
+      id: 'j1', type: 'ingest', status: 'failed',
+      paramsJson: JSON.stringify({
+        sourceId: 's1', filename: 'a.md', subjectId: 'sub1',
+        researchProvenance: {
+          runId: 'run-1', approvalId: 'approval-1', candidateId: 'candidate-1',
+        },
+      }),
+    });
+
+    const res = await call();
+
+    expect(res.status).toBe(409);
+    expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockGetSource).not.toHaveBeenCalled();
+  });
 });

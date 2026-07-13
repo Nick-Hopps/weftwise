@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { JobDetailDialog } from './job-detail-dialog';
+import { jobActivityTitle } from '@/lib/tool-activity';
 
 interface ProgressToastProps {
   jobId: string | null;
@@ -16,14 +17,6 @@ function StatusIcon({ status }: { status: string }) {
   if (status === 'completed') return <Check className="h-4 w-4 text-success" />;
   if (status === 'failed') return <X className="h-4 w-4 text-danger" />;
   return <Loader2 className="h-4 w-4 text-accent animate-spin" />;
-}
-
-function detectJobType(events: { type: string }[]): string {
-  for (const e of events) {
-    if (e.type.startsWith('ingest')) return 'Ingesting';
-    if (e.type.startsWith('lint')) return 'Linting';
-  }
-  return 'Processing';
 }
 
 function extractFiles(events: { type: string; data: Record<string, unknown> }[]): string[] {
@@ -76,7 +69,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
 
   if (!mounted || !jobId) return null;
 
-  const jobType = detectJobType(events);
+  const jobType = jobActivityTitle(events);
   const files = extractFiles(events);
   const isFinished = status === 'completed' || status === 'failed';
   const wasCancelled = events.some((e) => e.type === 'job:cancelled');

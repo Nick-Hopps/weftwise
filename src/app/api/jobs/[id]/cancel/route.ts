@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as queue from '@/server/jobs/queue';
 import * as events from '@/server/jobs/events';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
+import { reconcileResearchProvenanceForJob } from '@/server/services/research-provenance-reconciler';
 
 export const runtime = 'nodejs';
 
@@ -34,5 +35,10 @@ export async function POST(
   }
 
   events.emit(id, 'job:cancelled', 'Job cancelled by user', { manual: true });
+  try {
+    reconcileResearchProvenanceForJob(id);
+  } catch (error) {
+    console.error('[research-provenance] cancel reconcile failed', error);
+  }
   return NextResponse.json(queue.get(id), { status: 200 });
 }

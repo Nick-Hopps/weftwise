@@ -37,6 +37,7 @@ import './services/curate-service';
 import './services/reenrich-service';
 import './services/fix-service';
 import './services/research-service';
+import './services/research-import-service';
 
 const log = createLogger('worker');
 

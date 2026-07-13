@@ -471,3 +471,163 @@ describe('research-provenance-repo 原子批准与驳回', () => {
     expect(reloaded.candidates[0]).toMatchObject({ decision: 'pending', approvalId: null });
   });
 });
+
+describe('research-provenance-repo delivery 租约', () => {
+  async function createDelivery() {
+    const context = await setup();
+    const candidates = context.provenance.prepareResearchCandidates([
+      { url: 'https://example.com/a', title: 'A', snippet: 'a', score: 3, reason: null },
+    ]);
+    const stored = context.repo.persistResearchRun({
+      subjectId: 's1', researchJobId: 'research-delivery', origin: 'topic', lintJobId: null,
+      topic: 'A', topics: ['A'], queries: ['A'], findings: [], candidates,
+    });
+    const approved = context.repo.approveResearchRunAtomic({
+      runId: stored.run.id,
+      subjectId: 's1',
+      candidateIds: [stored.candidates[0]!.id],
+      expectedVersion: 1,
+      idempotencyKey: 'approve-delivery',
+    });
+    return {
+      ...context,
+      runId: stored.run.id,
+      approvalId: approved.stored.approval!.id,
+      candidateId: stored.candidates[0]!.id,
+    };
+  }
+
+  it('pending 可 claim，并写入 token、lease 与 attempt count', async () => {
+    const { repo, approvalId, candidateId } = await createDelivery();
+    const claim = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:00.000Z'),
+      leaseMs: 30_000,
+    });
+
+    expect(claim).toMatchObject({
+      approvalId,
+      candidateId,
+      status: 'fetching',
+      attemptCount: 1,
+      leaseExpiresAt: '2026-07-14T01:00:30.000Z',
+    });
+    expect(claim!.claimToken).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('未过期 fetching 不可重复 claim，过期后生成新 token 并递增 attempt', async () => {
+    const { repo, approvalId, candidateId } = await createDelivery();
+    const first = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:00.000Z'),
+      leaseMs: 30_000,
+    })!;
+
+    expect(repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:29.999Z'),
+      leaseMs: 30_000,
+    })).toBeNull();
+
+    const reclaimed = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:30.000Z'),
+      leaseMs: 60_000,
+    })!;
+    expect(reclaimed).toMatchObject({
+      status: 'fetching',
+      attemptCount: 2,
+      leaseExpiresAt: '2026-07-14T01:01:30.000Z',
+    });
+    expect(reclaimed.claimToken).not.toBe(first.claimToken);
+  });
+
+  it('旧 token 的续租、失败与 source/job queued 回写全部被 CAS 拒绝', async () => {
+    const { repo, sqlite, approvalId, candidateId } = await createDelivery();
+    const first = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:00.000Z'),
+      leaseMs: 1_000,
+    })!;
+    const current = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:01.000Z'),
+      leaseMs: 30_000,
+    })!;
+
+    expect(repo.renewResearchDeliveryClaim({
+      approvalId,
+      candidateId,
+      claimToken: first.claimToken!,
+      now: new Date('2026-07-14T01:00:02.000Z'),
+      leaseMs: 30_000,
+    })).toBe(false);
+    expect(repo.failResearchDeliveryClaim({
+      approvalId,
+      candidateId,
+      claimToken: first.claimToken!,
+      now: new Date('2026-07-14T01:00:02.000Z'),
+      error: { code: 'FETCH_FAILED', message: '旧请求失败' },
+    })).toBe(false);
+
+    const transaction = sqlite.transaction(() => repo.markResearchDeliveryQueuedInTransaction(
+      sqlite,
+      {
+        approvalId,
+        candidateId,
+        claimToken: first.claimToken!,
+        sourceId: 'source-old',
+        ingestJobId: 'job-old',
+        now: new Date('2026-07-14T01:00:02.000Z'),
+      },
+    ));
+    expect(() => transaction.immediate()).toThrow(/claim/i);
+
+    const delivery = repo.findResearchRunById(current.runId)!.deliveries[0]!;
+    expect(delivery).toMatchObject({
+      status: 'fetching',
+      claimToken: current.claimToken,
+      sourceId: null,
+      ingestJobId: null,
+      attemptCount: 2,
+    });
+  });
+
+  it('当前 token 可续租、失败，并在终态后拒绝重复写入', async () => {
+    const { repo, approvalId, candidateId } = await createDelivery();
+    const claim = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:00.000Z'),
+      leaseMs: 30_000,
+    })!;
+
+    expect(repo.renewResearchDeliveryClaim({
+      approvalId,
+      candidateId,
+      claimToken: claim.claimToken!,
+      now: new Date('2026-07-14T01:00:10.000Z'),
+      leaseMs: 60_000,
+    })).toBe(true);
+    expect(repo.failResearchDeliveryClaim({
+      approvalId,
+      candidateId,
+      claimToken: claim.claimToken!,
+      now: new Date('2026-07-14T01:00:11.000Z'),
+      error: { code: 'FETCH_FAILED', message: '抓取失败' },
+    })).toBe(true);
+    expect(repo.failResearchDeliveryClaim({
+      approvalId,
+      candidateId,
+      claimToken: claim.claimToken!,
+      now: new Date('2026-07-14T01:00:12.000Z'),
+      error: { code: 'FETCH_FAILED', message: '重复失败' },
+    })).toBe(false);
+  });
+});
