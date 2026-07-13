@@ -79,8 +79,17 @@
 
 ### `health/`
 
-- `health-view.tsx` —— 🆕 知识库体检主视图；"Tidy structure" / "Fix issues" 分别追踪 `curate:*` / `fix:*`，完成后显示 postcondition clean / residual / semantic failed 三态；Fix 仍自动重跑 lint 刷新完整 findings
+- `health-view.tsx` —— 🆕 知识库体检主视图；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作，统一调用 `POST /api/health/remediations`；追踪并恢复 Fix / Curate / Research / Re-ingest，写 workflow 完成后重跑 lint，展示 postcondition 与近期处置结果
+- `finding-row.tsx` —— 单条 finding 展示服务端 plan 的 status/workflow/reason/actions；无 plan 时只显示 `plan unavailable`，不按 finding type 猜测动作；`review-source` 只导航
+- `remediation-ui.ts` —— Phase 2A 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy、近期结果统计
+- `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选确认；与逐条/批量 Research 共用同一 workflow 锁
 - `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
+
+**Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API。
+
+**刷新恢复与 subject 隔离**：当前 subject 以 React Query 严格按 `pending → running` 顺序读取 active jobs，避免 job 被 worker claim 时跨查询遗漏；首次成功 hydrate 前四类可执行 action 全部安全禁用，查询失败显示错误并自动/手动重试，但不会伪装成 workflow loading。恢复只接受合法 job type 与完整 `remediationContext`（Re-ingest 还要求 `ingest + action:'re-ingest'`），按 `createdAt + id` 选择同 workflow 最新 job，并恢复对应 `useJobStream`/origin meta；queued plan 的 `jobId` 是 active 列表短暂缺失时的服务端兜底。
+
+所有异步请求都捕获 `{ generation, subjectId, scope }` origin；切换 subject 或 All Subjects 会同步使旧响应、旧删除请求、旧 lint rerun 与候选结果失效。manual/backlog/remediation Research 共用同步 action gate，避免 React state 提交前重复启动。终态同时失效 `['health-active-jobs', subjectId]` 与 `['lint-latest', subjectId]`；Fix/Curate/Re-ingest 完成继续触发 lint，Research 完成读取 candidates，settled job ID 防旧 queued 快照立即重挂，从而形成 subject-scoped 的执行、恢复、复检闭环。
 
 ### `history/`
 
@@ -138,7 +147,7 @@ React 错误边界，包裹 `(app)/layout.tsx` 主内容。
 
 ## 测试与质量
 
-目前无组件测试。建议：
+目前 Health 有纯 helper / 服务端 plan 渲染测试；其余组件建议：
 
 - Storybook 或 Playwright component test 覆盖 `ui/*` 原语的变体矩阵。
 - Shell 中的拖拽 resize（pointer events + `clampPanelWidth`）边界。
@@ -157,7 +166,7 @@ src/components/
 ├── search/       {command-palette}
 ├── subjects/     {subject-dialog, augmentation-field, subjects-api}
 ├── tags/         {tags-index-view, tag-pages-view}
-├── health/       {health-view}
+├── health/       {health-view, finding-row, remediation-ui, research-backlog-section, research-candidates-dialog, postcondition-summary}
 ├── history/      {operation-list, operation-diff, revert-button}
 ├── graph/        {mini-graph-view}
 └── shared/       {global-job-tracker, jobs-panel, progress-toast}
@@ -167,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-12 | Health 修复闭环 Phase 2A：UI 改为服务端 plan 驱动，稳定 ID 批量动作与统一 remediation API；All Subjects 只读、orphan-source 删除二次确认不变；补 active jobs 刷新恢复、hydration 安全门、subject/generation 隔离及终态 lint 闭环 |
 | 2026-07-12 | Phase 1C：Health 展示 Fix / Curate 后置校验三态；`use-job-stream` 注册四个 verify 事件；新增 `postcondition-summary` 纯函数与测试，Fix 自动 lint 刷新行为不变 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：Chat 接入 pending-action SSE、会话刷新恢复、批准/拒绝 API 与可访问 diff 卡片；actionId upsert 防重，reset 口头确认状态与 Wiki 审批状态彻底分离 |
 | 2026-04-22 | 初始化；对应最近一次 `refactor(ui): 统一设计系统与上下文面板` 后的结构 |

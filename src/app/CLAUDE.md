@@ -37,10 +37,11 @@
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，锁内复核 HEAD 后同步执行页面 Saga 或仅入队 re-enrich；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
-| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint job 的 findings 快照（含 bySeverity 计数）；从未跑过返回 `{ jobId:null, findings:[] }` |
+| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`：稳定 ID findings、bySeverity、服务端 `remediations` plans 与 `recentOutcomes`；从未跑过返回字段完整的空快照。All Subjects 的 plans 只读、actions 为空 |
+| `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
 | `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |
-| `/api/research` | POST | 入队 `research` 任务（缺口/主题→联网研究候选清单，只发现不写入）；body 二选一 `{ gapIds: string[] }`（校验命中最近 lint 快照的 coverage-gap）或 `{ topic: string }`；web search 未配置 → 422 |
+| `/api/research` | POST | 入队 `research` 任务（缺口/主题→联网研究候选清单，只发现不写入）；body 二选一 `{ findingIds: string[], lintJobId: string, subjectId }`（稳定 ID 必须全部命中当前 subject 最新 lint 的 coverage-gap）或 `{ topic: string, subjectId }`；旧 `gapIds` 数组下标协议已退役，显式出现即 400；web search 未配置 → 422；202 返回 `{ jobId, subjectId, subjectSlug }` |
 | `/api/research-backlog` | GET | 🆕 T3.2：列出当前 subject 待研究问题队列（`?status=open\|researched\|dismissed` 过滤，缺省返回全部） |
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
@@ -63,6 +64,17 @@
 | `/api/query` | POST | 默认流式分支扩展：body 加 `conversationId?`（无/跨 subject 静默当新会话防泄漏）→ 载末 8 条历史注入 prompt → 流末 best-effort 落库 → done 回传 `{subjectId, conversationId}`；save-as-page/save-to-wiki 模式不持久化 |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
 | `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录（需 auth + CSRF） |
+
+### `POST /api/health/remediations` 错误契约
+
+- `400`：`invalid-json`、`invalid-body`、`invalid-lint-job-id`、`invalid-action`、`invalid-finding-count`（1–100）、`invalid-finding-id`（64 位小写 hex）、`invalid-reingest-scope`（Re-ingest 必须恰好一个带 sourceId 的 finding）或 `action-not-allowed`。
+- `401/403`：沿用 Auth / CSRF 拒绝；subject 解析错误直接透传。
+- `409 stale-snapshot`：`lintJobId` 已不是当前快照，或任一 ID 已消失/属于其他 subject；批量请求整体拒绝，不部分入队。
+- `409 source-not-found | already-referenced | in-flight | requeue-conflict`：Re-ingest 来源前提或原子 requeue 冲突；同 remediation context 的在途任务则成功返回原 `jobId` 与 `deduplicated:true`。
+- `422 web-search-not-configured`：Research 所需 Web Search 未配置。
+- `500 internal-error`：未知服务编排异常，响应不泄漏内部错误细节。
+
+请求中的 `lintJobId` 是 compare-and-set token；`findingIds` 在服务端去重排序后写入 `job.paramsJson.remediationContext`。`review-source` 是只读导航，不允许提交到此端点；orphan-source 删除也不属于通用 remediation action。
 
 > **鉴权约定**：所有 **写** 或 **敏感读** 路由都在顶部调 `requireAuth(request)`；浏览器发起的 POST 还要调 `requireCsrf(request)`（Origin 校验）。SSE 因 EventSource 不能发 header，允许 `?apiKey=` query 兜底（见 `src/server/middleware/auth.ts:55`）。
 >
@@ -112,8 +124,10 @@ src/app/
     ├── query/route.ts
     ├── lint/route.ts
     ├── lint/latest/route.ts
+    ├── health/remediations/route.ts       # 🆕 Phase 2A 统一 Health 处置入口
     ├── curate/route.ts                  # 🆕 POST 入队 curate（agent 策展）
     ├── fix/route.ts                     # 🆕 POST 入队 fix（一键修复 lint findings）
+    ├── research/route.ts                # 联网研究：稳定 finding scope 或自由 topic
     ├── jobs/route.ts
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
@@ -137,6 +151,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-12 | Health 修复闭环 Phase 2A：`GET /api/lint/latest` 升级为完整 `HealthSnapshot`；新增 `POST /api/health/remediations` 统一校验、幂等执行入口；`POST /api/research` 改用稳定 `findingIds + lintJobId`，旧数组下标协议退役 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：`/api/query` 新增 read/propose 模式与 `pending-action` SSE；新增 pending-actions 列表/批准/拒绝三个 subject-scoped API，写请求均 requireAuth+CSRF，批准只消费服务端预览而不信任客户端 payload |
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |
 | 2026-04-25 | Subject：新增 `/api/subjects` + `(app)/subjects` 管理页；既有路由全部 subject 化（`resolveSubjectFromRequest`） |
