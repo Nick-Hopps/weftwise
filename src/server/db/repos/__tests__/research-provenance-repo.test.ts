@@ -135,6 +135,23 @@ describe('research-provenance-repo run 持久化', () => {
     expect(repo.findResearchRunByJobId('research-empty', 's2')).toBeNull();
   });
 
+  it('按 researchJobId 批量恢复时保持请求顺序、去重并隔离 subject', async () => {
+    const { repo } = await setup();
+    for (const researchJobId of ['research-a', 'research-b']) {
+      repo.persistResearchRun({
+        subjectId: 's1', researchJobId, origin: 'topic', lintJobId: null,
+        topic: researchJobId, topics: [researchJobId], queries: ['query'],
+        findings: [], candidates: [],
+      });
+    }
+    expect(repo.findResearchRunsByJobIds(
+      ['research-b', 'missing', 'research-a', 'research-b'],
+      's1',
+    ).map((stored) => stored.run.researchJobId)).toEqual(['research-b', 'research-a']);
+    expect(repo.findResearchRunsByJobIds(['research-a'], 's2')).toEqual([]);
+    expect(repo.findResearchRunsByJobIds([], 's1')).toEqual([]);
+  });
+
   it('公开读取在同一 DEFERRED 快照中 hydrate，跨连接提交不会产生 torn state', async () => {
     const { repo, provenance, sqlite } = await setup();
     const candidates = provenance.prepareResearchCandidates([
@@ -201,6 +218,33 @@ describe('research-provenance-repo run 持久化', () => {
 });
 
 describe('research-provenance-repo 原子批准与驳回', () => {
+  it('真实 service/repo 集成可读取、批准并幂等恢复同一 coordinator', async () => {
+    const { repo, provenance } = await setup();
+    const service = await import('../../../services/research-approval-service');
+    const candidates = provenance.prepareResearchCandidates([
+      { url: 'https://example.com/a', title: 'A', snippet: 'a', score: 3, reason: null },
+    ]);
+    const stored = repo.persistResearchRun({
+      subjectId: 's1', researchJobId: 'research-integration', origin: 'topic', lintJobId: null,
+      topic: 'A', topics: ['A'], queries: ['A'], findings: [], candidates,
+    });
+    expect(service.getResearchRun(stored.run.id, 's1')).toMatchObject({
+      status: 'awaiting-approval',
+      version: 1,
+    });
+    const input = {
+      runId: stored.run.id,
+      subjectId: 's1',
+      candidateIds: [stored.candidates[0]!.id],
+      expectedVersion: 1,
+      idempotencyKey: 'integration-key',
+    };
+    const first = service.approveResearchRun(input);
+    const replay = service.approveResearchRun(input);
+    expect(first).toMatchObject({ replayed: false, run: { status: 'importing', version: 2 } });
+    expect(replay).toMatchObject({ replayed: true, coordinatorJobId: first.coordinatorJobId });
+  });
+
   it.each([
     'snapshot-json',
     'normalized-url',

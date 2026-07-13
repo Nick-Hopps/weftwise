@@ -111,6 +111,32 @@ export function findResearchRunById(
   return read.deferred();
 }
 
+/** 同一 read snapshot 内按 researchJobId 批量恢复，供 Health/backlog 避免 N 次撕裂读取。 */
+export function findResearchRunsByJobIds(
+  researchJobIds: string[],
+  subjectId: SubjectId,
+): StoredResearchRun[] {
+  const ids = [...new Set(researchJobIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  if (ids.length > 200) throw new Error('Research run batch lookup accepts at most 200 job IDs');
+  const sqlite = getRawDb();
+  const placeholders = ids.map(() => '?').join(', ');
+  const read = sqlite.transaction((): StoredResearchRun[] => {
+    const rows = sqlite.prepare(`
+      SELECT * FROM research_runs
+      WHERE subject_id = ? AND research_job_id IN (${placeholders})
+    `).all(subjectId, ...ids) as RawRow[];
+    const byJobId = new Map(
+      rows.map((row) => [String(row.research_job_id), hydrateResearchRun(sqlite, row)]),
+    );
+    return ids.flatMap((id) => {
+      const stored = byJobId.get(id);
+      return stored ? [stored] : [];
+    });
+  });
+  return read.deferred();
+}
+
 /** 在一个 IMMEDIATE transaction 内原子创建 run、finding 与 candidate 快照。 */
 export function persistResearchRun(input: PersistResearchRunInput): StoredResearchRun {
   validateRunInput(input);
