@@ -73,8 +73,41 @@ describe('createPageInSubject', () => {
     opsMocks.executePageCreate.mockResolvedValue({ createdSlug: 'foo' });
     const out = await createPageInSubject(subject, { title: 'Foo', body: 'x' });
     expect(opsMocks.executePageCreate).toHaveBeenCalledOnce();
+    expect(opsMocks.executePageCreate).toHaveBeenCalledWith(
+      expect.any(String),
+      subject,
+      { title: 'Foo', body: 'x' },
+    );
     expect(embedMocks.enqueueEmbedIndex).toHaveBeenCalledWith('s1');
     expect(out).toEqual({ createdSlug: 'foo' });
+  });
+  it('显式 jobId → 原样关联 operation，并规范化 title/body', async () => {
+    opsMocks.executePageCreate.mockResolvedValue({ createdSlug: 'foo-2' });
+
+    const out = await createPageInSubject(
+      subject,
+      { title: '  Foo  ', body: undefined as never, tags: ['query-answer'] },
+      { jobId: 'save-job-1' },
+    );
+
+    expect(opsMocks.executePageCreate).toHaveBeenCalledWith(
+      'save-job-1',
+      subject,
+      { title: 'Foo', body: '', tags: ['query-answer'] },
+    );
+    expect(embedMocks.enqueueEmbedIndex).toHaveBeenCalledOnce();
+    expect(out).toEqual({ createdSlug: 'foo-2' });
+  });
+  it('执行失败 → 不 enqueue embed', async () => {
+    opsMocks.executePageCreate.mockRejectedValueOnce(new Error('apply failed'));
+
+    await expect(createPageInSubject(
+      subject,
+      { title: 'Foo', body: 'x' },
+      { jobId: 'save-job-2' },
+    )).rejects.toThrow('apply failed');
+
+    expect(embedMocks.enqueueEmbedIndex).not.toHaveBeenCalled();
   });
   it('空标题 → 抛错，不执行', async () => {
     await expect(createPageInSubject(subject, { title: '  ', body: 'x' })).rejects.toThrow(/title/);
