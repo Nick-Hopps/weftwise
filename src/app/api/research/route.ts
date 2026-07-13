@@ -16,7 +16,7 @@ export const runtime = 'nodejs';
 /**
  * POST /api/research — 缺口/主题触发联网研究，入队 'research' job（只发现不写入）。
  * body: { findingIds: string[], lintJobId: string } | { topic: string }（二选一）
- *  - findingIds：当前 subject 最新 completed lint 快照里 coverage-gap findings 的稳定 ID；
+ *  - findingIds：当前 subject 最新 completed lint 快照里 coverage-gap / thin-page findings 的稳定 ID；
  *    lintJobId 必须精确匹配该快照，避免陈旧选择误触发。
  *  - topic：手动自由文本。
  * web search 未配置 → 422（先去设置里配好）。

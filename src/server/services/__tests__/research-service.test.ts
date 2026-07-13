@@ -67,12 +67,22 @@ const RAW_FINDINGS = [
     subjectId: 's1',
     subjectSlug: 'general',
   },
+  {
+    type: 'thin-page',
+    severity: 'info',
+    pageSlug: 'thin-without-sources',
+    description: 'Thin page without sources',
+    suggestedFix: null,
+    subjectId: 's1',
+    subjectSlug: 'general',
+  },
 ] satisfies Array<LintFinding & { subjectId: string; subjectSlug: string }>;
 
 const BROKEN_ID = findingId(RAW_FINDINGS[0]);
 const GAP_ID = findingId(RAW_FINDINGS[1]);
 const DUPLICATE_TOPIC_GAP_ID = findingId(RAW_FINDINGS[2]);
 const SECOND_GAP_ID = findingId(RAW_FINDINGS[3]);
+const THIN_PAGE_ID = findingId(RAW_FINDINGS[4]);
 const TOO_MANY_FINDING_IDS = Array.from(
   { length: 101 },
   (_, index) => index.toString(16).padStart(64, '0'),
@@ -144,6 +154,16 @@ describe('resolveTopicsFromFindingIds', () => {
     expect(queueMock.get).toHaveBeenCalledWith('lint-1');
   });
 
+  it('允许单独解析 thin-page finding', () => {
+    expect(resolveTopicsFromFindingIds('s1', 'lint-1', [THIN_PAGE_ID]))
+      .toEqual(['Thin page without sources']);
+  });
+
+  it('coverage-gap 与 thin-page 可在同一批次按快照顺序解析', () => {
+    expect(resolveTopicsFromFindingIds('s1', 'lint-1', [THIN_PAGE_ID, GAP_ID]))
+      .toEqual(['gRPC streaming', 'Thin page without sources']);
+  });
+
   it.each([
     ['不存在', null],
     ['类型错误', lintJob({ type: 'fix' })],
@@ -164,12 +184,12 @@ describe('resolveTopicsFromFindingIds', () => {
 
   it('任一 finding ID 缺失时拒绝整个请求', () => {
     expect(() => resolveTopicsFromFindingIds('s1', 'lint-1', [GAP_ID, 'f'.repeat(64)]))
-      .toThrow(/coverage-gap/);
+      .toThrow(/coverage-gap or thin-page/);
   });
 
-  it('任一 finding 不是 coverage-gap 时拒绝整个请求', () => {
+  it('任一 finding 不是 coverage-gap 或 thin-page 时拒绝整个请求', () => {
     expect(() => resolveTopicsFromFindingIds('s1', 'lint-1', [GAP_ID, BROKEN_ID]))
-      .toThrow(/coverage-gap/);
+      .toThrow(/coverage-gap or thin-page/);
   });
 
   it('queue.get 未知异常保持原异常，不包装为范围错误', () => {
@@ -236,6 +256,19 @@ describe('runResearchJob', () => {
     expect(result.topics).toEqual(['gRPC streaming', 'Reactive backpressure']);
     expect(queueMock.get).toHaveBeenCalledWith('lint-1');
     expect(genMock.generateStructuredOutput).toHaveBeenCalledTimes(1);
+  });
+
+  it('thin-page remediation context 可由 worker scope 解析并消费', async () => {
+    genMock.generateStructuredOutput.mockResolvedValueOnce({ queries: ['thin page sources'] });
+    const result = await runResearchJob(researchJob({
+      findingIds: [THIN_PAGE_ID],
+      lintJobId: 'lint-1',
+      subjectId: 's1',
+      remediationContext: remediationContext([THIN_PAGE_ID]),
+    }), vi.fn());
+
+    expect(result.topics).toEqual(['Thin page without sources']);
+    expect(queueMock.get).toHaveBeenCalledWith('lint-1');
   });
 
   it('query 生成失败 → job 失败（抛出）', async () => {

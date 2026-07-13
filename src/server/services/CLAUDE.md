@@ -117,9 +117,9 @@ worker-entry.ts
 
 **Fix scope**：`remediationContext` 存在时只从指定、同 subject、completed lint job 解析所选 ID；确定性检查仍新鲜重扫，但只消费 ID 命中的 `missing-frontmatter/broken-link`，语义侧只消费 ID 命中的 `missing-crossref/contradiction`。工具 read/search/inspect/source evidence 保持 subject-wide，只有 `updatePage/patchPage` 写侧收窄到所选 findings 对应页面。无 context 的旧 `/api/fix` 继续保持全量 Fix 行为。
 
-**Research scope**：finding 分支必须同时携带稳定 `findingIds` 与当前 `lintJobId`；`research-scope.ts::resolveTopicsFromFindingIds()` 精确读取该 subject 的 completed lint 快照，并要求全部 ID 属于 `coverage-gap`。topic 分支保持通用手动/Backlog 入口；旧数组下标协议已退役。通过统一 remediation 入口创建的 Research job 同样携带规范化 context，供刷新恢复与状态推导。
+**Research scope**：finding 分支必须同时携带稳定 `findingIds` 与当前 `lintJobId`；`research-scope.ts::resolveTopicsFromFindingIds()` 精确读取该 subject 的 completed lint 快照，并要求全部 ID 属于可 Research 的 `coverage-gap` 或 `thin-page`，混入其他类型则整体拒绝。topic 分支保持通用手动/Backlog 入口；旧数组下标协议已退役。通过统一 remediation 入口创建的 Research job 同样携带规范化 context，供刷新恢复与状态推导。
 
-Health 前端刷新时还会按 subject 依次读取 pending、running jobs，以严格 `remediationContext` 恢复 Fix/Curate/Research/Re-ingest 的 SSE 与 busy 状态；终态同时失效 active-jobs 与 lint snapshot，Fix/Curate/Re-ingest 完成后重跑 lint，形成“执行 → 恢复 → 复检 → 状态”闭环。All Subjects 只构造只读 plans，不允许执行。
+Health 前端刷新时还会按 subject 依次读取 pending、running jobs：合法 `fix` / `curate` / `research` job 都可恢复对应 SSE 与 busy 状态；只有 context 完整且 `action` 与 workflow 匹配时才标记为 remediation 来源，否则作为 manual workflow 恢复。唯 Re-ingest 必须是 `ingest` job 且带严格匹配 `action:'re-ingest'` 的 context 才恢复。终态同时失效 active-jobs 与 lint snapshot，Fix/Curate/Re-ingest 完成后重跑 lint，形成“执行 → 恢复 → 复检 → 状态”闭环。All Subjects 只构造只读 plans，不允许执行。
 
 ### `curate-service.ts` 🆕 — 任务类型 `'curate'`
 
@@ -278,7 +278,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
-| 2026-07-12 | Health 修复闭环 Phase 2A：新增稳定 finding identity、九类纯 remediation router、统一执行与幂等 context、`MAX_REMEDIATION_JOBS=200` 状态恢复；Fix/Research 精确消费 `findingIds + lintJobId`，并与前端 active-job 恢复及 lint 复检形成闭环 |
+| 2026-07-12 | Health 修复闭环 Phase 2A：新增稳定 finding identity、九类纯 remediation router、统一执行与幂等 context、`MAX_REMEDIATION_JOBS=200` 状态恢复；Fix 精确消费所选 scope，Research 接受 `coverage-gap / thin-page` 的 `findingIds + lintJobId`，并与前端 active-job 恢复及 lint 复检形成闭环 |
 | 2026-07-12 | Phase 1C：新增 operation scope collector、共享确定性 postcondition verifier、Fix 单次语义复检与统一报告编排；Fix / Curate 都返回 `postconditionStatus + postcondition`，residual/校验异常保持 Job completed 且不重放写入 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：Query 按 read/propose 动态编译工具，propose 仅生成持久化预览；pending-action-service 负责 hash/TTL/原子批准/陈旧刷新/恢复，re-enrich 在批准时才入队；复用 query task，LLM 示例配置不变 |
 | 2026-07-10 | Wiki 证据工具 Phase 1A：Query 实际只读工具补齐 `wiki.inspect/source.search/source.read` 与可继续 `wiki.list`；Fix links/contradiction 获得页面和来源证据；Curate Auto/Manual 获得 scope 内 inspect；三类 context 复用 subject evidence reader，stale-source 判定迁入 `sources/source-staleness.ts` 供 lint/inspect 共用 |

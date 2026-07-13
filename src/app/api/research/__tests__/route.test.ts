@@ -58,8 +58,18 @@ const RAW_SECOND_GAP = {
   subjectId: 's1',
   subjectSlug: 'general',
 } satisfies LintFinding & { subjectId: string; subjectSlug: string };
+const RAW_THIN_PAGE = {
+  type: 'thin-page',
+  severity: 'info',
+  pageSlug: 'thin-without-sources',
+  description: 'Thin page without sources',
+  suggestedFix: null,
+  subjectId: 's1',
+  subjectSlug: 'general',
+} satisfies LintFinding & { subjectId: string; subjectSlug: string };
 const GAP_ID = findingId(RAW_GAP);
 const SECOND_GAP_ID = findingId(RAW_SECOND_GAP);
+const THIN_PAGE_ID = findingId(RAW_THIN_PAGE);
 const TOO_MANY_FINDING_IDS = Array.from(
   { length: 101 },
   (_, index) => index.toString(16).padStart(64, '0'),
@@ -79,7 +89,7 @@ function lintJob(overrides: Partial<Job> = {}): Job {
     status: 'completed',
     subjectId: 's1',
     paramsJson: JSON.stringify({ subjectId: 's1' }),
-    resultJson: JSON.stringify({ findings: [RAW_GAP, RAW_SECOND_GAP] }),
+    resultJson: JSON.stringify({ findings: [RAW_GAP, RAW_SECOND_GAP, RAW_THIN_PAGE] }),
     createdAt: '2026-07-12T10:00:00.000Z',
     startedAt: '2026-07-12T10:00:00.000Z',
     completedAt: '2026-07-12T10:00:30.000Z',
@@ -144,6 +154,29 @@ describe('POST /api/research', () => {
     );
   });
 
+  it('findingIds 分支允许 coverage-gap 与 thin-page 混合批次', async () => {
+    const findingIds = [THIN_PAGE_ID, GAP_ID];
+    const normalized = [...findingIds].sort();
+    const res = await POST(req({ findingIds, lintJobId: 'lint-1' }));
+
+    expect(res.status).toBe(202);
+    expect(mockResolveTopics).toHaveBeenCalledWith('s1', 'lint-1', findingIds);
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      'research',
+      {
+        findingIds: normalized,
+        lintJobId: 'lint-1',
+        subjectId: 's1',
+        remediationContext: {
+          lintJobId: 'lint-1',
+          findingIds: normalized,
+          action: 'research',
+        },
+      },
+      's1',
+    );
+  });
+
   it.each([
     ['数字下标', { gapIds: ['1'] }],
     ['与 topic 混用', { gapIds: null, topic: 'x' }],
@@ -189,17 +222,17 @@ describe('POST /api/research', () => {
     expect(mockEnqueue).not.toHaveBeenCalled();
   });
 
-  it('精确 resolver 拒绝缺失 ID 或非 coverage-gap → 400', async () => {
+  it('精确 resolver 拒绝缺失 ID 或非 Research finding → 400', async () => {
     mockResolveTopics.mockImplementation(() => {
       throw new ResearchScopeError(
         'invalid-finding-scope',
-        'Research findingIds must reference coverage-gap findings',
+        'Research findingIds must reference coverage-gap or thin-page findings',
       );
     });
     const res = await POST(req({ findingIds: [GAP_ID], lintJobId: 'lint-1' }));
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toEqual({
-      error: 'Research findingIds must reference coverage-gap findings',
+      error: 'Research findingIds must reference coverage-gap or thin-page findings',
     });
     expect(mockEnqueue).not.toHaveBeenCalled();
   });

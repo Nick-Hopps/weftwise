@@ -41,7 +41,7 @@
 | `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
 | `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |
-| `/api/research` | POST | 入队 `research` 任务（缺口/主题→联网研究候选清单，只发现不写入）；body 二选一 `{ findingIds: string[], lintJobId: string, subjectId }`（稳定 ID 必须全部命中当前 subject 最新 lint 的 coverage-gap）或 `{ topic: string, subjectId }`；旧 `gapIds` 数组下标协议已退役，显式出现即 400；web search 未配置 → 422；202 返回 `{ jobId, subjectId, subjectSlug }` |
+| `/api/research` | POST | 入队 `research` 任务（缺口/薄页/主题→联网研究候选清单，只发现不写入）；body 二选一 `{ findingIds: string[], lintJobId: string, subjectId }`（稳定 ID 必须全部命中当前 subject 最新 lint，且每项均为 `coverage-gap` 或 `thin-page`）或 `{ topic: string, subjectId }`；旧 `gapIds` 数组下标协议已退役，显式出现即 400；web search 未配置 → 422；202 返回 `{ jobId, subjectId, subjectSlug }` |
 | `/api/research-backlog` | GET | 🆕 T3.2：列出当前 subject 待研究问题队列（`?status=open\|researched\|dismissed` 过滤，缺省返回全部） |
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
@@ -151,7 +151,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
-| 2026-07-12 | Health 修复闭环 Phase 2A：`GET /api/lint/latest` 升级为完整 `HealthSnapshot`；新增 `POST /api/health/remediations` 统一校验、幂等执行入口；`POST /api/research` 改用稳定 `findingIds + lintJobId`，旧数组下标协议退役 |
+| 2026-07-12 | Health 修复闭环 Phase 2A：`GET /api/lint/latest` 升级为完整 `HealthSnapshot`；新增 `POST /api/health/remediations` 统一校验、幂等执行入口；`POST /api/research` 改用稳定 `findingIds + lintJobId` 并接受 `coverage-gap / thin-page`，旧数组下标协议退役 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：`/api/query` 新增 read/propose 模式与 `pending-action` SSE；新增 pending-actions 列表/批准/拒绝三个 subject-scoped API，写请求均 requireAuth+CSRF，批准只消费服务端预览而不信任客户端 payload |
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |
 | 2026-04-25 | Subject：新增 `/api/subjects` + `(app)/subjects` 管理页；既有路由全部 subject 化（`resolveSubjectFromRequest`） |
