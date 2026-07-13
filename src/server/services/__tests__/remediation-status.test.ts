@@ -4,6 +4,7 @@ import type {
   Job,
   LintLatestResult,
   RemediationContext,
+  ResearchRunView,
 } from '@/lib/contracts';
 import {
   buildHealthSnapshot,
@@ -114,6 +115,49 @@ const RESEARCH_CANDIDATE = {
   reason: 'Relevant evidence',
 };
 
+function researchRun(
+  status: ResearchRunView['status'],
+  overrides: Partial<ResearchRunView> = {},
+): ResearchRunView {
+  return {
+    id: 'run-1',
+    subjectId: 'subject-1',
+    researchJobId: 'job-1',
+    origin: 'findings',
+    lintJobId: 'lint-previous',
+    topic: null,
+    topics: ['topic'],
+    queries: ['query'],
+    candidateSetHash: 'hash',
+    status,
+    version: 2,
+    verificationLintJobId: status === 'verifying' ? 'lint-verification' : null,
+    findings: [{
+      findingId: 'finding-1',
+      finding: finding('finding-1', { type: 'coverage-gap' }),
+      verificationStatus: status === 'completed' ? 'fixed' : 'pending',
+      verifiedAt: status === 'completed' ? AFTER_LINT : null,
+      verificationFinding: null,
+    }],
+    candidates: [],
+    approval: status === 'awaiting-approval' || status === 'dismissed' || status === 'empty'
+      ? null
+      : {
+          id: 'approval-1',
+          selectedCandidateIds: [],
+          coordinatorJobId: 'coordinator-1',
+          createdAt: BEFORE_LINT,
+        },
+    createdAt: BEFORE_LINT,
+    updatedAt: AFTER_LINT,
+    completedAt: ['completed', 'partial', 'failed', 'dismissed', 'empty'].includes(status)
+      ? AFTER_LINT
+      : null,
+    error: status === 'failed' ? { message: 'failed' } : null,
+    ...overrides,
+  };
+}
+
 describe('buildHealthSnapshot', () => {
   it('无关联 job 时保留 router 初始状态，readOnly 只清空动作', () => {
     const current = lint([
@@ -192,6 +236,71 @@ describe('buildHealthSnapshot', () => {
 
     expect(buildHealthSnapshot(current, [related]).remediations['finding-1'])
       .toMatchObject({ status, jobId: 'job-1' });
+  });
+
+  it.each([
+    ['awaiting-approval', 'awaiting-approval'],
+    ['importing', 'queued'],
+    ['verifying', 'queued'],
+    ['dismissed', 'skipped'],
+    ['empty', 'skipped'],
+  ] as const)('持久化 Research run 的 %s 映射为 %s', (runStatus, expected) => {
+    const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: JSON.stringify({ runId: 'run-1' }),
+    });
+
+    expect(buildHealthSnapshot(current, [related], {
+      researchRuns: [researchRun(runStatus)],
+    }).remediations['finding-1']).toMatchObject({ status: expected, jobId: 'job-1' });
+  });
+
+  it.each([
+    ['completed', 'fixed', 'fixed'],
+    ['partial', 'fixed', 'fixed'],
+    ['partial', 'residual', 'failed'],
+    ['failed', 'unverifiable', 'failed'],
+  ] as const)(
+    '持久化 Research run 的 %s/%s 使用逐 finding 验证结果 %s',
+    (runStatus, verificationStatus, expected) => {
+      const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
+      const related = remediationJob('job-1', ['finding-1'], {
+        action: 'research',
+        status: 'completed',
+        completedAt: AFTER_LINT,
+        resultJson: JSON.stringify({ runId: 'run-1' }),
+      });
+      const run = researchRun(runStatus, {
+        findings: [{
+          findingId: 'finding-1',
+          finding: finding('finding-1', { type: 'coverage-gap' }),
+          verificationStatus,
+          verifiedAt: AFTER_LINT,
+          verificationFinding: verificationStatus === 'residual'
+            ? finding('finding-1', { type: 'coverage-gap' })
+            : null,
+        }],
+      });
+
+      expect(buildHealthSnapshot(current, [related], { researchRuns: [run] })
+        .remediations['finding-1'].status).toBe(expected);
+    },
+  );
+
+  it('Research finding 消失后把已物化 fixed 计入 recent outcome', () => {
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({ runId: 'run-1' }),
+    });
+
+    expect(buildHealthSnapshot(lint([]), [related], {
+      researchRuns: [researchRun('completed')],
+    }).recentOutcomes).toEqual({ 'finding-1': 'fixed' });
   });
 
   it.each([
