@@ -95,13 +95,8 @@ export async function remediate(input: {
 
   const ids = [...new Set(rawFindingIds as string[])].sort();
   const executableAction = action as ExecutableRemediationAction;
-  const lint = selectLatestFindings(
-    queue.list({
-      type: 'lint',
-      status: 'completed',
-      subjectId: input.subject.id,
-    }),
-  );
+  const latestLint = queue.listLatestCompletedLint(input.subject.id);
+  const lint = selectLatestFindings(latestLint ? [latestLint] : []);
   if (lint.jobId !== lintJobId) {
     throw new RemediationRequestError(
       409,
@@ -200,6 +195,7 @@ function getOrCreateRemediationJob(
     type,
     params,
     subjectId,
+    lintRanAt,
     matcher: (jobs) => findDuplicateRemediationJob(
       jobs,
       subjectId,

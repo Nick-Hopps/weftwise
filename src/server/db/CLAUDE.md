@@ -48,12 +48,15 @@
 - `updateHeartbeat(id)`
 - `completeJob / failJob / requeueJob / reclaimExpiredJobs`
 - `getJob / listJobs({ status?, type?, subjectId? })`
+- `listRecentJobs(filter, limit)` / `listLatestCompletedLint(subjectId)` —— 分别用于有界状态恢复与单行最新 lint CAS
+- `getOrCreateJobAtomic(...)` —— `BEGIN IMMEDIATE` 内只查同 subject/type 的在途或仍可复用 completed 候选，再由 matcher 精确匹配 context
+- `reingestSourceAtomic(...)` / `findLatestIngestJobForSource(subjectId, sourceId)` —— 通过 JSON 表达式索引精确读取最新同源 ingest，原子复用、重排或创建
 - `listJobEvents(jobId, afterId?)`
 
 ### `sources-repo.ts`
 
 - `upsertSource(subjectId, payload) / findByHash(subjectId, hash) / linkPageToSource(subjectId, pageSlug, sourceId)`
-- `listUnreferencedSources(subjectId)` —— 零 page_sources 关联的 source（孤儿候选）；`deleteSource(id)` —— 删单行（文件清理归 source-store）；`findLatestIngestJobForSource(subjectId, sourceId)`（jobs-repo）—— listJobs 按 type/subject 过滤后全量遍历 + JSON 解析精确匹配反查最新 ingest job
+- `listUnreferencedSources(subjectId)` —— 零 page_sources 关联的 source（孤儿候选）；`deleteSource(id)` —— 删单行（文件清理归 source-store）；`findLatestIngestJobForSource(subjectId, sourceId)`（jobs-repo）—— 使用 `CASE WHEN json_valid(params_json) THEN json_extract(...sourceId) END` 表达式索引精确反查最新 ingest job，损坏 JSON 历史不会中断查询或建索引
 - `listPageSourceIntegrityRows(subjectId, pageSlugs)` —— 定向 LEFT JOIN pages/sources，保留 page/source 悬空与 source Subject 错配行，供 Fix / Curate 写后只读校验
 
 ### `operations-repo.ts`
@@ -170,7 +173,7 @@
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
 - repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations（含 `pruneOldOperations` 边界：未超上限不删/超出只删多出的最旧行/`pending` 永不删/按 subject 隔离）/ conversations / embeddings / maturity / checkpoints / settings。
-- `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描）。
+- `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描），包含 remediation CAS 候选与同源 ingest JSON 表达式查询；后者同时覆盖损坏历史参数安全性。
 - `rebuild.test.ts`：`rebuildDatabaseFromVault` 核心逻辑（wipe + reindex + 侧车恢复统计）；`scripts/rebuild-cache.ts` 入口脚本本身（CLI 输出 + 锁获取）未覆盖，逻辑极薄，说明即可。
 
 仍待补充：
@@ -209,6 +212,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-13 | Health remediation 原子查询去除 subject 全历史扫描：CAS 只读取同 type 的可复用状态候选；同源 ingest 改走受 `json_valid` 保护的 sourceId 表达式索引并稳定取最新一条；补历史噪声、双入口去重、requeue 与 EQP 回归 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 `pending_actions` 表、热路径索引与 repo 条件状态流转；预览 30 分钟 TTL，终态保留 30 天，operation/job 双引用支持 worker 崩溃恢复 |
 | 2026-07-12 | Phase 1C：`operations-repo.listAppliedForJob` 提供 Job/Subject 已应用 Changeset 权威范围；`sources-repo.listPageSourceIntegrityRows` 提供定向 provenance 完整性快照 |
 | 2026-04-22 | 初始化 |

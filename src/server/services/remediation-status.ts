@@ -104,7 +104,7 @@ export function buildHealthSnapshot(
 
 function applyCurrentJob(
   plan: RemediationPlan,
-  { job, context }: ContextJob,
+  { job, context, findingId }: FindingContextJob,
   lintRanAt: string | null,
 ): RemediationPlan {
   let status: RemediationStatus;
@@ -122,7 +122,8 @@ function applyCurrentJob(
   ) {
     status = 'queued';
   } else if (context.action === 'fix' || context.action === 'curate') {
-    const outcome = completedWriteOutcome(job.resultJson);
+    const outcome = readPerFindingOutcome(job.resultJson, findingId)
+      ?? completedWriteOutcome(job.resultJson);
     status = outcome === 'fixed' ? 'failed' : outcome;
   } else {
     status = 'failed';
@@ -132,7 +133,7 @@ function applyCurrentJob(
 }
 
 function readRecentOutcome(
-  { job, context }: ContextJob,
+  { job, context, findingId }: FindingContextJob,
   lintRanAt: string | null,
 ): RemediationStatus | null {
   if (context.action === 'research') return null;
@@ -146,8 +147,26 @@ function readRecentOutcome(
   }
   if (job.status === 'failed') return 'failed';
   if (context.action === 're-ingest') return 'fixed';
+  if (context.action === 'fix' || context.action === 'curate') {
+    return readPerFindingOutcome(job.resultJson, findingId)
+      ?? completedWriteOutcome(job.resultJson);
+  }
 
   return completedWriteOutcome(job.resultJson);
+}
+
+/** 新 Fix / Curate 优先使用目标 finding 自身结果；缺失或损坏则回退旧 job-level 逻辑。 */
+function readPerFindingOutcome(
+  resultJson: string | null,
+  findingId: string,
+): 'fixed' | 'failed' | 'skipped' | null {
+  const result = parseRecord(resultJson);
+  const outcomes = result?.perFindingOutcomes;
+  if (!isRecord(outcomes)) return null;
+  const outcome = outcomes[findingId];
+  return outcome === 'fixed' || outcome === 'failed' || outcome === 'skipped'
+    ? outcome
+    : null;
 }
 
 function completedWriteOutcome(resultJson: string | null): RemediationStatus {

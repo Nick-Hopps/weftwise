@@ -126,6 +126,48 @@ describe('热路径查询走索引（非全表扫描）', () => {
     expect(allRecent).not.toMatch(/USE TEMP B-TREE/);
   });
 
+  it('remediation CAS 候选查询按 subject/type/status/completed_at 走索引', async () => {
+    const db = await bootstrap();
+    const detail = planDetail(
+      db,
+      `SELECT * FROM jobs
+       WHERE subject_id = ? AND type = ?
+         AND (status IN ('pending', 'running')
+           OR (status = 'completed'
+             AND (? IS NULL OR completed_at IS NULL OR completed_at > ?)))`,
+      'general',
+      'fix',
+      '2026-07-13T10:00:00.000Z',
+      '2026-07-13T10:00:00.000Z',
+    );
+
+    expect(detail).toMatch(/jobs_subject_type_status_completed_id_idx/);
+    expect(detail).not.toMatch(/SCAN jobs\b/);
+  });
+
+  it('同源 ingest 最新任务查询走 JSON 表达式索引且损坏历史参数安全', async () => {
+    const db = await bootstrap();
+    expect(() => db.prepare(`
+      INSERT INTO jobs (id, type, status, subject_id, params_json, created_at)
+      VALUES (?, 'ingest', 'failed', NULL, ?, ?)
+    `).run('invalid-json-job', '{', '2026-07-13T09:00:00.000Z')).not.toThrow();
+
+    const detail = planDetail(
+      db,
+      `SELECT * FROM jobs
+       WHERE subject_id = ? AND type = 'ingest'
+         AND CASE WHEN json_valid(params_json)
+           THEN json_extract(params_json, '$.sourceId') END = ?
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      'general',
+      'source-1',
+    );
+
+    expect(detail).toMatch(/jobs_subject_ingest_source_created_id_idx/);
+    expect(detail).not.toMatch(/USE TEMP B-TREE/);
+    expect(detail).not.toMatch(/SCAN jobs\b/);
+  });
+
   it('pending_actions 按会话恢复与按状态过期清理均走索引', async () => {
     const db = await bootstrap();
     const conversation = planDetail(

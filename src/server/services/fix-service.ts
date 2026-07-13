@@ -42,6 +42,7 @@ import type {
   EnrichedLintFinding,
   Job,
   LintLatestResult,
+  PostconditionReport,
   RemediationContext,
 } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
@@ -56,6 +57,12 @@ interface FixParams {
 }
 
 const FINDING_ID_PATTERN = /^[0-9a-f]{64}$/;
+type FixFindingOutcome = 'fixed' | 'failed' | 'skipped';
+
+const SEMANTIC_FIX_TYPES: ReadonlySet<EnrichedLintFinding['type']> = new Set([
+  'missing-crossref',
+  'contradiction',
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -63,6 +70,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasOwn(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** 依据实际工作清单与后置校验，为批量 Fix 中每个稳定 finding ID 单独归因。 */
+function buildPerFindingOutcomes(
+  worklist: EnrichedLintFinding[],
+  writes: number,
+  postcondition: PostconditionReport,
+): Record<string, FixFindingOutcome> {
+  const residualKeys = new Set(
+    postcondition.residualFindings.map(
+      (finding) => JSON.stringify([finding.type, finding.pageSlug]),
+    ),
+  );
+  const outcomes: Record<string, FixFindingOutcome> = {};
+
+  for (const finding of worklist) {
+    const hasMatchingResidual = residualKeys.has(
+      JSON.stringify([finding.type, finding.pageSlug]),
+    );
+    if (
+      postcondition.verificationError !== null
+      || hasMatchingResidual
+      || (
+        postcondition.semanticStatus === 'failed'
+        && SEMANTIC_FIX_TYPES.has(finding.type)
+      )
+    ) {
+      outcomes[finding.id] = 'failed';
+    } else if (writes === 0 && postcondition.residualFindings.length === 0) {
+      outcomes[finding.id] = 'skipped';
+    } else {
+      outcomes[finding.id] = 'fixed';
+    }
+  }
+
+  return outcomes;
 }
 
 /** 严格解析 Fix 参数；仅 remediationContext 属性完全缺失时进入 legacy 模式。 */
@@ -317,6 +360,16 @@ export async function runFixJob(
     semanticFindings: selectedScope.semantic,
     emit,
   });
+  const perFindingOutcomes = buildPerFindingOutcomes(worklist, writes, postcondition);
+  if (remediationContext) {
+    for (const findingId of remediationContext.findingIds) {
+      if (!hasOwn(perFindingOutcomes, findingId)) {
+        perFindingOutcomes[findingId] = postcondition.verificationError === null
+          ? 'skipped'
+          : 'failed';
+      }
+    }
+  }
   const completeData = {
     deterministic: deterministicFixed,
     update,
@@ -325,6 +378,7 @@ export async function runFixJob(
     postconditionStatus: postcondition.status,
     residualCount: postcondition.residualFindings.length,
     semanticStatus: postcondition.semanticStatus,
+    perFindingOutcomes,
     postcondition,
   };
   const verificationText = postcondition.status === 'clean'

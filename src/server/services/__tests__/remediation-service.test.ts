@@ -4,6 +4,7 @@ import { findingId } from '../finding-identity';
 
 const queueMock = vi.hoisted(() => ({
   getOrCreateJobAtomic: vi.fn(),
+  listLatestCompletedLint: vi.fn(),
   list: vi.fn(),
 }));
 const webSearchMock = vi.hoisted(() => ({
@@ -125,6 +126,7 @@ function context(action: RemediationContext['action'], findingIds: string[]): Re
 beforeEach(() => {
   vi.clearAllMocks();
   remediationJobs = [];
+  queueMock.listLatestCompletedLint.mockReturnValue(makeJob());
   queueMock.list.mockReturnValue([makeJob()]);
   queueMock.getOrCreateJobAtomic.mockImplementation((input: {
     matcher: (jobs: Job[]) => Job | null;
@@ -228,8 +230,11 @@ describe('remediate 工作流编排', () => {
         remediationContext: context('fix', [CONTRADICTION_ID, BROKEN_ID]),
       },
       subjectId: SUBJECT.id,
+      lintRanAt: '2026-07-13T10:01:00.000Z',
       matcher: expect.any(Function),
     });
+    expect(queueMock.listLatestCompletedLint).toHaveBeenCalledWith(SUBJECT.id);
+    expect(queueMock.list).not.toHaveBeenCalled();
     expect(result).toEqual({ jobId: 'job-1', deduplicated: false });
   });
 
@@ -250,6 +255,7 @@ describe('remediate 工作流编排', () => {
         remediationContext: context('curate', [SECOND_ORPHAN_ID, ORPHAN_ID]),
       },
       subjectId: SUBJECT.id,
+      lintRanAt: '2026-07-13T10:01:00.000Z',
       matcher: expect.any(Function),
     });
   });
@@ -271,6 +277,7 @@ describe('remediate 工作流编排', () => {
         remediationContext: context('research', [GAP_ID]),
       },
       subjectId: SUBJECT.id,
+      lintRanAt: '2026-07-13T10:01:00.000Z',
       matcher: expect.any(Function),
       beforeCreate: expect.any(Function),
     });
@@ -294,6 +301,7 @@ describe('remediate 工作流编排', () => {
         remediationContext: context('research', findingIds),
       },
       subjectId: SUBJECT.id,
+      lintRanAt: '2026-07-13T10:01:00.000Z',
       matcher: expect.any(Function),
       beforeCreate: expect.any(Function),
     });
