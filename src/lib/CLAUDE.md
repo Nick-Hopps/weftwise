@@ -10,7 +10,7 @@
 
 | 文件 | 说明 |
 |------|------|
-| `contracts.ts` | **全应用领域类型单一真实源**：`Subject / SubjectId / WikiPage / WikiLink / Job / JobEvent / Source / IngestResult / QueryResult / LintFinding / EnrichedLintFinding / RemediationAction / RemediationPlan / HealthSnapshot / Changeset / ChangesetEntry / PostconditionScope / PostconditionFinding / PostconditionReport / Conversation / ConversationMessage` |
+| `contracts.ts` | **全应用领域类型单一真实源**：Subject/Wiki/Job/Source/Health/Changeset/Conversation，以及 `MetadataPatchInput/Result`、`LinkEnsureInput/Result`、`PendingActionOperation/Preview/View` 等前后端审批契约 |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
@@ -52,6 +52,10 @@ HistoryEntry   { id, sha, date, type: string, message, affectedPages: HistoryAff
 HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
 Conversation   { id, subjectId, title, createdAt, updatedAt }
 ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: {pageSlug,excerpt}[]|null, createdAt }
+MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
+LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
+PendingActionOperation = 'create'|'update'|'patch'|'delete'|'reenrich'|'metadata-patch'|'link-ensure'
+PreviewChangeInput { operation, payload } // discriminated union；Query 只提交预览，不持有真实写工具
 ```
 
 > **扩展规则**：
@@ -120,7 +124,7 @@ src/lib/
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
-├── tool-activity.ts        # 🆕 工具活动展示：toolActivityIcon/toolActivityVerb/summarizeToolArgs（client+server 共用，`wiki.reenrich` 映射 ✨，`wiki.create` 映射 ➕，`wiki.update` 映射 ✏️，`wiki.delete` 映射 🗑，`wiki.merge` 映射 🔗，`wiki.split` 映射 ✂️）
+├── tool-activity.ts        # 工具活动展示与参数脱敏（含 metadata ✏️ / link 🔗，只显示 slug/字段名/mode，不泄露值或锚点）
 ├── error-format.ts         # 🆕 describeErrorMessage：补全 RetryError 丢失的真实原因
 └── theme/
     └── read-theme-vars.ts  # 读取 CSS 变量
@@ -130,6 +134,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-13 | contracts 新增 metadata/link 窄写输入结果，并把 PendingAction operation/preview 扩展到 `metadata-patch` / `link-ensure`；tool-activity 增加两种工具的安全摘要，metadata 值与链接锚点不进入活动日志 |
 | 2026-07-12 | Health 修复闭环 Phase 2A：`EnrichedLintFinding` 增加稳定 `id`；新增 `RemediationStatus / Workflow / Action / Plan / Context` 与 `HealthSnapshot` 共享契约，彻底移除数组位置身份语义 |
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：contracts 增加 `Subject` / `SubjectId` 与 `subjectId` 字段；`useApiFetch()` hook 自动注入 subjectId；markdown-client 跨主题 `?s=` href |
