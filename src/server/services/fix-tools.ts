@@ -1,7 +1,7 @@
 /**
  * fix tool-loop 的 worker 侧 ToolContext。
  * 只读：已提交 vault（readPageInSubject）+ 混合检索（hybridRankSlugs）+ 列举（过滤 meta）——与 curate-tools 读侧同构。
- * 写：update + patch（不注入 createPage——断链只允许重链/解链，禁止补建 stub 页）；
+ * 写：update + patch + linkEnsure（不注入 createPage/metadataPatch——断链只允许重链/解链，禁止补建 stub 页）；
  *     update 先过 FixGuard（写 cap + 保护页）再过忠实度（checkRewriteFidelity，profile 'fix'）；
  *     patch 只过 FixGuard（不接忠实度检查——old_string/new_string 精确唯一替换风险面天然小，
  *     坏链由 page-ops 内核确定性拒绝）；
@@ -11,7 +11,7 @@
 import * as pagesRepo from '../db/repos/pages-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import { executePageUpdate, executePagePatch } from '../wiki/page-ops';
+import { executePageUpdate, executePagePatch, executePageLinkEnsure } from '../wiki/page-ops';
 import type { FixGuard } from './fix-deterministic';
 import { checkRewriteFidelity, FIDELITY_PROFILES } from '@/server/wiki/rewrite-fidelity';
 import { collectBrokenLinkTargets } from './page-write';
@@ -20,6 +20,16 @@ import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
 
 const SEARCH_LIMIT_DEFAULT = 8;
+
+/** 单个 Fix job 内串行化完整写临界区；前一写失败不阻塞后续写。 */
+function createSerialWriteQueue(): <T>(write: () => Promise<T>) => Promise<T> {
+  let tail: Promise<void> = Promise.resolve();
+  return <T>(write: () => Promise<T>): Promise<T> => {
+    const result = tail.then(write);
+    tail = result.then(() => undefined, () => undefined);
+    return result;
+  };
+}
 
 export function buildFixToolContext(
   subject: Subject,
@@ -31,6 +41,7 @@ export function buildFixToolContext(
 ): ToolContext {
   const { guard, jobId, emit } = deps;
   const evidence = createSubjectEvidenceReader(subject);
+  const runWrite = createSerialWriteQueue();
   return {
     subject,
     async readPage(slug) {
@@ -63,37 +74,68 @@ export function buildFixToolContext(
     },
     emit,
     async updatePage(input) {
-      const cap = guard.canWrite();
-      if (!cap.ok) { emit('fix:skip', `Skip update ${input.slug}: ${cap.reason}`, { slug: input.slug, reason: cap.reason }); throw new Error(cap.reason); }
-      const prot = guard.canEditPage(input.slug);
-      if (!prot.ok) { emit('fix:skip', `Skip update ${input.slug}: ${prot.reason}`, { slug: input.slug, reason: prot.reason }); throw new Error(prot.reason); }
-      const doc = readPageInSubject(subject.slug, input.slug);
-      if (!doc) { const reason = `page "${input.slug}" not found`; emit('fix:skip', `Skip update ${input.slug}: ${reason}`, { slug: input.slug, reason }); throw new Error(reason); }
-      // 断链豁免：已确认目标页不存在的 wikilink 允许被解链/重链丢弃（活链仍不许丢）
-      const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix, {
-        allowedDroppedTargets: collectBrokenLinkTargets(subject, doc.body),
+      return runWrite(async () => {
+        const cap = guard.canWrite();
+        if (!cap.ok) { emit('fix:skip', `Skip update ${input.slug}: ${cap.reason}`, { slug: input.slug, reason: cap.reason }); throw new Error(cap.reason); }
+        const prot = guard.canEditPage(input.slug);
+        if (!prot.ok) { emit('fix:skip', `Skip update ${input.slug}: ${prot.reason}`, { slug: input.slug, reason: prot.reason }); throw new Error(prot.reason); }
+        const doc = readPageInSubject(subject.slug, input.slug);
+        if (!doc) { const reason = `page "${input.slug}" not found`; emit('fix:skip', `Skip update ${input.slug}: ${reason}`, { slug: input.slug, reason }); throw new Error(reason); }
+        // 断链豁免：已确认目标页不存在的 wikilink 允许被解链/重链丢弃（活链仍不许丢）
+        const fidelity = checkRewriteFidelity(doc.body, input.body, FIDELITY_PROFILES.fix, {
+          allowedDroppedTargets: collectBrokenLinkTargets(subject, doc.body),
+        });
+        if (!fidelity.ok) {
+          // 通用短语保留（下游/测试据此识别忠实度拦截），后缀带上具体违规项让日志可诊断
+          const reason = `edit dropped too much content: ${fidelity.violations.join('; ')}`;
+          emit('fix:warn', `Rejected update ${input.slug}: ${reason}`, { slug: input.slug, reason, violations: fidelity.violations });
+          throw new Error(reason);
+        }
+        const res = await executePageUpdate(jobId, subject, input);
+        guard.record('update');
+        emit('fix:page', `Repaired "${res.updatedSlug}".`, { slug: res.updatedSlug });
+        return res;
       });
-      if (!fidelity.ok) {
-        // 通用短语保留（下游/测试据此识别忠实度拦截），后缀带上具体违规项让日志可诊断
-        const reason = `edit dropped too much content: ${fidelity.violations.join('; ')}`;
-        emit('fix:warn', `Rejected update ${input.slug}: ${reason}`, { slug: input.slug, reason, violations: fidelity.violations });
-        throw new Error(reason);
-      }
-      const res = await executePageUpdate(jobId, subject, input);
-      guard.record('update');
-      emit('fix:page', `Repaired "${res.updatedSlug}".`, { slug: res.updatedSlug });
-      return res;
     },
     // patch：确定性字符串替换拼接，无漏抄风险 → 不做忠实度检查（坏链/残链仍由内核拒绝）
     async patchPage(input) {
-      const cap = guard.canWrite();
-      if (!cap.ok) { emit('fix:skip', `Skip patch ${input.slug}: ${cap.reason}`, { slug: input.slug, reason: cap.reason }); throw new Error(cap.reason); }
-      const prot = guard.canEditPage(input.slug);
-      if (!prot.ok) { emit('fix:skip', `Skip patch ${input.slug}: ${prot.reason}`, { slug: input.slug, reason: prot.reason }); throw new Error(prot.reason); }
-      const res = await executePagePatch(jobId, subject, input);
-      guard.record('update');
-      emit('fix:page', `Patched "${res.updatedSlug}" (${res.appliedEdits} edits).`, { slug: res.updatedSlug });
-      return res;
+      return runWrite(async () => {
+        const cap = guard.canWrite();
+        if (!cap.ok) { emit('fix:skip', `Skip patch ${input.slug}: ${cap.reason}`, { slug: input.slug, reason: cap.reason }); throw new Error(cap.reason); }
+        const prot = guard.canEditPage(input.slug);
+        if (!prot.ok) { emit('fix:skip', `Skip patch ${input.slug}: ${prot.reason}`, { slug: input.slug, reason: prot.reason }); throw new Error(prot.reason); }
+        const res = await executePagePatch(jobId, subject, input);
+        guard.record('update');
+        emit('fix:page', `Patched "${res.updatedSlug}" (${res.appliedEdits} edits).`, { slug: res.updatedSlug });
+        return res;
+      });
+    },
+    async linkEnsure(input) {
+      return runWrite(async () => {
+        const editable = guard.canEditPage(input.sourceSlug);
+        if (!editable.ok) {
+          emit('fix:skip', `Skip link repair ${input.sourceSlug}: ${editable.reason}`, {
+            slug: input.sourceSlug,
+            reason: editable.reason,
+          });
+          throw new Error(editable.reason);
+        }
+        const cap = guard.canWrite();
+        if (!cap.ok) {
+          emit('fix:skip', `Skip link repair ${input.sourceSlug}: ${cap.reason}`, {
+            slug: input.sourceSlug,
+            reason: cap.reason,
+          });
+          throw new Error(cap.reason);
+        }
+        const res = await executePageLinkEnsure(jobId, subject, input);
+        guard.record('update');
+        emit('fix:page', `Maintained one link in "${res.updatedSlug}".`, {
+          slug: res.updatedSlug,
+          mode: res.mode,
+        });
+        return res;
+      });
     },
   };
 }
