@@ -1,6 +1,6 @@
 # Research 批准溯源 Phase 2C 设计
 
-**日期：** 2026-07-13  
+**日期：** 2026-07-13
 **状态：** 已实现
 **来源：** `docs/superpowers/specs/2026-07-10-wiki-tooling-and-workflow-governance-design.md` 第十章与 Phase 2 第 4 项
 
