@@ -79,3 +79,14 @@ export function toolActivityLine(tool: string, args: unknown): string {
   const head = `${toolActivityIcon(tool)} ${toolActivityVerb(tool)}`;
   return summary ? `${head} "${summary}"…` : `${head}…`;
 }
+
+/** 根据 SSE 事件识别 job 活动标题，供进度条与详情弹窗共用。 */
+export function jobActivityTitle(events: readonly { type: string }[]): string {
+  for (const event of events) {
+    if (event.type.startsWith('research-import')) return 'Importing research';
+    if (event.type.startsWith('research')) return 'Researching';
+    if (event.type.startsWith('ingest')) return 'Ingesting';
+    if (event.type.startsWith('lint')) return 'Linting';
+  }
+  return 'Processing';
+}

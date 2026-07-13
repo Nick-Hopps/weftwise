@@ -7,6 +7,10 @@ import { pruneOldOperations } from '../db/repos/operations-repo';
 import { pruneOldUsage, USAGE_RETENTION_MS } from '../db/repos/usage-repo';
 import { maintainPendingActions } from '../services/pending-action-maintenance';
 import {
+  reconcileResearchProvenance,
+  reconcileResearchProvenanceForJob,
+} from '../services/research-provenance-reconciler';
+import {
   getMaintenanceEnabled,
   getMaintenanceSweepIntervalHours,
   getMaintenanceMaxPagesPerSweep,
@@ -69,6 +73,23 @@ function maintainPendingActionsTick(): void {
     console.log(
       `[maintenance] pending_actions: expired ${expired}, recovered ${recovered}, pruned ${pruned}`,
     );
+  }
+}
+
+/** 对账异常属于派生状态恢复失败，不能覆盖已经持久化的 job 终态。 */
+function reconcileTerminalJob(jobId: string): void {
+  try {
+    reconcileResearchProvenanceForJob(jobId);
+  } catch (error) {
+    console.error('[research-provenance] terminal reconcile failed', error);
+  }
+}
+
+function reconcileResearchTick(): void {
+  try {
+    reconcileResearchProvenance();
+  } catch (error) {
+    console.error('[research-provenance] maintenance reconcile failed', error);
   }
 }
 
@@ -200,6 +221,7 @@ async function runJob(job: Job): Promise<void> {
   if (!handler) {
     queue.fail(job.id, new Error(`No handler registered for job type: ${job.type}`));
     events.emit(job.id, 'job:failed', `No handler registered for job type: ${job.type}`);
+    reconcileTerminalJob(job.id);
     return;
   }
 
@@ -226,6 +248,7 @@ async function runJob(job: Job): Promise<void> {
     const result = await handler(job, emit);
     queue.complete(job.id, result);
     events.emit(job.id, 'job:completed', 'Job completed successfully', { result });
+    reconcileTerminalJob(job.id);
   } catch (error) {
     const errorMessage = describeErrorMessage(error);
     const errorData: Record<string, unknown> = { error: errorMessage };
@@ -241,6 +264,7 @@ async function runJob(job: Job): Promise<void> {
       // （若仍为 running 则 requestCancel 会落终态），并补发 job:cancelled 区别于失败。
       queue.requestCancel(job.id);
       events.emit(job.id, 'job:cancelled', 'Job cancelled by user', { manual: true });
+      reconcileTerminalJob(job.id);
     } else if (action === 'retry') {
       // Retry: requeue the SAME job (preserves job ID for SSE tracking)
       const delay = RETRY_DELAY_MS * attempt;
@@ -255,6 +279,7 @@ async function runJob(job: Job): Promise<void> {
     } else {
       queue.fail(job.id, error);
       events.emit(job.id, 'job:failed', errorMessage, errorData);
+      reconcileTerminalJob(job.id);
     }
   } finally {
     clearInterval(heartbeatId);
@@ -268,6 +293,7 @@ export function startWorker(pollIntervalMs = 2000): () => void {
   } catch (err) {
     console.error('[maintenance] job_events prune failed', err);
   }
+  reconcileResearchTick();
   try {
     pruneOldOperationsTick();
   } catch (err) {
@@ -306,6 +332,7 @@ export function startWorker(pollIntervalMs = 2000): () => void {
     } catch (err) {
       console.error('[maintenance] job_events prune failed', err);
     }
+    reconcileResearchTick();
     try {
       pruneOldOperationsTick();
     } catch (err) {

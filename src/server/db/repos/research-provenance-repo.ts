@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  Job,
   ResearchApprovalRow,
   ResearchCandidateIngestRow,
   ResearchCandidateRow,
+  ResearchFindingVerificationStatus,
   ResearchRunFindingRow,
   ResearchRunOrigin,
   ResearchRunRow,
@@ -79,6 +81,49 @@ export interface ApproveResearchRunResult {
   stored: StoredResearchRun;
   coordinatorJobId: string;
   replayed: boolean;
+}
+
+export interface ClaimResearchDeliveryInput {
+  approvalId: string;
+  candidateId: string;
+  now?: Date;
+  leaseMs?: number;
+}
+
+export interface ResearchDeliveryClaimInput extends ClaimResearchDeliveryInput {
+  claimToken: string;
+}
+
+export interface FailResearchDeliveryClaimInput extends ResearchDeliveryClaimInput {
+  error: { code?: string; message: string };
+}
+
+export interface MarkResearchDeliveryQueuedInput extends ResearchDeliveryClaimInput {
+  sourceId: string;
+  ingestJobId: string;
+}
+
+export interface CompleteResearchDeliveryInput {
+  approvalId: string;
+  candidateId: string;
+  ingestJobId: string;
+  sourceId: string;
+  operationIds: string[];
+  touchedPages: unknown[];
+  commitSha: string | null;
+  now?: Date;
+}
+
+export interface ResearchFindingVerificationOutcome {
+  findingId: string;
+  status: Exclude<ResearchFindingVerificationStatus, 'pending'>;
+  snapshot: unknown | null;
+}
+
+export interface EnqueueResearchDeliveryFromSourceInput extends ResearchDeliveryClaimInput {
+  runId: string;
+  subjectId: SubjectId;
+  sourceId: string;
 }
 
 type RawDb = ReturnType<typeof getRawDb>;
@@ -417,6 +462,474 @@ export function approveResearchRunAtomic(
   return transaction.immediate();
 }
 
+/** pending 或租约已过期的 fetching delivery 才能获得新 claim。 */
+export function claimResearchDelivery(
+  input: ClaimResearchDeliveryInput,
+): ResearchCandidateIngestRow | null {
+  const now = input.now ?? new Date();
+  const leaseMs = input.leaseMs ?? 60_000;
+  assertLeaseDuration(leaseMs);
+  const nowIso = now.toISOString();
+  const claimToken = randomUUID();
+  const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): ResearchCandidateIngestRow | null => {
+    const update = sqlite.prepare(`
+      UPDATE research_candidate_ingests
+      SET status = 'fetching', claim_token = ?, lease_expires_at = ?,
+          attempt_count = attempt_count + 1, updated_at = ?, error_json = NULL
+      WHERE approval_id = ? AND candidate_id = ?
+        AND (
+          status = 'pending'
+          OR (status = 'fetching' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+        )
+    `).run(
+      claimToken,
+      leaseExpiresAt,
+      nowIso,
+      input.approvalId,
+      input.candidateId,
+      nowIso,
+    );
+    if (update.changes !== 1) return null;
+    const row = sqlite.prepare(`
+      SELECT * FROM research_candidate_ingests
+      WHERE approval_id = ? AND candidate_id = ?
+    `).get(input.approvalId, input.candidateId) as RawRow | undefined;
+    if (!row) throw new Error('Claimed Research delivery disappeared');
+    return researchCandidateIngestRow(row);
+  });
+  return transaction.immediate();
+}
+
+/** 仅当前且未过期的 claim 可以续租。 */
+export function renewResearchDeliveryClaim(input: ResearchDeliveryClaimInput): boolean {
+  const now = input.now ?? new Date();
+  const leaseMs = input.leaseMs ?? 60_000;
+  assertLeaseDuration(leaseMs);
+  const nowIso = now.toISOString();
+  const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+  const result = getRawDb().prepare(`
+    UPDATE research_candidate_ingests
+    SET lease_expires_at = ?, updated_at = ?
+    WHERE approval_id = ? AND candidate_id = ?
+      AND status = 'fetching' AND claim_token = ?
+      AND lease_expires_at IS NOT NULL AND lease_expires_at > ?
+  `).run(
+    leaseExpiresAt,
+    nowIso,
+    input.approvalId,
+    input.candidateId,
+    input.claimToken,
+    nowIso,
+  );
+  return result.changes === 1;
+}
+
+/** source 写事务开始前复验 claim，避免已失效请求创建文件或 child job。 */
+export function assertResearchDeliveryClaimInTransaction(
+  sqlite: RawDb,
+  input: ResearchDeliveryClaimInput,
+): void {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  const row = sqlite.prepare(`
+    SELECT 1 FROM research_candidate_ingests
+    WHERE approval_id = ? AND candidate_id = ?
+      AND status = 'fetching' AND claim_token = ?
+      AND lease_expires_at IS NOT NULL AND lease_expires_at > ?
+      AND source_id IS NULL AND ingest_job_id IS NULL
+  `).get(
+    input.approvalId,
+    input.candidateId,
+    input.claimToken,
+    nowIso,
+  );
+  if (!row) throw new Error('Research delivery claim is stale or no longer writable');
+}
+
+/** 抓取失败只允许由当前 claim 终结，迟到请求不得覆盖新 attempt。 */
+export function failResearchDeliveryClaim(input: FailResearchDeliveryClaimInput): boolean {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  const result = getRawDb().prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'failed', claim_token = NULL, lease_expires_at = NULL,
+        updated_at = ?, completed_at = ?, error_json = ?
+    WHERE approval_id = ? AND candidate_id = ?
+      AND status = 'fetching' AND claim_token = ?
+      AND lease_expires_at IS NOT NULL AND lease_expires_at > ?
+  `).run(
+    nowIso,
+    nowIso,
+    JSON.stringify(input.error),
+    input.approvalId,
+    input.candidateId,
+    input.claimToken,
+    nowIso,
+  );
+  return result.changes === 1;
+}
+
+/**
+ * 供 source 持久化事务调用：source、child job 与 delivery queued 必须同成同败。
+ * 调用方必须传入当前 transaction 使用的同一 SQLite 连接。
+ */
+export function markResearchDeliveryQueuedInTransaction(
+  sqlite: RawDb,
+  input: MarkResearchDeliveryQueuedInput,
+): void {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  const result = sqlite.prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'queued', source_id = ?, ingest_job_id = ?,
+        claim_token = NULL, lease_expires_at = NULL, updated_at = ?, error_json = NULL
+    WHERE approval_id = ? AND candidate_id = ?
+      AND status = 'fetching' AND claim_token = ?
+      AND lease_expires_at IS NOT NULL AND lease_expires_at > ?
+      AND (source_id IS NULL OR source_id = ?) AND ingest_job_id IS NULL
+  `).run(
+    input.sourceId,
+    input.ingestJobId,
+    nowIso,
+    input.approvalId,
+    input.candidateId,
+    input.claimToken,
+    nowIso,
+    input.sourceId,
+  );
+  if (result.changes !== 1) {
+    throw new Error('Research delivery claim is stale or no longer writable');
+  }
+}
+
+/**
+ * 崩溃恢复分支：delivery 已有 canonical source 但缺 child job 时，不再联网或重写文件，
+ * 在同一事务内复验 claim、创建 Ingest job 并推进 queued。
+ */
+export function enqueueResearchDeliveryFromSourceAtomic(
+  input: EnqueueResearchDeliveryFromSourceInput,
+): Job {
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): Job => {
+    const now = input.now ?? new Date();
+    const nowIso = now.toISOString();
+    const source = sqlite.prepare(`
+      SELECT filename FROM sources WHERE id = ? AND subject_id = ?
+    `).get(input.sourceId, input.subjectId) as { filename: string } | undefined;
+    if (!source) throw new Error('Research delivery source is unavailable');
+    const claim = sqlite.prepare(`
+      SELECT 1 FROM research_candidate_ingests
+      WHERE approval_id = ? AND candidate_id = ? AND run_id = ?
+        AND status = 'fetching' AND claim_token = ?
+        AND lease_expires_at IS NOT NULL AND lease_expires_at > ?
+        AND source_id = ? AND ingest_job_id IS NULL
+    `).get(
+      input.approvalId,
+      input.candidateId,
+      input.runId,
+      input.claimToken,
+      nowIso,
+      input.sourceId,
+    );
+    if (!claim) throw new Error('Research delivery claim is stale or no longer writable');
+
+    const job: Job = {
+      id: randomUUID(),
+      type: 'ingest',
+      status: 'pending',
+      subjectId: input.subjectId,
+      paramsJson: JSON.stringify({
+        researchProvenance: {
+          runId: input.runId,
+          approvalId: input.approvalId,
+          candidateId: input.candidateId,
+        },
+        sourceId: input.sourceId,
+        filename: source.filename,
+        subjectId: input.subjectId,
+      }),
+      resultJson: null,
+      createdAt: nowIso,
+      startedAt: null,
+      completedAt: null,
+      leaseExpiresAt: null,
+      heartbeatAt: null,
+      attemptCount: 0,
+    };
+    sqlite.prepare(`
+      INSERT INTO jobs (
+        id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+      ) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, 0)
+    `).run(job.id, job.type, job.status, job.subjectId, job.paramsJson, job.createdAt);
+    markResearchDeliveryQueuedInTransaction(sqlite, {
+      approvalId: input.approvalId,
+      candidateId: input.candidateId,
+      claimToken: input.claimToken,
+      sourceId: input.sourceId,
+      ingestJobId: job.id,
+      now,
+    });
+    return job;
+  });
+  return transaction.immediate();
+}
+
+/** queued child 进入 running 时同步 delivery；重复调用幂等。 */
+export function markResearchDeliveryRunning(
+  approvalId: string,
+  candidateId: string,
+  ingestJobId: string,
+  now = new Date(),
+): boolean {
+  const result = getRawDb().prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'running', updated_at = ?
+    WHERE approval_id = ? AND candidate_id = ? AND ingest_job_id = ?
+      AND status = 'queued'
+  `).run(now.toISOString(), approvalId, candidateId, ingestJobId);
+  return result.changes === 1;
+}
+
+/** child Ingest 完成后原子物化审计证据并终结 delivery。 */
+export function completeResearchDeliveryAtomic(input: CompleteResearchDeliveryInput): boolean {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  const result = getRawDb().prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'completed', source_id = ?, operation_ids_json = ?,
+        touched_pages_json = ?, commit_sha = ?, claim_token = NULL,
+        lease_expires_at = NULL, updated_at = ?, completed_at = ?, error_json = NULL
+    WHERE approval_id = ? AND candidate_id = ? AND ingest_job_id = ?
+      AND status IN ('queued', 'running')
+  `).run(
+    input.sourceId,
+    JSON.stringify([...new Set(input.operationIds)].sort()),
+    JSON.stringify(input.touchedPages),
+    input.commitSha,
+    nowIso,
+    nowIso,
+    input.approvalId,
+    input.candidateId,
+    input.ingestJobId,
+  );
+  return result.changes === 1;
+}
+
+/** child Ingest 失败后终结 delivery；只接受当前绑定的 child job。 */
+export function failResearchDeliveryFromJob(
+  approvalId: string,
+  candidateId: string,
+  ingestJobId: string,
+  error: { code?: string; message: string },
+  now = new Date(),
+): boolean {
+  const nowIso = now.toISOString();
+  const result = getRawDb().prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'failed', claim_token = NULL, lease_expires_at = NULL,
+        updated_at = ?, completed_at = ?, error_json = ?
+    WHERE approval_id = ? AND candidate_id = ? AND ingest_job_id = ?
+      AND status IN ('queued', 'running')
+  `).run(
+    nowIso,
+    nowIso,
+    JSON.stringify(error),
+    approvalId,
+    candidateId,
+    ingestJobId,
+  );
+  return result.changes === 1;
+}
+
+/** coordinator 最终失败或取消时，终结尚未调度的 delivery。 */
+export function failUnscheduledResearchDeliveries(
+  runId: string,
+  error: { code?: string; message: string },
+  now = new Date(),
+): number {
+  const nowIso = now.toISOString();
+  const result = getRawDb().prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'failed', claim_token = NULL, lease_expires_at = NULL,
+        updated_at = ?, completed_at = ?, error_json = ?
+    WHERE run_id = ? AND status IN ('pending', 'fetching')
+  `).run(nowIso, nowIso, JSON.stringify(error), runId);
+  return result.changes;
+}
+
+/** topic run 在全部 delivery 终态后直接聚合 completed/partial/failed。 */
+export function finalizeTopicResearchRunAtomic(runId: string, now = new Date()): boolean {
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): boolean => {
+    const run = sqlite.prepare(`
+      SELECT origin, status FROM research_runs WHERE id = ?
+    `).get(runId) as { origin: string; status: string } | undefined;
+    if (!run || run.origin !== 'topic' || run.status !== 'importing') return false;
+    const counts = researchDeliveryCounts(sqlite, runId);
+    if (counts.total === 0 || counts.terminal !== counts.total) return false;
+    const status = counts.completed === counts.total
+      ? 'completed'
+      : counts.completed > 0 ? 'partial' : 'failed';
+    const nowIso = now.toISOString();
+    const update = sqlite.prepare(`
+      UPDATE research_runs
+      SET status = ?, version = version + 1, updated_at = ?, completed_at = ?
+      WHERE id = ? AND status = 'importing' AND origin = 'topic'
+    `).run(status, nowIso, nowIso, runId);
+    return update.changes === 1;
+  });
+  return transaction.immediate();
+}
+
+/** finding run 全部 delivery 失败时不创建 lint，直接聚合 failed。 */
+export function failFindingResearchRunWithoutDelivery(
+  runId: string,
+  now = new Date(),
+): boolean {
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): boolean => {
+    const counts = researchDeliveryCounts(sqlite, runId);
+    if (counts.total === 0 || counts.terminal !== counts.total || counts.completed > 0) return false;
+    const nowIso = now.toISOString();
+    const update = sqlite.prepare(`
+      UPDATE research_runs
+      SET status = 'failed', version = version + 1, updated_at = ?, completed_at = ?
+      WHERE id = ? AND status = 'importing' AND origin = 'findings'
+        AND verification_lint_job_id IS NULL
+    `).run(nowIso, nowIso, runId);
+    return update.changes === 1;
+  });
+  return transaction.immediate();
+}
+
+/**
+ * finding run 的验证 lint 唯一入队原语：重验 delivery 终态、INSERT job、回写 run
+ * 均在同一 IMMEDIATE transaction 中完成。
+ */
+export function enqueueResearchVerificationLintAtomic(
+  runId: string,
+  now = new Date(),
+): string | null {
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): string | null => {
+    const run = sqlite.prepare(`
+      SELECT subject_id, origin, status, verification_lint_job_id
+      FROM research_runs WHERE id = ?
+    `).get(runId) as {
+      subject_id: string;
+      origin: string;
+      status: string;
+      verification_lint_job_id: string | null;
+    } | undefined;
+    if (!run || run.origin !== 'findings') return null;
+    if (run.verification_lint_job_id) return run.verification_lint_job_id;
+    if (run.status !== 'importing') return null;
+    const counts = researchDeliveryCounts(sqlite, runId);
+    if (counts.total === 0 || counts.terminal !== counts.total || counts.completed === 0) return null;
+
+    const jobId = randomUUID();
+    const nowIso = now.toISOString();
+    sqlite.prepare(`
+      INSERT INTO jobs (
+        id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+      ) VALUES (?, 'lint', 'pending', ?, ?, NULL, ?, NULL, NULL, NULL, NULL, 0)
+    `).run(
+      jobId,
+      run.subject_id,
+      JSON.stringify({ subjectId: run.subject_id, researchVerification: { runId } }),
+      nowIso,
+    );
+    const update = sqlite.prepare(`
+      UPDATE research_runs
+      SET verification_lint_job_id = ?, status = 'verifying',
+          version = version + 1, updated_at = ?
+      WHERE id = ? AND status = 'importing' AND origin = 'findings'
+        AND verification_lint_job_id IS NULL
+    `).run(jobId, nowIso, runId);
+    if (update.changes !== 1) throw new Error('Research verification lint claim changed concurrently');
+    return jobId;
+  });
+  return transaction.immediate();
+}
+
+/** verification 结果与 run 终态在同一事务内物化。 */
+export function finalizeResearchVerificationAtomic(
+  runId: string,
+  verificationJobId: string,
+  outcomes: ResearchFindingVerificationOutcome[],
+  status: 'completed' | 'partial' | 'failed',
+  error: { code?: string; message: string } | null,
+  now = new Date(),
+): boolean {
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): boolean => {
+    const run = sqlite.prepare(`
+      SELECT status FROM research_runs
+      WHERE id = ? AND verification_lint_job_id = ?
+    `).get(runId, verificationJobId) as { status: string } | undefined;
+    if (!run || run.status !== 'verifying') return false;
+    const rows = sqlite.prepare(`
+      SELECT finding_id FROM research_run_findings WHERE run_id = ? ORDER BY finding_id
+    `).all(runId) as Array<{ finding_id: string }>;
+    const expected = rows.map((row) => row.finding_id);
+    const received = [...outcomes].map((outcome) => outcome.findingId).sort();
+    if (!sameStringArray(expected, received)) {
+      throw new Error('Research verification outcomes do not cover the persisted findings');
+    }
+    const nowIso = now.toISOString();
+    const updateFinding = sqlite.prepare(`
+      UPDATE research_run_findings
+      SET verification_status = ?, verified_at = ?, verification_snapshot_json = ?
+      WHERE run_id = ? AND finding_id = ? AND verification_status = 'pending'
+    `);
+    for (const outcome of outcomes) {
+      const update = updateFinding.run(
+        outcome.status,
+        nowIso,
+        outcome.snapshot === null ? null : JSON.stringify(outcome.snapshot),
+        runId,
+        outcome.findingId,
+      );
+      if (update.changes !== 1) throw new Error('Research finding verification changed concurrently');
+    }
+    const runUpdate = sqlite.prepare(`
+      UPDATE research_runs
+      SET status = ?, version = version + 1, updated_at = ?, completed_at = ?, error_json = ?
+      WHERE id = ? AND status = 'verifying' AND verification_lint_job_id = ?
+    `).run(
+      status,
+      nowIso,
+      nowIso,
+      error ? JSON.stringify(error) : null,
+      runId,
+      verificationJobId,
+    );
+    return runUpdate.changes === 1;
+  });
+  return transaction.immediate();
+}
+
+/** 启动/维护扫描只读取尚未终态的 run，返回有界稳定 ID。 */
+export function listResearchRunIdsForReconciliation(limit = 100): string[] {
+  if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError('Research reconcile limit must be positive');
+  return (getRawDb().prepare(`
+    SELECT id FROM research_runs
+    WHERE status IN ('importing', 'verifying')
+    ORDER BY updated_at ASC, id ASC LIMIT ?
+  `).all(limit) as Array<{ id: string }>).map((row) => row.id);
+}
+
+/** job 终态 hook 按 coordinator/child/verification 三条 lineage 定位 run。 */
+export function findResearchRunIdsByJobId(jobId: string): string[] {
+  return (getRawDb().prepare(`
+    SELECT id FROM research_runs WHERE verification_lint_job_id = ?
+    UNION
+    SELECT run_id AS id FROM research_approvals WHERE coordinator_job_id = ?
+    UNION
+    SELECT run_id AS id FROM research_candidate_ingests WHERE ingest_job_id = ?
+  `).all(jobId, jobId, jobId) as Array<{ id: string }>).map((row) => row.id);
+}
+
 /** awaiting-approval → dismissed 的 compare-and-swap。 */
 export function dismissResearchRunAtomic(
   runId: string,
@@ -625,4 +1138,28 @@ function parsePersistedSelection(json: string): string[] {
 function sameStringArray(left: string[], right: string[]): boolean {
   return left.length === right.length
     && left.every((value, index) => value === right[index]);
+}
+
+function assertLeaseDuration(leaseMs: number): void {
+  if (!Number.isSafeInteger(leaseMs) || leaseMs <= 0) {
+    throw new Error('Research delivery lease must be a positive integer');
+  }
+}
+
+function researchDeliveryCounts(
+  sqlite: RawDb,
+  runId: string,
+): { total: number; terminal: number; completed: number } {
+  const row = sqlite.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN status IN ('completed', 'failed') THEN 1 ELSE 0 END) AS terminal,
+      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed
+    FROM research_candidate_ingests WHERE run_id = ?
+  `).get(runId) as { total: number; terminal: number | null; completed: number | null };
+  return {
+    total: Number(row.total),
+    terminal: Number(row.terminal ?? 0),
+    completed: Number(row.completed ?? 0),
+  };
 }

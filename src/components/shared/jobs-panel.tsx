@@ -36,6 +36,8 @@ function jobTypeVerb(type: string): string {
       return 'Indexing';
     case 'research':
       return 'Researching';
+    case 'research-import':
+      return 'Importing research';
     default:
       return 'Processing';
   }
