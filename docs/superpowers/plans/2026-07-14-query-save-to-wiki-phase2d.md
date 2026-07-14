@@ -8,7 +8,7 @@
 
 **分支：** `feat/query-save-to-wiki-phase2d`
 **worktree：** `.worktrees/query-save-to-wiki-phase2d`
-**基线：** `41b3b5e`
+**基线：** `6846661`
 
 ## Task 1：让 shared create command 接受真实 job ID
 
@@ -29,7 +29,7 @@
    npx tsc --noEmit
    ```
 
-5. 提交：`重构：统一页面创建命令的任务上下文`
+5. 提交：`refactor: 统一页面创建命令的任务上下文`
 
 ## Task 2：迁移 save-to-wiki 编排并补齐重试恢复
 
@@ -55,7 +55,7 @@
    npx tsc --noEmit
    ```
 
-8. 提交：`重构：统一问答保存与页面创建路径`
+8. 提交：`refactor: 统一问答保存与页面创建路径`
 
 ## Task 3：清理客户端 slug 猜测并做 API 回归
 
@@ -78,7 +78,7 @@
    npx tsc --noEmit
    ```
 
-6. 提交：`修复：移除问答保存的客户端 slug 猜测`
+6. 提交：`fix: 移除问答保存的客户端 slug 猜测`
 
 ## Task 4：文档、配置审计与全量验收
 
@@ -96,7 +96,7 @@
 
    ```bash
    rg -n "saveQueryAsPage|query-answer|citations.map.*pageSlug|createChangeset|serializeFrontmatter" src/server/services/query-service.ts src/server/services
-   git diff --exit-code 41b3b5e -- llm-config.example.json
+   git diff --exit-code 6846661 -- llm-config.example.json
    ```
 
 3. 运行：
@@ -106,11 +106,11 @@
    npx tsc --noEmit
    npm run lint
    npm run build
-   git diff --check 41b3b5e..HEAD
+   git diff --check 6846661..HEAD
    ```
 
 4. 检查 Query ToolProfile、PendingAction create、History job type、Subject mutation epoch 与 embedding 回归。
-5. 提交：`文档：同步问答保存统一创建工作流`
+5. 提交：`docs: 同步问答保存统一创建工作流`
 
 ## Task 5：回合主分支并清理
 
@@ -118,7 +118,7 @@
 2. 在主工作区执行：
 
    ```bash
-   git merge --no-ff feat/query-save-to-wiki-phase2d -m "合并 feat/query-save-to-wiki-phase2d：完成问答保存统一创建 Phase 2D"
+   git merge --no-ff feat/query-save-to-wiki-phase2d -m "merge: 合并 feat/query-save-to-wiki-phase2d：完成问答保存统一创建 Phase 2D"
    ```
 
 3. 在 main 运行关键回归并确认 merge tree 与 feature tree 一致。

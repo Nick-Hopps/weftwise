@@ -53,7 +53,7 @@
 5. 回到 main 执行：
 
    ```bash
-   git merge --no-ff feat/cross-subject-read-phase3a -m "合并 feat/cross-subject-read-phase3a：完成跨主题只读工具 Phase 3A"
+   git merge --no-ff feat/cross-subject-read-phase3a -m "merge: 合并 feat/cross-subject-read-phase3a：完成跨主题只读工具 Phase 3A"
    ```
 
 6. 删除 worktree 与特性分支，确认 main 干净。
