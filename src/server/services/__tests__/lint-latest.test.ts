@@ -131,6 +131,31 @@ describe('selectLatestFindings', () => {
     expect(res.bySeverity).toEqual({ critical: 0, warning: 1, info: 0 });
   });
 
+  it('兼容缺少语义证据的旧快照，并严格校验新可选字段', () => {
+    const valid = {
+      ...finding('warning'),
+      type: 'missing-crossref',
+      targetSlug: 'target',
+      evidence: [{ pageSlug: 'p', quote: 'Target' }],
+    } as const;
+    const mixed = job({
+      id: 'semantic-fields',
+      resultJson: JSON.stringify({
+        findings: [
+          valid,
+          { ...valid, pageSlug: 'legacy', targetSlug: undefined, evidence: undefined },
+          { ...valid, targetSlug: 42 },
+          { ...valid, evidence: [{ pageSlug: 'p', quote: 7 }] },
+        ],
+      }),
+    });
+
+    const result = selectLatestFindings([mixed]);
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings[0]).toMatchObject(valid);
+    expect(result.findings[1]?.pageSlug).toBe('legacy');
+  });
+
   it('丢弃缺少必填字段的 finding', () => {
     const invalid = job({
       id: 'missing-required',

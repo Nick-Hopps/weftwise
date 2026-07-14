@@ -16,6 +16,7 @@ import {
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 import type { LintFinding, Subject } from '@/lib/contracts';
+import { validateSemanticFindings } from './lint-semantic-validation';
 
 const MAX_SEMANTIC_PROMPT_CHARS = 120_000;
 
@@ -25,6 +26,7 @@ export async function runSemanticChecksForSubject(subject: Subject): Promise<Lin
 
   const allPages = pagesRepo.getAllPages(subject.id);
   const titleBySlug = new Map(allPages.map((p) => [p.slug, p.title]));
+  const knownPageNames = pagesRepo.getTitleToSlugMap(subject.id);
 
   const pagesForPrompt = wikiFiles.map((f) => ({
     slug: f.slug,
@@ -70,16 +72,16 @@ export async function runSemanticChecksForSubject(subject: Subject): Promise<Lin
       LintResultSchema,
       LINT_SYSTEM_PROMPT,
       userPrompt,
+      { temperature: 0 },
     );
 
     allFindings.push(
-      ...result.findings.map((f): LintFinding => ({
-        type: f.type,
-        severity: f.severity,
-        pageSlug: f.pageSlug,
-        description: f.description,
-        suggestedFix: f.suggestedFix,
-      })),
+      ...validateSemanticFindings(
+        result.findings,
+        pagesForPrompt,
+        subject.slug,
+        knownPageNames,
+      ),
     );
   }
 

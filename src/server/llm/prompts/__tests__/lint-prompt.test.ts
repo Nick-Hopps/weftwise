@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { buildLintUserPrompt } from '../lint-prompt';
+import {
+  LINT_SYSTEM_PROMPT,
+  LintResultSchema,
+  buildLintUserPrompt,
+} from '../lint-prompt';
 import type { PromptContext } from '../prompt-context';
 
 const ctxJapanese: PromptContext = {
@@ -36,5 +40,23 @@ describe('buildLintUserPrompt – language directive', () => {
     expect(out).toMatch(/^=== OUTPUT LANGUAGE ===/);
     expect(out).toContain('Japanese');
     expect(out).toContain('No wiki pages provided');
+  });
+
+  it('要求可由服务端核验的目标与逐页原文证据', () => {
+    expect(LINT_SYSTEM_PROMPT).toContain('targetSlug');
+    expect(LINT_SYSTEM_PROMPT).toContain('exact, verbatim quote');
+    expect(LINT_SYSTEM_PROMPT).not.toContain('better to flag a false positive');
+
+    expect(LintResultSchema.safeParse({
+      findings: [{
+        type: 'missing-crossref',
+        severity: 'warning',
+        pageSlug: 'source',
+        targetSlug: 'target',
+        evidence: [{ pageSlug: 'source', quote: 'Target is discussed here.' }],
+        description: 'The source mentions Target without a link.',
+        suggestedFix: 'Link Target.',
+      }],
+    }).success).toBe(true);
   });
 });

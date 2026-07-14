@@ -47,6 +47,7 @@ import {
   recentOutcomeCounts,
   researchApprovalBody,
   selectRecoverableHealthJobs,
+  summarizeFixOutcomes,
   type ExecutableRemediationAction,
   type HealthOrigin,
 } from './remediation-ui';
@@ -356,7 +357,11 @@ export function HealthView() {
   const curating = workflowBusyActions.has('curate');
 
   const [fixJobId, setFixJobId] = useState<string | null>(null);
-  const [fixSummary, setFixSummary] = useState<{ fixed: number; skipped: number; failed: number } | null>(null);
+  const [fixSummary, setFixSummary] = useState<{
+    fixed: number;
+    skipped: number;
+    failed: number;
+  } | null>(null);
   const [fixPostcondition, setFixPostcondition] = useState<PostconditionReport | null>(null);
   const { status: fixStatus, events: fixEvents, latestMessage: fixMessage } = useJobStream(fixJobId);
   const fixing = workflowBusyActions.has('fix');
@@ -395,16 +400,7 @@ export function HealthView() {
         .find((event) => event.type === 'fix:verify:complete');
       setFixPostcondition(extractPostconditionReport(verification));
       const done = [...fixEvents].reverse().find((e) => e.type === 'fix:complete');
-      const d = done?.data.data as {
-        writes?: number;
-        residualCount?: number;
-        semanticStatus?: string;
-      } | undefined;
-      setFixSummary({
-        fixed: d?.writes ?? 0,
-        skipped: d?.residualCount ?? 0,
-        failed: d?.semanticStatus === 'failed' ? 1 : 0,
-      });
+      setFixSummary(summarizeFixOutcomes(done?.data.data));
       queryClient.invalidateQueries({ queryKey: ['pages'] });
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
@@ -1190,8 +1186,10 @@ export function HealthView() {
         )}
         {fixSummary && (
           <div className="border-l-2 border-accent bg-accent-subtle px-3 py-2 text-sm text-accent-strong">
-            Fixed {fixSummary.fixed} · skipped {fixSummary.skipped} for review
-            {fixSummary.failed > 0 ? ` · failed ${fixSummary.failed}` : ''}. Running a follow-up check.
+            {fixSummary.fixed + fixSummary.failed + fixSummary.skipped > 0
+              ? `Verified ${fixSummary.fixed} fixed · ${fixSummary.failed} failed · ${fixSummary.skipped} skipped`
+              : 'Per-finding verification was unavailable'}
+            . Running a full follow-up check for newly discovered issues.
           </div>
         )}
         {curatePostcondition && (

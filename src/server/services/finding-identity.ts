@@ -4,6 +4,7 @@ import type {
   LintFinding,
   SubjectId,
 } from '@/lib/contracts';
+import { normalizeSlug } from '../wiki/page-identity';
 
 export type FindingIdentityInput = LintFinding & {
   subjectId: SubjectId;
@@ -20,14 +21,44 @@ function normalizeDescription(description: string): string {
 }
 
 export function findingId(finding: FindingIdentityInput): string {
-  const canonicalTuple = [
-    'lint-finding:v1',
-    finding.subjectId,
-    finding.type,
-    finding.pageSlug,
-    finding.sourceId ?? finding.sourceFilename ?? '',
-    normalizeDescription(finding.description),
-  ].join('\0');
+  let canonicalTuple: string;
+
+  if (
+    (finding.type === 'missing-crossref' || finding.type === 'coverage-gap')
+    && typeof finding.targetSlug === 'string'
+    && normalizeSlug(finding.targetSlug)
+  ) {
+    canonicalTuple = [
+      'lint-finding:v2',
+      finding.subjectId,
+      finding.type,
+      ...(finding.type === 'missing-crossref' ? [finding.pageSlug] : []),
+      normalizeSlug(finding.targetSlug),
+    ].join('\0');
+  } else if (
+    finding.type === 'contradiction'
+    && Array.isArray(finding.evidence)
+    && finding.evidence.length >= 2
+  ) {
+    const evidence = finding.evidence
+      .map((item) => [item.pageSlug, normalizeDescription(item.quote)].join('\0'))
+      .sort();
+    canonicalTuple = [
+      'lint-finding:v2',
+      finding.subjectId,
+      finding.type,
+      ...evidence,
+    ].join('\0');
+  } else {
+    canonicalTuple = [
+      'lint-finding:v1',
+      finding.subjectId,
+      finding.type,
+      finding.pageSlug,
+      finding.sourceId ?? finding.sourceFilename ?? '',
+      normalizeDescription(finding.description),
+    ].join('\0');
+  }
 
   return createHash('sha256').update(canonicalTuple).digest('hex');
 }
