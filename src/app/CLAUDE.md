@@ -157,6 +157,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Query 编排边界：流式 `error` part、迭代器异常与初始化异常统一为单一 SSE error 终态；失败后不再回落空答案、发送 citations/done、持久化部分回答或触发 coverage；正常空流仍按 `NO_QUERY_CONTEXT_ANSWER` 成功收口 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：`/api/query` 可生成 `wiki.move` PendingAction；旧 slug 的页面 API 返回 308 canonical redirect，阅读页永久重定向并保留 Subject 查询参数 |
 | 2026-07-14 | Workflow 控制 Phase 3C：`/api/query` 可读 active Subject job 脱敏状态，re-enrich/research/cancel 只生成 PendingAction；批准 API 原子启动或取消 job，不信任客户端工作流参数 |
 | 2026-07-14 | History 工具 Phase 3B：`/api/history*` 改复用共享 History 服务，既有响应/人工确认保持兼容；`/api/query` 可读取 history list/diff，回滚只生成 PendingAction 并由独立批准 API 消费 |

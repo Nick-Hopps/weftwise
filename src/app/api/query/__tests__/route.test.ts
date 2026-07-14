@@ -209,6 +209,102 @@ describe('POST /api/query 流式持久化', () => {
     expect(mockExtractCitations).toHaveBeenCalled();
   });
 
+  it('正常空流 → 回落 NO_CONTEXT，并按成功终态持久化、发送 done、评估 coverage', async () => {
+    mockAgentic.mockReturnValue({
+      stream: {
+        fullStream: (async function* () {
+          // 无文本且无错误：属于正常空结果。
+        })(),
+      },
+      accessed: { meta: new Map(), bodies: new Map() },
+    });
+
+    const res = await call({ question: '没有命中', subjectId: 's1' });
+    const sse = await readSSE(res);
+
+    expect(sse).toContain('event: answer-delta');
+    expect(sse).toContain('NO_CONTEXT');
+    expect(sse).toContain('event: citations');
+    expect(sse).toContain('event: done');
+    expect(sse).not.toContain('event: error');
+    expect(mockExtractCitations).toHaveBeenCalledWith('NO_CONTEXT', expect.anything(), 'general');
+    expect(mockAppend).toHaveBeenCalledTimes(2);
+    expect(mockTouch).toHaveBeenCalledWith('new-conv');
+    expect(mockAssessCoverage).toHaveBeenCalledWith(
+      { id: 's1', slug: 'general' },
+      '没有命中',
+      'NO_CONTEXT',
+    );
+  });
+
+  it('fullStream error part → 只发一次错误终态，不回落、不持久化、不评估 coverage', async () => {
+    mockAgentic.mockReturnValue({
+      stream: {
+        fullStream: (async function* () {
+          yield { type: 'tool-call', toolName: 'wiki.search', input: { query: 'x' } } as const;
+          yield { type: 'error', error: new Error('tool execution failed') } as const;
+        })(),
+      },
+      accessed: { meta: new Map(), bodies: new Map() },
+    });
+
+    const res = await call({ question: '触发工具失败', subjectId: 's1' });
+    const sse = await readSSE(res);
+
+    expect(sse.match(/event: error/g)).toHaveLength(1);
+    expect(sse).toContain('tool execution failed');
+    expect(sse).not.toContain('NO_CONTEXT');
+    expect(sse).not.toContain('event: citations');
+    expect(sse).not.toContain('event: done');
+    expect(mockExtractCitations).not.toHaveBeenCalled();
+    expect(mockAppend).not.toHaveBeenCalled();
+    expect(mockTouch).not.toHaveBeenCalled();
+    expect(mockAssessCoverage).not.toHaveBeenCalled();
+  });
+
+  it('fullStream 在部分文本后抛错 → 保留已发送 delta，但不把部分回答按成功终态收口', async () => {
+    mockAgentic.mockReturnValue({
+      stream: {
+        fullStream: (async function* () {
+          yield { type: 'text-delta', text: '部分回答' } as const;
+          throw new Error('stream interrupted');
+        })(),
+      },
+      accessed: { meta: new Map(), bodies: new Map() },
+    });
+
+    const res = await call({ question: '触发流中断', subjectId: 's1' });
+    const sse = await readSSE(res);
+
+    expect(sse).toContain('部分回答');
+    expect(sse.match(/event: error/g)).toHaveLength(1);
+    expect(sse).toContain('stream interrupted');
+    expect(sse).not.toContain('event: citations');
+    expect(sse).not.toContain('event: done');
+    expect(mockExtractCitations).not.toHaveBeenCalled();
+    expect(mockAppend).not.toHaveBeenCalled();
+    expect(mockAssessCoverage).not.toHaveBeenCalled();
+  });
+
+  it('streamAgenticQuery 初始化抛错 → 只发错误终态，不产生任何成功副作用', async () => {
+    mockAgentic.mockImplementation(() => {
+      throw new Error('stream setup failed');
+    });
+
+    const res = await call({ question: '触发初始化失败', subjectId: 's1' });
+    const sse = await readSSE(res);
+
+    expect(sse.match(/event: error/g)).toHaveLength(1);
+    expect(sse).toContain('stream setup failed');
+    expect(sse).not.toContain('event: answer-delta');
+    expect(sse).not.toContain('event: citations');
+    expect(sse).not.toContain('event: done');
+    expect(mockExtractCitations).not.toHaveBeenCalled();
+    expect(mockAppend).not.toHaveBeenCalled();
+    expect(mockTouch).not.toHaveBeenCalled();
+    expect(mockAssessCoverage).not.toHaveBeenCalled();
+  });
+
   it('工具循环路径 → 透传 answer-delta，citations 来自确定性解析，done 不带 coverageSufficient', async () => {
     mockExtractCitations.mockReturnValue([{ pageSlug: 'foo', excerpt: 'bar' }]);
     const res = await call({ question: '你好', subjectId: 's1' });
