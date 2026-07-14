@@ -66,3 +66,14 @@
 - 任何跨 Subject 写入仍不可达；
 - `llm-config.example.json` 无差异；
 - 全部验证通过并以 `--no-ff` 合回 main。
+
+## 执行结果
+
+- 20 个 builtin 精确注册，Phase 3A 三工具只进入 Query profile；
+- active/cross Subject 同名 slug 使用复合身份，不覆盖、不串引；
+- 跨主题 citation、聊天跳转与 Save-to-Wiki References 已形成闭环；
+- `npx tsc --noEmit` 通过；
+- Vitest：229 个测试文件、1991 个用例全部通过；
+- `npm run lint` 通过，仅保留 11 条既有 warning；
+- `npm run build` 通过；
+- `git diff -- llm-config.example.json` 为空，无需更新示例配置。
