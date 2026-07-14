@@ -82,6 +82,15 @@ export function markReverted(id: string): void {
   getRawDb().prepare(`UPDATE operations SET status = 'reverted' WHERE id = ?`).run(id);
 }
 
+/** History PendingAction 最终化：只允许把本 Subject 内仍 applied 的原操作标为 reverted。 */
+export function markRevertedIfApplied(id: string, subjectId: string): boolean {
+  const result = getRawDb().prepare(`
+    UPDATE operations SET status = 'reverted'
+    WHERE id = ? AND subject_id = ? AND status = 'applied'
+  `).run(id, subjectId);
+  return result.changes === 1;
+}
+
 /**
  * operations 表 GC：每 subject 只保留最近 `keepPerSubject` 条**终态**（非 pending）行。
  *

@@ -59,7 +59,7 @@
 ### `chat/`
 
 - `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，批准页面变更后失效页面/图/历史等缓存，workflow job 则派发 `wiki:job-started`
-- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；刷新不会丢卡片，也不会把聊天回复当批准
+- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/History 回滚标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；刷新不会丢卡片，也不会把聊天回复当批准
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
@@ -176,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | History 工具 Phase 3B：Chat PendingAction 卡片区分 History 回滚提案；批准后沿用 page-change 缓存失效，刷新 pages/search/graph/history |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：Ask AI 引用列表显示 `subject:slug` 并通过 `?s=` 跳到精确 Subject；旧无 subjectSlug 引用保持原路径 |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：保存按钮保留既有显式用户动作与 job 追踪，删除未被消费的 `onSaved(normalizeSlug(title))` 提前回调，避免同名页采用数字后缀时向客户端传播错误 slug |
 | 2026-07-14 | Research 批准溯源 Phase 2C：候选弹窗改用持久化 `ResearchRunView` 与 candidate ID，批准 body 无 URL；普通关闭/显式忽略分离；Health 从 job `runId` 恢复 run、稳定幂等批准、轮询导入/验证并在终态失效 pages/lint/active jobs，subject/scope 切换清理旧 view 与 key |

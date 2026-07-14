@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe('pending_actions CHECK 启动迁移', () => {
-  it('保留旧历史行，接受两个新 operation，未知 operation 仍拒绝', async () => {
+  it('保留旧历史行，接受三类新增 operation，未知 operation 仍拒绝', async () => {
     seedLegacyPendingActions('patch', true);
     const { getRawDb } = await import('../client');
     const sqlite = getRawDb();
@@ -104,10 +104,11 @@ describe('pending_actions CHECK 启动迁移', () => {
     for (const [id, operation] of [
       ['a2', 'metadata-patch'],
       ['a3', 'link-ensure'],
+      ['a4', 'history-revert'],
     ] as const) {
       expect(() => insert.run(id, operation, now(), now(), expires())).not.toThrow();
     }
-    expect(() => insert.run('a4', 'unknown-operation', now(), now(), expires()))
+    expect(() => insert.run('a5', 'unknown-operation', now(), now(), expires()))
       .toThrow(/CHECK constraint failed/);
   });
 

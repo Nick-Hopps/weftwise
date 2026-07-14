@@ -5,6 +5,9 @@ const mockGetPageBySlug = vi.fn();
 const mockHybrid = vi.fn();
 const mockReadPage = vi.fn();
 const mockCreatePendingActionPreview = vi.fn();
+const mockCreatePendingHistoryRevertPreview = vi.fn();
+const mockListHistory = vi.fn();
+const mockReadHistoryDiff = vi.fn();
 const mockListSubjects = vi.fn();
 const mockGetSubjectBySlug = vi.fn();
 
@@ -25,6 +28,11 @@ vi.mock('@/server/wiki/wiki-store', () => ({
 }));
 vi.mock('../pending-action-service', () => ({
   createPendingActionPreview: (...a: unknown[]) => mockCreatePendingActionPreview(...a),
+  createPendingHistoryRevertPreview: (...a: unknown[]) => mockCreatePendingHistoryRevertPreview(...a),
+}));
+vi.mock('../history-tools', () => ({
+  listHistory: (...a: unknown[]) => mockListHistory(...a),
+  readHistoryDiff: (...a: unknown[]) => mockReadHistoryDiff(...a),
 }));
 
 const mockWebSearch = vi.fn();
@@ -83,6 +91,9 @@ beforeEach(() => {
   mockHybrid.mockReset();
   mockReadPage.mockReset();
   mockCreatePendingActionPreview.mockReset();
+  mockCreatePendingHistoryRevertPreview.mockReset();
+  mockListHistory.mockReset();
+  mockReadHistoryDiff.mockReset();
   mockListSubjects.mockReset();
   mockGetSubjectBySlug.mockReset();
 });
@@ -321,6 +332,29 @@ describe('buildQueryToolContext - 审批预览能力面', () => {
     });
     expect(ctx.conversationId).toBe('conversation-1');
     expect(ctx.onPendingAction).toBe(onPendingAction);
+
+    mockCreatePendingHistoryRevertPreview.mockResolvedValue(action);
+    await expect(ctx.previewHistoryRevert?.('op-1')).resolves.toBe(action);
+    expect(mockCreatePendingHistoryRevertPreview).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      subject: SUBJECT,
+      operationId: 'op-1',
+    });
+  });
+});
+
+describe('buildQueryToolContext - History 只读能力', () => {
+  it('list/diff 始终委托 active Subject 共享服务', async () => {
+    mockListHistory.mockResolvedValue({ entries: [] });
+    mockReadHistoryDiff.mockResolvedValue({
+      operationId: 'op-1', status: 'applied', affectedPages: [], diff: 'diff',
+    });
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    await ctx.listHistory?.({ slug: 'page-a', limit: 5 });
+    await ctx.readHistoryDiff?.({ operationId: 'op-1' });
+    expect(mockListHistory).toHaveBeenCalledWith(SUBJECT, { slug: 'page-a', limit: 5 });
+    expect(mockReadHistoryDiff).toHaveBeenCalledWith(SUBJECT, { operationId: 'op-1' });
+    expect(ctx.previewHistoryRevert).toBeUndefined();
   });
 });
 

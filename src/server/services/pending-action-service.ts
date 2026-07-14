@@ -27,6 +27,12 @@ import {
   type PlannedPageOperation,
 } from '../wiki/page-operation-plan';
 import { finalizeAppliedPageAction } from './pending-action-finalizer';
+import { finalizeAppliedHistoryRevertAction } from './pending-action-finalizer';
+import {
+  applyPlannedHistoryRevert,
+  planHistoryRevert,
+  type PlannedHistoryRevert,
+} from './history-tools';
 export { recoverPendingActions, maintainPendingActions } from './pending-action-maintenance';
 
 const PENDING_TTL_MS = 30 * 60_000;
@@ -36,6 +42,17 @@ function assertNever(value: never): never {
 }
 
 function pagePlanToPreview<T extends object>(plan: PlannedPageOperation<T>): PendingActionPreview {
+  return {
+    kind: 'page-change',
+    preHead: plan.preHead,
+    summary: plan.summary,
+    affectedPages: plan.affectedPages,
+    diff: plan.diff,
+    warnings: plan.warnings,
+  };
+}
+
+function historyPlanToPreview(plan: PlannedHistoryRevert): PendingActionPreview {
   return {
     kind: 'page-change',
     preHead: plan.preHead,
@@ -210,6 +227,54 @@ export async function createPendingActionPreview(input: {
   return recordToView(record);
 }
 
+export async function createPendingHistoryRevertPreview(input: {
+  conversationId: string;
+  subject: Subject;
+  operationId: string;
+  now?: Date;
+}): Promise<PendingActionView> {
+  const conversation = conversationsRepo.getConversation(input.conversationId);
+  if (!conversation || conversation.subjectId !== input.subject.id) {
+    throw new PendingActionError('ACTION_NOT_FOUND', 'Conversation not found.', 404);
+  }
+  const operationId = input.operationId.trim();
+  if (!operationId) {
+    throw new PendingActionError('ACTION_PLAN_INVALID', 'Operation id is required.', 409);
+  }
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  let preview: PendingActionPreview;
+  try {
+    preview = historyPlanToPreview(await planHistoryRevert(input.subject, operationId));
+  } catch (error) {
+    throw new PendingActionError(
+      'ACTION_PLAN_INVALID',
+      error instanceof Error ? error.message : 'Unable to plan this history revert.',
+      409,
+    );
+  }
+  const payload = { operationId, effectiveAt: nowIso };
+  const payloadHash = hashPendingActionPayload({
+    conversationId: input.conversationId,
+    subjectId: input.subject.id,
+    operation: 'history-revert',
+    payload,
+  });
+  const expiresAt = new Date(now.getTime() + PENDING_TTL_MS).toISOString();
+  const record = pendingActionsRepo.createPendingAction({
+    conversationId: input.conversationId,
+    subjectId: input.subject.id,
+    operation: 'history-revert',
+    payloadJson: canonicalJson(payload),
+    payloadHash,
+    previewJson: JSON.stringify(preview),
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    expiresAt,
+  });
+  return recordToView(record);
+}
+
 export function listPendingActions(input: {
   conversationId: string;
   subject: Subject;
@@ -249,6 +314,7 @@ function assertConsumable(record: PendingActionRecord): PendingActionView | null
 type ReplannedAction = {
   preview: PendingActionPreview;
   pagePlan: PlannedPageOperation<object> | null;
+  historyPlan: PlannedHistoryRevert | null;
   effectiveAt: string;
 };
 
@@ -273,7 +339,7 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
       break;
     case 'reenrich': {
       const workflow = await planReenrich(subject.id, String(payload.slug));
-      return { preview: workflow, pagePlan: null, effectiveAt };
+      return { preview: workflow, pagePlan: null, historyPlan: null, effectiveAt };
     }
     case 'metadata-patch':
       pagePlan = await planMetadataPatchInSubject(subject, planPayload as never, effectiveAt);
@@ -281,11 +347,20 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
     case 'link-ensure':
       pagePlan = await planLinkEnsureInSubject(subject, planPayload as never, effectiveAt);
       break;
+    case 'history-revert': {
+      const historyPlan = await planHistoryRevert(subject, String(payload.operationId));
+      return {
+        preview: historyPlanToPreview(historyPlan),
+        pagePlan: null,
+        historyPlan,
+        effectiveAt,
+      };
+    }
     default:
       return assertNever(record.operation);
   }
   if (!pagePlan) throw new Error('Page action did not produce a plan.');
-  return { preview: pagePlanToPreview(pagePlan), pagePlan, effectiveAt };
+  return { preview: pagePlanToPreview(pagePlan), pagePlan, historyPlan: null, effectiveAt };
 }
 
 export async function approvePendingAction(input: {
@@ -346,13 +421,19 @@ export async function approvePendingAction(input: {
       'Vault changed after preview; review the refreshed action.', 409, refreshed);
   }
 
-  const operationId = replanned.pagePlan?.changeset.id ?? null;
+  const operationId = replanned.pagePlan?.changeset.id
+    ?? replanned.historyPlan?.changeset.id
+    ?? null;
   if (!pendingActionsRepo.claimExecution(input.id, input.subject.id, operationId, null, nowIso)) {
     throw new PendingActionError('ACTION_IN_PROGRESS', 'Action is already being processed.', 409);
   }
-  if (replanned.pagePlan) {
+  if (replanned.pagePlan || replanned.historyPlan) {
     try {
-      await applyPlannedPageOperation(replanned.pagePlan);
+      if (replanned.historyPlan) {
+        await applyPlannedHistoryRevert(replanned.historyPlan);
+      } else {
+        await applyPlannedPageOperation(replanned.pagePlan!);
+      }
     } catch (error) {
       if (isActionStalePreviewError(error)) {
         let refreshedPlan: ReplannedAction;
@@ -370,7 +451,7 @@ export async function approvePendingAction(input: {
         const refreshed = pendingActionsRepo.refreshExecutingPreview({
           id: input.id,
           subjectId: input.subject.id,
-          operationId: replanned.pagePlan.changeset.id,
+          operationId: operationId!,
           payloadHash: approved.payloadHash,
           previewJson: JSON.stringify(refreshedPlan.preview),
           expiresAt: new Date(now.getTime() + PENDING_TTL_MS).toISOString(),
@@ -397,11 +478,20 @@ export async function approvePendingAction(input: {
     }
 
     try {
-      finalizeAppliedPageAction({
-        actionId: input.id,
-        subjectId: input.subject.id,
-        nowIso,
-      });
+      if (replanned.historyPlan) {
+        finalizeAppliedHistoryRevertAction({
+          actionId: input.id,
+          subjectId: input.subject.id,
+          originalOperationId: replanned.historyPlan.originalOperationId,
+          nowIso,
+        });
+      } else {
+        finalizeAppliedPageAction({
+          actionId: input.id,
+          subjectId: input.subject.id,
+          nowIso,
+        });
+      }
     } catch {
       throw new PendingActionError(
         'ACTION_IN_PROGRESS',

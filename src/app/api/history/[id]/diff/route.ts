@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
-import * as operationsRepo from '@/server/db/repos/operations-repo';
-import { getDiff } from '@/server/git/git-service';
+import { readHistoryDiff } from '@/server/services/history-tools';
 
 export const runtime = 'nodejs';
 
@@ -17,12 +16,10 @@ export async function GET(
   if (error) return error;
 
   const { id } = await params;
-  const op = operationsRepo.getById(id);
-  if (!op || op.subjectId !== subject.id) {
+  try {
+    const result = await readHistoryDiff(subject, { operationId: id });
+    return NextResponse.json(result);
+  } catch {
     return NextResponse.json({ error: 'Operation not found' }, { status: 404 });
   }
-  if (!op.postHead) return NextResponse.json({ diff: '' });
-
-  const diff = await getDiff(op.preHead, op.postHead);
-  return NextResponse.json({ diff });
 }

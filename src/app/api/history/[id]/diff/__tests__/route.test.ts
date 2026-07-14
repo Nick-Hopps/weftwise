@@ -2,18 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mockResolve = vi.fn();
-const mockGetById = vi.fn();
-const mockGetDiff = vi.fn();
+const mockReadHistoryDiff = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
   resolveSubjectFromRequest: (req: unknown, opts?: unknown) => mockResolve(req, opts),
 }));
-vi.mock('@/server/db/repos/operations-repo', () => ({
-  getById: (id: unknown) => mockGetById(id),
-}));
-vi.mock('@/server/git/git-service', () => ({
-  getDiff: (a: unknown, b: unknown) => mockGetDiff(a, b),
+vi.mock('@/server/services/history-tools', () => ({
+  readHistoryDiff: (...args: unknown[]) => mockReadHistoryDiff(...args),
 }));
 
 import { GET } from '../route';
@@ -26,28 +22,30 @@ function call(id: string) {
 beforeEach(() => {
   mockResolve.mockReset();
   mockResolve.mockReturnValue({ subject: { id: 's1', slug: 'general' }, error: null });
-  mockGetById.mockReset();
-  mockGetDiff.mockReset();
-  mockGetDiff.mockResolvedValue('diff-text');
+  mockReadHistoryDiff.mockReset();
+  mockReadHistoryDiff.mockResolvedValue({
+    operationId: 'opA', status: 'applied', affectedPages: [], diff: 'diff-text',
+  });
 });
 
 describe('GET /api/history/[id]/diff', () => {
   it('未知 op → 404', async () => {
-    mockGetById.mockReturnValue(null);
+    mockReadHistoryDiff.mockRejectedValue(new Error('not found'));
     expect((await call('nope')).status).toBe(404);
   });
 
   it('跨 subject 的 op → 404', async () => {
-    mockGetById.mockReturnValue({ id: 'opX', subjectId: 's2', preHead: 'pre', postHead: 'sha' });
+    mockReadHistoryDiff.mockRejectedValue(new Error('not found'));
     expect((await call('opX')).status).toBe(404);
-    expect(mockGetDiff).not.toHaveBeenCalled();
   });
 
   it('合法 → 返回 diff 文本', async () => {
-    mockGetById.mockReturnValue({ id: 'opA', subjectId: 's1', preHead: 'pre', postHead: 'sha' });
     const res = await call('opA');
     expect(res.status).toBe(200);
     expect((await res.json()).diff).toBe('diff-text');
-    expect(mockGetDiff).toHaveBeenCalledWith('pre', 'sha');
+    expect(mockReadHistoryDiff).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 's1' }),
+      { operationId: 'opA' },
+    );
   });
 });
