@@ -32,7 +32,7 @@
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
-| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；propose 只开放 `wiki.preview_change` 生成审批预览，通过 `event: pending-action` SSE 推送，绝不直接写入；也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
+| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；两者可显式跨 Subject 只读，propose 只开放 active Subject 的 `wiki.preview_change`；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，锁内复核 HEAD 后同步执行页面 Saga 或仅入队 re-enrich；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
@@ -157,6 +157,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 跨 Subject 只读 Phase 3A：`/api/query` 不再因 active Subject 为空提前退出；流式工具循环可读取其他 Subject，citation schema/persistence 透传可选 subjectSlug，写预览仍绑定 active Subject |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：补齐 `/api/query` save-only 与 question+save 入队契约测试；两种模式继续只创建 subject-scoped `save-to-wiki` job，页面创建统一由 worker 的 shared create command 执行 |
 | 2026-07-14 | Research 批准溯源 Phase 2C：新增 run 读取/批准/忽略 API，批准只接受稳定 candidate ID + version + idempotency key；`lint/latest` 批量注入 run 状态；通用 Ingest route 拒绝客户端 provenance，Research child 禁止独立 retry，coordinator cancel 后立即对账；reset/subject 删除覆盖 provenance 五表 |
 | 2026-07-12 | Health 修复闭环 Phase 2A：`GET /api/lint/latest` 升级为完整 `HealthSnapshot`；新增 `POST /api/health/remediations` 统一校验、幂等执行入口；`POST /api/research` 改用稳定 `findingIds + lintJobId` 并接受 `coverage-gap / thin-page`，旧数组下标协议退役 |

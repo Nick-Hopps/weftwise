@@ -6,6 +6,8 @@ function accessedWith(bodies: Record<string, { title: string; body: string }>): 
   return {
     meta: new Map(),
     bodies: new Map(Object.entries(bodies)),
+    crossMeta: new Map(),
+    crossBodies: new Map(),
     sourceRefs: new Map(),
   };
 }
@@ -42,7 +44,7 @@ describe('extractCitationsFromAnswer', () => {
     expect(out.map((c) => c.pageSlug)).toEqual(['wal-mode']);
   });
 
-  it('同 slug 多次出现只留一条（取首次锚点）；跨主题前缀链接丢弃', () => {
+  it('同 slug 多次出现只留一条（取首次锚点）；未读的跨主题链接丢弃', () => {
     const accessed = accessedWith({ sqlite: { title: 'SQLite', body } });
     const out = extractCitationsFromAnswer(
       'WAL 提升并发 [[sqlite]]，另见 [[other-subject:sqlite]]，FTS5 相关 [[sqlite]]。',
@@ -50,6 +52,52 @@ describe('extractCitationsFromAnswer', () => {
       'general',
     );
     expect(out).toHaveLength(1);
+  });
+
+  it('只接受真实跨主题 read 的复合身份，并返回 subjectSlug', () => {
+    const accessed = accessedWith({ sqlite: { title: 'SQLite', body } });
+    accessed.crossBodies.set('notes\0sqlite', {
+      subjectSlug: 'notes',
+      slug: 'sqlite',
+      title: 'Notes SQLite',
+      body: 'Notes 中的 SQLite 页面只讨论备份策略。',
+    });
+    accessed.crossBodies.set('archive\0sqlite', {
+      subjectSlug: 'archive',
+      slug: 'sqlite',
+      title: 'Archive SQLite',
+      body: 'Archive 中的 SQLite 页面只讨论旧版本。',
+    });
+
+    const out = extractCitationsFromAnswer(
+      '本主题并发说明 [[sqlite]]；备份说明 [[notes:sqlite]]；旧版本 [[archive:sqlite]]；伪造 [[ghost:sqlite]]。',
+      accessed,
+      'general',
+    );
+    expect(out.map((citation) => [citation.subjectSlug, citation.pageSlug])).toEqual([
+      [undefined, 'sqlite'],
+      ['notes', 'sqlite'],
+      ['archive', 'sqlite'],
+    ]);
+  });
+
+  it('跨主题标题形式只在对应 Subject 的已读页面内解析', () => {
+    const accessed = accessedWith({});
+    accessed.crossBodies.set('notes\0wal-mode', {
+      subjectSlug: 'notes',
+      slug: 'wal-mode',
+      title: 'WAL Mode',
+      body,
+    });
+    const out = extractCitationsFromAnswer(
+      '详见 [[notes:WAL Mode]] 与伪造的 [[archive:WAL Mode]]。',
+      accessed,
+      'general',
+    );
+    expect(out).toEqual([expect.objectContaining({
+      subjectSlug: 'notes',
+      pageSlug: 'wal-mode',
+    })]);
   });
 
   it('无任何 wikilink → 空数组', () => {

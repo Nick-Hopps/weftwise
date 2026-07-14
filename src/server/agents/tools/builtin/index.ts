@@ -17,10 +17,14 @@ import { sourceReadTool } from './source-read';
 import { wikiPreviewChangeTool } from './wiki-preview-change';
 import { wikiMetadataPatchTool } from './wiki-metadata-patch';
 import { wikiLinkEnsureTool } from './wiki-link-ensure';
+import { subjectListTool } from './subject-list';
+import { wikiSearchCrossSubjectTool } from './wiki-search-cross-subject';
+import { wikiReadCrossSubjectTool } from './wiki-read-cross-subject';
 
 /** 进程无关：worker 与 Next.js（query 流式）两进程各自构造（ToolDef 无状态纯对象）。 */
 export function createBuiltinToolRegistry(): ToolRegistry {
   const r = createToolRegistry();
+  r.register(subjectListTool as ToolDef);
   r.register(wikiReadTool as ToolDef);
   r.register(wikiSearchTool as ToolDef);
   r.register(wikiListTool as ToolDef);
@@ -35,6 +39,8 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(wikiInspectTool as ToolDef);
   r.register(sourceSearchTool as ToolDef);
   r.register(sourceReadTool as ToolDef);
+  r.register(wikiSearchCrossSubjectTool as ToolDef);
+  r.register(wikiReadCrossSubjectTool as ToolDef);
   r.register(wikiPreviewChangeTool as ToolDef);
   r.register(wikiMetadataPatchTool as ToolDef);
   r.register(wikiLinkEnsureTool as ToolDef);

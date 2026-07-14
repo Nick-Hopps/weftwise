@@ -20,7 +20,9 @@ describe('resolveQueryTools', () => {
     const names = resolveQueryTools().map((t) => t.name);
     expect(names).not.toContain('web.search');
     expect(names).toEqual(expect.arrayContaining([
-      'wiki.list', 'wiki.search', 'wiki.read', 'wiki.inspect', 'source.search', 'source.read',
+      'subject.list', 'wiki.list', 'wiki.search', 'wiki.read',
+      'wiki.search_cross_subject', 'wiki.read_cross_subject',
+      'wiki.inspect', 'source.search', 'source.read',
     ]));
     expect(names).not.toContain('wiki.update');
     expect(names).not.toContain('wiki.delete');

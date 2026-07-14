@@ -26,6 +26,47 @@ export interface SubjectListEntry {
   pageCount: number;
 }
 
+/** `subject.list` 模型工具返回项；pageCount 只统计非 meta 页面。 */
+export interface SubjectToolListEntry {
+  id: SubjectId;
+  slug: string;
+  name: string;
+  description: string;
+  pageCount: number;
+}
+
+export interface SubjectToolListResult {
+  subjects: SubjectToolListEntry[];
+}
+
+export interface CrossSubjectSearchInput {
+  query: string;
+  subjectSlugs: string[];
+  limit?: number;
+}
+
+export interface CrossSubjectSearchResult {
+  hits: Array<{
+    subjectSlug: string;
+    slug: string;
+    title: string;
+    summary: string;
+  }>;
+}
+
+export interface CrossSubjectReadInput {
+  subjectSlug: string;
+  slug: string;
+}
+
+export interface CrossSubjectReadResult {
+  found: boolean;
+  subjectSlug: string;
+  slug: string;
+  title: string | null;
+  body: string | null;
+}
+
 /** Wiki 页面 YAML frontmatter（解析/序列化单一真实源在 server/wiki/frontmatter.ts） */
 export interface WikiFrontmatter {
   title: string;
@@ -290,8 +331,15 @@ export interface IngestResult {
 
 export interface QueryResult {
   answer: string;
-  citations: { pageSlug: string; excerpt: string }[];
+  citations: WikiCitation[];
   savedAsPage: string | null;
+}
+
+/** Ask AI 引用；旧消息没有 subjectSlug 时按会话所属 Subject 解释。 */
+export interface WikiCitation {
+  pageSlug: string;
+  excerpt: string;
+  subjectSlug?: string;
 }
 
 /** research job 输出的单条候选：只发现不写入，批准后由 research-import 协调导入。 */
@@ -654,7 +702,7 @@ export interface ConversationMessage {
   conversationId: string;
   role: 'user' | 'assistant';
   content: string;
-  citations: { pageSlug: string; excerpt: string }[] | null;
+  citations: WikiCitation[] | null;
   createdAt: string;
 }
 
