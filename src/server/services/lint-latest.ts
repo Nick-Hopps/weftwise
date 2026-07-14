@@ -19,6 +19,18 @@ const LINT_FINDING_TYPES = new Set([
 
 const LINT_FINDING_SEVERITIES = new Set(['critical', 'warning', 'info']);
 
+function isHistoricalEvidence(value: unknown): boolean {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.every((item) => (
+      typeof item === 'object'
+      && item !== null
+      && !Array.isArray(item)
+      && typeof (item as Record<string, unknown>).pageSlug === 'string'
+      && typeof (item as Record<string, unknown>).quote === 'string'
+    ));
+}
+
 function isHistoricalFinding(value: unknown): value is FindingIdentityInput {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
 
@@ -35,6 +47,8 @@ function isHistoricalFinding(value: unknown): value is FindingIdentityInput {
     && typeof finding.subjectSlug === 'string'
     && (!('sourceId' in finding) || typeof finding.sourceId === 'string')
     && (!('sourceFilename' in finding) || typeof finding.sourceFilename === 'string')
+    && (!('targetSlug' in finding) || typeof finding.targetSlug === 'string')
+    && (!('evidence' in finding) || isHistoricalEvidence(finding.evidence))
     && (
       !('failedJobId' in finding)
       || typeof finding.failedJobId === 'string'

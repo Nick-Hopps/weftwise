@@ -585,12 +585,21 @@ export interface LintFinding {
   pageSlug: string;
   description: string;
   suggestedFix: string | null;
+  /** 语义 finding 的规范目标；missing-crossref / coverage-gap 经服务端验证后必有。 */
+  targetSlug?: string;
+  /** 语义 finding 的逐页原文字面证据；旧快照可缺失。 */
+  evidence?: LintFindingEvidence[];
   /** 来源相关 finding 可用：关联 source 的 DB id。 */
   sourceId?: string;
   /** 来源相关 finding 可用：source 文件名（pageSlug 为空时的展示替代）。 */
   sourceFilename?: string;
   /** orphan-source 专属：关联的 failed ingest job id；查无 job / job 非 failed 时为 null。 */
   failedJobId?: string | null;
+}
+
+export interface LintFindingEvidence {
+  pageSlug: string;
+  quote: string;
 }
 
 export interface EnrichedLintFinding extends LintFinding {
