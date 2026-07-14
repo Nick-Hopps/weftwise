@@ -20,6 +20,9 @@ import { wikiLinkEnsureTool } from './wiki-link-ensure';
 import { subjectListTool } from './subject-list';
 import { wikiSearchCrossSubjectTool } from './wiki-search-cross-subject';
 import { wikiReadCrossSubjectTool } from './wiki-read-cross-subject';
+import { historyListTool } from './history-list';
+import { historyDiffTool } from './history-diff';
+import { historyRevertTool } from './history-revert';
 
 /** 进程无关：worker 与 Next.js（query 流式）两进程各自构造（ToolDef 无状态纯对象）。 */
 export function createBuiltinToolRegistry(): ToolRegistry {
@@ -41,7 +44,10 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(sourceReadTool as ToolDef);
   r.register(wikiSearchCrossSubjectTool as ToolDef);
   r.register(wikiReadCrossSubjectTool as ToolDef);
+  r.register(historyListTool as ToolDef);
+  r.register(historyDiffTool as ToolDef);
   r.register(wikiPreviewChangeTool as ToolDef);
+  r.register(historyRevertTool as ToolDef);
   r.register(wikiMetadataPatchTool as ToolDef);
   r.register(wikiLinkEnsureTool as ToolDef);
   return r;

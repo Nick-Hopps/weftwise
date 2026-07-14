@@ -28,12 +28,18 @@ const operationPlanMocks = vi.hoisted(() => ({
   applyPlannedPageOperation: vi.fn(),
 }));
 vi.mock('../../wiki/page-operation-plan', () => operationPlanMocks);
+const historyMocks = vi.hoisted(() => ({
+  planHistoryRevert: vi.fn(),
+  applyPlannedHistoryRevert: vi.fn(),
+}));
+vi.mock('../history-tools', () => historyMocks);
 const embeddingMocks = vi.hoisted(() => ({ enqueueEmbedIndex: vi.fn() }));
 vi.mock('../embedding-service', () => embeddingMocks);
 
 import {
   PendingActionError,
   createPendingActionPreview,
+  createPendingHistoryRevertPreview,
   listPendingActions,
 } from '../pending-action-service';
 
@@ -69,6 +75,11 @@ beforeEach(() => {
     resultHint: {
       updatedSlug: 'page-a', mode: 'link', targetSubjectSlug: 'general', targetSlug: 'page-b',
     },
+  });
+  historyMocks.planHistoryRevert.mockResolvedValue({
+    originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'cs-history' },
+    summary: '回滚历史操作 op-old', affectedPages: pagePreview.affectedPages,
+    diff: 'history diff', warnings: ['会覆盖后续修改'],
   });
   repoMocks.createPendingAction.mockImplementation((input: Record<string, unknown>) => ({
     ...input,
@@ -120,6 +131,26 @@ describe('createPendingActionPreview', () => {
 
     expect(reenrichMocks.planReenrich).toHaveBeenCalledWith('s1', 'page-a');
     expect(view).toMatchObject({ kind: 'workflow', diff: null, operation: 'reenrich' });
+  });
+
+  it('history revert 保存独立 operation payload，预览阶段零写入', async () => {
+    const view = await createPendingHistoryRevertPreview({
+      conversationId: 'c1', subject, operationId: ' op-old ', now,
+    });
+
+    expect(historyMocks.planHistoryRevert).toHaveBeenCalledWith(subject, 'op-old');
+    expect(repoMocks.createPendingAction).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'history-revert',
+      payloadJson: JSON.stringify({
+        effectiveAt: now.toISOString(),
+        operationId: 'op-old',
+      }),
+      payloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    }));
+    expect(view).toMatchObject({
+      operation: 'history-revert', kind: 'page-change', diff: 'history diff', status: 'pending',
+    });
+    expect(historyMocks.applyPlannedHistoryRevert).not.toHaveBeenCalled();
   });
 
   it('metadata/link 预览复用共享 planner，绝不 apply 或触发 embedding', async () => {

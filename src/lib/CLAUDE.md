@@ -52,11 +52,13 @@ Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
                  status: 'pending'|'applied'|'rolled-back' }
 HistoryEntry   { id, sha, date, type: string, message, affectedPages: HistoryAffectedPage[], status: 'applied'|'reverted' }
 HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
+HistoryListInput/Result { slug?, limit? } / { entries }
+HistoryDiffInput/Result { operationId } / { operationId, status, affectedPages, diff }
 Conversation   { id, subjectId, title, createdAt, updatedAt }
 ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: WikiCitation[]|null, createdAt }
 MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
 LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
-PendingActionOperation = 'create'|'update'|'patch'|'delete'|'reenrich'|'metadata-patch'|'link-ensure'
+PendingActionOperation = 'create'|'update'|'patch'|'delete'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'
 PreviewChangeInput { operation, payload } // discriminated union；Query 只提交预览，不持有真实写工具
 ResearchRunView { id, subjectId, researchJobId, origin, status, version, findings, candidates, approval, verificationLintJobId, ... }
 ResearchCandidateView { ...ResearchCandidateSnapshot, decision, delivery }
@@ -147,6 +149,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | History 工具 Phase 3B：contracts 新增 History list/diff/revert 工具契约，并把 PendingAction operation 扩展到 `history-revert`；不改变既有 HistoryEntry JSON |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：contracts 新增跨主题工具输入输出与可选 `WikiCitation.subjectSlug`；`wiki-citation.ts` 统一聊天跳转和 Save-to-Wiki wikilink 序列化；旧 citation JSON 继续兼容 |
 | 2026-07-14 | contracts 新增 Research run/finding/candidate/approval/delivery/provenance 行与 view 契约、API error code、`research-import` job type；candidate ID 批准与服务端注入 Ingest lineage 取代客户端 URL 直提交流程 |
 | 2026-07-13 | contracts 新增 metadata/link 窄写输入结果，并把 PendingAction operation/preview 扩展到 `metadata-patch` / `link-ensure`；tool-activity 增加两种工具的安全摘要，metadata 值与链接锚点不进入活动日志 |

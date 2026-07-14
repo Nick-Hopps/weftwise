@@ -13,6 +13,9 @@ describe('resolveQueryMode', () => {
     'Patch wiki page eigenvalue',
     'Delete the wiki page obsolete',
     'Re-enrich the page linear-algebra',
+    '回滚历史操作 op-123',
+    '把知识库版本 op-123 恢复到变更前',
+    'Revert wiki history operation op-123',
   ])('明确写入命令进入 propose：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('propose');
   });
@@ -26,6 +29,8 @@ describe('resolveQueryMode', () => {
     'Can you create pages?',
     'Do not update the page eigenvalue',
     'What would happen if I delete this page?',
+    '如何回滚历史操作？',
+    '不要回滚知识库版本 op-123',
     '总结一下量子计算',
   ])('教程、能力、否定和普通问答保持 read：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('read');

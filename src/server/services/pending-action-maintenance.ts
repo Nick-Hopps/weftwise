@@ -1,7 +1,10 @@
 import * as operationsRepo from '../db/repos/operations-repo';
 import * as pendingActionsRepo from '../db/repos/pending-actions-repo';
 import { createLogger } from '../logging';
-import { finalizeAppliedPageAction } from './pending-action-finalizer';
+import {
+  finalizeAppliedHistoryRevertAction,
+  finalizeAppliedPageAction,
+} from './pending-action-finalizer';
 
 const log = createLogger('pending-action-maintenance');
 
@@ -14,11 +17,24 @@ export function recoverPendingActions(now = new Date()): number {
       const operation = operationsRepo.getById(action.operationId);
       if (operation?.status === 'applied') {
         try {
-          finalizeAppliedPageAction({
-            actionId: action.id,
-            subjectId: action.subjectId,
-            nowIso,
-          });
+          if (action.operation === 'history-revert') {
+            const payload = JSON.parse(action.payloadJson) as { operationId?: unknown };
+            if (typeof payload.operationId !== 'string' || !payload.operationId) {
+              throw new Error('History revert action is missing the original operation id.');
+            }
+            finalizeAppliedHistoryRevertAction({
+              actionId: action.id,
+              subjectId: action.subjectId,
+              originalOperationId: payload.operationId,
+              nowIso,
+            });
+          } else {
+            finalizeAppliedPageAction({
+              actionId: action.id,
+              subjectId: action.subjectId,
+              nowIso,
+            });
+          }
           recovered += 1;
         } catch (error) {
           log.warn(`页面审批 ${action.id} 最终化失败，保留 executing 等待重试`, error);
