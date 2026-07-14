@@ -560,7 +560,8 @@ export type ResearchApiErrorCode =
   | 'RESEARCH_ALREADY_APPROVED'
   | 'RESEARCH_IDEMPOTENCY_CONFLICT'
   | 'RESEARCH_SELECTION_INVALID'
-  | 'RESEARCH_RUN_NOT_APPROVABLE';
+  | 'RESEARCH_RUN_NOT_APPROVABLE'
+  | 'RESEARCH_RUN_NOT_RETRYABLE';
 
 export interface ResearchApiError {
   error: string;

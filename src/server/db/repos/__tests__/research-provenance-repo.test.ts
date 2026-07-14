@@ -631,3 +631,135 @@ describe('research-provenance-repo delivery 租约', () => {
     })).toBe(false);
   });
 });
+
+describe('research-provenance-repo failed run 导入重试', () => {
+  async function createFailedTopicRun() {
+    const context = await setup();
+    const candidates = context.provenance.prepareResearchCandidates([
+      { url: 'https://example.com/a', title: 'A', snippet: 'a', score: 3, reason: null },
+    ]);
+    const stored = context.repo.persistResearchRun({
+      subjectId: 's1', researchJobId: 'research-retry', origin: 'topic', lintJobId: null,
+      topic: 'A', topics: ['A'], queries: ['A'], findings: [], candidates,
+    });
+    const approved = context.repo.approveResearchRunAtomic({
+      runId: stored.run.id,
+      subjectId: 's1',
+      candidateIds: [stored.candidates[0]!.id],
+      expectedVersion: 1,
+      idempotencyKey: 'approve-retry',
+    });
+    const approvalId = approved.stored.approval!.id;
+    const candidateId = stored.candidates[0]!.id;
+    const claim = context.repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T01:00:00.000Z'),
+      leaseMs: 30_000,
+    })!;
+    expect(context.repo.failResearchDeliveryClaim({
+      approvalId,
+      candidateId,
+      claimToken: claim.claimToken!,
+      now: new Date('2026-07-14T01:00:01.000Z'),
+      error: { code: 'FETCH_FAILED', message: '抓取失败' },
+    })).toBe(true);
+    expect(context.repo.finalizeTopicResearchRunAtomic(
+      stored.run.id,
+      new Date('2026-07-14T01:00:02.000Z'),
+    )).toBe(true);
+    return { ...context, runId: stored.run.id, approvalId, candidateId };
+  }
+
+  it('重置 failed delivery、换发 coordinator 并把 run CAS 回 importing', async () => {
+    const { repo, sqlite, runId, approvalId, candidateId } = await createFailedTopicRun();
+    const before = repo.findResearchRunById(runId, 's1')!;
+    expect(before.run.status).toBe('failed');
+    const previousCoordinator = before.approval!.coordinatorJobId;
+
+    const result = repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+      now: new Date('2026-07-14T02:00:00.000Z'),
+    });
+
+    expect(result.stored.run.status).toBe('importing');
+    expect(result.stored.run.version).toBe(before.run.version + 1);
+    expect(result.stored.run.completedAt).toBeNull();
+    expect(result.stored.run.errorJson).toBeNull();
+    expect(result.coordinatorJobId).not.toBe(previousCoordinator);
+    expect(result.stored.approval!.coordinatorJobId).toBe(result.coordinatorJobId);
+
+    const delivery = result.stored.deliveries.find(
+      (row) => row.approvalId === approvalId && row.candidateId === candidateId,
+    )!;
+    expect(delivery).toMatchObject({
+      status: 'pending',
+      ingestJobId: null,
+      claimToken: null,
+      completedAt: null,
+      errorJson: null,
+      attemptCount: 1,
+    });
+
+    const job = sqlite.prepare('SELECT type, status, subject_id, params_json FROM jobs WHERE id = ?')
+      .get(result.coordinatorJobId) as { type: string; status: string; subject_id: string; params_json: string };
+    expect(job).toMatchObject({ type: 'research-import', status: 'pending', subject_id: 's1' });
+    expect(JSON.parse(job.params_json)).toEqual({
+      approvalId,
+      runId,
+      subjectId: 's1',
+    });
+
+    // 重试后的 delivery 可被新 coordinator 重新 claim。
+    const reclaimed = repo.claimResearchDelivery({
+      approvalId,
+      candidateId,
+      now: new Date('2026-07-14T02:00:01.000Z'),
+      leaseMs: 30_000,
+    });
+    expect(reclaimed).toMatchObject({ status: 'fetching', attemptCount: 2 });
+  });
+
+  it('版本陈旧、状态不可重试或 verification 后失败均拒绝', async () => {
+    const { repo, sqlite, runId } = await createFailedTopicRun();
+    const before = repo.findResearchRunById(runId, 's1')!;
+
+    expect(() => repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version + 5,
+    })).toThrow(/stale/);
+    expect(() => repo.retryResearchRunImportAtomic({
+      runId: 'missing',
+      subjectId: 's1',
+      expectedVersion: 1,
+    })).toThrow(/not found/);
+    expect(() => repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's2',
+      expectedVersion: before.run.version,
+    })).toThrow(/not found|subject/i);
+
+    sqlite.prepare("UPDATE research_runs SET verification_lint_job_id = 'lint-x' WHERE id = ?").run(runId);
+    expect(() => repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+    })).toThrow(/verification/);
+    sqlite.prepare('UPDATE research_runs SET verification_lint_job_id = NULL WHERE id = ?').run(runId);
+
+    // 成功重试后 run 进入 importing，重复重试被状态拒绝。
+    repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+    });
+    expect(() => repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version + 1,
+    })).toThrow(/not in a retryable state/);
+  });
+});
