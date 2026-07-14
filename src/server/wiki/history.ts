@@ -33,7 +33,7 @@ export function buildHistoryEntries(
       date: commit?.date ?? null,
       type: inferType(row.jobType, entries),
       message: commit?.message ?? '',
-      affectedPages: entries.map((e) => ({
+      affectedPages: entries.filter((entry) => !entry.auxiliary).map((e) => ({
         slug: parseWikiPath(e.path)?.slug ?? e.path,
         action: e.action,
       })),

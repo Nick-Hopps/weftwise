@@ -16,6 +16,7 @@ const pageMocks = vi.hoisted(() => ({
   planDeletePageInSubject: vi.fn(), planCreatePageInSubject: vi.fn(),
   planUpdatePageInSubject: vi.fn(), planPatchPageInSubject: vi.fn(),
   planMetadataPatchInSubject: vi.fn(), planLinkEnsureInSubject: vi.fn(),
+  planMovePageInSubject: vi.fn(),
 }));
 vi.mock('../page-write', () => pageMocks);
 const applyMocks = vi.hoisted(() => ({
@@ -91,6 +92,7 @@ beforeEach(() => {
   pageMocks.planDeletePageInSubject.mockResolvedValue(pagePlan);
   pageMocks.planMetadataPatchInSubject.mockResolvedValue({ ...pagePlan, operation: 'metadata-patch' });
   pageMocks.planLinkEnsureInSubject.mockResolvedValue({ ...pagePlan, operation: 'link-ensure' });
+  pageMocks.planMovePageInSubject.mockResolvedValue({ ...pagePlan, operation: 'move' });
   applyMocks.applyPlannedPageOperation.mockResolvedValue({ operationId: 'op-1' });
   historyMocks.planHistoryRevert.mockResolvedValue({
     originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'op-revert' },
@@ -343,6 +345,9 @@ describe('approvePendingAction', () => {
     ['patch', {
       slug: 'page-a', edits: [{ oldString: 'old', newString: 'new' }], effectiveAt: payload.effectiveAt,
     }, 'planPatchPageInSubject'],
+    ['move', {
+      slug: 'page-a', newSlug: 'page-b', effectiveAt: payload.effectiveAt,
+    }, 'planMovePageInSubject'],
   ] as const)('%s page plan fresh 批准后 apply 并恰好 enqueue embedding 一次', async (
     operation,
     actionPayload,

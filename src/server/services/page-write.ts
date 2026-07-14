@@ -18,6 +18,7 @@ import {
   planPageDelete,
   planPageLinkEnsure,
   planPageMetadataPatch,
+  planPageMove,
   planPagePatch,
   planPageUpdate,
   type PlannedPageOperation,
@@ -55,6 +56,14 @@ export async function planDeletePageInSubject(
   const error = validateDeleteTarget(slug, page);
   if (error) throw new Error(error);
   return planPageDelete(crypto.randomUUID(), subject, { slug, effectiveAt });
+}
+
+export async function planMovePageInSubject(
+  subject: Subject,
+  input: { slug: string; newSlug: string },
+  effectiveAt: string,
+) {
+  return planPageMove(crypto.randomUUID(), subject, { ...input, effectiveAt });
 }
 
 /** 校验目标页后同步删除（Saga）+ 触发向量 prune；校验失败抛 Error（消息可直接转述）。 */

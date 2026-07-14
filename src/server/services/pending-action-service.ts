@@ -19,6 +19,7 @@ import {
   planDeletePageInSubject,
   planLinkEnsureInSubject,
   planMetadataPatchInSubject,
+  planMovePageInSubject,
   planPatchPageInSubject,
   planUpdatePageInSubject,
 } from './page-write';
@@ -178,6 +179,12 @@ async function planPreview(
       ));
     case 'link-ensure':
       return pagePlanToPreview(await planLinkEnsureInSubject(
+        subject,
+        input.payload,
+        effectiveAt,
+      ));
+    case 'move':
+      return pagePlanToPreview(await planMovePageInSubject(
         subject,
         input.payload,
         effectiveAt,
@@ -431,6 +438,9 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
       break;
     case 'link-ensure':
       pagePlan = await planLinkEnsureInSubject(subject, planPayload as never, effectiveAt);
+      break;
+    case 'move':
+      pagePlan = await planMovePageInSubject(subject, planPayload as never, effectiveAt);
       break;
     case 'history-revert': {
       const historyPlan = await planHistoryRevert(subject, String(payload.operationId));

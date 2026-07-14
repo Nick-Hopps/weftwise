@@ -27,6 +27,7 @@ import { workflowStatusTool } from './workflow-status';
 import { workflowReenrichStartTool } from './workflow-reenrich-start';
 import { workflowResearchStartTool } from './workflow-research-start';
 import { workflowCancelTool } from './workflow-cancel';
+import { wikiMoveTool } from './wiki-move';
 
 /** 进程无关：worker 与 Next.js（query 流式）两进程各自构造（ToolDef 无状态纯对象）。 */
 export function createBuiltinToolRegistry(): ToolRegistry {
@@ -56,6 +57,7 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(workflowResearchStartTool as ToolDef);
   r.register(workflowCancelTool as ToolDef);
   r.register(wikiReenrichTool as ToolDef);
+  r.register(wikiMoveTool as ToolDef);
   r.register(wikiMetadataPatchTool as ToolDef);
   r.register(wikiLinkEnsureTool as ToolDef);
   return r;

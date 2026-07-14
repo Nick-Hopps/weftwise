@@ -64,6 +64,8 @@ export const pageAliases = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.subjectId, t.oldSlug, t.newSlug] }),
+    oldSlugUnique: uniqueIndex('page_aliases_subject_old_unique')
+      .on(t.subjectId, t.oldSlug),
   })
 );
 
@@ -218,7 +220,7 @@ export const pendingActions = sqliteTable(
       .on(t.status, t.expiresAt),
     operationCheck: check(
       'pending_actions_operation_check',
-      sql`${t.operation} IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel')`,
+      sql`${t.operation} IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move')`,
     ),
     statusCheck: check(
       'pending_actions_status_check',

@@ -1,7 +1,8 @@
 import { eq, and, asc, min } from 'drizzle-orm';
 import { getDb, getRawDb } from '../client';
-import { pages, wikiLinks } from '../schema';
+import { pages, pageAliases, wikiLinks } from '../schema';
 import type { WikiPage, WikiLink, SubjectId } from '@/lib/contracts';
+import { normalizeSlug } from '@/lib/slug';
 
 /**
  * Meta pages are system-generated (Index, Change Log, …) tagged with `meta`
@@ -256,7 +257,64 @@ export function getTitleToSlugMap(subjectId: SubjectId): Map<string, string> {
     map.set(page.title, page.slug);
     map.set(page.title.toLowerCase(), page.slug);
   }
+  const aliases = getDb()
+    .select()
+    .from(pageAliases)
+    .where(eq(pageAliases.subjectId, subjectId))
+    .all();
+  for (const alias of aliases) {
+    map.set(alias.oldSlug, alias.newSlug);
+    map.set(alias.oldSlug.toLowerCase(), alias.newSlug);
+  }
   return map;
+}
+
+/** 返回旧 slug/规范化 alias 对应的 canonical slug；不存在或自映射返回 null。 */
+export function resolvePageAlias(subjectId: SubjectId, slug: string): string | null {
+  const normalized = normalizeSlug(slug);
+  if (!normalized) return null;
+  const row = getDb()
+    .select({ newSlug: pageAliases.newSlug })
+    .from(pageAliases)
+    .where(and(
+      eq(pageAliases.subjectId, subjectId),
+      eq(pageAliases.oldSlug, normalized),
+    ))
+    .get();
+  return row && row.newSlug !== normalized ? row.newSlug : null;
+}
+
+/** 用 vault frontmatter aliases 替换一个 canonical 页面的持久化 alias 集合。 */
+export function syncPageAliases(
+  subjectId: SubjectId,
+  canonicalSlug: string,
+  aliases: readonly string[],
+  createdAt = new Date().toISOString(),
+): void {
+  const sqlite = getRawDb();
+  sqlite.prepare(
+    `DELETE FROM page_aliases WHERE subject_id = ? AND new_slug = ?`,
+  ).run(subjectId, canonicalSlug);
+
+  const normalized = [...new Set(aliases.map(normalizeSlug))]
+    .filter((alias) => alias && alias !== canonicalSlug);
+  const insert = sqlite.prepare(`
+    INSERT INTO page_aliases (subject_id, old_slug, new_slug, created_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(subject_id, old_slug) DO UPDATE SET
+      new_slug = excluded.new_slug,
+      created_at = excluded.created_at
+  `);
+  for (const alias of normalized) {
+    insert.run(subjectId, alias, canonicalSlug, createdAt);
+  }
+}
+
+/** 页面删除时移除所有指向该 canonical slug 的 alias。 */
+export function deletePageAliases(subjectId: SubjectId, canonicalSlug: string): void {
+  getRawDb().prepare(
+    `DELETE FROM page_aliases WHERE subject_id = ? AND new_slug = ?`,
+  ).run(subjectId, canonicalSlug);
 }
 
 export function getAllLinks(

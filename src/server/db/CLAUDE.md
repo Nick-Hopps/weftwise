@@ -144,7 +144,7 @@
 |----|------|---------|
 | `subjects` | `id` | `slug` UNIQUE；`general` 必须存在；`description` 默认 `''` |
 | `pages` | `(subject_id, slug)` 复合 PK | 同时 `path` UNIQUE；跨 subject 同名 slug 合法但 path 不能撞 |
-| `page_aliases` | `(subject_id, old_slug, new_slug)` | 复合主键，alias 不跨 subject |
+| `page_aliases` | `(subject_id, old_slug, new_slug)` | 复合主键；`(subject_id, old_slug)` UNIQUE，单个旧身份只能解析到一个 canonical page；alias 不跨 subject |
 | `wiki_links` | `id`（自增） | `subject_id` + `target_subject_id` 必填，allows graph join |
 | `sources` | `id` | `subject_id` 必填；`content_hash` 用于去重 |
 | `page_sources` | `(subject_id, page_slug, source_id)` | 多对多溯源 |
@@ -154,7 +154,7 @@
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
-| `pending_actions` | `id` | `conversation_id`/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面或 History inverse Saga，`job_id` 指向已批准的 re-enrich 调度；operation CHECK 含 `history-revert` |
+| `pending_actions` | `id` | `conversation_id`/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面或 History inverse Saga，`job_id` 指向已批准的 workflow；operation CHECK 含 `move/history-revert/workflow-*` |
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 | `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
@@ -219,6 +219,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 页面身份迁移 Phase 3D：`page_aliases` 增加 subject+oldSlug 唯一索引并由索引器从 frontmatter aliases 同步；pending_actions CHECK 增加 `move`，Drizzle 0007 与启动迁移均先去重再升级旧库 |
 | 2026-07-14 | History 工具 Phase 3B：pending_actions operation CHECK 增加 `history-revert`，Drizzle 0005 与启动期原子重建兼容旧库；operations repo 增加 subject/status 条件标记供审批最终化 |
 | 2026-07-14 | Research 批准溯源 Phase 2C：新增 `research_runs / research_run_findings / research_candidates / research_approvals / research_candidate_ingests` 五表、复合外键与热路径索引；Drizzle migration 与启动期原子兼容迁移同构；subject 删除/reset 和重复 source 合并同步维护 provenance 引用；repo 提供 run 批量读取、批准/忽略、delivery 租约、source+child job 唯一入队和 verification CAS |
 | 2026-07-13 | Health remediation 原子查询去除 subject 全历史扫描：CAS 只读取同 type 的可复用状态候选；同源 ingest 改走受 `json_valid` 保护的 sourceId/sourceId+status 表达式索引，reingest 全量读取 active 并优先 exact-context，DELETE 只取任一 active，仅在无 active 时取最新 terminal；补历史噪声、双入口去重、requeue 与 EQP 回归 |

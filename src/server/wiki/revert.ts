@@ -17,16 +17,33 @@ export function buildRevertEntries(
 ): ChangesetEntry[] {
   const seen = new Set<string>();
   const result: ChangesetEntry[] = [];
+  const reverseMoveBySourcePath = new Map(
+    originalEntries
+      .filter((entry) => !entry.auxiliary && entry.action === 'create' && entry.movedFromPath)
+      .map((entry) => [entry.movedFromPath!, entry.path] as const),
+  );
   for (const entry of originalEntries) {
     if (seen.has(entry.path)) continue;
     seen.add(entry.path);
     const prior = fileAtPreHead(entry.path);
     if (prior === null) {
-      result.push({ action: 'delete', path: entry.path, content: null });
+      result.push({
+        action: 'delete', path: entry.path, content: null,
+        ...(entry.auxiliary ? { auxiliary: true } : {}),
+      });
     } else if (currentExists(entry.path)) {
-      result.push({ action: 'update', path: entry.path, content: prior });
+      result.push({
+        action: 'update', path: entry.path, content: prior,
+        ...(entry.auxiliary ? { auxiliary: true } : {}),
+      });
     } else {
-      result.push({ action: 'create', path: entry.path, content: prior });
+      result.push({
+        action: 'create', path: entry.path, content: prior,
+        ...(entry.auxiliary ? { auxiliary: true } : {}),
+        ...(reverseMoveBySourcePath.has(entry.path)
+          ? { movedFromPath: reverseMoveBySourcePath.get(entry.path) }
+          : {}),
+      });
     }
   }
   return result;

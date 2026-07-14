@@ -51,11 +51,17 @@ describe('createBuiltinToolRegistry', () => {
 
   it('注册 Phase 3C 工作流控制工具并保持启动取消为提案副作用', () => {
     const registry = createBuiltinToolRegistry();
-    expect(registry.resolve(['*'])).toHaveLength(27);
+    expect(registry.resolve(['*'])).toHaveLength(28);
     expect(registry.get('workflow.status')).toMatchObject({ sideEffect: 'none' });
     expect(registry.get('workflow.reenrich.start')).toMatchObject({ sideEffect: 'propose' });
     expect(registry.get('workflow.research.start')).toMatchObject({ sideEffect: 'propose' });
     expect(registry.get('workflow.cancel')).toMatchObject({ sideEffect: 'propose' });
     expect(registry.get('wiki.reenrich')).toMatchObject({ sideEffect: 'propose' });
+  });
+
+  it('注册 Phase 3D wiki.move 且只暴露提案副作用', () => {
+    expect(createBuiltinToolRegistry().get('wiki.move')).toMatchObject({
+      sideEffect: 'propose',
+    });
   });
 });

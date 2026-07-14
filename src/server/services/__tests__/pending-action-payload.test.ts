@@ -71,6 +71,25 @@ describe('pending-action payload', () => {
     });
   });
 
+  it('move 只接受不同的 canonical slug', () => {
+    expect(normalizePreviewInput({
+      operation: 'move', payload: { slug: 'old-page', newSlug: 'folder/new-page' },
+    }, '2026-07-14T00:00:00.000Z')).toEqual({
+      operation: 'move',
+      payload: {
+        slug: 'old-page',
+        newSlug: 'folder/new-page',
+        effectiveAt: '2026-07-14T00:00:00.000Z',
+      },
+    });
+    expect(() => normalizePreviewInput({
+      operation: 'move', payload: { slug: 'old-page', newSlug: 'New Page' },
+    }, '2026-07-14T00:00:00.000Z')).toThrow(/canonical/i);
+    expect(() => normalizePreviewInput({
+      operation: 'move', payload: { slug: 'old-page', newSlug: 'old-page' },
+    }, '2026-07-14T00:00:00.000Z')).toThrow(/differ/i);
+  });
+
   it('拒绝 undefined 与非有限数字', () => {
     expect(() => canonicalJson({ a: undefined })).toThrow(/unsupported/i);
     expect(() => canonicalJson({ a: Number.NaN })).toThrow(/finite/i);

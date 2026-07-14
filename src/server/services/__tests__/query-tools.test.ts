@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mockGetAllPages = vi.fn();
 const mockGetPageBySlug = vi.fn();
+const mockResolvePageAlias = vi.fn();
 const mockHybrid = vi.fn();
 const mockReadPage = vi.fn();
 const mockCreatePendingActionPreview = vi.fn();
@@ -16,6 +17,7 @@ const mockGetSubjectBySlug = vi.fn();
 vi.mock('@/server/db/repos/pages-repo', () => ({
   getAllPages: (...a: unknown[]) => mockGetAllPages(...a),
   getPageBySlug: (...a: unknown[]) => mockGetPageBySlug(...a),
+  resolvePageAlias: (...a: unknown[]) => mockResolvePageAlias(...a),
   isMetaPage: (p: { tags?: string[] }) => (p.tags ?? []).includes('meta'),
 }));
 vi.mock('@/server/search/hybrid-retrieval', () => ({
@@ -95,6 +97,8 @@ function page(slug: string, over: Record<string, unknown> = {}) {
 beforeEach(() => {
   mockGetAllPages.mockReset();
   mockGetPageBySlug.mockReset();
+  mockResolvePageAlias.mockReset();
+  mockResolvePageAlias.mockReturnValue(null);
   mockHybrid.mockReset();
   mockReadPage.mockReset();
   mockCreatePendingActionPreview.mockReset();
