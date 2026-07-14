@@ -2,11 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const mockResolve = vi.fn();
-const mockHasContent = vi.fn();
 const mockAgentic = vi.fn();
 const mockAccessedToContext = vi.fn();
 const mockExtractCitations = vi.fn();
-const mockRecordCoverageGap = vi.fn();
 const mockAssessCoverage = vi.fn();
 const mockResolveQueryMode = vi.fn();
 const mockCreate = vi.fn();
@@ -24,10 +22,8 @@ vi.mock('@/server/middleware/subject', () => ({
 vi.mock('@/server/jobs/queue', () => ({ enqueue: (...a: unknown[]) => mockEnqueue(...a) }));
 vi.mock('@/server/services/query-service', () => ({
   streamAgenticQuery: (...a: unknown[]) => mockAgentic(...a),
-  subjectHasContent: (...a: unknown[]) => mockHasContent(...a),
   accessedToContext: (...a: unknown[]) => mockAccessedToContext(...a),
   runQuery: (...a: unknown[]) => mockRunQuery(...a),
-  recordCoverageGap: (...a: unknown[]) => mockRecordCoverageGap(...a),
   assessCoverageInBackground: (...a: unknown[]) => mockAssessCoverage(...a),
   NO_QUERY_CONTEXT_ANSWER: 'NO_CONTEXT',
 }));
@@ -65,8 +61,6 @@ async function readSSE(res: Response): Promise<string> {
 beforeEach(() => {
   mockResolve.mockReset();
   mockResolve.mockReturnValue({ subject: { id: 's1', slug: 'general' }, error: null });
-  mockHasContent.mockReset();
-  mockHasContent.mockReturnValue(true);
   mockAgentic.mockReset();
   mockAgentic.mockReturnValue({
     stream: {
@@ -80,7 +74,6 @@ beforeEach(() => {
   mockAccessedToContext.mockReturnValue([]);
   mockExtractCitations.mockReset();
   mockExtractCitations.mockReturnValue([]);
-  mockRecordCoverageGap.mockReset();
   mockAssessCoverage.mockReset();
   mockResolveQueryMode.mockReset().mockImplementation((question: string) =>
     question.includes('删除') ? 'propose' : 'read',
@@ -206,14 +199,12 @@ describe('POST /api/query 流式持久化', () => {
   });
 
   it('active Subject 为空仍进入工具循环，以允许跨主题检索', async () => {
-    mockHasContent.mockReturnValue(false);
     const res = await call({ question: '随便问问', subjectId: 's1' });
     const sse = await readSSE(res);
     expect(mockAgentic).toHaveBeenCalledTimes(1);
     expect(sse).toContain('hello');
     expect(sse).toContain('event: done');
     expect(mockAppend).toHaveBeenCalledTimes(2); // 仍落库一轮
-    expect(mockRecordCoverageGap).not.toHaveBeenCalled();
     expect(mockAssessCoverage).toHaveBeenCalled();
     expect(mockExtractCitations).toHaveBeenCalled();
   });

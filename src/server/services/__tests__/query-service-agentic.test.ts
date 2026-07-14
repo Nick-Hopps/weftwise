@@ -3,7 +3,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // vi.hoisted 确保变量在 vi.mock 工厂函数提升前已初始化
 const {
   mockGenerateTools,
-  mockSubjectHasContent,
   mockBuildToolContext,
   mockCreateAccessedPages,
   mockCompileToolSet,
@@ -13,7 +12,6 @@ const {
   mockStreamTools,
 } = vi.hoisted(() => ({
   mockGenerateTools: vi.fn(),
-  mockSubjectHasContent: vi.fn(),
   mockBuildToolContext: vi.fn(() => ({})),
   mockCreateAccessedPages: vi.fn(() => ({ meta: new Map(), bodies: new Map() })),
   mockCompileToolSet: vi.fn(() => ({})),
@@ -38,7 +36,6 @@ vi.mock('../query-tools', () => ({
   buildQueryToolContext: mockBuildToolContext,
   createAccessedPages: mockCreateAccessedPages,
   accessedToContext: vi.fn(() => []),
-  subjectHasContent: mockSubjectHasContent,
 }));
 vi.mock('../citation-extract', () => ({
   extractCitationsFromAnswer: mockExtractCitations,
@@ -76,7 +73,6 @@ async function flushPromises(times = 4) {
 
 beforeEach(() => {
   mockGenerateTools.mockReset();
-  mockSubjectHasContent.mockReset();
   mockCreateAccessedPages.mockReset().mockReturnValue({ meta: new Map(), bodies: new Map() });
   mockGenerateStructured.mockReset().mockResolvedValue({ coverageSufficient: true });
   mockBacklogCreate.mockReset();
@@ -86,7 +82,6 @@ beforeEach(() => {
 
 describe('runQuery（agentic）', () => {
   it('active Subject 为空仍进入工具循环，以允许跨主题检索', async () => {
-    mockSubjectHasContent.mockReturnValue(false);
     mockGenerateTools.mockResolvedValue({ text: '跨主题答案 [[notes:page]]' });
     const res = await runQuery('问题', SUBJECT);
     expect(res.answer).toBe('跨主题答案 [[notes:page]]');
@@ -94,7 +89,6 @@ describe('runQuery（agentic）', () => {
   });
 
   it('有内容 → 走 generateTextWithTools，返回其 text', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     const res = await runQuery('问题', SUBJECT);
     expect(mockGenerateTools).toHaveBeenCalledTimes(1);
@@ -102,14 +96,12 @@ describe('runQuery（agentic）', () => {
   });
 
   it('模型返回空文本 → 回落 NO_CONTENT', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '   ' });
     const res = await runQuery('问题', SUBJECT);
     expect(res.answer).toBe(NO_QUERY_CONTEXT_ANSWER);
   });
 
   it('citations 来自答案内联 wikilink 的确定性解析，不再有第二次结构化输出产出 citations', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案 [[sqlite]]。' });
     mockExtractCitations.mockReturnValue([{ pageSlug: 'sqlite', excerpt: 'WAL 相关摘录' }]);
     mockGenerateStructured.mockResolvedValue({ coverageSufficient: true });
@@ -153,7 +145,6 @@ describe('streamAgenticQuery - 动态工具模式', () => {
 
 describe('runQuery — coverage gap → research backlog（异步）', () => {
   it('coverageSufficient=false → create 恰一次，question 取 suggestedResearchQuestion', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockResolvedValue({
       coverageSufficient: false,
@@ -166,7 +157,6 @@ describe('runQuery — coverage gap → research backlog（异步）', () => {
   });
 
   it('coverageSufficient=false 且无 suggestedResearchQuestion → 回落用户原问题', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockResolvedValue({
       coverageSufficient: false,
@@ -178,7 +168,6 @@ describe('runQuery — coverage gap → research backlog（异步）', () => {
   });
 
   it('active Subject 为空且模型仍无答案 → 异步 coverage 判定记录 gap', async () => {
-    mockSubjectHasContent.mockReturnValue(false);
     mockGenerateTools.mockResolvedValue({ text: '   ' });
     mockGenerateStructured.mockResolvedValue({ coverageSufficient: false });
     const res = await runQuery('原始问题', SUBJECT);
@@ -189,7 +178,6 @@ describe('runQuery — coverage gap → research backlog（异步）', () => {
   });
 
   it('coverageSufficient=true → 不写 backlog', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockResolvedValue({
       coverageSufficient: true,
@@ -200,7 +188,6 @@ describe('runQuery — coverage gap → research backlog（异步）', () => {
   });
 
   it('coverage 判定抛错 → 不影响 runQuery 返回值，只 console.error', async () => {
-    mockSubjectHasContent.mockReturnValue(true);
     mockGenerateTools.mockResolvedValue({ text: '答案正文' });
     mockGenerateStructured.mockRejectedValue(new Error('llm 超时'));
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

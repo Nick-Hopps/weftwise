@@ -17,7 +17,6 @@ import type { CoreMessage } from 'ai';
 import {
   buildQueryToolContext,
   createAccessedPages,
-  subjectHasContent,
 } from './query-tools';
 import type { AccessedPages } from './query-tools';
 import { createBuiltinToolRegistry } from '@/server/agents/tools/builtin';
@@ -96,7 +95,7 @@ export function recordCoverageGap(subject: Subject, question: string, suggestedQ
 
 // QueryContextPage 类型已迁至 query-tools，此处再导出保持向后兼容
 export type { QueryContextPage, AccessedPages } from './query-tools';
-export { accessedToContext, subjectHasContent, createAccessedPages } from './query-tools';
+export { accessedToContext, createAccessedPages } from './query-tools';
 
 /** 工具循环单 query 的最大步数（防 runaway）。 */
 export const QUERY_MAX_STEPS = 8;
