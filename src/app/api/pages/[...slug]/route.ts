@@ -49,6 +49,12 @@ export async function GET(
 
   const page = pagesRepo.getPageBySlug(subject.id, slug);
   if (!page) {
+    const canonicalSlug = pagesRepo.resolvePageAlias(subject.id, slug);
+    if (canonicalSlug) {
+      const target = new URL(request.url);
+      target.pathname = `/api/pages/${canonicalSlug}`;
+      return NextResponse.redirect(target, 308);
+    }
     const elsewhere = pagesRepo.findPageBySlugAcrossSubjects(slug);
     return NextResponse.json(
       {

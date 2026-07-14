@@ -14,16 +14,21 @@ const ChangesetEntriesSchema = z.array(
       action: z.literal('create'),
       path: z.string().min(1),
       content: z.string(),
+      movedFromPath: z.string().optional(),
+      auxiliary: z.boolean().optional(),
     }),
     z.object({
       action: z.literal('update'),
       path: z.string().min(1),
       content: z.string(),
+      movedFromPath: z.string().optional(),
+      auxiliary: z.boolean().optional(),
     }),
     z.object({
       action: z.literal('delete'),
       path: z.string().min(1),
       content: z.null(),
+      auxiliary: z.boolean().optional(),
     }),
   ]),
 );
@@ -71,6 +76,7 @@ export function buildPostconditionScope(
 
     operationIds.add(row.id);
     for (const entry of parseEntries(row)) {
+      if (entry.auxiliary) continue;
       if (!entry.path.startsWith('wiki/')) {
         throw new PostconditionScopeError(
           `Operation ${row.id} 包含非 Wiki 路径。`,

@@ -59,7 +59,7 @@
 ### `chat/`
 
 - `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，批准页面变更后失效页面/图/历史等缓存，workflow start 派发 `wiki:job-started`，cancel 不误报为新任务
-- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/History 回滚/工作流标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；Research start 提醒候选二次审批，cancel 显示终止语义；刷新不会丢卡片，也不会把聊天回复当批准
+- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/页面 move/History 回滚/工作流标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；move 明确提示旧链接 alias 兼容，Research start 提醒候选二次审批，cancel 显示终止语义；刷新不会丢卡片，也不会把聊天回复当批准
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
@@ -176,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 页面身份迁移 Phase 3D：PendingAction 卡片区分页面 move 并提示旧 slug alias 兼容；tool activity 仅展示 `slug → newSlug`，不暴露 sidecar 内容 |
 | 2026-07-14 | Workflow 控制 Phase 3C：PendingAction 卡片区分 workflow start/cancel/research 二次审批；tool activity 使用 Planning/Checking 语义并只展示 slug/topic/jobId；cancel 批准不派发 job-started |
 | 2026-07-14 | History 工具 Phase 3B：Chat PendingAction 卡片区分 History 回滚提案；批准后沿用 page-change 缓存失效，刷新 pages/search/graph/history |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：Ask AI 引用列表显示 `subject:slug` 并通过 `?s=` 跳到精确 Subject；旧无 subjectSlug 引用保持原路径 |

@@ -22,6 +22,9 @@ describe('resolveQueryMode', () => {
     '取消任务 job-123',
     '终止工作流 job-123',
     'Cancel job job-123',
+    '把页面 old-page 移动到 new-page',
+    '把 Wiki 页面 old-page 的 slug 改成 new-page',
+    'Rename the wiki page slug from old-page to new-page',
   ])('明确写入命令进入 propose：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('propose');
   });
@@ -43,6 +46,9 @@ describe('resolveQueryMode', () => {
     'How do I start research?',
     'Can you cancel a job?',
     'Do not cancel job job-123',
+    '如何移动 Wiki 页面？',
+    '不要把页面 old-page 改成 new-page',
+    'How do I rename a wiki page slug?',
     '总结一下量子计算',
   ])('教程、能力、否定和普通问答保持 read：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('read');

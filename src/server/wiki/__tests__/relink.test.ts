@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rewriteBacklinkText } from '../relink';
+import { rewriteBacklinkText, rewriteLinksForPageMove } from '../relink';
 
 const SUBJECT = 'general';
 
@@ -129,5 +129,31 @@ describe('repointLinksToPage', () => {
   it('无匹配返回原串', () => {
     expect(repointLinksToPage('nothing [[zzz]]', 'b', 'A Title', 'general', resolver))
       .toBe('nothing [[zzz]]');
+  });
+});
+
+describe('rewriteLinksForPageMove', () => {
+  const resolver: TitleResolver = (title) => (
+    title.trim().toLowerCase() === 'old title' ? 'old-page' : undefined
+  );
+
+  it('同时改写 slug-form 与 title-form，并保留锚点/显示别名', () => {
+    expect(rewriteLinksForPageMove(
+      '[[old-page]] [[Old Title#part|显示]]',
+      'old-page',
+      'new-page',
+      'general',
+      resolver,
+    )).toBe('[[new-page]] [[new-page#part|显示]]');
+  });
+
+  it('保留显式本 Subject 前缀，不改跨 Subject 与代码区', () => {
+    expect(rewriteLinksForPageMove(
+      '[[general:old-page]] [[other:old-page]] `[[old-page]]`',
+      'old-page',
+      'new-page',
+      'general',
+      resolver,
+    )).toBe('[[general:new-page]] [[other:old-page]] `[[old-page]]`');
   });
 });

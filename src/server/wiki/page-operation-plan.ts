@@ -17,11 +17,16 @@ import {
   assertCanonicalPageSlug,
   buildWikiPath,
   deriveUniqueSlug,
+  META_PAGE_SLUGS,
+  normalizeSlug,
   parseWikiPath,
 } from './page-identity';
-import { rewriteBacklinkText } from './relink';
+import { rewriteBacklinkText, rewriteLinksForPageMove } from './relink';
 import { serializeWikiDocument } from './markdown';
 import { readPageInSubject, scanWikiPages } from './wiki-store';
+import { vaultPath } from '../config/env';
+import fs from 'node:fs';
+import * as sourcesRepo from '../db/repos/sources-repo';
 import {
   applyChangeset,
   captureSubjectMutationEpoch,
@@ -43,7 +48,7 @@ export interface PagePlanMeta {
 export interface PlannedPageOperation<
   ResultHint extends object = Record<string, unknown>,
 > {
-  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch' | 'link-ensure';
+  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch' | 'link-ensure' | 'move';
   preHead: string;
   changeset: Changeset;
   summary: string;
@@ -59,7 +64,7 @@ function buildDiffEntries(
   entries: ChangesetEntry[],
   beforeByPath: BeforeSnapshotByPath,
 ): UnifiedDiffEntry[] {
-  return entries.map((entry) => {
+  return entries.filter((entry) => !entry.auxiliary).map((entry) => {
     if (!beforeByPath.has(entry.path)) {
       throw new Error(`Missing before snapshot for planned path: ${entry.path}`);
     }
@@ -98,7 +103,7 @@ async function finishPlan<T extends object>(input: {
     }
   }
 
-  const affectedPages = input.changeset.entries.map((entry) => {
+  const affectedPages = input.changeset.entries.filter((entry) => !entry.auxiliary).map((entry) => {
     const identity = parseWikiPath(entry.path);
     if (!identity) throw new Error(`Invalid planned wiki path: ${entry.path}`);
     return { slug: identity.slug, action: entry.action };
@@ -114,6 +119,160 @@ async function finishPlan<T extends object>(input: {
     warnings,
     resultHint: input.resultHint,
   };
+}
+
+function appendMoveSourceSidecars(input: {
+  subject: Subject;
+  fromSlug: string;
+  toSlug: string;
+  entries: ChangesetEntry[];
+  beforeByPath: Map<string, string | null>;
+  warnings: string[];
+}): number {
+  let migrated = 0;
+  for (const source of sourcesRepo.getSourcesForPage(input.subject.id, input.fromSlug)) {
+    const relativePath = `.llm-wiki/sources/${input.subject.slug}/${source.id}.json`;
+    const absolutePath = vaultPath(relativePath);
+    if (!fs.existsSync(absolutePath)) {
+      input.warnings.push(`Source sidecar missing for ${source.id}; database link will still move.`);
+      continue;
+    }
+    const before = fs.readFileSync(absolutePath, 'utf-8');
+    let metadata: Record<string, unknown>;
+    try {
+      metadata = JSON.parse(before) as Record<string, unknown>;
+    } catch {
+      input.warnings.push(`Source sidecar ${source.id} is invalid JSON and was not changed.`);
+      continue;
+    }
+    const linkedPages = Array.isArray(metadata.linkedPages)
+      ? metadata.linkedPages.filter((value): value is string => typeof value === 'string')
+      : [];
+    const next = [...new Set([
+      ...linkedPages.map((slug) => slug === input.fromSlug ? input.toSlug : slug),
+      input.toSlug,
+    ])];
+    input.entries.push({
+      action: 'update',
+      path: relativePath,
+      content: `${JSON.stringify({ ...metadata, linkedPages: next }, null, 2)}\n`,
+      auxiliary: true,
+    });
+    input.beforeByPath.set(relativePath, before);
+    migrated += 1;
+  }
+  return migrated;
+}
+
+export async function planPageMove(
+  jobId: string,
+  subject: Subject,
+  input: { slug: string; newSlug: string } & PagePlanMeta,
+): Promise<PlannedPageOperation<{
+  movedFromSlug: string;
+  movedToSlug: string;
+  referencesUpdated: number;
+  sourceLinksMigrated: number;
+}>> {
+  assertCanonicalPageSlug(input.slug, 'source slug');
+  assertCanonicalPageSlug(input.newSlug, 'target slug');
+  if (input.slug === input.newSlug) throw new Error('Target slug must differ from source slug.');
+  if (META_PAGE_SLUGS.has(input.slug) || META_PAGE_SLUGS.has(input.newSlug)) {
+    throw new Error('Protected system pages cannot be moved or used as move targets.');
+  }
+  const sourcePage = pagesRepo.getPageBySlug(subject.id, input.slug);
+  const sourceDoc = readPageInSubject(subject.slug, input.slug);
+  if (!sourcePage || !sourceDoc) throw new Error(`page "${input.slug}" not found`);
+  if (sourcePage.tags.includes('meta')) throw new Error(`meta page "${input.slug}" cannot be moved`);
+  if (pagesRepo.getPageBySlug(subject.id, input.newSlug)
+    || readPageInSubject(subject.slug, input.newSlug)) {
+    throw new Error(`target page "${input.newSlug}" already exists`);
+  }
+  const aliasTarget = pagesRepo.resolvePageAlias(subject.id, input.newSlug);
+  if (aliasTarget && aliasTarget !== input.slug) {
+    throw new Error(`target slug "${input.newSlug}" is an alias of page "${aliasTarget}"`);
+  }
+
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
+  const preHead = await getVaultHead();
+  const titleResolver = pagesRepo.getTitleToSlugMap(subject.id);
+  const resolveTitle = (title: string) => titleResolver.get(title) ?? titleResolver.get(title.toLowerCase());
+  const aliases = [...new Set([
+    ...(sourceDoc.frontmatter.aliases ?? []),
+    input.slug,
+  ].filter((alias) => normalizeSlug(alias) !== input.newSlug))];
+  const movedBody = rewriteLinksForPageMove(
+    sourceDoc.body,
+    input.slug,
+    input.newSlug,
+    subject.slug,
+    resolveTitle,
+  );
+  const movedContent = serializeFrontmatter({
+    ...sourceDoc.frontmatter,
+    aliases,
+    updated: input.effectiveAt,
+  }, movedBody);
+  const sourcePath = buildWikiPath(subject.slug, input.slug);
+  const targetPath = buildWikiPath(subject.slug, input.newSlug);
+  const sourceRaw = serializeWikiDocument(sourceDoc);
+  const entries: ChangesetEntry[] = [
+    {
+      action: 'create',
+      path: targetPath,
+      content: movedContent,
+      movedFromPath: sourcePath,
+    },
+    { action: 'delete', path: sourcePath, content: null },
+  ];
+  const beforeByPath = new Map<string, string | null>([
+    [targetPath, null],
+    [sourcePath, sourceRaw],
+  ]);
+
+  let referencesUpdated = movedBody === sourceDoc.body ? 0 : 1;
+  for (const backlink of pagesRepo.getBacklinks(subject.id, input.slug)) {
+    if (backlink.subjectId !== subject.id || backlink.slug === input.slug) continue;
+    const doc = readPageInSubject(subject.slug, backlink.slug);
+    if (!doc) continue;
+    const before = serializeWikiDocument(doc);
+    const after = rewriteLinksForPageMove(
+      before,
+      input.slug,
+      input.newSlug,
+      subject.slug,
+      resolveTitle,
+    );
+    if (after === before) continue;
+    const path = buildWikiPath(subject.slug, backlink.slug);
+    entries.push({ action: 'update', path, content: after });
+    beforeByPath.set(path, before);
+    referencesUpdated += 1;
+  }
+
+  const sidecarWarnings: string[] = [];
+  const sourceLinksMigrated = appendMoveSourceSidecars({
+    subject,
+    fromSlug: input.slug,
+    toSlug: input.newSlug,
+    entries,
+    beforeByPath,
+    warnings: sidecarWarnings,
+  });
+  const plan = await finishPlan({
+    operation: 'move',
+    preHead,
+    changeset: createChangeset(jobId, subject, entries, mutationEpoch),
+    beforeByPath,
+    summary: `移动页面 ${input.slug} → ${input.newSlug}`,
+    resultHint: {
+      movedFromSlug: input.slug,
+      movedToSlug: input.newSlug,
+      referencesUpdated,
+      sourceLinksMigrated,
+    },
+  });
+  return { ...plan, warnings: [...plan.warnings, ...sidecarWarnings] };
 }
 
 /** 把改标题引发的 backlink 机械重写追加到同一 changeset；update/metadata 共用。 */

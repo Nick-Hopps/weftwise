@@ -82,6 +82,7 @@ const PROFILES: Record<ToolProfileId, ToolProfile> = {
       'workflow.research.start',
       'workflow.cancel',
       'wiki.reenrich',
+      'wiki.move',
     ],
     allowedSideEffects: ['none', 'propose'],
     requiresApproval: true,

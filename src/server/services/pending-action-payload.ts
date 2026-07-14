@@ -6,8 +6,13 @@ import type {
   WorkflowPreviewInput,
 } from '@/lib/contracts';
 import { normalizeMetadataPatch } from '@/server/wiki/narrow-write';
+import { isCanonicalPageSlug } from '@/server/wiki/page-identity';
 
 const TrimmedTextSchema = z.string().trim().min(1);
+const CanonicalPageSlugSchema = TrimmedTextSchema.refine(
+  isCanonicalPageSlug,
+  'page slug must be a non-empty canonical page slug',
+);
 const TagsSchema = z.array(TrimmedTextSchema).optional();
 const MetadataPatchPayloadSchema = z.object({
   slug: TrimmedTextSchema,
@@ -70,6 +75,16 @@ export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('link-ensure'),
     payload: LinkEnsurePayloadSchema,
+  }).strict(),
+  z.object({
+    operation: z.literal('move'),
+    payload: z.object({
+      slug: CanonicalPageSlugSchema,
+      newSlug: CanonicalPageSlugSchema,
+    }).strict().refine((payload) => payload.slug !== payload.newSlug, {
+      message: 'newSlug must differ from slug',
+      path: ['newSlug'],
+    }),
   }).strict(),
 ]);
 

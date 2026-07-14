@@ -46,6 +46,8 @@ export function PendingActionCard({
   const isPending = action.status === 'pending';
   const title = action.operation === 'history-revert'
     ? 'Proposed history revert'
+    : action.operation === 'move'
+      ? 'Proposed page move'
     : action.kind === 'workflow'
       ? 'Proposed workflow action'
       : 'Proposed wiki change';
@@ -79,6 +81,12 @@ export function PendingActionCard({
       {action.kind === 'workflow' && action.operation === 'workflow-cancel' && (
         <p className="mt-2 text-xs text-foreground-secondary">
           The selected background task will be stopped after approval.
+        </p>
+      )}
+
+      {action.operation === 'move' && (
+        <p className="mt-2 text-xs text-foreground-secondary">
+          The canonical page slug and URL will change; the page title stays unchanged.
         </p>
       )}
 

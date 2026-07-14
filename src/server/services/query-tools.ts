@@ -188,7 +188,8 @@ export function buildQueryToolContext(
     },
     async readCrossSubjectPage(input) {
       const targetSubject = resolveOtherSubject(subject, input.subjectSlug);
-      const page = pagesRepo.getPageBySlug(targetSubject.id, input.slug);
+      const canonicalSlug = pagesRepo.resolvePageAlias(targetSubject.id, input.slug) ?? input.slug;
+      const page = pagesRepo.getPageBySlug(targetSubject.id, canonicalSlug);
       const empty = {
         found: false,
         subjectSlug: targetSubject.slug,
@@ -197,7 +198,7 @@ export function buildQueryToolContext(
         body: null,
       };
       if (!page || pagesRepo.isMetaPage(page)) return empty;
-      const doc = readPageInSubject(targetSubject.slug, input.slug);
+      const doc = readPageInSubject(targetSubject.slug, canonicalSlug);
       if (!doc || doc.body.trim().length === 0) return empty;
       return {
         found: true,
@@ -208,8 +209,9 @@ export function buildQueryToolContext(
       };
     },
     async readPage(slug) {
-      const page = pagesRepo.getPageBySlug(subject.id, slug);
-      const doc = readPageInSubject(subject.slug, slug);
+      const canonicalSlug = pagesRepo.resolvePageAlias(subject.id, slug) ?? slug;
+      const page = pagesRepo.getPageBySlug(subject.id, canonicalSlug);
+      const doc = readPageInSubject(subject.slug, canonicalSlug);
       if (!page || !doc || doc.body.trim().length === 0) return null;
       return { title: page.title, markdown: doc.body };
     },

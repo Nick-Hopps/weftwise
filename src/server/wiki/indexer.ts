@@ -57,11 +57,17 @@ function resolveLinkTargetSubject(
 ): { targetSubjectId: SubjectId; targetSlug: string } | null {
   const { targetSubjectSlug, target } = link;
   if (!targetSubjectSlug || targetSubjectSlug === fallbackSubject.slug) {
-    return { targetSubjectId: fallbackSubject.id, targetSlug: target };
+    return {
+      targetSubjectId: fallbackSubject.id,
+      targetSlug: pagesRepo.resolvePageAlias(fallbackSubject.id, target) ?? target,
+    };
   }
   const targetSubject = subjectsRepo.getBySlug(targetSubjectSlug);
   if (!targetSubject) return null;
-  return { targetSubjectId: targetSubject.id, targetSlug: target };
+  return {
+    targetSubjectId: targetSubject.id,
+    targetSlug: pagesRepo.resolvePageAlias(targetSubject.id, target) ?? target,
+  };
 }
 
 /** 收集与 slug 相邻的页（本 subject 内 backlink 源 ∪ 出链目标），去重、排除自身。 */
@@ -119,6 +125,7 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
 
     if (doc === null) {
       pagesRepo.deletePage(subjectId, slug);
+      pagesRepo.deletePageAliases(subjectId, slug);
       continue;
     }
 
@@ -126,6 +133,12 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
     const page = buildWikiPage(subjectId, subject.slug, slug, rawContent, doc.frontmatter);
 
     pagesRepo.upsertPage(page);
+    pagesRepo.syncPageAliases(
+      subjectId,
+      slug,
+      doc.frontmatter.aliases ?? [],
+      doc.frontmatter.updated || new Date().toISOString(),
+    );
     pagesRepo.updateFtsEntry(subjectId, slug, page.title, page.summary, doc.body);
     presentSlugs.push(slug);
   }
@@ -176,6 +189,7 @@ export function rebuildPageIndex(): void {
   const rebuild = sqlite.transaction(() => {
     sqlite.exec('DELETE FROM pages_fts');
     sqlite.exec('DELETE FROM wiki_links');
+    sqlite.exec('DELETE FROM page_aliases');
     sqlite.exec('DELETE FROM pages');
 
     const allSubjects = subjectsRepo.listSubjects();
@@ -202,6 +216,12 @@ export function rebuildPageIndex(): void {
           frontmatter
         );
         pagesRepo.upsertPage(page);
+        pagesRepo.syncPageAliases(
+          subject.id,
+          entry.slug,
+          frontmatter.aliases ?? [],
+          frontmatter.updated || new Date().toISOString(),
+        );
         pagesRepo.updateFtsEntry(
           subject.id,
           entry.slug,

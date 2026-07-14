@@ -52,11 +52,12 @@ operations.status = 'applied'                   ← 释放 lock
 | `rewrite-fidelity.ts` 🆕 | `checkRewriteFidelity(original, revised, profile) / FIDELITY_PROFILES`（四档：`supplement`/`merge-update`/`fix`/`reshape`） | **统一保真护栏单一真实源**（T1.4）：长度/wikilink（复用 `wikilinks.ts::extractWikiLinks`，preserve/subset/none）/heading/frontmatter 四项检查，阈值集中在 `FIDELITY_PROFILES`；fix/reshape/supplement 三条既有护栏 + ingest merge-update（新增）共用同一实现，不再各写一份 |
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
 | `meta-pages.ts` 🆕 | `renderIndexPage(pages, opts) / renderLogPage(entries, opts) / parseLogEntries(existingLogMd) / buildIngestLogEntry(sources, pageCount) / resolveTemplateLang(wikiLanguage)` | **T2.1**：subject 系统元页（`index.md`/`log.md`）确定性渲染，取代原 `ingest-indexer` LLM 结构化输出——纯函数，零 LLM 调用。index 按每页第一个 tag 分组（无 tag 归 Uncategorized/未分类，永远排最后）、组内按标题排序，条目 `[[slug\|Title]] — summary`；log 保留最近 `MAX_LOG_ENTRIES=50` 条（新条目在前），既有条目由 `parseLogEntries` 解析既有正文 bullet 行还原。`resolveTemplateLang` 把自由文本 `wikiLanguage` 粗略二值化为 zh/en 模板（只影响分组标题/表头等固定文案，不影响页面 title/summary 本身的语言）。调用方 `ingest-service.ts::finalizeIngest` |
-| `relink.ts` | `rewriteBacklinkText(raw, oldTitle, newTitle, subjectSlug)` / `repointLinksToPage(raw, fromSlug, toTitle, subjectSlug, titleResolver)` | 纯函数：前者改标题时按「target 文本==旧标题」重写同-subject `[[…]]`（④a）；后者按「解析后 target slug==fromSlug」重写（覆盖 title/slug-form），合并（④b）/拆分（④c）重指均复用。共用私有 `replaceTargetInToken` 保前缀/锚点/别名 |
+| `relink.ts` | `rewriteBacklinkText / repointLinksToPage / rewriteLinksForPageMove` | 纯函数：标题变更、合并/拆分与页面 move 共用 token 级重写，保留 subject 前缀、锚点和显示别名；move 只改当前 Subject 源文件 |
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
 | `narrow-write.ts` | `normalizeMetadataPatch / prepareMetadataPatch / buildLinkEnsureEdit` | metadata/link 窄写纯内核：字段规范化、alias 身份冲突、唯一自然锚点、Markdown token 边界、link/unlink/retarget 与跨主题 target 形态校验；零 I/O、零 LLM |
 | `page-ops.ts` | `executePageMerge/Split/Delete/Create/Update/Patch/MetadataPatch/LinkEnsure` + `applyPatchEdits` | 所有页面写入的 direct 执行内核（Saga）；无 emit / 无 embed enqueue，由调用方持有调度。metadata patch 逐字复用正文并把 title relink 放入同一 changeset；link ensure 只把确定性单 edit 委托 patch plan，唯一写对象是 source page |
-| `page-operation-plan.ts` / `unified-diff.ts` | `planPageCreate/Update/Patch/Delete/MetadataPatch/LinkEnsure` + `applyPlannedPageOperation` | direct 与审批共享的 plan/apply 层；plan 只读并产出精确 diff，apply 复用 Saga；`expectedPreHead` 在 vault mutex 内、任何 fs/DB 写入前核对，避免批准陈旧预览覆盖并发提交 |
+| `page-operation-plan.ts` / `unified-diff.ts` | `planPageCreate/Update/Patch/Delete/MetadataPatch/LinkEnsure/Move` + `applyPlannedPageOperation` | direct 与审批共享的 plan/apply 层；move 规划 old delete + new create + backlink/source sidecar 更新；`expectedPreHead` 在 vault mutex 内、任何 fs/DB 写入前核对，避免批准陈旧预览覆盖并发提交 |
+| `page-identity-migration.ts` | `collectPageIdentityMoves / migratePageIdentityCaches` | 按 changeset move marker 幂等迁移 page_sources、embedding、maturity、rendition 与 profile signal slug，供 apply/rollback/recovery/History revert 共用 |
 | `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, allowedSet, caps })` | 纯函数：scope 扩展（含邻居）；Guard 强制 allowedSet/seed/meta 边界，并分别限制 merge/split/delete/create/update；metadata/link 窄写共用 `canEditPage` 与独立 update cap |
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 History API 与 `services/history-tools.ts` 共用（⑥ / Phase 3B） |
 | `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 History API 与 `history.list` 共用（⑥ / Phase 3B） |
@@ -99,7 +100,7 @@ operations.status = 'applied'                   ← 释放 lock
 
 ## 测试与质量
 
-已覆盖（`__tests__/`，vitest，23 文件）：wikilink 解析与跨主题解析、Saga validate/apply/rollback/recovery、frontmatter round-trip、relink/split/meta pages、page identity 与 canonical slug、create/update/patch/delete、统一 diff/陈旧 HEAD、Curate Guard、metadata/link 纯窄写与 plan/apply。窄写重点固定正文逐字保留、alias 冲突、Markdown token 边界、唯一锚点、source-only 写入、跨主题 target 验证、系统页保护和路径穿越拒绝。
+已覆盖（`__tests__/`，vitest，27 文件）：wikilink 解析与跨主题解析、Saga validate/apply/rollback/recovery、frontmatter round-trip、relink/split/meta pages、page identity 与 canonical slug、create/update/patch/delete/move、统一 diff/陈旧 HEAD、Curate Guard、metadata/link 纯窄写与 plan/apply。move 集成测试覆盖 alias/旧 URL 解析、当前与跨 Subject 链接、source sidecar、全部 slug 派生缓存及反向回滚。
 
 仍待补充：
 
@@ -132,7 +133,8 @@ src/server/wiki/
 ├── relink.ts             # 改标题/重指引用 重写（纯函数）
 ├── split-plan.ts         # 拆分页 slug 派生 + 恰一主页（纯函数）
 ├── narrow-write.ts       # metadata/link 窄写纯函数与确定性 edit
-├── page-operation-plan.ts # create/update/patch/delete/metadata/link 共用 plan/apply
+├── page-operation-plan.ts # create/update/patch/delete/metadata/link/move 共用 plan/apply
+├── page-identity-migration.ts # move 派生缓存正反向迁移
 ├── unified-diff.ts       # 审批预览统一 diff
 ├── page-ops.ts           # 页面写入 direct 内核（无 emit/enqueue）
 ├── curate-plan.ts        # scope + Guard（caps/seed/allowedSet/update/保护页）
@@ -145,6 +147,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 页面身份迁移 Phase 3D：新增 move plan、alias 解析、当前 Subject backlink 与 source sidecar 同 commit 更新；Saga 按 marker 迁移 slug 派生缓存并重建索引，rollback/recovery/History revert 支持反向身份迁移 |
 | 2026-07-14 | History 工具 Phase 3B：既有 `history.ts/revert.ts` 纯函数由共享 `services/history-tools.ts` 复用；回滚预览以当前 HEAD 生成 inverse diff，批准 apply 使用 `expectedPreHead` 与 vault mutex 拒绝陈旧计划 |
 | 2026-07-13 | Wiki 窄写 Phase 2B：新增 metadata patch 与 link ensure 纯函数、共享 plan/apply/direct 内核；metadata 正文逐字保留且 title relink 同 changeset，link 只写 source page；canonical slug 在任何 HEAD/读取前阻断路径穿越，Curate Guard 增加 allowedSet 内 update cap |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 page-operation-plan/unified-diff 预览层，页面 create/update/patch/delete 统一 plan→apply；`applyChangeset` 支持 expectedPreHead 并在 vault 锁内、首次写入前拒绝陈旧预览 |
