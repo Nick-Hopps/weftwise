@@ -25,17 +25,26 @@ export function defaultResearchCandidateIds(run: ResearchRunView): Set<string> {
   );
 }
 
+export function researchRunRetryable(run: ResearchRunView): boolean {
+  return run.status === 'failed'
+    && run.verificationLintJobId === null
+    && run.approval !== null
+    && run.candidates.some((candidate) => candidate.delivery?.status === 'failed');
+}
+
 export function ResearchCandidatesDialog({
   run,
   onClose,
   onApprove,
   onDismiss,
+  onRetry,
   acting,
 }: {
   run: ResearchRunView;
   onClose: () => void;
   onApprove: (candidateIds: string[]) => void;
   onDismiss: () => void;
+  onRetry: () => void;
   acting: boolean;
 }) {
   const [checked, setChecked] = useState<Set<string>>(
@@ -195,7 +204,14 @@ export function ResearchCandidatesDialog({
                 </Button>
               </>
             ) : (
-              <Button intent="secondary" onClick={onClose}>Close</Button>
+              <>
+                {researchRunRetryable(run) && (
+                  <Button intent="primary" onClick={onRetry} loading={acting}>
+                    Retry failed imports
+                  </Button>
+                )}
+                <Button intent="secondary" onClick={onClose} disabled={acting}>Close</Button>
+              </>
             )}
           </div>
         </div>

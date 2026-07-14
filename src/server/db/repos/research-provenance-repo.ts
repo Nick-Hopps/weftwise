@@ -31,7 +31,8 @@ export type ResearchProvenanceRepoErrorCode =
   | 'already-approved'
   | 'idempotency-conflict'
   | 'selection-invalid'
-  | 'run-not-approvable';
+  | 'run-not-approvable'
+  | 'run-not-retryable';
 
 /** Research repo 可映射为稳定 API 语义的冲突。 */
 export class ResearchProvenanceRepoError extends Error {
@@ -797,6 +798,122 @@ export function failFindingResearchRunWithoutDelivery(
         AND verification_lint_job_id IS NULL
     `).run(nowIso, nowIso, runId);
     return update.changes === 1;
+  });
+  return transaction.immediate();
+}
+
+export interface RetryResearchRunImportInput {
+  runId: string;
+  subjectId: SubjectId;
+  expectedVersion: number;
+  now?: Date;
+}
+
+export interface RetryResearchRunImportResult {
+  stored: StoredResearchRun;
+  coordinatorJobId: string;
+}
+
+/**
+ * failed run 的导入重试原语：只接受尚未进入 verification 的 failed run，
+ * 把 failed delivery 重置回 pending、换发新的 research-import coordinator、
+ * run CAS 回 importing；重置/换发/回写在同一 IMMEDIATE transaction 中完成，
+ * 之后由既有 reconciler 闭环接管。
+ */
+export function retryResearchRunImportAtomic(
+  input: RetryResearchRunImportInput,
+): RetryResearchRunImportResult {
+  if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
+    throw new ResearchProvenanceRepoError(
+      'run-stale',
+      'Research retry expectedVersion must be a positive integer',
+    );
+  }
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): RetryResearchRunImportResult => {
+    const stored = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
+    if (!stored) {
+      throw new ResearchProvenanceRepoError('run-not-found', 'Research run not found');
+    }
+    if (stored.run.status !== 'failed') {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        `Research run is not in a retryable state: ${stored.run.status}`,
+      );
+    }
+    if (stored.run.verificationLintJobId) {
+      // verification 之后的 failed 已有物化的 finding 终态，导入重试无法恢复语义。
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run failed after verification and cannot retry the import',
+      );
+    }
+    if (!stored.approval || stored.deliveries.length === 0) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run has no approval evidence to retry',
+      );
+    }
+    if (stored.run.version !== input.expectedVersion) {
+      throw new ResearchProvenanceRepoError('run-stale', 'Research run version is stale');
+    }
+
+    const nowIso = (input.now ?? new Date()).toISOString();
+    // 保留 source_id 使 coordinator 走既有"从现有来源恢复"路径，避免重复抓取；
+    // attempt_count 保留为历史证据，由下一次 claim 继续累加。
+    const reset = sqlite.prepare(`
+      UPDATE research_candidate_ingests
+      SET status = 'pending', ingest_job_id = NULL, claim_token = NULL,
+          lease_expires_at = NULL, completed_at = NULL, error_json = NULL,
+          operation_ids_json = '[]', touched_pages_json = '[]', commit_sha = NULL,
+          updated_at = ?
+      WHERE run_id = ? AND status = 'failed'
+    `).run(nowIso, input.runId);
+    if (reset.changes === 0) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run has no failed candidate imports to retry',
+      );
+    }
+
+    const coordinatorJobId = randomUUID();
+    sqlite.prepare(`
+      INSERT INTO jobs (
+        id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+      ) VALUES (?, 'research-import', 'pending', ?, ?, NULL, ?,
+        NULL, NULL, NULL, NULL, 0)
+    `).run(
+      coordinatorJobId,
+      input.subjectId,
+      JSON.stringify({
+        approvalId: stored.approval.id,
+        runId: input.runId,
+        subjectId: input.subjectId,
+      }),
+      nowIso,
+    );
+    const approvalUpdate = sqlite.prepare(`
+      UPDATE research_approvals SET coordinator_job_id = ?
+      WHERE id = ? AND run_id = ?
+    `).run(coordinatorJobId, stored.approval.id, input.runId);
+    if (approvalUpdate.changes !== 1) {
+      throw new Error('Research approval coordinator handoff changed concurrently');
+    }
+
+    const runUpdate = sqlite.prepare(`
+      UPDATE research_runs
+      SET status = 'importing', version = version + 1, updated_at = ?,
+          completed_at = NULL, error_json = NULL
+      WHERE id = ? AND subject_id = ? AND status = 'failed' AND version = ?
+    `).run(nowIso, input.runId, input.subjectId, input.expectedVersion);
+    if (runUpdate.changes !== 1) {
+      throw new ResearchProvenanceRepoError('run-stale', 'Research run version changed concurrently');
+    }
+
+    const latest = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
+    if (!latest) throw new Error('Failed to reload retried Research run');
+    return { stored: latest, coordinatorJobId };
   });
   return transaction.immediate();
 }
