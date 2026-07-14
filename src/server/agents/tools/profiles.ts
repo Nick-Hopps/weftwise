@@ -40,6 +40,8 @@ const QUERY_READ_TOOLS = [
   'wiki.inspect',
   'source.search',
   'source.read',
+  'history.list',
+  'history.diff',
   'web.search',
 ] as const;
 
@@ -71,7 +73,7 @@ const PROFILES: Record<ToolProfileId, ToolProfile> = {
   },
   'query:propose': {
     id: 'query:propose',
-    tools: [...QUERY_READ_TOOLS, 'wiki.preview_change'],
+    tools: [...QUERY_READ_TOOLS, 'wiki.preview_change', 'history.revert'],
     allowedSideEffects: ['none', 'propose'],
     requiresApproval: true,
   },

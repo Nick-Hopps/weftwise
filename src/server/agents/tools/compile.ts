@@ -121,6 +121,7 @@ const SENSITIVE_AUDIT_KEYS = new Set([
   'oldString',
   'newString',
   'displayText',
+  'diff',
 ]);
 
 function sanitizeAuditValue(value: unknown, key?: string): unknown {

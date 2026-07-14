@@ -142,10 +142,20 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
 
   it('仅允许通过审批预览工具提案，并明确预览不会直接落盘', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_preview_change');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_list');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_diff');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_revert');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/not applied/i);
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/actionId/i);
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/approval button/i);
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toMatch(/reply.*confirm/i);
+  });
+
+  it('History 回滚要求 list → diff → PendingAction，且禁止猜 operation id', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/history_list[\s\S]*history_diff/);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Never guess an operation id/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/history_diff[\s\S]*history_revert/);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/never applies the revert/i);
   });
 
   it('窄写请求只指导 preview_change 的 operation，不暴露真实窄写工具', () => {

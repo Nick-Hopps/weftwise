@@ -3,6 +3,10 @@ import type {
   CrossSubjectReadResult,
   CrossSubjectSearchInput,
   CrossSubjectSearchResult,
+  HistoryDiffInput,
+  HistoryDiffResult,
+  HistoryListInput,
+  HistoryListResult,
   InspectSection,
   LinkEnsureInput,
   LinkEnsureResult,
@@ -32,6 +36,8 @@ export interface ToolContext {
   subject: Subject;
   conversationId?: string;
   previewChange?(input: PreviewChangeInput): Promise<PendingActionView>;
+  /** Query 专用：为 active Subject 的历史 operation 创建回滚审批。 */
+  previewHistoryRevert?(operationId: string): Promise<PendingActionView>;
   onPendingAction?(action: PendingActionView): void;
   readPage(slug: string): Promise<{ title: string; markdown: string } | null>;
   search(query: string, limit: number): Promise<Array<{ slug: string; title: string; summary: string }>>;
@@ -48,6 +54,10 @@ export interface ToolContext {
   searchCrossSubject?(input: CrossSubjectSearchInput): Promise<CrossSubjectSearchResult>;
   /** Query 专用：读取显式指定的其他 Subject 页面正文。 */
   readCrossSubjectPage?(input: CrossSubjectReadInput): Promise<CrossSubjectReadResult>;
+  /** Query 专用：读取 active Subject 的 operation 时间线。 */
+  listHistory?(input: HistoryListInput): Promise<HistoryListResult>;
+  /** Query 专用：读取 active Subject 的单次 operation diff。 */
+  readHistoryDiff?(input: HistoryDiffInput): Promise<HistoryDiffResult>;
   /** query 累积访问页用于引用核查；ingest 不传。 */
   onAccess?(page: { subjectSlug?: string; slug: string; title: string; body?: string }): void;
   /** 只记录来源标识，禁止把来源正文写入访问收集器。 */

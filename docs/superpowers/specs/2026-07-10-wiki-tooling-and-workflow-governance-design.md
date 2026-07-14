@@ -1,7 +1,7 @@
 # Wiki 工具面与工作流治理重构 — 设计 Spec
 
 日期：2026-07-10  
-状态：Phase 0–2 已完成；Phase 3 执行中（Phase 3A 已实现）
+状态：Phase 0–2 已完成；Phase 3 执行中（Phase 3A–3B 已实现）
 
 ## 一、背景
 
@@ -149,7 +149,7 @@ export interface ToolProfile {
 | Profile | 工具 |
 |---|---|
 | `query:read` | `wiki.list/search/read/inspect`、`source.search/read`、`subject.list`、`wiki.search_cross_subject/read_cross_subject`、可选 `web.search` |
-| `query:propose` | `query:read` + `wiki.preview_change`（预览仍只写 active Subject） |
+| `query:propose` | `query:read` + `wiki.preview_change` + `history.revert`（预览仍只写 active Subject） |
 | `fix:links` | `wiki.search/read/inspect`、`source.search/read`、`wiki.patch` |
 | `fix:contradiction` | `fix:links` + `wiki.update` |
 | `curate:auto` | `wiki.search/read/inspect`、`wiki.merge/split`；P1 再加 `wiki.link.ensure`、`wiki.metadata.patch` |
@@ -177,7 +177,7 @@ export interface ToolExecutionPolicy {
 
 - 工具不在 profile allowlist：不进入 `ToolSet`；
 - `sideEffect` 不在 `allowedSideEffects`：启动时抛配置错误，禁止静默降级；
-- query profile 不直接编译 create/update/delete/merge/split 等实际写工具，只编译 `wiki.preview_change`；
+- query profile 不直接编译 create/update/delete/merge/split 等实际写工具，只编译 `wiki.preview_change/history.revert` 两个提案工具；
 - worker profile 可以编译写工具，但执行 handler 时仍必须通过 Guard。
 
 执行阶段：
@@ -428,7 +428,7 @@ applyPlannedPageOperation(plan): Promise<AppliedPageOperation>
 
 ### 7.5 Query 工具面收缩
 
-Ask AI 默认只编译 `query:read`。当用户明确提出 create/update/patch/delete/reenrich 意图时，runner 切换为 `query:propose`，模型只能调用 `wiki.preview_change`，看不到实际写工具。
+Ask AI 默认只编译 `query:read`。当用户明确提出 create/update/patch/delete/reenrich 或 History 回滚意图时，runner 切换为 `query:propose`，模型只能调用 `wiki.preview_change/history.revert` 生成审批预览，看不到实际写工具。
 
 现有 `wiki.create/update/patch/delete/reenrich` 保留给 worker / 兼容路径，但从 Query `BASE_QUERY_TOOL_NAMES` 移除。审批 API 最终调用共享 Service command，不通过模型工具 handler。
 
@@ -724,7 +724,7 @@ Worker 启动时：
 ### Phase 3：扩展能力
 
 1. subject/cross-subject read tools（Phase 3A 已完成）；
-2. history tools；
+2. history tools（Phase 3B 已完成）；
 3. workflow start/status/cancel；
 4. `wiki.move` 单独立项。
 
