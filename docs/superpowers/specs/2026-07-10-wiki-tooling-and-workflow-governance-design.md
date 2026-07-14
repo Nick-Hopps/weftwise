@@ -1,7 +1,7 @@
 # Wiki 工具面与工作流治理重构 — 设计 Spec
 
 日期：2026-07-10  
-状态：待评审
+状态：Phase 0–2 已完成；Phase 3 执行中（Phase 3A 已实现）
 
 ## 一、背景
 
@@ -148,8 +148,8 @@ export interface ToolProfile {
 
 | Profile | 工具 |
 |---|---|
-| `query:read` | `wiki.list/search/read/inspect`、`source.search/read`、可选 `web.search` |
-| `query:propose` | `query:read` + `wiki.preview_change` |
+| `query:read` | `wiki.list/search/read/inspect`、`source.search/read`、`subject.list`、`wiki.search_cross_subject/read_cross_subject`、可选 `web.search` |
+| `query:propose` | `query:read` + `wiki.preview_change`（预览仍只写 active Subject） |
 | `fix:links` | `wiki.search/read/inspect`、`source.search/read`、`wiki.patch` |
 | `fix:contradiction` | `fix:links` + `wiki.update` |
 | `curate:auto` | `wiki.search/read/inspect`、`wiki.merge/split`；P1 再加 `wiki.link.ensure`、`wiki.metadata.patch` |
@@ -723,7 +723,7 @@ Worker 启动时：
 
 ### Phase 3：扩展能力
 
-1. subject/cross-subject read tools；
+1. subject/cross-subject read tools（Phase 3A 已完成）；
 2. history tools；
 3. workflow start/status/cancel；
 4. `wiki.move` 单独立项。
