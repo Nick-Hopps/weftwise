@@ -23,6 +23,10 @@ import { wikiReadCrossSubjectTool } from './wiki-read-cross-subject';
 import { historyListTool } from './history-list';
 import { historyDiffTool } from './history-diff';
 import { historyRevertTool } from './history-revert';
+import { workflowStatusTool } from './workflow-status';
+import { workflowReenrichStartTool } from './workflow-reenrich-start';
+import { workflowResearchStartTool } from './workflow-research-start';
+import { workflowCancelTool } from './workflow-cancel';
 
 /** 进程无关：worker 与 Next.js（query 流式）两进程各自构造（ToolDef 无状态纯对象）。 */
 export function createBuiltinToolRegistry(): ToolRegistry {
@@ -31,7 +35,6 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(wikiReadTool as ToolDef);
   r.register(wikiSearchTool as ToolDef);
   r.register(wikiListTool as ToolDef);
-  r.register(wikiReenrichTool as ToolDef);
   r.register(wikiDeleteTool as ToolDef);
   r.register(wikiCreateTool as ToolDef);
   r.register(wikiUpdateTool as ToolDef);
@@ -46,8 +49,13 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(wikiReadCrossSubjectTool as ToolDef);
   r.register(historyListTool as ToolDef);
   r.register(historyDiffTool as ToolDef);
+  r.register(workflowStatusTool as ToolDef);
   r.register(wikiPreviewChangeTool as ToolDef);
   r.register(historyRevertTool as ToolDef);
+  r.register(workflowReenrichStartTool as ToolDef);
+  r.register(workflowResearchStartTool as ToolDef);
+  r.register(workflowCancelTool as ToolDef);
+  r.register(wikiReenrichTool as ToolDef);
   r.register(wikiMetadataPatchTool as ToolDef);
   r.register(wikiLinkEnsureTool as ToolDef);
   return r;

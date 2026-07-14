@@ -76,8 +76,8 @@ ingest-service.ts
 **执行路径分支**（`compile.ts` + `agent-loop.ts`）：
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
 - **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
-- **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造包含 23 个 builtin 的 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
-- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装 read/search/inspect/source-page-filter/list 与写上下文，`wiki.link.ensure` 只按 source page 判写 scope，跨主题 target 仅作存在性验证。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/diff/patch 及 metadata 值。Query 按意图使用 `query:read` 或 `query:propose`，后者只多 `wiki.preview_change/history.revert` 提案能力、不含任何实际写工具；`fix:links` 只用 `wiki.link.ensure`，`fix:contradiction` 才额外开放 patch/update；Curate 两种 profile 均可在 allowedSet 内使用 link/metadata 窄写；ingest 只使用 planner/writer 只读 profile。
+- **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造包含 27 个 builtin 的 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
+- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装 read/search/inspect/source-page-filter/list 与写上下文，`wiki.link.ensure` 只按 source page 判写 scope，跨主题 target 仅作存在性验证。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/diff/patch 及 metadata 值。Query 按意图使用 `query:read` 或 `query:propose`：read 可脱敏读取 active Subject workflow status，propose 才额外获得页面/History/workflow PendingAction 提案能力，仍不含任何 enqueue/destructive 直接执行工具；`fix:links` 只用 `wiki.link.ensure`，`fix:contradiction` 才额外开放 patch/update；Curate 两种 profile 均可在 allowedSet 内使用 link/metadata 窄写；ingest 只使用 planner/writer 只读 profile。
 
 **暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。`index.md` / `log.md`（meta 页）由 `wiki/meta-pages.ts` 纯函数渲染，所有内容页随 `pending` 自动提交——T2.1 起索引/日志根本不再有 LLM 调用（此前是无 tools 结构化输出，不接触页正文；现在连该调用也去掉了），从根本上杜绝巨量提示词随页数增长与工具循环风险。
 
@@ -135,7 +135,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `registry.ts` | `ToolRegistry` — 工具集合容器；每个 step 初始化一个 registry，按 skill 配置决定挂载哪些工具；`createBuiltinToolRegistry()` 工厂函数进程无关地构造内置工具集（ingest worker / query runner 各自调用，无共享单例） |
 | `evidence-reader.ts` | subject-scoped 确定性证据读取层：页面关系/来源/健康、source chunk 检索与窗口读取、keyset page list；可 import repos/source store，不依赖 AI SDK |
 | `evidence-results.ts` | 纯契约 helper：scope 外与不存在页共用的空 `WikiInspection`，不加载 DB |
-| `tool-context.ts` | `ToolContext` 接口定义（当前 Subject 证据 + Query 专用跨 Subject/History 只读 + 可选 `conversationId/previewChange/previewHistoryRevert/onPendingAction` + metadata/link 窄写等 worker 能力）；不再暴露原始 `AgentContext` 逃生舱。Query propose 只注入预览服务，Fix/Curate 实际写能力仍按 profile 与 Guard 限制 |
+| `tool-context.ts` | `ToolContext` 接口定义（当前 Subject 证据 + Query 专用跨 Subject/History/workflow 状态只读 + 可选页面/History/workflow preview 与 `onPendingAction` + metadata/link 窄写等 worker 能力）；不再暴露原始 `AgentContext` 逃生舱。Query propose 只注入预览服务，Fix/Curate 实际写能力仍按 profile 与 Guard 限制 |
 | `profiles.ts` | 八个 `ToolProfile` + `resolveToolProfile/createToolExecutionPolicy/profileForIngestSkill`；集中声明 runner 工具 allowlist、允许 sideEffect、审批标记与可选 page scope/job capability。Query 两个 profile 独占跨 Subject 只读工具且永无真实写工具；Fix links/contradiction 和 Curate auto/manual 使用精确不同的写面 |
 | `compile.ts` | `compileToolSet(toolDefs, ctx, { policy, ... })` — policy 必传；过滤工具、校验 sideEffect/subject/job capability、包装 page scope，并把脱敏后的 profile/sideEffect/subject/pageSlugs 送入审计回调。`synthesizeFinishTool` 仍仅作为 provider 收尾适配器 |
 | `builtin/wiki-read.ts` | `wiki.read` — 通过 `ToolContext.readPage` 读取 wiki 页面内容（取代旧 `vault-read.ts`） |
@@ -150,6 +150,10 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `builtin/history-list.ts` | `history.list` — Query 读取 active Subject 的 operation 时间线，支持 slug 过滤与有界 limit |
 | `builtin/history-diff.ts` | `history.diff` — Query 读取 active Subject 指定 operation 的已提交 diff |
 | `builtin/history-revert.ts` | `history.revert` — 只创建 History 回滚 PendingAction（`sideEffect:'propose'`，仅 `query:propose`），不直接执行 Saga |
+| `builtin/workflow-status.ts` | `workflow.status` — active Subject job 脱敏状态，只返回类型/状态/时间/取消标记，不返回 params/result |
+| `builtin/workflow-reenrich-start.ts` | `workflow.reenrich.start` — 只创建 re-enrich PendingAction，不直接入队 |
+| `builtin/workflow-research-start.ts` | `workflow.research.start` — 只创建 Research discovery PendingAction，候选导入仍需二次批准 |
+| `builtin/workflow-cancel.ts` | `workflow.cancel` — 只创建 active Subject 非终态 job 的取消 PendingAction，不直接终止任务 |
 | `builtin/wiki-update.ts` | `wiki.update` — 通过 `ToolContext.updatePage` 更新页面标题/正文，改标题联动 relink（`sideEffect:'update'`，仅 `fix:contradiction` profile） |
 | `builtin/wiki-patch.ts` | `wiki.patch` — 通过 `ToolContext.patchPage` 做 old_string/new_string 精确替换（`sideEffect:'update'`，仅 `fix:contradiction` profile） |
 | `builtin/wiki-metadata-patch.ts` | `wiki.metadata.patch` — 只改 title/summary/tags/aliases，正文逐字保留（`sideEffect:'update'`，仅 Curate profile） |
@@ -299,12 +303,16 @@ src/server/agents/
         ├── history-list.ts         # history.list（Query-only）
         ├── history-diff.ts         # history.diff（Query-only）
         ├── history-revert.ts       # history.revert（仅提案，独立批准）
+        ├── workflow-status.ts      # workflow.status（active Subject 脱敏状态）
+        ├── workflow-reenrich-start.ts # re-enrich 启动提案
+        ├── workflow-research-start.ts # Research 启动提案
+        ├── workflow-cancel.ts      # job 取消提案
         ├── wiki-preview-change.ts  # wiki.preview_change（仅 query:propose，零直接写入）
         ├── wiki-update.ts          # wiki.update（sideEffect:'update'，仅 fix:contradiction）
         ├── wiki-patch.ts           # wiki.patch（sideEffect:'update'，仅 fix:contradiction）
         ├── wiki-metadata-patch.ts  # wiki.metadata.patch（仅 Curate，正文不可写）
         ├── wiki-link-ensure.ts     # wiki.link.ensure（Fix/Curate，单链接确定性维护）
-        ├── wiki-reenrich.ts        # wiki.reenrich（兼容定义；Phase 0 profile 不暴露）
+        ├── wiki-reenrich.ts        # wiki.reenrich（workflow.reenrich.start 弃用 alias）
         ├── wiki-delete.ts          # wiki.delete（sideEffect:'destructive'，仅 curate:manual）
         ├── wiki-create.ts          # wiki.create（sideEffect:'create'，仅 curate:manual）
         ├── wiki-merge.ts           # 🆕 wiki.merge（写动作工具，sideEffect:'merge'，仅 curate runner）
@@ -318,6 +326,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Workflow 控制 Phase 3C：registry 新增 `workflow.status/reenrich.start/research.start/cancel`；status 只读，start/cancel 只生成 PendingAction；`wiki.reenrich` 改为记录弃用日志的审批 alias；Query 仍无直接 enqueue/destructive 工具 |
 | 2026-07-14 | History 工具 Phase 3B：registry 新增 `history.list/diff/revert`；list/diff 只进入 Query 只读面，revert 只进入 `query:propose` 并生成 PendingAction；History diff 在审计输出中脱敏，其他 runner 工具面不变 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：registry 新增 `subject.list`、`wiki.search_cross_subject`、`wiki.read_cross_subject`，只进入 Query profile；跨主题正文审计遮盖 body，Fix/Curate/Ingest 工具面不变 |
 | 2026-07-13 | Wiki 窄写工具 Phase 2B：registry 新增 `wiki.metadata.patch` / `wiki.link.ensure`；Fix links 由通用 patch 收缩为 link ensure，contradiction 保留 patch/update；Curate auto/manual 增加 metadata/link 窄写与 update cap；Query 仍只持有 `wiki.preview_change`，真实窄写工具不进入 Query profile |

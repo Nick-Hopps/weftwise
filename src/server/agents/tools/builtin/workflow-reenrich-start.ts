@@ -1,20 +1,18 @@
 import { z } from 'zod';
-import type { PendingActionView } from '@/lib/contracts';
+import type { PendingActionView, WorkflowReenrichStartInput } from '@/lib/contracts';
 import type { ToolDef } from '../../types';
 
-const InputSchema = z.object({ slug: z.string().trim().min(1) });
+const InputSchema = z.object({ slug: z.string().trim().min(1) }).strict();
 const OutputSchema = z.custom<PendingActionView>();
 
-export const wikiReenrichTool: ToolDef<z.infer<typeof InputSchema>, PendingActionView> = {
-  name: 'wiki.reenrich',
+export const workflowReenrichStartTool: ToolDef<WorkflowReenrichStartInput, PendingActionView> = {
+  name: 'workflow.reenrich.start',
   source: 'builtin',
-  description:
-    'Deprecated alias for workflow.reenrich.start. Creates an approval preview for re-enriching one page; it never starts the job directly.',
+  description: 'Create an approval preview for starting re-enrichment of one page in the active subject. It does not enqueue a job.',
   inputSchema: InputSchema,
   outputSchema: OutputSchema,
   sideEffect: 'propose',
   async handler({ slug }, ctx) {
-    console.warn('[deprecated] wiki.reenrich is deprecated; use workflow.reenrich.start');
     if (!ctx.previewWorkflowReenrich) {
       throw new Error('[ACTION_PLAN_INVALID] Workflow preview is not available in this context.');
     }

@@ -3,6 +3,7 @@ import type {
   PendingActionView,
   PreviewChangeInput,
   Subject,
+  WorkflowPreviewInput,
 } from '@/lib/contracts';
 import * as conversationsRepo from '../db/repos/conversations-repo';
 import * as pendingActionsRepo from '../db/repos/pending-actions-repo';
@@ -11,6 +12,7 @@ import {
   canonicalJson,
   hashPendingActionPayload,
   normalizePreviewInput,
+  normalizeWorkflowPreviewInput,
 } from './pending-action-payload';
 import {
   planCreatePageInSubject,
@@ -21,18 +23,27 @@ import {
   planUpdatePageInSubject,
 } from './page-write';
 import { planReenrich } from './reenrich-enqueue';
-import { enqueueReenrich } from './reenrich-enqueue';
 import {
   applyPlannedPageOperation,
   type PlannedPageOperation,
 } from '../wiki/page-operation-plan';
-import { finalizeAppliedPageAction } from './pending-action-finalizer';
-import { finalizeAppliedHistoryRevertAction } from './pending-action-finalizer';
+import {
+  finalizeAppliedHistoryRevertAction,
+  finalizeAppliedPageAction,
+  finalizeWorkflowCancelAction,
+  finalizeWorkflowStartAction,
+} from './pending-action-finalizer';
 import {
   applyPlannedHistoryRevert,
   planHistoryRevert,
   type PlannedHistoryRevert,
 } from './history-tools';
+import {
+  planWorkflowCancel,
+  planWorkflowReenrich,
+  planWorkflowResearch,
+  reportWorkflowCancellation,
+} from './workflow-tools';
 export { recoverPendingActions, maintainPendingActions } from './pending-action-maintenance';
 
 const PENDING_TTL_MS = 30 * 60_000;
@@ -275,6 +286,70 @@ export async function createPendingHistoryRevertPreview(input: {
   return recordToView(record);
 }
 
+async function planWorkflowPreview(
+  subject: Subject,
+  input: WorkflowPreviewInput,
+): Promise<PendingActionPreview> {
+  switch (input.operation) {
+    case 'workflow-reenrich-start':
+      return planWorkflowReenrich(subject, input.payload.slug);
+    case 'workflow-research-start':
+      return planWorkflowResearch(subject, input.payload.topic);
+    case 'workflow-cancel':
+      return planWorkflowCancel(subject, input.payload.jobId);
+    default:
+      return assertNever(input);
+  }
+}
+
+export async function createPendingWorkflowActionPreview(input: {
+  conversationId: string;
+  subject: Subject;
+  input: WorkflowPreviewInput;
+  now?: Date;
+}): Promise<PendingActionView> {
+  const conversation = conversationsRepo.getConversation(input.conversationId);
+  if (!conversation || conversation.subjectId !== input.subject.id) {
+    throw new PendingActionError('ACTION_NOT_FOUND', 'Conversation not found.', 404);
+  }
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const normalized = normalizeWorkflowPreviewInput(input.input, nowIso);
+  const normalizedForPlan = {
+    operation: normalized.operation,
+    payload: omitEffectiveAt(normalized.payload),
+  } as WorkflowPreviewInput;
+  let preview: PendingActionPreview;
+  try {
+    preview = await planWorkflowPreview(input.subject, normalizedForPlan);
+  } catch (error) {
+    throw new PendingActionError(
+      'ACTION_PLAN_INVALID',
+      error instanceof Error ? error.message : 'Unable to plan this workflow action.',
+      409,
+    );
+  }
+  const payloadHash = hashPendingActionPayload({
+    conversationId: input.conversationId,
+    subjectId: input.subject.id,
+    operation: normalized.operation,
+    payload: normalized.payload,
+  });
+  const expiresAt = new Date(now.getTime() + PENDING_TTL_MS).toISOString();
+  const record = pendingActionsRepo.createPendingAction({
+    conversationId: input.conversationId,
+    subjectId: input.subject.id,
+    operation: normalized.operation,
+    payloadJson: canonicalJson(normalized.payload),
+    payloadHash,
+    previewJson: JSON.stringify(preview),
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    expiresAt,
+  });
+  return recordToView(record);
+}
+
 export function listPendingActions(input: {
   conversationId: string;
   subject: Subject;
@@ -315,6 +390,7 @@ type ReplannedAction = {
   preview: PendingActionPreview;
   pagePlan: PlannedPageOperation<object> | null;
   historyPlan: PlannedHistoryRevert | null;
+  workflowInput: WorkflowPreviewInput | null;
   effectiveAt: string;
 };
 
@@ -339,7 +415,16 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
       break;
     case 'reenrich': {
       const workflow = await planReenrich(subject.id, String(payload.slug));
-      return { preview: workflow, pagePlan: null, historyPlan: null, effectiveAt };
+      return {
+        preview: workflow,
+        pagePlan: null,
+        historyPlan: null,
+        workflowInput: {
+          operation: 'workflow-reenrich-start',
+          payload: { slug: String(payload.slug) },
+        },
+        effectiveAt,
+      };
     }
     case 'metadata-patch':
       pagePlan = await planMetadataPatchInSubject(subject, planPayload as never, effectiveAt);
@@ -353,6 +438,22 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
         preview: historyPlanToPreview(historyPlan),
         pagePlan: null,
         historyPlan,
+        workflowInput: null,
+        effectiveAt,
+      };
+    }
+    case 'workflow-reenrich-start':
+    case 'workflow-research-start':
+    case 'workflow-cancel': {
+      const workflowInput = {
+        operation: record.operation,
+        payload: planPayload,
+      } as WorkflowPreviewInput;
+      return {
+        preview: await planWorkflowPreview(subject, workflowInput),
+        pagePlan: null,
+        historyPlan: null,
+        workflowInput,
         effectiveAt,
       };
     }
@@ -360,7 +461,13 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
       return assertNever(record.operation);
   }
   if (!pagePlan) throw new Error('Page action did not produce a plan.');
-  return { preview: pagePlanToPreview(pagePlan), pagePlan, historyPlan: null, effectiveAt };
+  return {
+    preview: pagePlanToPreview(pagePlan),
+    pagePlan,
+    historyPlan: null,
+    workflowInput: null,
+    effectiveAt,
+  };
 }
 
 export async function approvePendingAction(input: {
@@ -424,7 +531,16 @@ export async function approvePendingAction(input: {
   const operationId = replanned.pagePlan?.changeset.id
     ?? replanned.historyPlan?.changeset.id
     ?? null;
-  if (!pendingActionsRepo.claimExecution(input.id, input.subject.id, operationId, null, nowIso)) {
+  const workflowJobId = replanned.workflowInput?.operation === 'workflow-cancel'
+    ? replanned.workflowInput.payload.jobId
+    : null;
+  if (!pendingActionsRepo.claimExecution(
+    input.id,
+    input.subject.id,
+    operationId,
+    workflowJobId,
+    nowIso,
+  )) {
     throw new PendingActionError('ACTION_IN_PROGRESS', 'Action is already being processed.', 409);
   }
   if (replanned.pagePlan || replanned.historyPlan) {
@@ -499,15 +615,54 @@ export async function approvePendingAction(input: {
         409,
       );
     }
-  } else {
+  } else if (replanned.workflowInput) {
     try {
-      const { jobId } = enqueueReenrich(input.subject.id, String(payload && (payload as Record<string, unknown>).slug));
-      pendingActionsRepo.markApplied(input.id, input.subject.id, nowIso, { jobId });
+      switch (replanned.workflowInput.operation) {
+        case 'workflow-reenrich-start':
+          finalizeWorkflowStartAction({
+            actionId: input.id,
+            subjectId: input.subject.id,
+            type: 're-enrich',
+            params: {
+              slug: replanned.workflowInput.payload.slug,
+              subjectId: input.subject.id,
+            },
+            nowIso,
+          });
+          break;
+        case 'workflow-research-start':
+          finalizeWorkflowStartAction({
+            actionId: input.id,
+            subjectId: input.subject.id,
+            type: 'research',
+            params: {
+              topic: replanned.workflowInput.payload.topic,
+              subjectId: input.subject.id,
+            },
+            nowIso,
+          });
+          break;
+        case 'workflow-cancel':
+          finalizeWorkflowCancelAction({
+            actionId: input.id,
+            subjectId: input.subject.id,
+            jobId: replanned.workflowInput.payload.jobId,
+            nowIso,
+          });
+          reportWorkflowCancellation(replanned.workflowInput.payload.jobId);
+          break;
+        default:
+          assertNever(replanned.workflowInput);
+      }
     } catch {
       pendingActionsRepo.markFailed(input.id, input.subject.id,
         JSON.stringify({ code: 'ACTION_APPLY_FAILED', message: 'Action execution failed.' }), nowIso);
       throw new PendingActionError('ACTION_APPLY_FAILED', 'Action execution failed.', 500);
     }
+  } else {
+    pendingActionsRepo.markFailed(input.id, input.subject.id,
+      JSON.stringify({ code: 'ACTION_PLAN_INVALID', message: 'Workflow plan is missing.' }), nowIso);
+    throw new PendingActionError('ACTION_PLAN_INVALID', 'Workflow plan is missing.', 409);
   }
   return recordToView(scopedRecord(input.id, input.subject.id));
 }

@@ -55,7 +55,7 @@ worker-entry.ts
 
 - `streamAgenticQuery(opts)` — 流式 agentic 问答：
   1. 调 `createAccessedPages()` 创建访问页收集器；
-  2. 根据 `resolveQueryMode(question)` 选择 `query:read` 或 `query:propose`；两者都有只读 evidence 与 History list/diff，只有 propose 额外获得 `wiki.preview_change/history.revert`，再由必传 `ToolExecutionPolicy` 编译；
+  2. 根据 `resolveQueryMode(question)` 选择 `query:read` 或 `query:propose`；两者都有只读 evidence、History list/diff 与 `workflow.status`，只有 propose 额外获得页面/History/workflow PendingAction 工具，再由必传 `ToolExecutionPolicy` 编译；
   3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
   4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
@@ -68,20 +68,20 @@ worker-entry.ts
 - `extractCitationsFromAnswer(answer, accessed, subjectSlug)`（`citation-extract.ts`，纯函数）：`extractWikiLinks` 解析答案全文 → 复合页面身份与 `accessed.bodies/crossBodies` 求交集（过滤幻觉链接、错误 Subject 和未读页）→ 按 `subjectSlug + slug` 去重；`pickExcerpt(anchorText, pageBody)` 用词重叠打分在页面正文按句界切出 1-3 句，**恒为页面原文字面子串**；跨主题 citation 额外携带 `subjectSlug`；
 - 流式分支（`streamAgenticQuery` + `/api/query`）与 `runQuery` 均在**流结束后**同步调用此解析，聊天 UI 正文内联 `[[slug]]` 由前端渲染层直接渲染成 wikilink，不再需要模型额外产出 citations 数组；
 - coverage 判定与引用解析解耦，改为**流后异步 fire-and-forget 小调用**：`assessCoverageInBackground(subject, question, answer)` 只喂问题+答案（不喂 accessed 上下文），走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（`query-prompt.ts`）判定 `coverageSufficient`；`false` 时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'；`try/catch` 包裹，写入失败/异常只 `console.error` 不影响已返回的问答响应，也不阻塞响应本身）；`done` 事件不再携带 `coverageSufficient`（T3.2 引入时曾同步携带，现已异步化）；
-- `resolveQueryTools(mode)` — `query:read` 包含当前 Subject 证据工具、跨 Subject 三工具、`history.list/diff` 与可选 `web.search`；`query:propose` 仅额外开放 `wiki.preview_change/history.revert`。跨 Subject 与 History 读取全部只读，所有 preview 仍严格绑定 active Subject；
+- `resolveQueryTools(mode)` — `query:read` 包含当前 Subject 证据工具、跨 Subject 三工具、`history.list/diff`、`workflow.status` 与可选 `web.search`；`query:propose` 额外开放页面/History/workflow PendingAction 工具和一个版本的 `wiki.reenrich` alias。所有 preview 仍严格绑定 active Subject；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue）；`saveQueryAsPage` 只组装 answer + `## References` 正文和 `query-answer` tag，再调用 `page-write::createPageInSubject(..., { jobId })`，与 `wiki.create` 共用唯一 slug、create plan/apply、Saga 和 embedding 回填。页面 citation 只保留为正文 wikilink，frontmatter `sources` 继续专用于 raw source ID（本路径为空）。若 worker 在 commit 后、job complete 前重试，则按该 job 的 applied operation 恢复唯一 canonical create slug、核对页面仍存在并补 enqueue embedding，不创建后缀重复页。
 
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 工具循环完成后仍没有可用答案时的兜底回答，coverage 判定可据此写入 backlog。
 `QUERY_MAX_STEPS = 8` 常量 —— 为 list → cross-search → cross-read 留出有界调用空间，同时防 runaway。
 
 **`query-tools.ts`**（新增）— subject-scoped 工具上下文，经共享 registry 解析实际 ToolDef：
-- `buildQueryToolContext(subject, accessed, options?)` — 默认严格只读并注入 active Subject 的 History list/diff；只有传入已校验 conversationId 时才注入 `previewChange/previewHistoryRevert` 与 `onPendingAction`。预览调用 `pending-action-service`，不会写 vault/index/git，也不会为 re-enrich 入队。
+- `buildQueryToolContext(subject, accessed, options?)` — 默认严格只读并注入 active Subject 的 History list/diff 与脱敏 workflow status；只有传入已校验 conversationId 时才注入页面/History/workflow preview 与 `onPendingAction`。预览调用 `pending-action-service`，不会写 vault/index/git、入队或取消 job。
 - `createAccessedPages()` — 创建 `AccessedPages` 对象（active 页面 `meta/bodies` + 以 `subjectSlug\0slug` 为键的 `crossMeta/crossBodies` + `sourceRefs`）；跨 Subject 同名 slug 不碰撞，来源正文/excerpt 不进入引用上下文。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
 
 ### `pending-action-service.ts` — 对话写入审批状态机
 
-创建预览时以 strict schema 规范化并哈希服务端 payload，页面 create/update/patch/delete/metadata-patch/link-ensure 与 History revert 只生成共享 plan/diff；re-enrich 只预览“调度动作”，批准前不创建 job。批准时原子 claim、复算 hash 与同一 plan，并在 Saga 锁内核对预览 `preHead`；陈旧则刷新 action 并要求重新批准，匹配才 apply 或 enqueue。页面 apply 成功后由 `pending-action-finalizer.ts` 在同一 SQLite IMMEDIATE transaction 中原子写入 `embed-index` job 与 action applied；History revert 还在同一事务标记原 operation 为 reverted。任一步失败均保持 executing，`pending-action-maintenance.ts` 根据已 applied operation 复用对应 finalizer 重试，避免“Wiki 已写入但审批显示失败”或漏回填。`pending_actions.operation` CHECK 同步提供 Drizzle 迁移与启动期原子兼容重建，保留历史行并拒绝未知 operation。该能力复用现有 `query` LLM task，不新增模型路由，因此 `llm-config.example.json` 无需更新。
+创建预览时以 strict schema 规范化并哈希服务端 payload，页面/History/workflow 均只生成 plan；批准前不创建或取消 job。批准时原子 claim、复算 hash 与同一 plan，HEAD 变化会刷新 preview 并要求重新批准。页面与 History 仍走 Saga；workflow start 的 job insert + action applied、workflow cancel 的 job 终止 + action applied 分别在同一 SQLite IMMEDIATE transaction 中提交，失败整体回滚。取消提交后再发送 `job:cancelled` 并 best-effort 对账 Research provenance。`pending_actions.operation` CHECK 同步提供 Drizzle 迁移与启动期原子兼容重建，保留历史行并拒绝未知 operation。该能力复用现有 `query` LLM task，不新增模型路由，因此 `llm-config.example.json` 无需更新。
 
 ### `lint-service.ts` — 任务类型 `'lint'`
 
@@ -269,9 +269,10 @@ src/server/services/
 ├── ingest-prep.ts       # 预检/预算/常量纯函数
 ├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆（agentic 工具循环）
 ├── query-tools.ts       # current/cross Subject 只读 ToolContext（wiki/source evidence + 可选 web.search）+ 复合身份 AccessedPages
+├── workflow-tools.ts    # active Subject job 脱敏状态 + re-enrich/research/cancel 计划与取消通知
 ├── pending-action-payload.ts # 审批 payload strict normalize/canonical hash
 ├── pending-action-service.ts # preview/approve/reject 状态机与 stale 重算
-├── pending-action-finalizer.ts # embed job + applied 原子最终化
+├── pending-action-finalizer.ts # embed/workflow job + cancel 与 action applied 原子最终化
 ├── pending-action-maintenance.ts # TTL/崩溃恢复/finalizer 重试/GC
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
@@ -294,6 +295,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Workflow 控制 Phase 3C：新增 active Subject 脱敏 status、re-enrich/research/cancel 计划；Query 只生成 PendingAction，start/cancel 与 action applied 原子收口，取消复用事件与 Research provenance 对账；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | History 工具 Phase 3B：新增 `history-tools.ts` 复用 operations/git/revert/Saga；Query 注入 list/diff 与回滚预览，PendingAction 支持 `history-revert` 的 fresh/stale/apply/恢复最终化；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：Query 新增 Subject 列举、显式跨主题混合检索与正文读取；active 空库不再提前阻断；访问与 citation 使用复合身份，Save-to-Wiki References 保留跨主题 wikilink；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：`saveQueryAsPage` 删除自建 slug/frontmatter/changeset 路径，改调可贯通真实 job ID 的 shared create command；与 `wiki.create` 统一唯一 slug、Saga 和 embedding，页面 citations 只写 References、不污染 raw `sources`；applied operation 恢复避免 worker 重试重复建页；无新增 LLM task，示例配置不变 |
