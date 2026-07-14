@@ -95,6 +95,32 @@ export function approveResearchRun(
   }
 }
 
+export interface RetryResearchRunServiceInput {
+  runId: string;
+  subjectId: string;
+  expectedVersion: number;
+}
+
+export interface RetryResearchRunServiceResult {
+  run: ResearchRunView;
+  coordinatorJobId: string;
+}
+
+/** failed run 的导入重试：重置 failed delivery、换发 coordinator，run 回到 importing。 */
+export function retryResearchRunImport(
+  input: RetryResearchRunServiceInput,
+): RetryResearchRunServiceResult {
+  try {
+    const result = researchRepo.retryResearchRunImportAtomic(input);
+    return {
+      run: mapStoredResearchRunToView(result.stored),
+      coordinatorJobId: result.coordinatorJobId,
+    };
+  } catch (error) {
+    throw mapApprovalError(error, input.runId, input.subjectId);
+  }
+}
+
 export function dismissResearchRun(runId: string, subjectId: string): ResearchRunView {
   try {
     return mapStoredResearchRunToView(
@@ -383,12 +409,15 @@ function mapApprovalError(
     'idempotency-conflict': ['RESEARCH_IDEMPOTENCY_CONFLICT', 'Idempotency key conflicts with another approval payload.', 409],
     'selection-invalid': ['RESEARCH_SELECTION_INVALID', 'Research candidate selection is invalid.', 400],
     'run-not-approvable': ['RESEARCH_RUN_NOT_APPROVABLE', 'Research run is not awaiting approval.', 409],
+    'run-not-retryable': ['RESEARCH_RUN_NOT_RETRYABLE', 'Research run cannot be retried.', 409],
     'candidate-set-conflict': ['RESEARCH_RUN_NOT_APPROVABLE', 'Stored Research evidence is invalid.', 409],
   };
   const mapping = mappings[error.code];
   if (!mapping) return error;
   const [code, message, status] = mapping;
-  const includeLatest = code === 'RESEARCH_RUN_STALE' || code === 'RESEARCH_ALREADY_APPROVED';
+  const includeLatest = code === 'RESEARCH_RUN_STALE'
+    || code === 'RESEARCH_ALREADY_APPROVED'
+    || code === 'RESEARCH_RUN_NOT_RETRYABLE';
   return new ResearchApprovalServiceError(
     code,
     message,

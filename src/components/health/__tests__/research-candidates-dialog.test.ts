@@ -5,6 +5,7 @@ import type { ResearchRunView } from '@/lib/contracts';
 import {
   defaultResearchCandidateIds,
   ResearchCandidatesDialog,
+  researchRunRetryable,
 } from '../research-candidates-dialog';
 
 vi.mock('@/components/ui/tag', async () => {
@@ -94,6 +95,7 @@ describe('ResearchCandidatesDialog', () => {
       onClose: vi.fn(),
       onApprove: vi.fn(),
       onDismiss: vi.fn(),
+      onRetry: vi.fn(),
       acting: false,
     }));
 
@@ -118,6 +120,7 @@ describe('ResearchCandidatesDialog', () => {
       onClose: vi.fn(),
       onApprove: vi.fn(),
       onDismiss: vi.fn(),
+      onRetry: vi.fn(),
       acting: false,
     }));
 
@@ -131,6 +134,7 @@ describe('ResearchCandidatesDialog', () => {
       onClose: vi.fn(),
       onApprove: vi.fn(),
       onDismiss: vi.fn(),
+      onRetry: vi.fn(),
       acting: false,
     }));
 
@@ -138,5 +142,57 @@ describe('ResearchCandidatesDialog', () => {
     expect(html).toContain('ingest-a');
     expect(html).toContain('aria-label="Close"');
     expect(html).not.toContain('Dismiss');
+  });
+
+  function failedRun(): ResearchRunView {
+    const base = run('failed');
+    return {
+      ...base,
+      candidates: base.candidates.map((candidate) => candidate.delivery
+        ? {
+          ...candidate,
+          delivery: {
+            ...candidate.delivery,
+            status: 'failed' as const,
+            completedAt: '2026-07-14T00:10:00.000Z',
+            error: { code: 'RESEARCH_CANDIDATE_IMPORT_FAILED', message: 'fetch failed' },
+          },
+        }
+        : candidate),
+    };
+  }
+
+  it('failed run 且存在 failed delivery 时提供 Retry 按钮', () => {
+    expect(researchRunRetryable(failedRun())).toBe(true);
+    const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
+      run: failedRun(),
+      onClose: vi.fn(),
+      onApprove: vi.fn(),
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      acting: false,
+    }));
+
+    expect(html).toContain('Retry failed imports');
+    expect(html).not.toContain('Approve 1');
+  });
+
+  it('非 failed run、verification 后失败或无 failed delivery 均不可重试', () => {
+    expect(researchRunRetryable(run('failed'))).toBe(false);
+    expect(researchRunRetryable(run('partial'))).toBe(false);
+    expect(researchRunRetryable(run('importing'))).toBe(false);
+    expect(researchRunRetryable({
+      ...failedRun(),
+      verificationLintJobId: 'lint-verify',
+    })).toBe(false);
+    const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
+      run: run('failed'),
+      onClose: vi.fn(),
+      onApprove: vi.fn(),
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      acting: false,
+    }));
+    expect(html).not.toContain('Retry failed imports');
   });
 });

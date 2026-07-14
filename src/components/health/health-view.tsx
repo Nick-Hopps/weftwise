@@ -827,6 +827,48 @@ export function HealthView() {
     }
   }
 
+  async function retryResearchCandidates() {
+    const result = candidateResult;
+    if (
+      !result
+      || result.run.status !== 'failed'
+      || !isCurrentOrigin(result.origin)
+      || researchActionOriginRef.current
+    ) return;
+    researchActionOriginRef.current = result.origin;
+    setResearchActing(true);
+    try {
+      const response = await apiFetch(
+        `/api/research-runs/${encodeURIComponent(result.run.id)}/retry`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subjectId: result.run.subjectId,
+            expectedVersion: result.run.version,
+          }),
+        },
+      );
+      const run = await readResearchRun(response);
+      if (!isCurrentOrigin(result.origin)) return;
+      setCandidateResult({ run, origin: result.origin });
+      invalidateWorkflowLifecycle(result.origin);
+    } catch (error) {
+      if (isCurrentOrigin(result.origin)) {
+        showResearchError(
+          result.run.origin === 'findings' ? 'remediation' : 'manual',
+          error instanceof Error ? error.message : 'Research retry failed.',
+        );
+      }
+    } finally {
+      const held = researchActionOriginRef.current;
+      if (held && isHealthOriginCurrent(held, result.origin)) {
+        researchActionOriginRef.current = null;
+        if (isCurrentOrigin(result.origin)) setResearchActing(false);
+      }
+    }
+  }
+
   async function deleteSource(sourceId: string) {
     const origin = captureOrigin();
     if (!isCurrentOrigin(origin) || deleteOriginsRef.current.has(sourceId)) return;
@@ -1206,6 +1248,7 @@ export function HealthView() {
           onClose={() => setCandidateResult(null)}
           onApprove={approveResearchCandidates}
           onDismiss={dismissResearchCandidates}
+          onRetry={retryResearchCandidates}
           acting={researchActing}
         />
       )}
