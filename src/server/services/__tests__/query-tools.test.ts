@@ -6,6 +6,8 @@ const mockHybrid = vi.fn();
 const mockReadPage = vi.fn();
 const mockCreatePendingActionPreview = vi.fn();
 const mockCreatePendingHistoryRevertPreview = vi.fn();
+const mockCreatePendingWorkflowActionPreview = vi.fn();
+const mockReadWorkflowStatus = vi.fn();
 const mockListHistory = vi.fn();
 const mockReadHistoryDiff = vi.fn();
 const mockListSubjects = vi.fn();
@@ -29,10 +31,15 @@ vi.mock('@/server/wiki/wiki-store', () => ({
 vi.mock('../pending-action-service', () => ({
   createPendingActionPreview: (...a: unknown[]) => mockCreatePendingActionPreview(...a),
   createPendingHistoryRevertPreview: (...a: unknown[]) => mockCreatePendingHistoryRevertPreview(...a),
+  createPendingWorkflowActionPreview: (...a: unknown[]) =>
+    mockCreatePendingWorkflowActionPreview(...a),
 }));
 vi.mock('../history-tools', () => ({
   listHistory: (...a: unknown[]) => mockListHistory(...a),
   readHistoryDiff: (...a: unknown[]) => mockReadHistoryDiff(...a),
+}));
+vi.mock('../workflow-tools', () => ({
+  readWorkflowStatus: (...a: unknown[]) => mockReadWorkflowStatus(...a),
 }));
 
 const mockWebSearch = vi.fn();
@@ -92,6 +99,8 @@ beforeEach(() => {
   mockReadPage.mockReset();
   mockCreatePendingActionPreview.mockReset();
   mockCreatePendingHistoryRevertPreview.mockReset();
+  mockCreatePendingWorkflowActionPreview.mockReset();
+  mockReadWorkflowStatus.mockReset();
   mockListHistory.mockReset();
   mockReadHistoryDiff.mockReset();
   mockListSubjects.mockReset();
@@ -340,6 +349,23 @@ describe('buildQueryToolContext - 审批预览能力面', () => {
       subject: SUBJECT,
       operationId: 'op-1',
     });
+
+    mockCreatePendingWorkflowActionPreview.mockResolvedValue(action);
+    await expect(ctx.previewWorkflowReenrich?.('page-a')).resolves.toBe(action);
+    await expect(ctx.previewWorkflowResearch?.('SQLite')).resolves.toBe(action);
+    await expect(ctx.previewWorkflowCancel?.('job-1')).resolves.toBe(action);
+    expect(mockCreatePendingWorkflowActionPreview).toHaveBeenNthCalledWith(1, {
+      conversationId: 'conversation-1', subject: SUBJECT,
+      input: { operation: 'workflow-reenrich-start', payload: { slug: 'page-a' } },
+    });
+    expect(mockCreatePendingWorkflowActionPreview).toHaveBeenNthCalledWith(2, {
+      conversationId: 'conversation-1', subject: SUBJECT,
+      input: { operation: 'workflow-research-start', payload: { topic: 'SQLite' } },
+    });
+    expect(mockCreatePendingWorkflowActionPreview).toHaveBeenNthCalledWith(3, {
+      conversationId: 'conversation-1', subject: SUBJECT,
+      input: { operation: 'workflow-cancel', payload: { jobId: 'job-1' } },
+    });
   });
 });
 
@@ -355,6 +381,20 @@ describe('buildQueryToolContext - History 只读能力', () => {
     expect(mockListHistory).toHaveBeenCalledWith(SUBJECT, { slug: 'page-a', limit: 5 });
     expect(mockReadHistoryDiff).toHaveBeenCalledWith(SUBJECT, { operationId: 'op-1' });
     expect(ctx.previewHistoryRevert).toBeUndefined();
+  });
+});
+
+describe('buildQueryToolContext - Workflow 状态能力', () => {
+  it('status 始终委托 active Subject 脱敏服务，未提供会话时不注入提案', async () => {
+    mockReadWorkflowStatus.mockReturnValue({ found: false, job: null });
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    await expect(ctx.readWorkflowStatus?.('job-1')).resolves.toEqual({
+      found: false, job: null,
+    });
+    expect(mockReadWorkflowStatus).toHaveBeenCalledWith(SUBJECT, 'job-1');
+    expect(ctx.previewWorkflowReenrich).toBeUndefined();
+    expect(ctx.previewWorkflowResearch).toBeUndefined();
+    expect(ctx.previewWorkflowCancel).toBeUndefined();
   });
 });
 

@@ -413,7 +413,7 @@ function migratePendingActions(): void {
       conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
       subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
       operation TEXT NOT NULL
-        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert')),
+        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel')),
       payload_json TEXT NOT NULL,
       payload_hash TEXT NOT NULL,
       preview_json TEXT NOT NULL,
@@ -442,6 +442,9 @@ function migratePendingActions(): void {
     currentSql.includes("'metadata-patch'")
     && currentSql.includes("'link-ensure'")
     && currentSql.includes("'history-revert'")
+    && currentSql.includes("'workflow-reenrich-start'")
+    && currentSql.includes("'workflow-research-start'")
+    && currentSql.includes("'workflow-cancel'")
   ) {
     return;
   }

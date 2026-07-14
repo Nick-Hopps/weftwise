@@ -42,6 +42,7 @@ const QUERY_READ_TOOLS = [
   'source.read',
   'history.list',
   'history.diff',
+  'workflow.status',
   'web.search',
 ] as const;
 
@@ -73,7 +74,15 @@ const PROFILES: Record<ToolProfileId, ToolProfile> = {
   },
   'query:propose': {
     id: 'query:propose',
-    tools: [...QUERY_READ_TOOLS, 'wiki.preview_change', 'history.revert'],
+    tools: [
+      ...QUERY_READ_TOOLS,
+      'wiki.preview_change',
+      'history.revert',
+      'workflow.reenrich.start',
+      'workflow.research.start',
+      'workflow.cancel',
+      'wiki.reenrich',
+    ],
     allowedSideEffects: ['none', 'propose'],
     requiresApproval: true,
   },

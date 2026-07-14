@@ -23,6 +23,7 @@ import type {
   WikiInspection,
   PendingActionView,
   PreviewChangeInput,
+  WorkflowStatusResult,
 } from '@/lib/contracts';
 import type { AgentContext } from '../types';
 import { parseFrontmatter } from '@/server/wiki/frontmatter';
@@ -38,6 +39,12 @@ export interface ToolContext {
   previewChange?(input: PreviewChangeInput): Promise<PendingActionView>;
   /** Query 专用：为 active Subject 的历史 operation 创建回滚审批。 */
   previewHistoryRevert?(operationId: string): Promise<PendingActionView>;
+  /** Query 专用：为 re-enrich 工作流创建审批，不直接入队。 */
+  previewWorkflowReenrich?(slug: string): Promise<PendingActionView>;
+  /** Query 专用：为自由主题 Research 创建审批，不直接入队。 */
+  previewWorkflowResearch?(topic: string): Promise<PendingActionView>;
+  /** Query 专用：为 active Subject job 创建取消审批。 */
+  previewWorkflowCancel?(jobId: string): Promise<PendingActionView>;
   onPendingAction?(action: PendingActionView): void;
   readPage(slug: string): Promise<{ title: string; markdown: string } | null>;
   search(query: string, limit: number): Promise<Array<{ slug: string; title: string; summary: string }>>;
@@ -58,14 +65,14 @@ export interface ToolContext {
   listHistory?(input: HistoryListInput): Promise<HistoryListResult>;
   /** Query 专用：读取 active Subject 的单次 operation diff。 */
   readHistoryDiff?(input: HistoryDiffInput): Promise<HistoryDiffResult>;
+  /** Query 专用：读取 active Subject job 的脱敏状态。 */
+  readWorkflowStatus?(jobId: string): Promise<WorkflowStatusResult>;
   /** query 累积访问页用于引用核查；ingest 不传。 */
   onAccess?(page: { subjectSlug?: string; slug: string; title: string; body?: string }): void;
   /** 只记录来源标识，禁止把来源正文写入访问收集器。 */
   onSourceAccess?(access: { sourceId: string; chunkId?: string }): void;
   /** 可选 job 事件（ingest 经 agentCtx.emit）；query 不传（工具活动由流式响应携带）。 */
   emit?(type: string, message: string, data?: Record<string, unknown>): void;
-  /** query 侧触发 re-enrich 任务（入队）；ingest 不传 → 工具在 ingest 中调用会优雅报错。 */
-  reenrich?(slug: string): Promise<{ jobId: string }>;
   /** query 侧同步删除一页（Saga）；ingest 不传 → 工具在 ingest 中调用会优雅报错。 */
   deletePage?(slug: string): Promise<{ deletedSlug: string; brokenBacklinks: number }>;
   /** query 侧同步新建一页（Saga）；ingest 不传。 */

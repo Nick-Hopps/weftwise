@@ -276,6 +276,36 @@ export interface JobEvent {
   createdAt: string;
 }
 
+export interface WorkflowStatusInput {
+  jobId: string;
+}
+
+export interface WorkflowStatusResult {
+  found: boolean;
+  job: null | {
+    jobId: string;
+    type: Job['type'];
+    status: Job['status'];
+    cancelled: boolean;
+    createdAt: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    attemptCount: number;
+  };
+}
+
+export interface WorkflowReenrichStartInput {
+  slug: string;
+}
+
+export interface WorkflowResearchStartInput {
+  topic: string;
+}
+
+export interface WorkflowCancelInput {
+  jobId: string;
+}
+
 /** ingest 断点续传进度快照（API 响应 + 续传事件共用）。totalPages 仅在 plan 已缓存时可知。 */
 export interface CheckpointProgress {
   plan: boolean;
@@ -738,7 +768,10 @@ export type PendingActionOperation =
   | 'reenrich'
   | 'metadata-patch'
   | 'link-ensure'
-  | 'history-revert';
+  | 'history-revert'
+  | 'workflow-reenrich-start'
+  | 'workflow-research-start'
+  | 'workflow-cancel';
 
 export type PendingActionStatus =
   | 'pending'
@@ -766,6 +799,11 @@ export type PreviewChangeInput =
   | { operation: 'reenrich'; payload: { slug: string } }
   | { operation: 'metadata-patch'; payload: MetadataPatchInput }
   | { operation: 'link-ensure'; payload: LinkEnsureInput };
+
+export type WorkflowPreviewInput =
+  | { operation: 'workflow-reenrich-start'; payload: { slug: string } }
+  | { operation: 'workflow-research-start'; payload: { topic: string } }
+  | { operation: 'workflow-cancel'; payload: { jobId: string } };
 
 export interface PendingActionPreview {
   kind: 'page-change' | 'workflow';

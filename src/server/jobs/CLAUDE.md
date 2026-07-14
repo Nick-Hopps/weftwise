@@ -67,6 +67,8 @@ emit(jobId, type, message, data?): void
 
 `job_events`：`{ id, job_id, type, message, data_json, created_at }`，SSE 客户端用 `Last-Event-Id` = 最后收到的 `id` 续播。
 
+Phase 3C 的 Ask AI 工作流命令不直接暴露 queue：`workflow.status` 通过 services 层只返回 active Subject 脱敏摘要；start/cancel 先进入 PendingAction，批准后才在 SQLite 事务中把 job 状态与 action applied 一起提交。取消继续复用 `requestCancel`、`job:cancelled` 与 Research provenance 对账。
+
 ## 关键依赖与配置
 
 - `WORKER_POLL_INTERVAL_MS`（默认 2000）
@@ -122,6 +124,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Workflow 控制 Phase 3C：Ask AI status 只读脱敏；re-enrich/research start 与 cancel 先审批，批准后 job/action 原子收口，取消沿用既有终态、事件和 provenance 语义 |
 | 2026-07-14 | Phase 2C 新增 `research-import` coordinator job；worker 终态 hook、启动与维护扫描执行幂等 Research provenance 对账，且早于 operation GC；自动 retry 中间态不提前终结 delivery，携带 provenance 的 child Ingest 禁止通用手动 retry，coordinator cancel 后 route 立即对账 |
 | 2026-07-13 | queue 暴露最新 lint 单行读取与两类原子 get-or-create；repo 候选 SQL 避免扫描 subject 全历史，同源 ingest 走 JSON 表达式索引 |
 | 2026-04-22 | 初始化 |

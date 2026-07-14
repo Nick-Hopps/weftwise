@@ -21,6 +21,13 @@ const STATUS_LABELS: Record<PendingActionView['status'], string> = {
   failed: 'Failed',
 };
 
+const WORKFLOW_STATUS_LABELS: Record<PendingActionView['status'], string> = {
+  ...STATUS_LABELS,
+  approved: 'Approved, preparing workflow',
+  executing: 'Executing workflow action',
+  applied: 'Workflow action applied',
+};
+
 function StatusIcon({ status }: { status: PendingActionView['status'] }) {
   if (status === 'applied') return <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />;
   if (status === 'rejected' || status === 'failed' || status === 'expired') {
@@ -39,7 +46,9 @@ export function PendingActionCard({
   const isPending = action.status === 'pending';
   const title = action.operation === 'history-revert'
     ? 'Proposed history revert'
-    : 'Proposed wiki change';
+    : action.kind === 'workflow'
+      ? 'Proposed workflow action'
+      : 'Proposed wiki change';
 
   return (
     <section
@@ -67,7 +76,22 @@ export function PendingActionCard({
         </ul>
       )}
 
-      {action.kind === 'workflow' && (
+      {action.kind === 'workflow' && action.operation === 'workflow-cancel' && (
+        <p className="mt-2 text-xs text-foreground-secondary">
+          The selected background task will be stopped after approval.
+        </p>
+      )}
+
+      {action.kind === 'workflow' && action.operation === 'workflow-research-start' && (
+        <p className="mt-2 text-xs text-foreground-secondary">
+          Research candidates will still require separate approval before import.
+        </p>
+      )}
+
+      {action.kind === 'workflow' && ![
+        'workflow-cancel',
+        'workflow-research-start',
+      ].includes(action.operation) && (
         <p className="mt-2 text-xs text-foreground-secondary">
           Final content will be produced after the background task completes.
         </p>
@@ -119,7 +143,7 @@ export function PendingActionCard({
         </div>
       ) : (
         <p role="status" className="mt-3 text-xs font-medium text-foreground-secondary">
-          {STATUS_LABELS[action.status]}
+          {(action.kind === 'workflow' ? WORKFLOW_STATUS_LABELS : STATUS_LABELS)[action.status]}
         </p>
       )}
     </section>
