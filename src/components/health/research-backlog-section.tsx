@@ -86,24 +86,28 @@ export function ResearchBacklogSection({
   if (isLoading || entries.length === 0) return null;
 
   return (
-    <section className="space-y-2">
-      <h2 className="text-xs font-medium uppercase tracking-wider text-foreground-tertiary px-3 mb-1">
-        Research backlog ({entries.length})
-      </h2>
+    <section>
+      <div className="mb-3 flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">Research backlog</h2>
+          <p className="mt-0.5 text-xs text-foreground-tertiary">Open questions from Ask AI and manual review.</p>
+        </div>
+        <span className="text-xs text-foreground-tertiary">{entries.length} open</span>
+      </div>
       {error && (
-        <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
+        <div className="mb-2 border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
           {error}
         </div>
       )}
-      <div className="space-y-0.5">
+      <div className="divide-y divide-border-subtle overflow-hidden rounded-md border border-border bg-surface shadow-xs">
         {entries.map((entry) => {
           const busy = pendingId === entry.id;
           return (
             <div
               key={entry.id}
-              className="flex items-start gap-3 px-3 py-2.5 rounded-md hover:bg-subtle transition-colors"
+              className="flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-subtle/40 sm:flex-row sm:items-center"
             >
-              <div className="min-w-0 flex-1 space-y-1">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Tag tone="neutral" size="sm">
                     {entry.source === 'ask-ai' ? 'Ask AI' : 'Manual'}
@@ -112,9 +116,9 @@ export function ResearchBacklogSection({
                     {new Date(entry.createdAt).toLocaleString()}
                   </span>
                 </div>
-                <p className="text-sm text-foreground-secondary">{entry.question}</p>
+                <p className="mt-1 line-clamp-2 text-sm text-foreground-secondary">{entry.question}</p>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex shrink-0 items-center gap-1.5 self-end sm:self-auto">
                 <Button
                   intent="secondary"
                   size="sm"

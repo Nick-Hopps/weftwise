@@ -250,7 +250,7 @@ export function FindingRow({
       </div>
 
       {detailsOpen && hasDetails && (
-        <div className="animate-slide-down border-t border-border-subtle bg-canvas/60 px-4 py-3 pl-15 sm:grid sm:grid-cols-2 sm:gap-8">
+        <div className="animate-slide-down border-t border-border-subtle bg-canvas/60 px-4 py-3 pl-16 sm:grid sm:grid-cols-2 sm:gap-8">
           {finding.suggestedFix && (
             <div>
               <h3 className="text-xs font-medium text-foreground">Recommended change</h3>
@@ -267,7 +267,7 @@ export function FindingRow({
       )}
 
       {!plan && (
-        <p className="border-t border-border-subtle bg-canvas/60 px-4 py-2 pl-15 text-xs text-foreground-tertiary">
+        <p className="border-t border-border-subtle bg-canvas/60 px-4 py-2 pl-16 text-xs text-foreground-tertiary">
           Re-run the health check before choosing a remediation.
         </p>
       )}
