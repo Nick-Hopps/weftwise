@@ -199,8 +199,9 @@ export async function POST(request: NextRequest) {
               args: summarizeToolArgs(part.toolName, part.input),
             });
           } else if (part.type === 'error') {
-            const message = part.error instanceof Error ? part.error.message : String(part.error);
-            emit('error', { error: message });
+            // `error` 是本次生成的终态，不得继续走空答案回落、会话持久化与 done。
+            // 统一交给外层 catch 发一次 SSE error，也与 iterator/setup 抛错行为保持一致。
+            throw part.error instanceof Error ? part.error : new Error(String(part.error));
           }
         }
 
