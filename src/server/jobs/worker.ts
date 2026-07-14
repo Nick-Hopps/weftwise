@@ -219,9 +219,15 @@ function sleep(ms: number): Promise<void> {
 async function runJob(job: Job): Promise<void> {
   const handler = handlers.get(job.type);
   if (!handler) {
-    queue.fail(job.id, new Error(`No handler registered for job type: ${job.type}`));
-    events.emit(job.id, 'job:failed', `No handler registered for job type: ${job.type}`);
-    reconcileTerminalJob(job.id);
+    const failed = queue.fail(
+      job.id,
+      new Error(`No handler registered for job type: ${job.type}`),
+      job.attemptCount,
+    );
+    if (failed) {
+      events.emit(job.id, 'job:failed', `No handler registered for job type: ${job.type}`);
+      reconcileTerminalJob(job.id);
+    }
     return;
   }
 
@@ -236,7 +242,7 @@ async function runJob(job: Job): Promise<void> {
   // Start heartbeat to extend lease during long-running jobs
   const heartbeatId = setInterval(() => {
     try {
-      queue.updateHeartbeat(job.id);
+      queue.updateHeartbeat(job.id, job.attemptCount);
     } catch {
       // If heartbeat fails, the lease will expire and another worker can reclaim
     }
@@ -246,7 +252,7 @@ async function runJob(job: Job): Promise<void> {
 
   try {
     const result = await handler(job, emit);
-    queue.complete(job.id, result);
+    if (!queue.complete(job.id, result, attempt)) return;
     events.emit(job.id, 'job:completed', 'Job completed successfully', { result });
     reconcileTerminalJob(job.id);
   } catch (error) {
@@ -266,6 +272,11 @@ async function runJob(job: Job): Promise<void> {
       events.emit(job.id, 'job:cancelled', 'Job cancelled by user', { manual: true });
       reconcileTerminalJob(job.id);
     } else if (action === 'retry') {
+      try {
+        if (!queue.updateHeartbeat(job.id, attempt)) return;
+      } catch {
+        return;
+      }
       // Retry: requeue the SAME job (preserves job ID for SSE tracking)
       const delay = RETRY_DELAY_MS * attempt;
       events.emit(
@@ -275,9 +286,9 @@ async function runJob(job: Job): Promise<void> {
         { attempt, maxRetries: MAX_RETRIES },
       );
       await sleep(delay);
-      queue.requeue(job.id);
+      queue.requeue(job.id, attempt);
     } else {
-      queue.fail(job.id, error);
+      if (!queue.fail(job.id, error, attempt)) return;
       events.emit(job.id, 'job:failed', errorMessage, errorData);
       reconcileTerminalJob(job.id);
     }

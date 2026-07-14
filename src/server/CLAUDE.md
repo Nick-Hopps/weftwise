@@ -93,15 +93,8 @@ Route Handler / Worker Handler
 
 ## 测试与质量
 
-已覆盖（vitest，122 测试文件 / 811 用例，2026-07-09；各子模块 `__tests__/`）：
-
-- 分布（按 `*.test.ts` 文件实测重新核对，此前分布行已过期未同步）：services 26 / agents 26 / db 20 / wiki 16 / llm 14 / sources 7 / search 5 / jobs 3 / profile 3 / git 1 / middleware 1。
-- 重点：wikilinks / wiki-transaction（validate·rollback·applyChangeset）/ frontmatter / relink / split-plan / curate-plan / revert / history；db repos + 热路径索引 EQP；task-router / prompts；agents runtime（budget / agent-loop / orchestrator / overlay-vault / checkpoint）；ingest 流水线（prep / service / chunker / cleaner / finalize-sources / augmentation）；search（vector-math / semantic / hybrid / web）；`jobs/worker.ts::isRetryableError` 分类（含 `AI_RetryError.reason` 精确判定）。
-
-仍待补充：
-
-1. `jobs/worker.ts`（租约心跳续租）
-2. `db/repos`（`jobs-repo.claimNextJob` 并发原子性、FTS 触发器一致性）
+已覆盖（vitest；当前全仓库文件/用例基线见根 `AGENTS.md`，各子模块测试位于 `__tests__/`）：
+- 重点：wikilinks / wiki-transaction（validate·rollback·applyChangeset）/ frontmatter / relink / split-plan / curate-plan / revert / history；db repos + 热路径索引 EQP；task-router / prompts；agents runtime（budget / agent-loop / orchestrator / overlay-vault / checkpoint）；ingest 流水线（prep / service / chunker / cleaner / finalize-sources / augmentation）；search（vector-math / semantic / hybrid / web）；worker 心跳生命周期、双进程 claim/租约边界、pages 复合主键与手动 FTS 一致性。
 
 ## 常见问题 (FAQ)
 

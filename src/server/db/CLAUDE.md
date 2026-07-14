@@ -45,7 +45,7 @@
 
 - `enqueueJob(type, subjectId, params): Job` —— `subject_id` 写入 jobs；`ingest` / `save-to-wiki` 必填，全量 `lint` / `reset` 可为 NULL
 - `claimNextJob(type?): Job | null` —— 原子"pending → running"并写 `lease_expires_at`
-- `updateHeartbeat(id)`
+- `updateHeartbeat(id, expectedAttempt)` —— `attempt_count` fencing token 防旧 worker 续租新 attempt
 - `completeJob / failJob / requeueJob / reclaimExpiredJobs`
 - `getJob / listJobs({ status?, type?, subjectId? })`
 - `listRecentJobs(filter, limit)` / `listLatestCompletedLint(subjectId)` —— 分别用于有界状态恢复与单行最新 lint CAS
@@ -178,14 +178,11 @@
 
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
-- repos CRUD/查询：subjects / pages（`getBacklinks` JOIN 去重·保序·meta 过滤·悬空剔除）/ sources（`getSourcesForPage` JOIN）/ jobs（`pruneJobEvents` 保留清扫）/ operations（含 `pruneOldOperations` 边界）/ conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
+- repos CRUD/查询：subjects / pages（复合 PK、path unique、跨 Subject 同 slug、精确 upsert/delete、`getBacklinks` JOIN）/ sources / jobs（双进程 claim、到期租约、attempt fencing/requeue、事件清扫）/ operations / conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
 - `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描），包含 remediation CAS 候选与同源 ingest JSON 表达式查询；后者同时覆盖损坏历史参数安全性。
+- `pages-repo-invariants.test.ts`：真实 SQLite 覆盖复合身份约束，以及无 trigger 前提下 `updateFtsEntry/deleteFtsEntry/deletePage` 的替换、搜索和 Subject 隔离。
+- `jobs-repo.test.ts`：两个独立 Node 进程同时调用真实 `claimNextJob`，在 WAL + busy_timeout 下只有一个领取；并覆盖 `lease_expires_at <= now`、reclaim 与 attempt 语义。
 - `rebuild.test.ts`：`rebuildDatabaseFromVault` 核心逻辑（wipe + reindex + 侧车恢复统计）；`scripts/rebuild-cache.ts` 入口脚本本身（CLI 输出 + 锁获取）未覆盖，逻辑极薄，说明即可。
-
-仍待补充：
-
-- `jobs-repo.claimNextJob`：并发情况下只能有一个 worker 拿到（用 `pragma busy_timeout`）。
-- FTS 一致性：`pages` 表手动维护路径（`updateFtsEntry`/`deleteFtsEntry`）的覆盖率——**不是**触发器（触发器不存在，见上文 FTS5 一节）。
 
 ## 常见问题 (FAQ)
 
@@ -219,6 +216,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Worker/DB 不变量测试收尾：双进程真实 repo claim、到期租约与 attempt fencing/requeue 边界；旧 attempt 不得 heartbeat/complete/fail/requeue 新 attempt；pages 复合 PK/path unique、跨 Subject 同 slug 与手动 FTS update/delete/search 一致性 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：`page_aliases` 增加 subject+oldSlug 唯一索引并由索引器从 frontmatter aliases 同步；pending_actions CHECK 增加 `move`，Drizzle 0007 与启动迁移均先去重再升级旧库 |
 | 2026-07-14 | History 工具 Phase 3B：pending_actions operation CHECK 增加 `history-revert`，Drizzle 0005 与启动期原子重建兼容旧库；operations repo 增加 subject/status 条件标记供审批最终化 |
 | 2026-07-14 | Research 批准溯源 Phase 2C：新增 `research_runs / research_run_findings / research_candidates / research_approvals / research_candidate_ingests` 五表、复合外键与热路径索引；Drizzle migration 与启动期原子兼容迁移同构；subject 删除/reset 和重复 source 合并同步维护 provenance 引用；repo 提供 run 批量读取、批准/忽略、delivery 租约、source+child job 唯一入队和 verification CAS |

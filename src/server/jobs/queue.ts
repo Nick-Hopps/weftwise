@@ -13,12 +13,16 @@ export function claim(type?: Job['type']): Job | null {
   return jobsRepo.claimNextJob(type);
 }
 
-export function complete(jobId: string, result: Record<string, unknown>): void {
-  jobsRepo.completeJob(jobId, result);
+export function complete(
+  jobId: string,
+  result: Record<string, unknown>,
+  expectedAttempt: number,
+): boolean {
+  return jobsRepo.completeJob(jobId, result, expectedAttempt);
 }
 
-export function fail(jobId: string, error: unknown): void {
-  jobsRepo.failJob(jobId, error);
+export function fail(jobId: string, error: unknown, expectedAttempt: number): boolean {
+  return jobsRepo.failJob(jobId, error, expectedAttempt);
 }
 
 export function get(jobId: string): Job | null {
@@ -40,8 +44,8 @@ export function listLatestCompletedLint(subjectId: SubjectId | null): Job | null
   return jobsRepo.listLatestCompletedLint(subjectId);
 }
 
-export function requeue(jobId: string): void {
-  jobsRepo.requeueJob(jobId);
+export function requeue(jobId: string, expectedAttempt?: number): boolean {
+  return jobsRepo.requeueJob(jobId, expectedAttempt);
 }
 
 export function requeueJobWithParams(
@@ -75,8 +79,8 @@ export function isCancelRequested(jobId: string): boolean {
   return jobsRepo.isCancelRequested(jobId);
 }
 
-export function updateHeartbeat(jobId: string): void {
-  jobsRepo.updateHeartbeat(jobId);
+export function updateHeartbeat(jobId: string, expectedAttempt: number): boolean {
+  return jobsRepo.updateHeartbeat(jobId, expectedAttempt);
 }
 
 /** 清扫早于 cutoff 的 job_events，返回删除行数。 */
