@@ -18,7 +18,7 @@
 | `(app)/page.tsx` | Dashboard 首页（按 `currentSubject` 过滤，空态 / 有内容两种布局） |
 | `(app)/wiki/[...slug]/page.tsx` | 动态 wiki 页面（SSR）：`?s=<slug>` 优先于 cookie；找不到页时通过 `findPageInOtherSubjects` 渲染"是否在其他 subject"提示 |
 | `(app)/subjects/page.tsx` | 🔀 Subject 管理页：可点卡片网格（点主体=切换并进入工作区，右上 gear=打开统一编辑弹窗）+ 友好空态；创建/编辑/删除收敛到全局 `SubjectDialog`（不再有内联表单/`window.confirm`/`?new=1`）|
-| `(app)/health/page.tsx` | 🆕 知识库体检中心：触发 lint（当前 subject / 全量）+ 按严重度分组展示 findings + 跳转到对应页（含 "Fix issues" 一键修复入口 + "Research backlog" 待研究问题队列区块，T3.2）|
+| `(app)/health/page.tsx` | 🆕 知识库体检工作台：触发 lint（当前 subject / 全量）+ 摘要带 + 类型筛选 + 按严重度分组的紧凑 findings 列表 + 逐条/批量处置（含可折叠的自定义 Research 与页面底部 Research backlog）|
 | `(app)/history/page.tsx` | 🆕 操作时间线：当前 subject 写操作倒序（类型/受影响页/时间戳，仿 /health /tags），单次操作可展开查看 unified diff + 回滚按钮（前向 Saga 还原） |
 | `(app)/wiki/[...slug]/edit/page.tsx` | 🆕 页面在线编辑：`@uiw/react-md-editor` 编辑整文件 markdown，保存走 `PUT /api/pages`（Saga 重索引）后跳回读页 |
 | `(app)/tags/page.tsx` | 🆕 标签索引：列出当前 subject 所有 tag + 页计数（客户端聚合 /api/pages）|
