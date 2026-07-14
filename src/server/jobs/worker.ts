@@ -268,7 +268,7 @@ async function runJob(job: Job): Promise<void> {
     if (action === 'cancelled') {
       // 用户取消：cancel 路由通常已把 job 落终态(failed)+清检查点；这里幂等兜底
       // （若仍为 running 则 requestCancel 会落终态），并补发 job:cancelled 区别于失败。
-      queue.requestCancel(job.id);
+      if (queue.requestCancel(job.id) !== 'cancelled') return;
       events.emit(job.id, 'job:cancelled', 'Job cancelled by user', { manual: true });
       reconcileTerminalJob(job.id);
     } else if (action === 'retry') {
@@ -279,14 +279,14 @@ async function runJob(job: Job): Promise<void> {
       }
       // Retry: requeue the SAME job (preserves job ID for SSE tracking)
       const delay = RETRY_DELAY_MS * attempt;
+      await sleep(delay);
+      if (!queue.requeue(job.id, attempt)) return;
       events.emit(
         job.id,
         'job:retrying',
         `Retrying (attempt ${attempt + 1}/${MAX_RETRIES + 1}) after ${delay}ms...`,
         { attempt, maxRetries: MAX_RETRIES },
       );
-      await sleep(delay);
-      queue.requeue(job.id, attempt);
     } else {
       if (!queue.fail(job.id, error, attempt)) return;
       events.emit(job.id, 'job:failed', errorMessage, errorData);

@@ -46,6 +46,7 @@ vi.mock('@/server/db/repos/settings-repo', () => ({
 
 import { decideJobFailureAction, registerHandler, startWorker, stopWorker } from '../worker';
 import * as queue from '../queue';
+import * as events from '../events';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -284,9 +285,40 @@ describe('startWorker - 运行中任务心跳', () => {
     startWorker(10);
     await vi.advanceTimersByTimeAsync(10);
     expect(queue.fail).toHaveBeenCalledWith(job.id, expect.any(Error), 1);
+    expect(events.emit).toHaveBeenCalledWith(
+      job.id,
+      'job:failed',
+      'business failure',
+      { error: 'business failure' },
+    );
+    expect(vi.mocked(queue.fail).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(events.emit).mock.invocationCallOrder[0]!);
+    expect(mockReconcileForJob.mock.invocationCallOrder[0])
+      .toBeGreaterThan(vi.mocked(events.emit).mock.invocationCallOrder[0]!);
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(queue.updateHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it('最终 fail fencing 未命中时不发布虚假终态事件或触发对账', async () => {
+    const job = claimedJob('stale-failure');
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    vi.mocked(queue.fail).mockReturnValueOnce(false);
+    registerHandler('lint', async () => {
+      throw new Error('stale saga failure');
+    });
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.fail).toHaveBeenCalledWith(job.id, expect.any(Error), 1);
+    expect(events.emit).not.toHaveBeenCalledWith(
+      job.id,
+      'job:failed',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mockReconcileForJob).not.toHaveBeenCalled();
   });
 
   it('可重试失败完成 requeue 后清理心跳定时器', async () => {
@@ -300,11 +332,89 @@ describe('startWorker - 运行中任务心跳', () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(queue.requeue).not.toHaveBeenCalled();
     expect(queue.updateHeartbeat).toHaveBeenCalledTimes(1);
+    expect(events.emit).not.toHaveBeenCalledWith(
+      job.id,
+      'job:retrying',
+      expect.anything(),
+      expect.anything(),
+    );
     await vi.advanceTimersByTimeAsync(5_000);
     expect(queue.requeue).toHaveBeenCalledWith(job.id, 1);
+    expect(events.emit).toHaveBeenCalledWith(
+      job.id,
+      'job:retrying',
+      expect.any(String),
+      { attempt: 1, maxRetries: 2 },
+    );
+    expect(vi.mocked(queue.requeue).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(events.emit).mock.invocationCallOrder[0]!);
 
     await vi.advanceTimersByTimeAsync(60_000);
     expect(queue.updateHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('retry requeue fencing 未命中时不发布 job:retrying', async () => {
+    const job = claimedJob('stale-retry');
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    vi.mocked(queue.requeue).mockReturnValueOnce(false);
+    registerHandler('lint', async () => {
+      throw new Error('fetch failed');
+    });
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(5_010);
+
+    expect(queue.requeue).toHaveBeenCalledWith(job.id, 1);
+    expect(events.emit).not.toHaveBeenCalledWith(
+      job.id,
+      'job:retrying',
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it('取消 CAS 已终态时不发布 job:cancelled 或重复对账', async () => {
+    const job = claimedJob('late-cancel');
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    vi.mocked(queue.requestCancel).mockReturnValueOnce('already-terminal');
+    registerHandler('lint', async () => {
+      throw new AgentCancelled();
+    });
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(queue.requestCancel).toHaveBeenCalledWith(job.id);
+    expect(events.emit).not.toHaveBeenCalledWith(
+      job.id,
+      'job:cancelled',
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mockReconcileForJob).not.toHaveBeenCalled();
+  });
+
+  it('取消 CAS 成功后才发布 job:cancelled 并触发对账', async () => {
+    const job = claimedJob('cancelled');
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    vi.mocked(queue.requestCancel).mockReturnValueOnce('cancelled');
+    registerHandler('lint', async () => {
+      throw new AgentCancelled();
+    });
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(events.emit).toHaveBeenCalledWith(
+      job.id,
+      'job:cancelled',
+      'Job cancelled by user',
+      { manual: true },
+    );
+    expect(vi.mocked(queue.requestCancel).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(events.emit).mock.invocationCallOrder[0]!);
+    expect(mockReconcileForJob.mock.invocationCallOrder[0])
+      .toBeGreaterThan(vi.mocked(events.emit).mock.invocationCallOrder[0]!);
   });
 
   it('心跳异常被吞掉，不覆盖 handler 的成功结果', async () => {
