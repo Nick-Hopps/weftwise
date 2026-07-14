@@ -85,11 +85,12 @@ beforeEach(() => {
 });
 
 describe('runQuery（agentic）', () => {
-  it('空 subject → 直接 NO_CONTENT，不调模型', async () => {
+  it('active Subject 为空仍进入工具循环，以允许跨主题检索', async () => {
     mockSubjectHasContent.mockReturnValue(false);
+    mockGenerateTools.mockResolvedValue({ text: '跨主题答案 [[notes:page]]' });
     const res = await runQuery('问题', SUBJECT);
-    expect(res.answer).toBe(NO_QUERY_CONTEXT_ANSWER);
-    expect(mockGenerateTools).not.toHaveBeenCalled();
+    expect(res.answer).toBe('跨主题答案 [[notes:page]]');
+    expect(mockGenerateTools).toHaveBeenCalledTimes(1);
   });
 
   it('有内容 → 走 generateTextWithTools，返回其 text', async () => {
@@ -176,10 +177,13 @@ describe('runQuery — coverage gap → research backlog（异步）', () => {
     expect(mockBacklogCreate).toHaveBeenCalledWith(SUBJECT.id, '原始问题', 'ask-ai');
   });
 
-  it('空库短路（NO_QUERY_CONTEXT_ANSWER）→ create 一次，question=用户原问题（同步，不经 coverage 判定）', async () => {
+  it('active Subject 为空且模型仍无答案 → 异步 coverage 判定记录 gap', async () => {
     mockSubjectHasContent.mockReturnValue(false);
+    mockGenerateTools.mockResolvedValue({ text: '   ' });
+    mockGenerateStructured.mockResolvedValue({ coverageSufficient: false });
     const res = await runQuery('原始问题', SUBJECT);
     expect(res.answer).toBe(NO_QUERY_CONTEXT_ANSWER);
+    await flushPromises();
     expect(mockBacklogCreate).toHaveBeenCalledTimes(1);
     expect(mockBacklogCreate).toHaveBeenCalledWith(SUBJECT.id, '原始问题', 'ask-ai');
   });

@@ -5,8 +5,6 @@ import {
   NO_QUERY_CONTEXT_ANSWER,
   runQuery,
   streamAgenticQuery,
-  subjectHasContent,
-  recordCoverageGap,
 } from '@/server/services/query-service';
 import { extractCitationsFromAnswer } from '@/server/services/citation-extract';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
@@ -16,6 +14,7 @@ import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
 import { resolveQueryMode } from '@/server/services/query-intent';
+import type { WikiCitation } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
@@ -28,6 +27,7 @@ const QueryBodySchema = z.object({
   citations: z.array(z.object({
     pageSlug: z.string(),
     excerpt: z.string(),
+    subjectSlug: z.string().optional(),
   })).optional(),
   pageSlug: z.string().trim().min(1).optional(),
   subjectId: z.string().optional(),
@@ -155,7 +155,7 @@ export async function POST(request: NextRequest) {
 
       const persistTurn = (
         answer: string,
-        cits: { pageSlug: string; excerpt: string }[],
+        cits: WikiCitation[],
       ) => {
         try {
           conversationsRepo.appendMessage(activeConversationId, 'user', trimmedQuestion, null);
@@ -175,16 +175,6 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        if (!subjectHasContent(subject.id)) {
-          emit('answer-delta', { delta: NO_QUERY_CONTEXT_ANSWER });
-          emit('citations', { citations: [] });
-          persistTurn(NO_QUERY_CONTEXT_ANSWER, []);
-          recordCoverageGap(subject, trimmedQuestion);
-          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
-          closeStream();
-          return;
-        }
-
         const mode = resolveQueryMode(trimmedQuestion);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,

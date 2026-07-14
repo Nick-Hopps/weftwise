@@ -5,6 +5,8 @@ const mockGetPageBySlug = vi.fn();
 const mockHybrid = vi.fn();
 const mockReadPage = vi.fn();
 const mockCreatePendingActionPreview = vi.fn();
+const mockListSubjects = vi.fn();
+const mockGetSubjectBySlug = vi.fn();
 
 vi.mock('@/server/db/repos/pages-repo', () => ({
   getAllPages: (...a: unknown[]) => mockGetAllPages(...a),
@@ -13,6 +15,10 @@ vi.mock('@/server/db/repos/pages-repo', () => ({
 }));
 vi.mock('@/server/search/hybrid-retrieval', () => ({
   hybridRankSlugs: (...a: unknown[]) => mockHybrid(...a),
+}));
+vi.mock('@/server/db/repos/subjects-repo', () => ({
+  listSubjects: (...a: unknown[]) => mockListSubjects(...a),
+  getBySlug: (...a: unknown[]) => mockGetSubjectBySlug(...a),
 }));
 vi.mock('@/server/wiki/wiki-store', () => ({
   readPageInSubject: (...a: unknown[]) => mockReadPage(...a),
@@ -43,6 +49,20 @@ const SUBJECT = {
   updatedAt: 't',
 };
 
+const NOTES_SUBJECT = {
+  ...SUBJECT,
+  id: 's2',
+  slug: 'notes',
+  name: 'Notes',
+};
+
+const ARCHIVE_SUBJECT = {
+  ...SUBJECT,
+  id: 's3',
+  slug: 'archive',
+  name: 'Archive',
+};
+
 function page(slug: string, over: Record<string, unknown> = {}) {
   return {
     subjectId: 's1',
@@ -64,6 +84,76 @@ beforeEach(() => {
   mockHybrid.mockReset();
   mockReadPage.mockReset();
   mockCreatePendingActionPreview.mockReset();
+  mockListSubjects.mockReset();
+  mockGetSubjectBySlug.mockReset();
+});
+
+describe('buildQueryToolContext - Phase 3A 跨主题读取', () => {
+  it('subject.list 稳定排序并只统计非 meta 页面', async () => {
+    mockListSubjects.mockReturnValue([NOTES_SUBJECT, SUBJECT]);
+    mockGetAllPages.mockImplementation((subjectId: string) => subjectId === 's2'
+      ? [page('n1', { subjectId: 's2' }), page('idx', { subjectId: 's2', tags: ['meta'] })]
+      : [page('g1'), page('g2')]);
+
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    await expect(ctx.listSubjects?.()).resolves.toEqual({
+      subjects: [
+        { id: 's1', slug: 'general', name: 'General', description: '', pageCount: 2 },
+        { id: 's2', slug: 'notes', name: 'Notes', description: '', pageCount: 1 },
+      ],
+    });
+  });
+
+  it('跨主题搜索拒绝 active/未知 Subject，且按 Subject 排名轮询合并', async () => {
+    mockGetSubjectBySlug.mockImplementation((slug: string) => ({
+      notes: NOTES_SUBJECT,
+      archive: ARCHIVE_SUBJECT,
+    })[slug] ?? null);
+    mockHybrid.mockImplementation(async (subjectId: string) => subjectId === 's2'
+      ? ['n1', 'n2']
+      : ['a1', 'a2']);
+    mockGetPageBySlug.mockImplementation((subjectId: string, slug: string) =>
+      page(slug, { subjectId, title: slug.toUpperCase() }));
+
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    await expect(ctx.searchCrossSubject?.({
+      query: 'q', subjectSlugs: ['notes', 'archive'], limit: 3,
+    })).resolves.toEqual({
+      hits: [
+        { subjectSlug: 'notes', slug: 'n1', title: 'N1', summary: 'summary-n1' },
+        { subjectSlug: 'archive', slug: 'a1', title: 'A1', summary: 'summary-a1' },
+        { subjectSlug: 'notes', slug: 'n2', title: 'N2', summary: 'summary-n2' },
+      ],
+    });
+    await expect(ctx.searchCrossSubject?.({
+      query: 'q', subjectSlugs: ['general'],
+    })).rejects.toThrow(/active subject/i);
+    await expect(ctx.searchCrossSubject?.({
+      query: 'q', subjectSlugs: ['missing'],
+    })).rejects.toThrow(/unknown subject/i);
+  });
+
+  it('跨主题读取只返回其他 Subject 的非 meta 非空正文', async () => {
+    mockGetSubjectBySlug.mockImplementation((slug: string) =>
+      slug === 'notes' ? NOTES_SUBJECT : null);
+    mockGetPageBySlug.mockImplementation((_subjectId: string, slug: string) =>
+      slug === 'meta' ? page(slug, { subjectId: 's2', tags: ['meta'] }) : page(slug, { subjectId: 's2' }));
+    mockReadPage.mockImplementation((_subjectSlug: string, slug: string) => ({
+      body: slug === 'empty' ? '  ' : `BODY-${slug}`,
+    }));
+
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
+    await expect(ctx.readCrossSubjectPage?.({ subjectSlug: 'notes', slug: 'n1' })).resolves.toEqual({
+      found: true, subjectSlug: 'notes', slug: 'n1', title: 'N1', body: 'BODY-n1',
+    });
+    for (const slug of ['meta', 'empty']) {
+      await expect(ctx.readCrossSubjectPage?.({ subjectSlug: 'notes', slug })).resolves.toEqual({
+        found: false, subjectSlug: 'notes', slug, title: null, body: null,
+      });
+    }
+    await expect(ctx.readCrossSubjectPage?.({ subjectSlug: 'general', slug: 'n1' }))
+      .rejects.toThrow(/active subject/i);
+  });
 });
 
 describe('buildQueryToolContext - listPages', () => {
@@ -195,6 +285,19 @@ describe('buildQueryToolContext - onAccess 路由', () => {
       { sourceId: 'src1', chunkId: 'c0' },
       { sourceId: 'src1', chunkId: 'c1' },
     ]);
+  });
+
+  it('跨主题同名 slug 用复合身份存储，不覆盖 active Subject', () => {
+    const accessed = createAccessedPages();
+    const ctx = buildQueryToolContext(SUBJECT, accessed);
+    ctx.onAccess?.({ slug: 'same', title: 'General Same', body: 'general-body' });
+    ctx.onAccess?.({
+      subjectSlug: 'notes', slug: 'same', title: 'Notes Same', body: 'notes-body',
+    });
+    expect(accessed.bodies.get('same')?.body).toBe('general-body');
+    expect(accessed.crossBodies.get('notes\0same')).toEqual({
+      subjectSlug: 'notes', slug: 'same', title: 'Notes Same', body: 'notes-body',
+    });
   });
 });
 

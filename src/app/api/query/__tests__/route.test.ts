@@ -205,20 +205,17 @@ describe('POST /api/query 流式持久化', () => {
     expect(mockTouch).toHaveBeenCalledWith('c1');
   });
 
-  it('空 subject → 直接 NO_CONTENT，不进工具循环', async () => {
+  it('active Subject 为空仍进入工具循环，以允许跨主题检索', async () => {
     mockHasContent.mockReturnValue(false);
     const res = await call({ question: '随便问问', subjectId: 's1' });
     const sse = await readSSE(res);
-    expect(mockAgentic).not.toHaveBeenCalled();
-    expect(sse).toContain('NO_CONTEXT');
+    expect(mockAgentic).toHaveBeenCalledTimes(1);
+    expect(sse).toContain('hello');
     expect(sse).toContain('event: done');
     expect(mockAppend).toHaveBeenCalledTimes(2); // 仍落库一轮
-    expect(mockRecordCoverageGap).toHaveBeenCalledWith(
-      { id: 's1', slug: 'general' },
-      '随便问问',
-    );
-    expect(mockAssessCoverage).not.toHaveBeenCalled();
-    expect(mockExtractCitations).not.toHaveBeenCalled();
+    expect(mockRecordCoverageGap).not.toHaveBeenCalled();
+    expect(mockAssessCoverage).toHaveBeenCalled();
+    expect(mockExtractCitations).toHaveBeenCalled();
   });
 
   it('工具循环路径 → 透传 answer-delta，citations 来自确定性解析，done 不带 coverageSufficient', async () => {

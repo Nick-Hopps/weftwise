@@ -15,6 +15,10 @@ export const QueryResponseSchema = z.object({
     .array(
       z.object({
         pageSlug: z.string().describe('Slug of the referenced wiki page'),
+        subjectSlug: z
+          .string()
+          .optional()
+          .describe('Subject slug for an explicitly cross-subject citation'),
         excerpt: z
           .string()
           .describe(
@@ -150,6 +154,9 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - \`wiki_list\`: list every page in the subject (slug, title, summary). Use FIRST for broad/overview/summary questions ("what does this cover", "summarise X", "how do A and B relate").
 - \`wiki_search\`: hybrid full-text + semantic search. Use for specific questions. Issue SEVERAL focused searches with different keywords to maximise recall.
 - \`wiki_read\`: read a page's full body by slug. Use to get details and the exact wording before citing.
+- \`subject_list\`: list available subjects and their exact slugs. Use before any cross-subject lookup.
+- \`wiki_search_cross_subject\`: search explicitly selected subjects other than the active subject. Results are metadata only.
+- \`wiki_read_cross_subject\`: read one page body from another explicitly named subject. A cross-subject search hit MUST be read before it can support a claim.
 - \`wiki_preview_change\` (only available for mutation requests): create an approval preview for one proposed page change or background re-enrichment. It returns an actionId and never applies the change itself.
 - \`web_search\` (only available when web search is configured): search the public web. Read-only, no side effects. Only use it under the rules in "Web search" below.
 
@@ -158,6 +165,7 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - Specific questions: \`wiki_search\` (often several times), then \`wiki_read\` on the top hits.
 - Before stating a fact, make sure you have \`wiki_read\`'d the page that supports it, so you can cite an exact excerpt.
 - If, after searching and listing, the subject genuinely has nothing relevant, say so clearly. Never invent information.
+- If the user explicitly asks to compare, search across, or use another subject, call \`subject_list\`, then \`wiki_search_cross_subject\`, then \`wiki_read_cross_subject\` on relevant hits. Do not search other subjects speculatively for an ordinary current-subject question.
 
 ## Web search
 If \`web_search\` is available and the wiki genuinely lacks the information needed (after searching/listing), you may call it to find supplementary information from the public web.
@@ -168,13 +176,13 @@ If \`web_search\` is available and the wiki genuinely lacks the information need
 ## Answer format
 - Clear, well-structured markdown.
 - Base every claim ONLY on content returned by your tools. Do not use outside knowledge.
-- CITE INLINE: immediately after each statement based on wiki content, append a wikilink to the supporting page using its EXACT slug, e.g. "WAL mode improves concurrent reads [[sqlite-wal]]." Only cite pages you have actually read with \`wiki_read\` in this conversation. These inline wikilinks are how citations are collected — an uncited claim will show no source.
+- CITE INLINE: immediately after each statement based on wiki content, append a wikilink to the supporting page. For the active subject use the EXACT slug, e.g. "WAL mode improves concurrent reads [[sqlite-wal]]." For another subject use \`[[subject-slug:page-slug]]\` with both exact slugs. Only cite pages you have actually read with \`wiki_read\` or \`wiki_read_cross_subject\` in this conversation. These inline wikilinks are how citations are collected — an uncited claim will show no source.
 - Do NOT invent slugs. Do NOT cite pages you only saw in search results without reading them.
 - If pages conflict, acknowledge the contradiction explicitly.
 
 ## Subject scoping
-- Your tools only see the current subject. Do NOT reference or invent pages from another subject.
-- If the question can only be answered from another subject, say so plainly and ask the user to switch subjects.
+- Current-subject tools remain strictly scoped to the active subject. Cross-subject tools are explicit, read-only, and return identities that include subjectSlug.
+- Never perform or propose a cross-subject write. \`wiki_preview_change\` always targets the active subject, even if evidence was read elsewhere.
 
 ## Capability boundary
 - This Ask AI runner never applies changes directly. It can inspect the current subject and answer questions.
@@ -196,7 +204,7 @@ export function buildAgenticUserContent(
 - **Name**: ${ctx.subject.name}
 - **Slug**: \`${ctx.subject.slug}\`
 ${ctx.subject.description?.trim() ? `- **Description**: ${ctx.subject.description.trim()}\n` : ''}
-All your tools operate ONLY within this subject.
+Current-subject tools operate only within this subject. Explicit cross-subject tools are read-only and never change the active subject.
 
 `
     : '';

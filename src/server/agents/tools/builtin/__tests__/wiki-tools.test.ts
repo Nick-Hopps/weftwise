@@ -6,6 +6,9 @@ import { wikiListTool } from '../wiki-list';
 import { wikiInspectTool } from '../wiki-inspect';
 import { sourceSearchTool } from '../source-search';
 import { sourceReadTool } from '../source-read';
+import { subjectListTool } from '../subject-list';
+import { wikiSearchCrossSubjectTool } from '../wiki-search-cross-subject';
+import { wikiReadCrossSubjectTool } from '../wiki-read-cross-subject';
 
 function fakeCtx(over: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -126,5 +129,71 @@ describe('source.read', () => {
   it('Schema 拒绝负 offset 与过大 limit', () => {
     expect(sourceReadTool.inputSchema.safeParse({ sourceId: 's', offset: -1 }).success).toBe(false);
     expect(sourceReadTool.inputSchema.safeParse({ sourceId: 's', limit: 20_001 }).success).toBe(false);
+  });
+});
+
+describe('Phase 3A 跨主题只读工具', () => {
+  it('subject.list 委托只读上下文', async () => {
+    const listSubjects = vi.fn(async () => ({
+      subjects: [{
+        id: 's2', slug: 'notes', name: 'Notes', description: '', pageCount: 2,
+      }],
+    }));
+    await expect(subjectListTool.handler({}, fakeCtx({ listSubjects }))).resolves.toEqual({
+      subjects: [{ id: 's2', slug: 'notes', name: 'Notes', description: '', pageCount: 2 }],
+    });
+  });
+
+  it('跨主题搜索记录带 subjectSlug 的元数据访问', async () => {
+    const onAccess = vi.fn();
+    const searchCrossSubject = vi.fn(async () => ({
+      hits: [{ subjectSlug: 'notes', slug: 'a', title: 'A', summary: 'sa' }],
+    }));
+    const input = { query: 'q', subjectSlugs: ['notes'] };
+    await expect(wikiSearchCrossSubjectTool.handler(
+      input,
+      fakeCtx({ searchCrossSubject, onAccess }),
+    )).resolves.toEqual({
+      hits: [{ subjectSlug: 'notes', slug: 'a', title: 'A', summary: 'sa' }],
+    });
+    expect(searchCrossSubject).toHaveBeenCalledWith(input);
+    expect(onAccess).toHaveBeenCalledWith({ subjectSlug: 'notes', slug: 'a', title: 'A' });
+  });
+
+  it('跨主题正文读取只有命中时记录带 subjectSlug 的 body', async () => {
+    const onAccess = vi.fn();
+    const readCrossSubjectPage = vi.fn(async () => ({
+      found: true as const,
+      subjectSlug: 'notes',
+      slug: 'a',
+      title: 'A',
+      body: 'body-a',
+    }));
+    const input = { subjectSlug: 'notes', slug: 'a' };
+    await expect(wikiReadCrossSubjectTool.handler(
+      input,
+      fakeCtx({ readCrossSubjectPage, onAccess }),
+    )).resolves.toEqual({
+      found: true,
+      subjectSlug: 'notes',
+      slug: 'a',
+      title: 'A',
+      body: 'body-a',
+    });
+    expect(onAccess).toHaveBeenCalledWith({
+      subjectSlug: 'notes', slug: 'a', title: 'A', body: 'body-a',
+    });
+  });
+
+  it('跨主题搜索 schema 限制 Subject 数与总结果数', () => {
+    expect(wikiSearchCrossSubjectTool.inputSchema.safeParse({
+      query: 'q', subjectSlugs: [],
+    }).success).toBe(false);
+    expect(wikiSearchCrossSubjectTool.inputSchema.safeParse({
+      query: 'q', subjectSlugs: ['a', 'b', 'c', 'd', 'e', 'f'],
+    }).success).toBe(false);
+    expect(wikiSearchCrossSubjectTool.inputSchema.safeParse({
+      query: 'q', subjectSlugs: ['a'], limit: 21,
+    }).success).toBe(false);
   });
 });

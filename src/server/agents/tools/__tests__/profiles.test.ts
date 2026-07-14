@@ -8,9 +8,12 @@ import {
 describe('resolveToolProfile', () => {
   it('query:read 只声明读取与证据工具', () => {
     expect(resolveToolProfile('query:read', { webSearchConfigured: false }).tools).toEqual([
+      'subject.list',
       'wiki.list',
       'wiki.search',
       'wiki.read',
+      'wiki.search_cross_subject',
+      'wiki.read_cross_subject',
       'wiki.inspect',
       'source.search',
       'source.read',
@@ -67,6 +70,26 @@ describe('resolveToolProfile', () => {
   it('ingest profile 保持不变', () => {
     expect(resolveToolProfile('ingest:planner').tools).toEqual(['wiki.read', 'wiki.search']);
     expect(resolveToolProfile('ingest:writer').tools).toEqual(['wiki.read', 'wiki.search']);
+  });
+
+  it('跨主题只读工具只属于 Query profile', () => {
+    const crossSubjectTools = [
+      'subject.list',
+      'wiki.search_cross_subject',
+      'wiki.read_cross_subject',
+    ];
+    for (const profileId of [
+      'fix:links',
+      'fix:contradiction',
+      'curate:auto',
+      'curate:manual',
+      'ingest:planner',
+      'ingest:writer',
+    ] as const) {
+      expect(resolveToolProfile(profileId).tools).not.toEqual(
+        expect.arrayContaining(crossSubjectTools),
+      );
+    }
   });
 
   it('Auto Curate 不声明 list/create/delete', () => {
