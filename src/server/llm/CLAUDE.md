@@ -227,6 +227,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 页面身份迁移 Phase 3D：Query prompt 增加 `wiki_move` 的 canonical slug、仅改路径与独立批准纪律；继续复用 `query` task，`llm-config.example.json` 不变 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：`QUERY_AGENTIC_SYSTEM_PROMPT` 新增 subject list → cross search → cross read 策略与 `[[subject:slug]]` 引用纪律；继续复用 `query` task，不修改 LLM 配置 schema 或示例配置 |
 | 2026-04-22 | 初始化 |
 | 2026-04-26 | wikiLanguage：新增 `PromptContext` + `renderLanguageDirective`；5 个 user prompt builder 接入 `ctx: PromptContext`；文件清单补 `prompts/prompt-context.ts` |

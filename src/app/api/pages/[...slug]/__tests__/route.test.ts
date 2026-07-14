@@ -7,6 +7,7 @@ const mockGetPage = vi.fn();
 const mockBacklinks = vi.fn();
 const mockReadPage = vi.fn();
 const mockResolve = vi.fn();
+const mockResolvePageAlias = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null, requireCsrf: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
@@ -14,11 +15,12 @@ vi.mock('@/server/middleware/subject', () => ({
 }));
 vi.mock('@/server/db/repos/pages-repo', () => ({
   getPageBySlug: (subjectId: unknown, slug: unknown) => mockGetPage(subjectId, slug),
+  resolvePageAlias: (subjectId: unknown, slug: unknown) => mockResolvePageAlias(subjectId, slug),
   getBacklinks: (subjectId: unknown, slug: unknown) => mockBacklinks(subjectId, slug),
-  findPageBySlugAcrossSubjects: (slug: unknown) => [],
+  findPageBySlugAcrossSubjects: () => [],
 }));
 vi.mock('@/server/wiki/wiki-store', () => ({
-  readPageInSubject: (subjectSlug: unknown, slug: unknown) => mockReadPage(subjectSlug, slug),
+  readPageInSubject: (subjectSlug: unknown, pageSlug: unknown) => mockReadPage(subjectSlug, pageSlug),
 }));
 
 import { GET } from '../route';
@@ -46,6 +48,8 @@ beforeEach(() => {
   mockBacklinks.mockReturnValue([]);
   mockReadPage.mockReset();
   mockResolve.mockReset();
+  mockResolvePageAlias.mockReset();
+  mockResolvePageAlias.mockReturnValue(null);
   mockResolve.mockReturnValue({ subject: { id: 's1', slug: 'general' }, error: null });
 });
 
@@ -64,6 +68,15 @@ describe('GET /api/pages/[...slug]', () => {
     mockGetPage.mockReturnValue(null);
     const res = await call(['missing']);
     expect(res.status).toBe(404);
+  });
+
+  it('旧 slug alias 返回 308 canonical redirect 并保留查询参数', async () => {
+    mockGetPage.mockReturnValue(null);
+    mockResolvePageAlias.mockReturnValue('new-page');
+    const req = new NextRequest('http://localhost/api/pages/old-page?s=general');
+    const res = await GET(req, { params: Promise.resolve({ slug: ['old-page'] }) });
+    expect(res.status).toBe(308);
+    expect(res.headers.get('location')).toBe('http://localhost/api/pages/new-page?s=general');
   });
 
   it('页面存在但 doc 为 null 时 raw 为空串', async () => {

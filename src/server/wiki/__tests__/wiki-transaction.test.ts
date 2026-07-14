@@ -24,8 +24,15 @@ vi.mock('../wiki-store', () => storeMocks);
 
 const indexerMocks = vi.hoisted(() => ({
   indexTouchedPages: vi.fn(),
+  rebuildPageIndex: vi.fn(),
 }));
 vi.mock('../indexer', () => indexerMocks);
+
+const identityMocks = vi.hoisted(() => ({
+  collectPageIdentityMoves: vi.fn((): Array<{ fromSlug: string; toSlug: string }> => []),
+  migratePageIdentityCaches: vi.fn(),
+}));
+vi.mock('../page-identity-migration', () => identityMocks);
 
 // 假的 better-sqlite3 句柄：prepare().run 记录调用；transaction(fn) 直接返回 fn
 const dbMocks = vi.hoisted(() => {
@@ -101,6 +108,8 @@ beforeEach(() => {
   dbMocks.run.mockImplementation(() => undefined);
   dbMocks.get.mockReturnValue({ maintenance_state: 'active', mutation_epoch: 0 });
   indexerMocks.indexTouchedPages.mockImplementation(() => undefined);
+  indexerMocks.rebuildPageIndex.mockImplementation(() => undefined);
+  identityMocks.collectPageIdentityMoves.mockReturnValue([]);
   pagesRepoMocks.getAllPages.mockReturnValue([{ slug: 'known-page', title: 'Known Page' }]);
   pagesRepoMocks.getTitleToSlugMap.mockReturnValue(new Map([['Known Page', 'known-page']]));
   pagesRepoMocks.getPageBySlug.mockReturnValue(null);
@@ -114,6 +123,42 @@ describe('validateChangeset', () => {
     ]);
     const result = validateChangeset(cs);
     expect(result).toEqual({ valid: true, errors: [], warnings: [] });
+  });
+
+  it('只允许当前 Subject source sidecar 作为 auxiliary JSON', () => {
+    const valid = makeChangeset([{
+      action: 'update',
+      path: '.llm-wiki/sources/general/source-1.json',
+      content: '{"linkedPages":["new-page"]}',
+      auxiliary: true,
+    }]);
+    expect(validateChangeset(valid).valid).toBe(true);
+
+    const escaped = makeChangeset([{
+      action: 'update', path: '.llm-wiki/sources/other/source-1.json',
+      content: '{}', auxiliary: true,
+    }]);
+    expect(validateChangeset(escaped).errors).toEqual([
+      expect.stringContaining('not an allowed source sidecar'),
+    ]);
+  });
+
+  it('movedFromPath 必须是同 Subject 匹配 delete 的 create marker', () => {
+    const valid = makeChangeset([
+      {
+        action: 'create', path: 'wiki/general/new.md', content: VALID_CONTENT,
+        movedFromPath: 'wiki/general/old.md',
+      },
+      { action: 'delete', path: 'wiki/general/old.md', content: null },
+    ]);
+    expect(validateChangeset(valid).valid).toBe(true);
+
+    const missingDelete = makeChangeset([{
+      action: 'create', path: 'wiki/general/new.md', content: VALID_CONTENT,
+      movedFromPath: 'wiki/general/old.md',
+    }]);
+    expect(validateChangeset(missingDelete).valid).toBe(false);
+    expect(validateChangeset(missingDelete).errors.join(' ')).toMatch(/matching delete/i);
   });
 
   it('subject 不存在时直接整体失败', () => {
@@ -247,6 +292,27 @@ describe('rollbackChangeset', () => {
     expect(indexerMocks.indexTouchedPages).toHaveBeenCalledWith('s1', ['a']);
   });
 
+  it('move 回滚反向迁移派生缓存并全量重建 alias/link 索引', async () => {
+    identityMocks.collectPageIdentityMoves.mockReturnValue([
+      { fromSlug: 'old', toSlug: 'new' },
+    ]);
+    const cs = makeChangeset([
+      {
+        action: 'create', path: 'wiki/general/new.md', content: 'new',
+        movedFromPath: 'wiki/general/old.md',
+      },
+      { action: 'delete', path: 'wiki/general/old.md', content: null },
+    ], { preHead: 'pre-sha' });
+
+    await rollbackChangeset(cs);
+
+    expect(identityMocks.migratePageIdentityCaches).toHaveBeenCalledWith(
+      's1', { fromSlug: 'new', toSlug: 'old' },
+    );
+    expect(indexerMocks.rebuildPageIndex).toHaveBeenCalledOnce();
+    expect(indexerMocks.indexTouchedPages).toHaveBeenCalledWith('s1', ['new', 'old']);
+  });
+
   it('reindex 或 operations 更新失败时被吞掉（best effort），不抛出', async () => {
     indexerMocks.indexTouchedPages.mockImplementation(() => {
       throw new Error('index boom');
@@ -300,6 +366,37 @@ describe('applyChangeset', () => {
       ['wiki/general/a.md', 'wiki/general/old.md']
     );
     expect(mutexMocks.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('move marker 迁移派生缓存、全量重建链接索引，并把 auxiliary sidecar 纳入同一 commit', async () => {
+    identityMocks.collectPageIdentityMoves.mockReturnValue([
+      { fromSlug: 'old', toSlug: 'new' },
+    ]);
+    const sidecarPath = '.llm-wiki/sources/general/source-1.json';
+    const cs = makeChangeset([
+      {
+        action: 'create', path: 'wiki/general/new.md', content: VALID_CONTENT,
+        movedFromPath: 'wiki/general/old.md',
+      },
+      { action: 'delete', path: 'wiki/general/old.md', content: null },
+      { action: 'update', path: sidecarPath, content: '{}', auxiliary: true },
+    ]);
+
+    await applyChangeset(cs);
+
+    expect(identityMocks.migratePageIdentityCaches).toHaveBeenCalledWith(
+      's1', { fromSlug: 'old', toSlug: 'new' },
+    );
+    expect(indexerMocks.rebuildPageIndex).toHaveBeenCalledOnce();
+    expect(indexerMocks.indexTouchedPages).toHaveBeenCalledWith('s1', ['new', 'old']);
+    expect(storeMocks.writeVaultFiles).toHaveBeenCalledWith([
+      { path: 'wiki/general/new.md', content: VALID_CONTENT },
+      { path: sidecarPath, content: '{}' },
+    ]);
+    expect(gitMocks.commitVaultChanges).toHaveBeenCalledWith(
+      expect.any(String),
+      ['wiki/general/new.md', 'wiki/general/old.md', sidecarPath],
+    );
   });
 
   it('锁内发现 Subject 已删除时拒绝写入并释放 vault 锁', async () => {

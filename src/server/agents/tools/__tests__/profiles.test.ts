@@ -39,6 +39,7 @@ describe('resolveToolProfile', () => {
       'workflow.research.start',
       'workflow.cancel',
       'wiki.reenrich',
+      'wiki.move',
     ]);
     for (const writeTool of [
       'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete',
@@ -138,6 +139,17 @@ describe('resolveToolProfile', () => {
       expect(resolveToolProfile(profileId).tools).not.toEqual(
         expect.arrayContaining(workflowTools),
       );
+    }
+  });
+
+  it('wiki.move 只属于 Query propose，其他 runner 不可见', () => {
+    expect(resolveToolProfile('query:read').tools).not.toContain('wiki.move');
+    expect(resolveToolProfile('query:propose').tools).toContain('wiki.move');
+    for (const profileId of [
+      'fix:links', 'fix:contradiction', 'curate:auto', 'curate:manual',
+      'ingest:planner', 'ingest:writer',
+    ] as const) {
+      expect(resolveToolProfile(profileId).tools).not.toContain('wiki.move');
     }
   });
 

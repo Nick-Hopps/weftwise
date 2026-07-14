@@ -19,6 +19,7 @@ const pagePlanMocks = vi.hoisted(() => ({
   planDeletePageInSubject: vi.fn(),
   planMetadataPatchInSubject: vi.fn(),
   planLinkEnsureInSubject: vi.fn(),
+  planMovePageInSubject: vi.fn(),
 }));
 vi.mock('../page-write', () => pagePlanMocks);
 
@@ -83,6 +84,20 @@ beforeEach(() => {
       updatedSlug: 'page-a', mode: 'link', targetSubjectSlug: 'general', targetSlug: 'page-b',
     },
   });
+  pagePlanMocks.planMovePageInSubject.mockResolvedValue({
+    ...pagePreview,
+    summary: '移动页面 page-a → page-b',
+    operation: 'move',
+    changeset: { id: 'cs-move' },
+    affectedPages: [
+      { slug: 'page-b', action: 'create' },
+      { slug: 'page-a', action: 'delete' },
+    ],
+    resultHint: {
+      movedFromSlug: 'page-a', movedToSlug: 'page-b',
+      referencesUpdated: 0, sourceLinksMigrated: 0,
+    },
+  });
   historyMocks.planHistoryRevert.mockResolvedValue({
     originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'cs-history' },
     summary: '回滚历史操作 op-old', affectedPages: pagePreview.affectedPages,
@@ -113,6 +128,27 @@ beforeEach(() => {
 });
 
 describe('createPendingActionPreview', () => {
+  it('move 只保存预览，批准前不执行页面迁移', async () => {
+    const view = await createPendingActionPreview({
+      conversationId: 'c1', subject,
+      input: { operation: 'move', payload: { slug: 'page-a', newSlug: 'page-b' } },
+      now,
+    });
+    expect(pagePlanMocks.planMovePageInSubject).toHaveBeenCalledWith(
+      subject,
+      { slug: 'page-a', newSlug: 'page-b' },
+      now.toISOString(),
+    );
+    expect(repoMocks.createPendingAction).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'move',
+      payloadJson: JSON.stringify({
+        effectiveAt: now.toISOString(), newSlug: 'page-b', slug: 'page-a',
+      }),
+    }));
+    expect(view.operation).toBe('move');
+    expect(operationPlanMocks.applyPlannedPageOperation).not.toHaveBeenCalled();
+  });
+
   it('页面操作保存规范化 payload、hash、预览与 30 分钟有效期', async () => {
     const view = await createPendingActionPreview({
       conversationId: 'c1',
