@@ -176,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 跨 Subject 只读 Phase 3A：Ask AI 引用列表显示 `subject:slug` 并通过 `?s=` 跳到精确 Subject；旧无 subjectSlug 引用保持原路径 |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：保存按钮保留既有显式用户动作与 job 追踪，删除未被消费的 `onSaved(normalizeSlug(title))` 提前回调，避免同名页采用数字后缀时向客户端传播错误 slug |
 | 2026-07-14 | Research 批准溯源 Phase 2C：候选弹窗改用持久化 `ResearchRunView` 与 candidate ID，批准 body 无 URL；普通关闭/显式忽略分离；Health 从 job `runId` 恢复 run、稳定幂等批准、轮询导入/验证并在终态失效 pages/lint/active jobs，subject/scope 切换清理旧 view 与 key |
 | 2026-07-12 | Health 修复闭环 Phase 2A：UI 改为服务端 plan 驱动，稳定 ID 批量动作与统一 remediation API；All Subjects 只读、orphan-source 删除二次确认不变；补 active jobs 刷新恢复、hydration 安全门、subject/generation 隔离及终态 lint 闭环 |

@@ -34,7 +34,6 @@ vi.mock('../../llm/provider-registry', () => ({
 vi.mock('../query-tools', () => ({
   buildQueryToolContext: vi.fn(),
   createAccessedPages: vi.fn(),
-  subjectHasContent: vi.fn(),
   accessedToContext: vi.fn(),
 }));
 vi.mock('../citation-extract', () => ({ extractCitationsFromAnswer: vi.fn() }));
@@ -83,7 +82,7 @@ describe('saveQueryAsPage', () => {
       'Answer Page',
       [
         { pageSlug: 'page-a', excerpt: 'Excerpt A' },
-        { pageSlug: 'page-b', excerpt: 'Excerpt B' },
+        { pageSlug: 'page-b', excerpt: 'Excerpt B', subjectSlug: 'notes' },
       ],
       subject,
       'save-job-1',
@@ -99,7 +98,7 @@ describe('saveQueryAsPage', () => {
           '## References',
           '',
           '- [[page-a]]: Excerpt A',
-          '- [[page-b]]: Excerpt B',
+          '- [[notes:page-b]]: Excerpt B',
           '',
         ].join('\n'),
         tags: ['query-answer'],

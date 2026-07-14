@@ -59,27 +59,25 @@ worker-entry.ts
   3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
   4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
-  1. 调 `subjectHasContent(subject.id)` 空 subject 短路守卫；空库直接返回 `NO_QUERY_CONTEXT_ANSWER`；
-  2. 同样走 `generateTextWithTools` 工具循环；
-  3. 引用改为**流后确定性解析**（零 LLM 二次调用）：`extractCitationsFromAnswer(answer, accessed, subject.slug)`（`citation-extract.ts`）。
+  1. 始终进入 `generateTextWithTools` 工具循环；active Subject 为空时仍可显式查询其他 Subject；
+  2. 引用使用**流后确定性解析**（零 LLM 二次调用）：`extractCitationsFromAnswer(answer, accessed, subject.slug)`（`citation-extract.ts`）。
 
 引用不再靠模型二次结构化输出生成，而是靠 prompt 纪律 + 确定性解析（退役 `generateQueryCitations`/`QueryCitationsSchema`/`[unverified]` 前缀机制）：
 
-- `QUERY_AGENTIC_SYSTEM_PROMPT` 新增 CITE INLINE 纪律——模型在答案正文中每条基于 wiki 内容的陈述后内联标注 `[[slug]]`（必须是本轮工具已读过的页的精确 slug），未标注的陈述视为无引用；
-- `extractCitationsFromAnswer(answer, accessed, subjectSlug)`（`citation-extract.ts`，纯函数）：`extractWikiLinks` 解析答案全文（标题也可兜底解析到 slug）→ 目标 slug ∩ `accessed.bodies`（真正 `wiki_read` 过的页，过滤幻觉链接/未读页）→ 按 slug 去重（取首次出现锚点句）；`pickExcerpt(anchorText, pageBody)` 用词重叠打分（中英通用分词：latin 词 + CJK 双字 bigram）在页面正文按句界切出 1-3 句作 excerpt，**恒为页面原文字面子串**（按偏移切片，不重新生成文本）；
+- `QUERY_AGENTIC_SYSTEM_PROMPT` 的 CITE INLINE 纪律要求 active Subject 用 `[[slug]]`，其他 Subject 用 `[[subject:slug]]`；两者都必须是本轮 `wiki_read` / `wiki_read_cross_subject` 真正读过的页面；
+- `extractCitationsFromAnswer(answer, accessed, subjectSlug)`（`citation-extract.ts`，纯函数）：`extractWikiLinks` 解析答案全文 → 复合页面身份与 `accessed.bodies/crossBodies` 求交集（过滤幻觉链接、错误 Subject 和未读页）→ 按 `subjectSlug + slug` 去重；`pickExcerpt(anchorText, pageBody)` 用词重叠打分在页面正文按句界切出 1-3 句，**恒为页面原文字面子串**；跨主题 citation 额外携带 `subjectSlug`；
 - 流式分支（`streamAgenticQuery` + `/api/query`）与 `runQuery` 均在**流结束后**同步调用此解析，聊天 UI 正文内联 `[[slug]]` 由前端渲染层直接渲染成 wikilink，不再需要模型额外产出 citations 数组；
 - coverage 判定与引用解析解耦，改为**流后异步 fire-and-forget 小调用**：`assessCoverageInBackground(subject, question, answer)` 只喂问题+答案（不喂 accessed 上下文），走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（`query-prompt.ts`）判定 `coverageSufficient`；`false` 时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'；`try/catch` 包裹，写入失败/异常只 `console.error` 不影响已返回的问答响应，也不阻塞响应本身）；`done` 事件不再携带 `coverageSufficient`（T3.2 引入时曾同步携带，现已异步化）；
-- `resolveQueryTools(mode)` — `query:read` 只有 `wiki.list/search/read/inspect`、`source.search/read` 与可选 `web.search`；`query:propose` 仅额外开放 `wiki.preview_change`（`sideEffect:'propose'`）。两者都不暴露 reenrich/create/update/patch/delete/metadata.patch/link.ensure 实际写工具，也不把对话历史里的口头确认当授权；
+- `resolveQueryTools(mode)` — `query:read` 包含当前 Subject 证据工具、`subject.list/wiki.search_cross_subject/wiki.read_cross_subject` 与可选 `web.search`；`query:propose` 仅额外开放 `wiki.preview_change`。跨 Subject 三工具全部只读，preview 仍严格写 active Subject；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue）；`saveQueryAsPage` 只组装 answer + `## References` 正文和 `query-answer` tag，再调用 `page-write::createPageInSubject(..., { jobId })`，与 `wiki.create` 共用唯一 slug、create plan/apply、Saga 和 embedding 回填。页面 citation 只保留为正文 wikilink，frontmatter `sources` 继续专用于 raw source ID（本路径为空）。若 worker 在 commit 后、job complete 前重试，则按该 job 的 applied operation 恢复唯一 canonical create slug、核对页面仍存在并补 enqueue embedding，不创建后缀重复页。
 
-`NO_QUERY_CONTEXT_ANSWER` 常量 —— 空 subject 短路时的兜底回答（同时触发 backlog 写入）。
-`QUERY_MAX_STEPS = 6` 常量 —— 工具循环最大步数，防 runaway。
+`NO_QUERY_CONTEXT_ANSWER` 常量 —— 工具循环完成后仍没有可用答案时的兜底回答，coverage 判定可据此写入 backlog。
+`QUERY_MAX_STEPS = 8` 常量 —— 为 list → cross-search → cross-read 留出有界调用空间，同时防 runaway。
 
 **`query-tools.ts`**（新增）— subject-scoped 工具上下文，经共享 registry 解析实际 ToolDef：
 - `buildQueryToolContext(subject, accessed, options?)` — 默认严格只读；只有传入已校验 conversationId 时才注入 `previewChange` 与 `onPendingAction`。预览调用 `pending-action-service`，不会写 vault/index/git，也不会为 re-enrich 入队。
-- `createAccessedPages()` — 创建 `AccessedPages` 对象（页面 `meta/bodies` 两个 Map + 仅保存 `{sourceId,chunkId?}` 的 `sourceRefs` Map）；来源正文/excerpt 不进入引用上下文。
+- `createAccessedPages()` — 创建 `AccessedPages` 对象（active 页面 `meta/bodies` + 以 `subjectSlug\0slug` 为键的 `crossMeta/crossBodies` + `sourceRefs`）；跨 Subject 同名 slug 不碰撞，来源正文/excerpt 不进入引用上下文。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
-- `subjectHasContent(subjectId)` — 确定性检查：`pagesRepo.getAllPages(subjectId).some(p => !pagesRepo.isMetaPage(p))`；只计非 meta 页，空 subject 或仅含 meta 页时返 false，消灭"宏观问题报不存在文档"误报。
 
 ### `pending-action-service.ts` — 对话写入审批状态机
 
@@ -270,7 +268,7 @@ src/server/services/
 ├── ingest-service.ts    # 多阶段 LLM 摄入（分片自适应流水线）
 ├── ingest-prep.ts       # 预检/预算/常量纯函数
 ├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆（agentic 工具循环）
-├── query-tools.ts       # subject-scoped 只读 ToolContext（wiki/source evidence + 可选 web.search）+ AccessedPages + subjectHasContent
+├── query-tools.ts       # current/cross Subject 只读 ToolContext（wiki/source evidence + 可选 web.search）+ 复合身份 AccessedPages
 ├── pending-action-payload.ts # 审批 payload strict normalize/canonical hash
 ├── pending-action-service.ts # preview/approve/reject 状态机与 stale 重算
 ├── pending-action-finalizer.ts # embed job + applied 原子最终化
@@ -296,6 +294,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 跨 Subject 只读 Phase 3A：Query 新增 Subject 列举、显式跨主题混合检索与正文读取；active 空库不再提前阻断；访问与 citation 使用复合身份，Save-to-Wiki References 保留跨主题 wikilink；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：`saveQueryAsPage` 删除自建 slug/frontmatter/changeset 路径，改调可贯通真实 job ID 的 shared create command；与 `wiki.create` 统一唯一 slug、Saga 和 embedding，页面 citations 只写 References、不污染 raw `sources`；applied operation 恢复避免 worker 重试重复建页；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | Research 批准溯源 Phase 2C：持久化 run/candidate/finding 快照，candidate ID + version + idempotency 原子批准；`research-import` coordinator 以租约逐条导入并注入 child Ingest lineage，终态对账物化 operation/page/commit 与 verification finding；Health 从 run view 恢复批准、导入、验证和终态，旧 resultJson 仅作兼容回退；无新增 LLM task，示例配置不变 |
 | 2026-07-13 | Wiki 窄写 Phase 2B：Fix links 收缩为 `wiki.link.ensure`，contradiction 保留 patch/update；Curate auto/manual 增加 metadata/link 窄写与串行 update cap；Query preview/approve 支持两个新 operation，真实写工具仍不可见；PendingAction CHECK 兼容迁移，并以原子 finalizer 保证 embed job 与 applied 同进退、崩溃可重试；LLM 示例配置不变 |

@@ -1,4 +1,8 @@
 import type {
+  CrossSubjectReadInput,
+  CrossSubjectReadResult,
+  CrossSubjectSearchInput,
+  CrossSubjectSearchResult,
   InspectSection,
   LinkEnsureInput,
   LinkEnsureResult,
@@ -11,6 +15,7 @@ import type {
   SourceSearchInput,
   SourceSearchResult,
   Subject,
+  SubjectToolListResult,
   WikiInspection,
   PendingActionView,
   PreviewChangeInput,
@@ -37,8 +42,14 @@ export interface ToolContext {
     input?: PageListInput,
     options?: { allowedPageSlugs?: ReadonlySet<string> },
   ): Promise<PageListResult>;
+  /** Query 专用：列出可见 Subject 摘要，不改变 active Subject。 */
+  listSubjects?(): Promise<SubjectToolListResult>;
+  /** Query 专用：在显式指定的其他 Subject 中检索。 */
+  searchCrossSubject?(input: CrossSubjectSearchInput): Promise<CrossSubjectSearchResult>;
+  /** Query 专用：读取显式指定的其他 Subject 页面正文。 */
+  readCrossSubjectPage?(input: CrossSubjectReadInput): Promise<CrossSubjectReadResult>;
   /** query 累积访问页用于引用核查；ingest 不传。 */
-  onAccess?(page: { slug: string; title: string; body?: string }): void;
+  onAccess?(page: { subjectSlug?: string; slug: string; title: string; body?: string }): void;
   /** 只记录来源标识，禁止把来源正文写入访问收集器。 */
   onSourceAccess?(access: { sourceId: string; chunkId?: string }): void;
   /** 可选 job 事件（ingest 经 agentCtx.emit）；query 不传（工具活动由流式响应携带）。 */

@@ -30,4 +30,15 @@ describe('createBuiltinToolRegistry', () => {
     expect(registry.get('wiki.metadata.patch')).toBeDefined();
     expect(registry.get('wiki.link.ensure')).toBeDefined();
   });
+
+  it('注册 Phase 3A 跨主题只读工具', () => {
+    const registry = createBuiltinToolRegistry();
+    for (const name of [
+      'subject.list',
+      'wiki.search_cross_subject',
+      'wiki.read_cross_subject',
+    ]) {
+      expect(registry.get(name)).toMatchObject({ sideEffect: 'none' });
+    }
+  });
 });

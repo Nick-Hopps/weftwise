@@ -3,12 +3,13 @@
  *
  * 提供 buildQueryToolContext（消费 createBuiltinToolRegistry + compileToolSet），
  * 替代旧的内联 tool() 孤岛 buildQueryTools。
- * AccessedPages / createAccessedPages / subjectHasContent / accessedToContext 保持不变。
+ * AccessedPages / createAccessedPages / accessedToContext 保持兼容并扩展跨 Subject 身份。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
+import * as subjectsRepo from '../db/repos/subjects-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import type { PendingActionView, Subject, SubjectId } from '@/lib/contracts';
+import type { PendingActionView, Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
@@ -16,6 +17,22 @@ import { createPendingActionPreview } from './pending-action-service';
 
 /** search_wiki 默认返回条数。 */
 const SEARCH_LIMIT_DEFAULT = 8;
+const CROSS_SUBJECT_LIMIT_MAX = 20;
+
+function crossSubjectError(message: string): Error {
+  return new Error(`[SUBJECT_OUT_OF_SCOPE] ${message}`);
+}
+
+function resolveOtherSubject(activeSubject: Subject, subjectSlug: string): Subject {
+  if (subjectSlug === activeSubject.slug) {
+    throw crossSubjectError(`Subject "${subjectSlug}" is the active subject; use the current-subject tools instead.`);
+  }
+  const subject = subjectsRepo.getBySlug(subjectSlug);
+  if (!subject) {
+    throw crossSubjectError(`Unknown subject "${subjectSlug}".`);
+  }
+  return subject;
+}
 
 export interface QueryContextPage {
   slug: string;
@@ -28,16 +45,33 @@ export interface QueryContextPage {
 export interface AccessedPages {
   meta: Map<string, { title: string; summary: string }>;
   bodies: Map<string, { title: string; body: string }>;
+  crossMeta: Map<string, {
+    subjectSlug: string;
+    slug: string;
+    title: string;
+    summary: string;
+  }>;
+  crossBodies: Map<string, {
+    subjectSlug: string;
+    slug: string;
+    title: string;
+    body: string;
+  }>;
   sourceRefs: Map<string, { sourceId: string; chunkId?: string }>;
 }
 
 export function createAccessedPages(): AccessedPages {
-  return { meta: new Map(), bodies: new Map(), sourceRefs: new Map() };
+  return {
+    meta: new Map(),
+    bodies: new Map(),
+    crossMeta: new Map(),
+    crossBodies: new Map(),
+    sourceRefs: new Map(),
+  };
 }
 
-/** 当前 subject 是否有任何非 meta 页（空 subject 守卫用）。 */
-export function subjectHasContent(subjectId: SubjectId): boolean {
-  return pagesRepo.getAllPages(subjectId).some((p) => !pagesRepo.isMetaPage(p));
+export function crossSubjectPageKey(subjectSlug: string, slug: string): string {
+  return `${subjectSlug}\u0000${slug}`;
 }
 
 export interface QueryToolContextOptions {
@@ -73,6 +107,71 @@ export function buildQueryToolContext(
   return {
     subject,
     ...approvalCapabilities,
+    async listSubjects() {
+      const subjects = subjectsRepo.listSubjects()
+        .map((entry) => ({
+          id: entry.id,
+          slug: entry.slug,
+          name: entry.name,
+          description: entry.description,
+          pageCount: pagesRepo.getAllPages(entry.id).filter((page) => !pagesRepo.isMetaPage(page)).length,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name) || a.slug.localeCompare(b.slug));
+      return { subjects };
+    },
+    async searchCrossSubject(input) {
+      const limit = Math.min(input.limit ?? SEARCH_LIMIT_DEFAULT, CROSS_SUBJECT_LIMIT_MAX);
+      const selectedSubjects = [...new Set(input.subjectSlugs)]
+        .map((slug) => resolveOtherSubject(subject, slug));
+      const rankedBySubject = await Promise.all(selectedSubjects.map(async (targetSubject) => {
+        const slugs = await hybridRankSlugs(targetSubject.id, input.query, limit);
+        return slugs.flatMap((slug) => {
+          const page = pagesRepo.getPageBySlug(targetSubject.id, slug);
+          if (!page || pagesRepo.isMetaPage(page)) return [];
+          return [{
+            subjectSlug: targetSubject.slug,
+            slug: page.slug,
+            title: page.title,
+            summary: page.summary ?? '',
+          }];
+        });
+      }));
+
+      const hits: Awaited<ReturnType<NonNullable<ToolContext['searchCrossSubject']>>>['hits'] = [];
+      for (let rank = 0; hits.length < limit; rank++) {
+        let added = false;
+        for (const subjectHits of rankedBySubject) {
+          const hit = subjectHits[rank];
+          if (!hit) continue;
+          hits.push(hit);
+          added = true;
+          if (hits.length === limit) break;
+        }
+        if (!added) break;
+      }
+      return { hits };
+    },
+    async readCrossSubjectPage(input) {
+      const targetSubject = resolveOtherSubject(subject, input.subjectSlug);
+      const page = pagesRepo.getPageBySlug(targetSubject.id, input.slug);
+      const empty = {
+        found: false,
+        subjectSlug: targetSubject.slug,
+        slug: input.slug,
+        title: null,
+        body: null,
+      };
+      if (!page || pagesRepo.isMetaPage(page)) return empty;
+      const doc = readPageInSubject(targetSubject.slug, input.slug);
+      if (!doc || doc.body.trim().length === 0) return empty;
+      return {
+        found: true,
+        subjectSlug: targetSubject.slug,
+        slug: page.slug,
+        title: page.title,
+        body: doc.body,
+      };
+    },
     async readPage(slug) {
       const page = pagesRepo.getPageBySlug(subject.id, slug);
       const doc = readPageInSubject(subject.slug, slug);
@@ -101,7 +200,17 @@ export function buildQueryToolContext(
     async listPages(input, options) {
       return evidence.listPages(input, options);
     },
-    onAccess({ slug, title, body }) {
+    onAccess({ subjectSlug, slug, title, body }) {
+      if (subjectSlug && subjectSlug !== subject.slug) {
+        const key = crossSubjectPageKey(subjectSlug, slug);
+        if (body !== undefined && body.trim().length > 0) {
+          accessed.crossBodies.set(key, { subjectSlug, slug, title, body });
+          accessed.crossMeta.delete(key);
+        } else if (!accessed.crossBodies.has(key)) {
+          accessed.crossMeta.set(key, { subjectSlug, slug, title, summary: '' });
+        }
+        return;
+      }
       if (body !== undefined && body.trim().length > 0) {
         accessed.bodies.set(slug, { title, body });
       } else if (!accessed.bodies.has(slug)) {

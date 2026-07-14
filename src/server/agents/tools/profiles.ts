@@ -31,9 +31,12 @@ export interface ToolProfileResolutionContext {
 }
 
 const QUERY_READ_TOOLS = [
+  'subject.list',
   'wiki.list',
   'wiki.search',
   'wiki.read',
+  'wiki.search_cross_subject',
+  'wiki.read_cross_subject',
   'wiki.inspect',
   'source.search',
   'source.read',

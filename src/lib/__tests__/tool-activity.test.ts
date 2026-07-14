@@ -97,6 +97,20 @@ describe('tool-activity - web_search', () => {
   });
 });
 
+describe('tool-activity - Phase 3A 跨主题读取', () => {
+  it('显示 Subject 列表、跨主题搜索和跨主题读取的安全摘要', () => {
+    expect(toolActivityVerb('subject_list')).toBe('Listing subjects');
+    expect(toolActivityIcon('wiki_search_cross_subject')).toBe('🔭');
+    expect(summarizeToolArgs('wiki_search_cross_subject', {
+      query: 'WAL', subjectSlugs: ['notes', 'archive'],
+    })).toBe('notes, archive: WAL');
+    expect(toolActivityIcon('wiki_read_cross_subject')).toBe('📚');
+    expect(summarizeToolArgs('wiki_read_cross_subject', {
+      subjectSlug: 'notes', slug: 'sqlite',
+    })).toBe('notes:sqlite');
+  });
+});
+
 describe('toolActivityLine', () => {
   it('拼装 icon + verb + 参数摘要', () => {
     expect(toolActivityLine('wiki_read', { slug: 'some-page' })).toBe('📄 Reading "some-page"…');
