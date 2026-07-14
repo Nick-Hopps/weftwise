@@ -36,7 +36,6 @@ import {
   buildQueryToolContext,
   createAccessedPages,
   accessedToContext,
-  subjectHasContent,
 } from '../query-tools';
 
 const SUBJECT = {
@@ -235,17 +234,6 @@ describe('accessedToContext', () => {
       { slug: 'b', title: 'B', content: 'FULL-B' },
       { slug: 'c', title: 'C', content: 'FULL-C' },
     ]);
-  });
-});
-
-describe('subjectHasContent', () => {
-  it('有非 meta 页 → true；仅 meta/空 → false', () => {
-    mockGetAllPages.mockReturnValueOnce([page('a'), page('idx', { tags: ['meta'] })]);
-    expect(subjectHasContent('s1')).toBe(true);
-    mockGetAllPages.mockReturnValueOnce([page('idx', { tags: ['meta'] })]);
-    expect(subjectHasContent('s1')).toBe(false);
-    mockGetAllPages.mockReturnValueOnce([]);
-    expect(subjectHasContent('s1')).toBe(false);
   });
 });
 

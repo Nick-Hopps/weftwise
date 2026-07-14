@@ -3,13 +3,13 @@
  *
  * 提供 buildQueryToolContext（消费 createBuiltinToolRegistry + compileToolSet），
  * 替代旧的内联 tool() 孤岛 buildQueryTools。
- * AccessedPages / createAccessedPages / subjectHasContent / accessedToContext 保持不变。
+ * AccessedPages / createAccessedPages / accessedToContext 保持兼容并扩展跨 Subject 身份。
  */
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import type { PendingActionView, Subject, SubjectId } from '@/lib/contracts';
+import type { PendingActionView, Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
@@ -72,11 +72,6 @@ export function createAccessedPages(): AccessedPages {
 
 export function crossSubjectPageKey(subjectSlug: string, slug: string): string {
   return `${subjectSlug}\u0000${slug}`;
-}
-
-/** 当前 subject 是否有任何非 meta 页（空 subject 守卫用）。 */
-export function subjectHasContent(subjectId: SubjectId): boolean {
-  return pagesRepo.getAllPages(subjectId).some((p) => !pagesRepo.isMetaPage(p));
 }
 
 export interface QueryToolContextOptions {

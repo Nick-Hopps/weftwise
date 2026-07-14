@@ -34,7 +34,6 @@ vi.mock('../../llm/provider-registry', () => ({
 vi.mock('../query-tools', () => ({
   buildQueryToolContext: vi.fn(),
   createAccessedPages: vi.fn(),
-  subjectHasContent: vi.fn(),
   accessedToContext: vi.fn(),
 }));
 vi.mock('../citation-extract', () => ({ extractCitationsFromAnswer: vi.fn() }));
