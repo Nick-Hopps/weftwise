@@ -7,6 +7,9 @@ export function toolActivityIcon(tool: string): string {
     case 'wiki_search': return '🔍';
     case 'wiki_read': return '📄';
     case 'wiki_list': return '🗂';
+    case 'subject_list': return '🗂';
+    case 'wiki_search_cross_subject': return '🔭';
+    case 'wiki_read_cross_subject': return '📚';
     case 'wiki_reenrich': return '✨';
     case 'wiki_create': return '➕';
     case 'wiki_update': return '✏️';
@@ -26,6 +29,9 @@ export function toolActivityVerb(tool: string): string {
     case 'wiki_search': return 'Searching';
     case 'wiki_read': return 'Reading';
     case 'wiki_list': return 'Listing pages';
+    case 'subject_list': return 'Listing subjects';
+    case 'wiki_search_cross_subject': return 'Searching subjects';
+    case 'wiki_read_cross_subject': return 'Reading another subject';
     case 'wiki_reenrich': return 'Re-enriching';
     case 'wiki_create': return 'Creating';
     case 'wiki_update': return 'Editing';
@@ -44,6 +50,18 @@ export function toolActivityVerb(tool: string): string {
 export function summarizeToolArgs(tool: string, args: unknown): string {
   const a = (args ?? {}) as Record<string, unknown>;
   if (tool === 'wiki_search') return typeof a.query === 'string' ? a.query : '';
+  if (tool === 'wiki_search_cross_subject') {
+    const query = typeof a.query === 'string' ? a.query : '';
+    const subjects = Array.isArray(a.subjectSlugs)
+      ? a.subjectSlugs.filter((value): value is string => typeof value === 'string').join(', ')
+      : '';
+    return [subjects, query].filter(Boolean).join(': ');
+  }
+  if (tool === 'wiki_read_cross_subject') {
+    const subject = typeof a.subjectSlug === 'string' ? a.subjectSlug : '';
+    const slug = typeof a.slug === 'string' ? a.slug : '';
+    return subject && slug ? `${subject}:${slug}` : slug;
+  }
   if (tool === 'wiki_read' || tool === 'wiki_reenrich') return typeof a.slug === 'string' ? a.slug : '';
   if (tool === 'wiki_delete') return typeof a.slug === 'string' ? a.slug : '';
   if (tool === 'wiki_create') return typeof a.title === 'string' ? a.title : '';

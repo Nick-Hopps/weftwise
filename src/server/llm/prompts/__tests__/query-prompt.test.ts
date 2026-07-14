@@ -69,6 +69,14 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_reenrich');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/other subject/i);
   });
+
+  it('明确跨主题列出、搜索、读取与带前缀引用纪律', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('subject_list');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_search_cross_subject');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_read_cross_subject');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('[[subject-slug:page-slug]]');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/never[\s\S]*cross-subject[\s\S]*write/i);
+  });
 });
 
 describe('buildAgenticUserContent', () => {

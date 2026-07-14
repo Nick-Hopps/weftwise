@@ -5,11 +5,10 @@ import { ChevronDown, MessageCircleQuestion } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import { toolActivityIcon, toolActivityVerb } from '@/lib/tool-activity';
+import { citationHref } from '@/lib/wiki-citation';
+import type { WikiCitation } from '@/lib/contracts';
 
-export interface Citation {
-  pageSlug: string;
-  excerpt: string;
-}
+export type Citation = WikiCitation;
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -78,10 +77,12 @@ const MessageCitations = memo(function MessageCitations({ citations }: { citatio
           {citations.map((cite, cIdx) => (
             <button
               key={cIdx}
-              onClick={() => router.push(`/wiki/${cite.pageSlug}`)}
+              onClick={() => router.push(citationHref(cite))}
               className="block w-full text-left rounded-sm px-2 py-1.5 bg-subtle hover:bg-accent-subtle transition-colors focus-ring"
             >
-              <p className="text-xs font-medium text-accent-strong">{cite.pageSlug}</p>
+              <p className="text-xs font-medium text-accent-strong">
+                {cite.subjectSlug ? `${cite.subjectSlug}:${cite.pageSlug}` : cite.pageSlug}
+              </p>
               {cite.excerpt && (
                 <p className="text-xs text-foreground-secondary mt-0.5 line-clamp-2">
                   {cite.excerpt}

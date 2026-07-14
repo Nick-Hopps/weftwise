@@ -43,12 +43,13 @@ import {
 } from '../wiki/page-identity';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { registerHandler } from '../jobs/worker';
-import type { PendingActionView, QueryResult, Job, Subject } from '@/lib/contracts';
+import type { PendingActionView, QueryResult, Job, Subject, WikiCitation } from '@/lib/contracts';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 import type { QueryMode } from './query-intent';
 import { createPageInSubject } from './page-write';
 import { enqueueEmbedIndex } from './embedding-enqueue';
+import { citationWikiLink } from '@/lib/wiki-citation';
 
 export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
@@ -98,7 +99,7 @@ export type { QueryContextPage, AccessedPages } from './query-tools';
 export { accessedToContext, subjectHasContent, createAccessedPages } from './query-tools';
 
 /** 工具循环单 query 的最大步数（防 runaway）。 */
-export const QUERY_MAX_STEPS = 6;
+export const QUERY_MAX_STEPS = 8;
 
 function subjectCtxFrom(subject: Subject) {
   return {
@@ -183,11 +184,6 @@ export async function runQuery(
   subject: Subject,
   currentPageSlug?: string,
 ): Promise<QueryResult> {
-  if (!subjectHasContent(subject.id)) {
-    recordCoverageGap(subject, question);
-    return { answer: NO_QUERY_CONTEXT_ANSWER, citations: [], savedAsPage: null };
-  }
-
   const accessed = createAccessedPages();
   const tools = compileQueryTools(subject, accessed);
   const promptCtx: PromptContext = {
@@ -213,7 +209,7 @@ export async function runQuery(
 export async function saveQueryAsPage(
   answer: string,
   title: string,
-  citations: { pageSlug: string; excerpt: string }[],
+  citations: WikiCitation[],
   subject: Subject,
   jobId: string,
 ): Promise<string> {
@@ -272,7 +268,8 @@ export async function saveQueryAsPage(
           '',
           '## References',
           '',
-          ...citations.map((c) => `- [[${c.pageSlug}]]: ${c.excerpt}`),
+          ...citations.map((citation) =>
+            `- ${citationWikiLink(citation, subject.slug)}: ${citation.excerpt}`),
         ].join('\n')
       : '';
 
@@ -292,7 +289,7 @@ async function runSaveToWikiJob(
   const params = JSON.parse(job.paramsJson) as {
     answer: string;
     title: string;
-    citations: { pageSlug: string; excerpt: string }[];
+    citations: WikiCitation[];
     subjectId?: string;
   };
 

@@ -8,7 +8,8 @@
  */
 import { extractWikiLinks } from '../wiki/wikilinks';
 import { normalizeSlug } from '../wiki/page-identity';
-import type { AccessedPages } from './query-tools';
+import type { WikiCitation } from '@/lib/contracts';
+import { crossSubjectPageKey, type AccessedPages } from './query-tools';
 
 const EXCERPT_MAX_CHARS = 400;
 const EXCERPT_MAX_SENTENCES = 3;
@@ -121,28 +122,48 @@ export function extractCitationsFromAnswer(
   answer: string,
   accessed: AccessedPages,
   subjectSlug: string,
-): { pageSlug: string; excerpt: string }[] {
+): WikiCitation[] {
   // 标题→slug 兜底解析：模型写 [[Title]] 也能落到 read 过的页
-  const titleToSlug = new Map<string, string>();
-  for (const [slug, { title }] of accessed.bodies) titleToSlug.set(normalizeSlug(title), slug);
+  const titleCandidates = new Map<string, Set<string>>();
+  const addTitleCandidate = (title: string, slug: string) => {
+    const normalized = normalizeSlug(title);
+    const candidates = titleCandidates.get(normalized) ?? new Set<string>();
+    candidates.add(slug);
+    titleCandidates.set(normalized, candidates);
+  };
+  for (const [slug, { title }] of accessed.bodies) addTitleCandidate(title, slug);
   for (const [slug, { title }] of accessed.meta) {
-    if (!titleToSlug.has(normalizeSlug(title))) titleToSlug.set(normalizeSlug(title), slug);
+    addTitleCandidate(title, slug);
   }
+  for (const page of accessed.crossBodies.values()) addTitleCandidate(page.title, page.slug);
+  for (const page of accessed.crossMeta.values()) addTitleCandidate(page.title, page.slug);
 
   const links = extractWikiLinks(answer, {
     currentSubjectSlug: subjectSlug,
-    titleResolver: (title) => titleToSlug.get(normalizeSlug(title)),
+    titleResolver: (title) => {
+      const candidates = titleCandidates.get(normalizeSlug(title));
+      return candidates?.size === 1 ? [...candidates][0] : undefined;
+    },
   });
 
-  const out: { pageSlug: string; excerpt: string }[] = [];
+  const out: WikiCitation[] = [];
   const seen = new Set<string>();
   for (const link of links) {
-    if (link.targetSubjectSlug !== subjectSlug) continue; // 跨主题链接不算本 subject 引用
-    const page = accessed.bodies.get(link.target);
-    if (!page || seen.has(link.target)) continue;
-    seen.add(link.target);
+    const isCurrentSubject = link.targetSubjectSlug === subjectSlug;
+    const identity = isCurrentSubject
+      ? link.target
+      : crossSubjectPageKey(link.targetSubjectSlug, link.target);
+    const page = isCurrentSubject
+      ? accessed.bodies.get(link.target)
+      : accessed.crossBodies.get(identity);
+    if (!page || seen.has(identity)) continue;
+    seen.add(identity);
     const anchor = anchorSentenceAt(answer, link.position.start, link.position.end);
-    out.push({ pageSlug: link.target, excerpt: pickExcerpt(anchor, page.body) });
+    out.push({
+      pageSlug: link.target,
+      excerpt: pickExcerpt(anchor, page.body),
+      ...(isCurrentSubject ? {} : { subjectSlug: link.targetSubjectSlug }),
+    });
   }
   return out;
 }

@@ -83,7 +83,7 @@ describe('saveQueryAsPage', () => {
       'Answer Page',
       [
         { pageSlug: 'page-a', excerpt: 'Excerpt A' },
-        { pageSlug: 'page-b', excerpt: 'Excerpt B' },
+        { pageSlug: 'page-b', excerpt: 'Excerpt B', subjectSlug: 'notes' },
       ],
       subject,
       'save-job-1',
@@ -99,7 +99,7 @@ describe('saveQueryAsPage', () => {
           '## References',
           '',
           '- [[page-a]]: Excerpt A',
-          '- [[page-b]]: Excerpt B',
+          '- [[notes:page-b]]: Excerpt B',
           '',
         ].join('\n'),
         tags: ['query-answer'],

@@ -12,6 +12,7 @@ import { sourceReadTool } from '../builtin/source-read';
 import { wikiListTool } from '../builtin/wiki-list';
 import { wikiLinkEnsureTool as actualLinkEnsureTool } from '../builtin/wiki-link-ensure';
 import { wikiMetadataPatchTool as actualMetadataPatchTool } from '../builtin/wiki-metadata-patch';
+import { wikiReadCrossSubjectTool } from '../builtin/wiki-read-cross-subject';
 import { emptyWikiInspection } from '../evidence-results';
 
 const ctx = { subject: { id: 's', slug: 'general' } } as ToolContext;
@@ -367,6 +368,39 @@ describe('compileToolSet', () => {
       output: expect.objectContaining({
         sourceId: 'src1', chunkId: 'c0', content: '[REDACTED]',
       }),
+    }));
+  });
+
+  it('跨主题正文审计只保留页面身份并遮盖 body', async () => {
+    const onToolCall = vi.fn();
+    const auditCtx = {
+      ...ctx,
+      readCrossSubjectPage: vi.fn(async () => ({
+        found: true,
+        subjectSlug: 'notes',
+        slug: 'sqlite',
+        title: 'SQLite',
+        body: '跨主题秘密正文',
+      })),
+    } as ToolContext;
+    const set = compileToolSet([wikiReadCrossSubjectTool as ToolDef], auditCtx, {
+      policy: createToolExecutionPolicy(resolveToolProfile('query:read'), 's'),
+      onToolCall,
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (set.wiki_read_cross_subject as any).execute({ subjectSlug: 'notes', slug: 'sqlite' });
+
+    expect(onToolCall).toHaveBeenCalledWith(expect.objectContaining({
+      tool: 'wiki.read_cross_subject',
+      pageSlugs: ['sqlite'],
+      output: {
+        found: true,
+        subjectSlug: 'notes',
+        slug: 'sqlite',
+        title: 'SQLite',
+        body: '[REDACTED]',
+      },
     }));
   });
 });
