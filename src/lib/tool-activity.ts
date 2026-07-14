@@ -21,6 +21,7 @@ export function toolActivityIcon(tool: string): string {
     case 'wiki_metadata_patch': return '✏️';
     case 'wiki_link_ensure': return '🔗';
     case 'wiki_delete': return '🗑';
+    case 'wiki_move': return '↪️';
     case 'wiki_merge': return '🔗';
     case 'wiki_split': return '✂️';
     case 'web_search': return '🌐';
@@ -47,6 +48,7 @@ export function toolActivityVerb(tool: string): string {
     case 'wiki_metadata_patch': return 'Editing metadata';
     case 'wiki_link_ensure': return 'Maintaining link';
     case 'wiki_delete': return 'Deleting';
+    case 'wiki_move': return 'Planning page move';
     case 'wiki_merge': return 'Merging';
     case 'wiki_split': return 'Splitting';
     case 'web_search': return 'Searching the web';
@@ -80,6 +82,11 @@ export function summarizeToolArgs(tool: string, args: unknown): string {
     return typeof a.jobId === 'string' ? a.jobId : '';
   }
   if (tool === 'wiki_delete') return typeof a.slug === 'string' ? a.slug : '';
+  if (tool === 'wiki_move') {
+    const from = typeof a.slug === 'string' ? a.slug : '';
+    const to = typeof a.newSlug === 'string' ? a.newSlug : '';
+    return from && to ? `${from} → ${to}` : from || to;
+  }
   if (tool === 'wiki_create') return typeof a.title === 'string' ? a.title : '';
   if (tool === 'wiki_update') return typeof a.slug === 'string' ? a.slug : '';
   if (tool === 'wiki_patch') return typeof a.slug === 'string' ? a.slug : '';

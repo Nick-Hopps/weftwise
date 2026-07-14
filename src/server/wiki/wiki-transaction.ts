@@ -19,7 +19,7 @@ import {
   cleanUntrackedPaths,
 } from '../git/git-service';
 import { writeVaultFiles, deleteVaultFile } from './wiki-store';
-import { indexTouchedPages } from './indexer';
+import { indexTouchedPages, rebuildPageIndex } from './indexer';
 import { validateFrontmatter } from './frontmatter';
 import { parseFrontmatter } from './frontmatter';
 import { extractWikiLinks } from './wikilinks';
@@ -28,6 +28,10 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import { parseWikiPath } from './page-identity';
 import { acquireVaultLock } from './vault-mutex';
+import {
+  collectPageIdentityMoves,
+  migratePageIdentityCaches,
+} from './page-identity-migration';
 import type { Changeset, ChangesetEntry, Subject } from '@/lib/contracts';
 
 /**
@@ -97,6 +101,20 @@ export function validateChangeset(
       continue;
     }
 
+    if (entry.auxiliary) {
+      const escapedSubject = subject.slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const sidecarPattern = new RegExp(
+        `^\\.llm-wiki/sources/${escapedSubject}/[A-Za-z0-9_-]+\\.json$`,
+      );
+      if (!sidecarPattern.test(entry.path)) {
+        errors.push(`[${entry.path}] Auxiliary path is not an allowed source sidecar`);
+      }
+      if (entry.movedFromPath) {
+        errors.push(`[${entry.path}] Auxiliary entry cannot carry movedFromPath`);
+      }
+      continue;
+    }
+
     const parts = parseWikiPath(entry.path);
     if (!parts) {
       errors.push(`[${entry.path}] Path is not a valid wiki path`);
@@ -107,10 +125,35 @@ export function validateChangeset(
         `[${entry.path}] Path subject "${parts.subjectSlug}" does not match changeset subject "${subject.slug}"`
       );
     }
+    if (entry.movedFromPath) {
+      if (entry.action !== 'create') {
+        errors.push(`[${entry.path}] movedFromPath is only valid on create entries`);
+      }
+      const from = parseWikiPath(entry.movedFromPath);
+      if (!from || from.subjectSlug !== subject.slug || from.slug === parts.slug) {
+        errors.push(`[${entry.path}] movedFromPath must be a different page in this subject`);
+      } else if (!changeset.entries.some((candidate) => (
+        !candidate.auxiliary
+        && candidate.action === 'delete'
+        && candidate.path === entry.movedFromPath
+      ))) {
+        errors.push(`[${entry.path}] movedFromPath requires a matching delete entry`);
+      }
+    }
   }
 
   // Per-entry frontmatter + wikilink syntax validation.
   for (const entry of changeset.entries) {
+    if (entry.auxiliary) {
+      if (entry.action !== 'delete' && entry.content !== null) {
+        try {
+          JSON.parse(entry.content);
+        } catch {
+          errors.push(`[${entry.path}] Auxiliary source sidecar must contain valid JSON`);
+        }
+      }
+      continue;
+    }
     if (entry.action === 'delete') continue;
     if (entry.content === null || entry.content === undefined) {
       errors.push(`Entry "${entry.path}" has no content for action "${entry.action}"`);
@@ -141,7 +184,7 @@ export function validateChangeset(
   // that this changeset is about to add.
   const knownSlugs = new Set(pagesRepo.getAllPages(subject.id).map((p) => p.slug));
   for (const entry of changeset.entries) {
-    if (entry.action !== 'create') continue;
+    if (entry.auxiliary || entry.action !== 'create') continue;
     const parts = parseWikiPath(entry.path);
     if (parts && parts.subjectSlug === subject.slug) {
       knownSlugs.add(parts.slug);
@@ -158,7 +201,7 @@ export function validateChangeset(
   };
 
   for (const entry of changeset.entries) {
-    if (entry.action === 'delete' || !entry.content) continue;
+    if (entry.auxiliary || entry.action === 'delete' || !entry.content) continue;
     let body: string;
     try {
       ({ body } = parseFrontmatter(entry.content));
@@ -310,9 +353,16 @@ export async function applyChangeset(
       }
 
       const touchedSlugs = collectTouchedSlugs(working.subjectSlug, working.entries);
+      const identityMoves = collectPageIdentityMoves(working.subjectSlug, working.entries);
 
       const updateIndex = db.transaction(() => {
-        indexTouchedPages(working.subjectId, touchedSlugs);
+        for (const move of identityMoves) {
+          migratePageIdentityCaches(working.subjectId, move);
+        }
+        if (identityMoves.length > 0) {
+          rebuildPageIndex();
+          indexTouchedPages(working.subjectId, touchedSlugs);
+        } else indexTouchedPages(working.subjectId, touchedSlugs);
 
         if (sourceOps) {
           for (const link of sourceOps.links) {
@@ -412,8 +462,18 @@ export async function rollbackChangeset(
   try {
     const sqlite = getRawDb();
     const touchedSlugs = collectTouchedSlugs(changeset.subjectSlug, changeset.entries);
+    const identityMoves = collectPageIdentityMoves(changeset.subjectSlug, changeset.entries);
     const reindex = sqlite.transaction(() => {
-      indexTouchedPages(changeset.subjectId, touchedSlugs);
+      for (const move of identityMoves.slice().reverse()) {
+        migratePageIdentityCaches(changeset.subjectId, {
+          fromSlug: move.toSlug,
+          toSlug: move.fromSlug,
+        });
+      }
+      if (identityMoves.length > 0) {
+        rebuildPageIndex();
+        indexTouchedPages(changeset.subjectId, touchedSlugs);
+      } else indexTouchedPages(changeset.subjectId, touchedSlugs);
     });
     reindex();
   } catch {
@@ -443,6 +503,7 @@ export async function rollbackChangeset(
 export function collectTouchedSlugs(subjectSlug: string, entries: ChangesetEntry[]): string[] {
   const slugs = new Set<string>();
   for (const entry of entries) {
+    if (entry.auxiliary) continue;
     const parts = parseWikiPath(entry.path);
     if (!parts) continue;
     if (parts.subjectSlug !== subjectSlug) continue;

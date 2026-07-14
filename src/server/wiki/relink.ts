@@ -104,3 +104,30 @@ export function repointLinksToPage(
   }
   return result;
 }
+
+/**
+ * 页面 canonical slug 迁移时，把当前 Subject 内解析到旧 slug 的链接改写为新 slug。
+ * 保留显式 Subject 前缀、锚点与显示别名；跨 Subject target 与代码区不改。
+ */
+export function rewriteLinksForPageMove(
+  raw: string,
+  fromSlug: string,
+  toSlug: string,
+  subjectSlug: string,
+  titleResolver: TitleResolver,
+): string {
+  const links = extractWikiLinks(raw, { currentSubjectSlug: subjectSlug, titleResolver });
+  const matches = links
+    .filter(
+      (link) => link.target === fromSlug
+        && (!link.targetSubjectSlug || link.targetSubjectSlug === subjectSlug),
+    )
+    .sort((a, b) => b.position.start - a.position.start);
+
+  let result = raw;
+  for (const link of matches) {
+    const newToken = replaceTargetInToken(link.raw, toSlug);
+    result = result.slice(0, link.position.start) + newToken + result.slice(link.position.end);
+  }
+  return result;
+}

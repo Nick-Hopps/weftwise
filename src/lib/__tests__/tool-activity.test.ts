@@ -149,6 +149,16 @@ describe('Phase 3C workflow activity', () => {
   });
 });
 
+describe('Phase 3D wiki.move activity', () => {
+  it('只展示旧/新 slug，不泄漏其他参数', () => {
+    expect(toolActivityIcon('wiki_move')).toBe('↪️');
+    expect(toolActivityVerb('wiki_move')).toBe('Planning page move');
+    expect(toolActivityLine('wiki_move', {
+      slug: 'old-page', newSlug: 'new-page', content: 'secret',
+    })).toBe('↪️ Planning page move "old-page → new-page"…');
+  });
+});
+
 describe('jobActivityTitle', () => {
   it('识别 research-import 事件并优先于通用 Research', () => {
     expect(jobActivityTitle([{ type: 'research-import:start' }])).toBe('Importing research');

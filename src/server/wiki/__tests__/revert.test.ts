@@ -43,4 +43,28 @@ describe('buildRevertEntries', () => {
       { action: 'update', path: P2, content: '# B old' },
     ]);
   });
+
+  it('move 回滚生成反向 movedFromPath，并保留 auxiliary 标记', () => {
+    const oldPath = 'wiki/general/old.md';
+    const newPath = 'wiki/general/new.md';
+    const sidecar = '.llm-wiki/sources/general/source-1.json';
+    const original: ChangesetEntry[] = [
+      { action: 'create', path: newPath, content: 'new', movedFromPath: oldPath },
+      { action: 'delete', path: oldPath, content: null },
+      { action: 'update', path: sidecar, content: '{"linkedPages":["new"]}', auxiliary: true },
+    ];
+    const prior = (path: string) => {
+      if (path === oldPath) return 'old';
+      if (path === sidecar) return '{"linkedPages":["old"]}';
+      return null;
+    };
+    expect(buildRevertEntries(original, prior, (path) => path !== oldPath)).toEqual([
+      { action: 'delete', path: newPath, content: null },
+      { action: 'create', path: oldPath, content: 'old', movedFromPath: newPath },
+      {
+        action: 'update', path: sidecar, content: '{"linkedPages":["old"]}',
+        auxiliary: true,
+      },
+    ]);
+  });
 });

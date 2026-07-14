@@ -58,8 +58,9 @@ Conversation   { id, subjectId, title, createdAt, updatedAt }
 ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: WikiCitation[]|null, createdAt }
 MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
 LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
-PendingActionOperation = 'create'|'update'|'patch'|'delete'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'|'workflow-reenrich-start'|'workflow-research-start'|'workflow-cancel'
+PendingActionOperation = 'create'|'update'|'patch'|'delete'|'move'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'|'workflow-reenrich-start'|'workflow-research-start'|'workflow-cancel'
 PreviewChangeInput { operation, payload } // discriminated union；Query 只提交预览，不持有真实写工具
+MovePageInput { slug, newSlug } // 当前 Subject canonical 页面身份迁移
 WorkflowStatusResult { found, job: null|{ jobId,type,status,cancelled,createdAt,startedAt,completedAt,attemptCount } }
 WorkflowPreviewInput { operation:'workflow-reenrich-start'|'workflow-research-start'|'workflow-cancel', payload }
 ResearchRunView { id, subjectId, researchJobId, origin, status, version, findings, candidates, approval, verificationLintJobId, ... }
@@ -151,6 +152,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 页面身份迁移 Phase 3D：contracts 新增 `MovePageInput`、PendingAction `move` 与 Changeset `movedFromPath/auxiliary` marker；tool activity 只摘要旧新 slug |
 | 2026-07-14 | Workflow 控制 Phase 3C：contracts 新增脱敏 workflow status 与三类 preview 输入/operation；tool activity 新增 status/start/cancel 安全摘要，旧 `wiki.reenrich` 改 Planning 语义 |
 | 2026-07-14 | History 工具 Phase 3B：contracts 新增 History list/diff/revert 工具契约，并把 PendingAction operation 扩展到 `history-revert`；不改变既有 HistoryEntry JSON |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：contracts 新增跨主题工具输入输出与可选 `WikiCitation.subjectSlug`；`wiki-citation.ts` 统一聊天跳转和 Save-to-Wiki wikilink 序列化；旧 citation JSON 继续兼容 |

@@ -413,7 +413,7 @@ function migratePendingActions(): void {
       conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
       subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
       operation TEXT NOT NULL
-        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel')),
+        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move')),
       payload_json TEXT NOT NULL,
       payload_hash TEXT NOT NULL,
       preview_json TEXT NOT NULL,
@@ -445,6 +445,7 @@ function migratePendingActions(): void {
     && currentSql.includes("'workflow-reenrich-start'")
     && currentSql.includes("'workflow-research-start'")
     && currentSql.includes("'workflow-cancel'")
+    && currentSql.includes("'move'")
   ) {
     return;
   }
@@ -783,7 +784,17 @@ function ensurePagesFts(): void {
 // 注：page_sources(subject_id, page_slug) 不建——复合 PK (subject_id, page_slug, source_id) 前缀已覆盖。
 function ensureIndexes(): void {
   const sqlite = rawSqlite!;
+  // Phase 3D 前 page_aliases 允许同一 old_slug 指向多个页面；保留最新 rowid
+  // 收敛为单一 canonical target 后再建立唯一索引。
   sqlite.exec(`
+    DELETE FROM page_aliases
+    WHERE rowid NOT IN (
+      SELECT MAX(rowid) FROM page_aliases GROUP BY subject_id, old_slug
+    );
+  `);
+  sqlite.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS page_aliases_subject_old_unique
+      ON page_aliases(subject_id, old_slug);
     CREATE INDEX IF NOT EXISTS wiki_links_target_idx
       ON wiki_links(target_subject_id, target_slug);
     CREATE INDEX IF NOT EXISTS wiki_links_source_idx

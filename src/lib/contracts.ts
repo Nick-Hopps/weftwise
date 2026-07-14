@@ -689,6 +689,10 @@ export interface ChangesetEntry {
   action: 'create' | 'update' | 'delete';
   path: string;
   content: string | null;
+  /** 新 canonical 页面由哪个旧路径迁移而来；仅允许出现在 wiki create entry。 */
+  movedFromPath?: string;
+  /** 受 Saga 管理但不属于页面索引的 vault 辅助文件（当前仅 source sidecar）。 */
+  auxiliary?: boolean;
 }
 
 export interface Changeset {
@@ -771,7 +775,8 @@ export type PendingActionOperation =
   | 'history-revert'
   | 'workflow-reenrich-start'
   | 'workflow-research-start'
-  | 'workflow-cancel';
+  | 'workflow-cancel'
+  | 'move';
 
 export type PendingActionStatus =
   | 'pending'
@@ -798,7 +803,13 @@ export type PreviewChangeInput =
   | { operation: 'delete'; payload: { slug: string } }
   | { operation: 'reenrich'; payload: { slug: string } }
   | { operation: 'metadata-patch'; payload: MetadataPatchInput }
-  | { operation: 'link-ensure'; payload: LinkEnsureInput };
+  | { operation: 'link-ensure'; payload: LinkEnsureInput }
+  | { operation: 'move'; payload: MovePageInput };
+
+export interface MovePageInput {
+  slug: string;
+  newSlug: string;
+}
 
 export type WorkflowPreviewInput =
   | { operation: 'workflow-reenrich-start'; payload: { slug: string } }

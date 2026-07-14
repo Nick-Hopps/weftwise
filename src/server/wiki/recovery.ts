@@ -24,10 +24,14 @@
 
 import { getVaultHead, findCommitWithMarker } from '../git/git-service';
 import { getRawDb } from '../db/client';
-import { indexTouchedPages } from './indexer';
+import { indexTouchedPages, rebuildPageIndex } from './indexer';
 import { rollbackChangeset, collectTouchedSlugs } from './wiki-transaction';
 import { createLogger } from '../logging';
 import type { Changeset } from '@/lib/contracts';
+import {
+  collectPageIdentityMoves,
+  migratePageIdentityCaches,
+} from './page-identity-migration';
 
 const log = createLogger('wiki-recovery');
 
@@ -57,8 +61,15 @@ export async function recoverPendingOperation(
 
     try {
       const touchedSlugs = collectTouchedSlugs(changeset.subjectSlug, changeset.entries);
+      const identityMoves = collectPageIdentityMoves(changeset.subjectSlug, changeset.entries);
       const reindex = db.transaction(() => {
-        indexTouchedPages(changeset.subjectId, touchedSlugs);
+        for (const move of identityMoves) {
+          migratePageIdentityCaches(changeset.subjectId, move);
+        }
+        if (identityMoves.length > 0) {
+          rebuildPageIndex();
+          indexTouchedPages(changeset.subjectId, touchedSlugs);
+        } else indexTouchedPages(changeset.subjectId, touchedSlugs);
       });
       reindex();
     } catch (err) {

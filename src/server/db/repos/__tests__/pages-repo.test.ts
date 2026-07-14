@@ -71,3 +71,25 @@ describe('pages-repo.getBacklinks', () => {
     expect(repo.getBacklinks('s1', 'page-a')).toEqual([]);
   });
 });
+
+describe('pages-repo 页面 alias', () => {
+  it('同步 alias 后参与 title resolver，并可解析 canonical slug', async () => {
+    const repo = await setup();
+    repo.syncPageAliases('s1', 'target', [' Old Target ', 'legacy_target'], NOW);
+
+    expect(repo.resolvePageAlias('s1', 'old-target')).toBe('target');
+    expect(repo.resolvePageAlias('s2', 'old-target')).toBeNull();
+    expect(repo.getTitleToSlugMap('s1').get('old-target')).toBe('target');
+    expect(repo.getTitleToSlugMap('s1').get('legacy-target')).toBe('target');
+  });
+
+  it('替换 canonical 页 alias 并拒绝形成自映射', async () => {
+    const repo = await setup();
+    repo.syncPageAliases('s1', 'target', ['old-target', 'target'], NOW);
+    repo.syncPageAliases('s1', 'target', ['new-alias'], NOW);
+
+    expect(repo.resolvePageAlias('s1', 'old-target')).toBeNull();
+    expect(repo.resolvePageAlias('s1', 'target')).toBeNull();
+    expect(repo.resolvePageAlias('s1', 'new-alias')).toBe('target');
+  });
+});

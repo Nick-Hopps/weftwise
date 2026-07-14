@@ -32,9 +32,9 @@
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
-| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；两者可显式跨 Subject 只读、读取 active Subject History 与脱敏 workflow status，propose 只开放 active Subject 页面/History/workflow PendingAction；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
+| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；两者可显式跨 Subject 只读、读取 active Subject History 与脱敏 workflow status，propose 只开放 active Subject 页面/move/History/workflow PendingAction；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
-| `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，重新规划后执行页面/History Saga，或原子 start/cancel workflow job；陈旧预览 409 返回刷新 action |
+| `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，重新规划后执行页面/move/History Saga，或原子 start/cancel workflow job；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；先有界读取近期 jobs，再按 subject 批量读取关联 Research run view 交给纯 builder 映射审批/导入/验证终态，避免 N+1；从未跑过返回完整空快照，All Subjects plans 只读 |
@@ -157,6 +157,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 页面身份迁移 Phase 3D：`/api/query` 可生成 `wiki.move` PendingAction；旧 slug 的页面 API 返回 308 canonical redirect，阅读页永久重定向并保留 Subject 查询参数 |
 | 2026-07-14 | Workflow 控制 Phase 3C：`/api/query` 可读 active Subject job 脱敏状态，re-enrich/research/cancel 只生成 PendingAction；批准 API 原子启动或取消 job，不信任客户端工作流参数 |
 | 2026-07-14 | History 工具 Phase 3B：`/api/history*` 改复用共享 History 服务，既有响应/人工确认保持兼容；`/api/query` 可读取 history list/diff，回滚只生成 PendingAction 并由独立批准 API 消费 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：`/api/query` 不再因 active Subject 为空提前退出；流式工具循环可读取其他 Subject，citation schema/persistence 透传可选 subjectSlug，写预览仍绑定 active Subject |

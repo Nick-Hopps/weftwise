@@ -1,7 +1,7 @@
 # Wiki 工具面与工作流治理重构 — 设计 Spec
 
 日期：2026-07-10  
-状态：Phase 0–2 已完成；Phase 3 执行中（Phase 3A–3C 已实现）
+状态：Phase 0–3 已完成（Phase 3D 于 2026-07-14 验收）
 
 ## 一、背景
 
@@ -148,8 +148,8 @@ export interface ToolProfile {
 
 | Profile | 工具 |
 |---|---|
-| `query:read` | `wiki.list/search/read/inspect`、`source.search/read`、`subject.list`、`wiki.search_cross_subject/read_cross_subject`、可选 `web.search` |
-| `query:propose` | `query:read` + `wiki.preview_change` + `history.revert`（预览仍只写 active Subject） |
+| `query:read` | `wiki.list/search/read/inspect`、`source.search/read`、`subject.list`、`wiki.search_cross_subject/read_cross_subject`、`history.list/diff`、`workflow.status`、可选 `web.search` |
+| `query:propose` | `query:read` + `wiki.preview_change/move` + `history.revert` + `workflow.reenrich.start/research.start/cancel`（所有提案仍只作用于 active Subject） |
 | `fix:links` | `wiki.search/read/inspect`、`source.search/read`、`wiki.patch` |
 | `fix:contradiction` | `fix:links` + `wiki.update` |
 | `curate:auto` | `wiki.search/read/inspect`、`wiki.merge/split`；P1 再加 `wiki.link.ensure`、`wiki.metadata.patch` |
@@ -177,7 +177,7 @@ export interface ToolExecutionPolicy {
 
 - 工具不在 profile allowlist：不进入 `ToolSet`；
 - `sideEffect` 不在 `allowedSideEffects`：启动时抛配置错误，禁止静默降级；
-- query profile 不直接编译 create/update/delete/merge/split 等实际写工具，只编译 `wiki.preview_change/history.revert` 两个提案工具；
+- query profile 不直接编译 create/update/delete/merge/split/enqueue/cancel 等实际副作用工具，只编译页面、move、History 与 workflow PendingAction 提案工具；
 - worker profile 可以编译写工具，但执行 handler 时仍必须通过 Guard。
 
 执行阶段：
@@ -726,7 +726,7 @@ Worker 启动时：
 1. subject/cross-subject read tools（Phase 3A 已完成）；
 2. history tools（Phase 3B 已完成）；
 3. workflow start/status/cancel（Phase 3C 已完成）；
-4. `wiki.move` 单独立项。
+4. `wiki.move` 页面身份迁移（Phase 3D 已完成）。
 
 ## 十五、测试策略
 

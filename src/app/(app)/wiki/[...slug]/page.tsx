@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import type { Metadata } from 'next';
@@ -38,7 +38,8 @@ export async function generateMetadata({ params, searchParams }: WikiPageProps):
   const slug = decodeRouteSegments(slugParts);
   const sp = (await searchParams) ?? {};
   const subject = await resolveActiveSubject(sp.s);
-  const page = pagesRepo.getPageBySlug(subject.id, slug);
+  const canonicalSlug = pagesRepo.resolvePageAlias(subject.id, slug) ?? slug;
+  const page = pagesRepo.getPageBySlug(subject.id, canonicalSlug);
 
   if (!page) return { title: 'Page Not Found — Agentic Wiki' };
 
@@ -56,6 +57,12 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
 
   const page = pagesRepo.getPageBySlug(subject.id, slug);
   if (!page) {
+    const canonicalSlug = pagesRepo.resolvePageAlias(subject.id, slug);
+    if (canonicalSlug) {
+      permanentRedirect(
+        `/wiki/${canonicalSlug}${sp.s ? `?s=${encodeURIComponent(sp.s)}` : ''}`,
+      );
+    }
     const elsewhere = pagesRepo
       .findPageBySlugAcrossSubjects(slug)
       .filter((p) => p.subjectId !== subject.id);
@@ -77,12 +84,7 @@ export default async function WikiPage({ params, searchParams }: WikiPageProps) 
   const doc = readPageInSubject(subject.slug, slug);
   if (!doc) notFound();
 
-  const allPages = pagesRepo.getAllPages(subject.id);
-  const titleSlugMap: Record<string, string> = {};
-  for (const p of allPages) {
-    titleSlugMap[p.title] = p.slug;
-    titleSlugMap[p.title.toLowerCase()] = p.slug;
-  }
+  const titleSlugMap = Object.fromEntries(pagesRepo.getTitleToSlugMap(subject.id));
 
   const backlinks = pagesRepo.getBacklinks(subject.id, slug);
   const backlinkItems = backlinks.map((bl) => ({

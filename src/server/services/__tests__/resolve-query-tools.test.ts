@@ -52,6 +52,7 @@ describe('resolveQueryTools', () => {
       'workflow.research.start',
       'workflow.cancel',
       'wiki.reenrich',
+      'wiki.move',
     ]);
     expect(propose).not.toEqual(expect.arrayContaining([
       'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete', 'wiki.reenrich',
