@@ -155,7 +155,7 @@ npx vitest run src/server/agents/tools/__tests__/profiles.test.ts src/server/age
 
 ```bash
 git add src/server/agents src/server/services
-git commit -m "功能：引入工具配置与运行时策略"
+git commit -m "feat: 引入工具配置与运行时策略"
 ```
 
 ---
@@ -235,7 +235,7 @@ rg -n "dispatch\.skill|dispatch_skill|commit_changeset|commitChangesetTool|tools
 
 ```bash
 git add -A src/server/agents src/server/services
-git commit -m "重构：移除不可达工具并迁移提交入口"
+git commit -m "refactor: 移除不可达工具并迁移提交入口"
 ```
 
 ---
@@ -457,7 +457,7 @@ npx tsx -e "import { retireBuiltinSkillFiles } from './src/server/agents/skills/
 
 ```bash
 git add src/server/agents/skills src/server/worker-entry.ts
-git commit -m "维护：安全退役残留内置技能"
+git commit -m "chore: 安全退役残留内置技能"
 ```
 
 ---
@@ -521,7 +521,7 @@ git log --oneline main..HEAD
 
 ```bash
 git add src/server/agents/CLAUDE.md src/server/services/CLAUDE.md src/server/wiki/CLAUDE.md CHANGELOG.md
-git commit -m "文档：记录工具治理 Phase 0 变更"
+git commit -m "docs: 记录工具治理 Phase 0 变更"
 ```
 
 ---

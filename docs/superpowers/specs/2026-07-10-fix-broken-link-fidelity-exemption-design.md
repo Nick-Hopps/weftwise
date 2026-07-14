@@ -4,7 +4,7 @@
 
 ## 问题
 
-`FIDELITY_PROFILES.fix` 的 `linkRule: 'preserve'` 要求原文全部 wikilink 目标 ⊆ 修改后正文，但 broken-link 的两种合法修法（解链为纯文本 / 重链到已有页）本质上都要丢弃断链目标；同时 d0126c6 已禁止 fix 建 stub 页绕过。两条纪律组合把"修断链"这条路彻底封死——fix agent 的更新被护栏确定性拒绝（`Rejected update …: dropped existing wikilink target(s)`），断链永远修不掉。
+`FIDELITY_PROFILES.fix` 的 `linkRule: 'preserve'` 要求原文全部 wikilink 目标 ⊆ 修改后正文，但 broken-link 的两种合法修法（解链为纯文本 / 重链到已有页）本质上都要丢弃断链目标；同时 ad690e6 已禁止 fix 建 stub 页绕过。两条纪律组合把"修断链"这条路彻底封死——fix agent 的更新被护栏确定性拒绝（`Rejected update …: dropped existing wikilink target(s)`），断链永远修不掉。
 
 同一护栏被 `page-write.ts::updatePageInSubject`（Ask AI 的 `wiki_update`）复用，问答路径同样被卡。
 

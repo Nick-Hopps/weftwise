@@ -8,7 +8,7 @@
 
 **分支：** `feat/wiki-narrow-write-tools-phase2b`  
 **worktree：** `.worktrees/wiki-narrow-write-tools-phase2b`  
-**基线：** `d4fa243`
+**基线：** `a608542`
 
 ## Task 1：冻结公共契约与 metadata 纯函数
 
@@ -182,7 +182,7 @@
    ```bash
    rg -n "wiki\.metadata\.patch|wiki\.link\.ensure|metadata-patch|link-ensure" src docs
    rg -n "dispatch\.skill|commit_changeset" src examples
-   git diff --exit-code d4fa243 -- llm-config.example.json
+   git diff --exit-code a608542 -- llm-config.example.json
    ```
 
 3. 运行：

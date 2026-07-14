@@ -4,7 +4,7 @@
 
 **状态：** 已完成（2026-07-13）
 
-**实现证据：** `fe78a3f`–`3e8a3e6`（契约、事务内核、工具、Fix/Curate 与 Query 审批）、`1f0c170`（合并收口）
+**实现证据：** `01a6002`–`40befe2`（契约、事务内核、工具、Fix/Curate 与 Query 审批）、`3050509`（合并收口）
 **来源：** `docs/superpowers/specs/2026-07-10-wiki-tooling-and-workflow-governance-design.md` 第九章
 
 ## 一、目标
@@ -289,7 +289,7 @@ npx vitest run
 npm run lint
 npx tsc --noEmit
 npm run build
-git diff --exit-code d4fa243 -- llm-config.example.json
+git diff --exit-code a608542 -- llm-config.example.json
 ```
 
 ## 九、验收标准

@@ -8,7 +8,7 @@
 
 **分支：** `feat/research-approval-provenance-phase2c`
 **worktree：** `.worktrees/research-approval-provenance-phase2c`
-**基线：** `1f0c170`
+**基线：** `3050509`
 
 ## Task 1：收紧 URL 抓取的 SSRF 出网边界
 
@@ -209,7 +209,7 @@
    ```bash
    rg -n "POST /api/ingest|confirmIngest|selectedUrls|redirect: 'follow'|research-import|researchProvenance" src docs
    rg -n "research_runs|research_candidates|research_approvals|research_candidate_ingests" src drizzle docs
-   git diff --exit-code 1f0c170 -- llm-config.example.json
+   git diff --exit-code 3050509 -- llm-config.example.json
    ```
 
 3. 运行：
