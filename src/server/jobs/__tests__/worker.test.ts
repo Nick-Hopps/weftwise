@@ -11,11 +11,11 @@ vi.mock('@/server/services/pending-action-maintenance', () => ({
 vi.mock('../queue', () => ({
   pruneEvents: vi.fn(() => 0),
   claim: vi.fn(() => null),
-  complete: vi.fn(),
-  fail: vi.fn(),
+  complete: vi.fn(() => true),
+  fail: vi.fn(() => true),
   requestCancel: vi.fn(),
-  requeue: vi.fn(),
-  updateHeartbeat: vi.fn(),
+  requeue: vi.fn(() => true),
+  updateHeartbeat: vi.fn(() => true),
 }));
 vi.mock('../events', () => ({ emit: vi.fn() }));
 vi.mock('@/server/services/maintenance-scheduler', () => ({
@@ -46,6 +46,33 @@ vi.mock('@/server/db/repos/settings-repo', () => ({
 
 import { decideJobFailureAction, registerHandler, startWorker, stopWorker } from '../worker';
 import * as queue from '../queue';
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function claimedJob(id: string) {
+  return {
+    id,
+    type: 'lint',
+    status: 'running',
+    subjectId: 's1',
+    paramsJson: '{}',
+    resultJson: null,
+    createdAt: '2026-07-14T00:00:00.000Z',
+    startedAt: '2026-07-14T00:00:00.000Z',
+    completedAt: null,
+    leaseExpiresAt: '2026-07-14T00:02:00.000Z',
+    heartbeatAt: '2026-07-14T00:00:00.000Z',
+    attemptCount: 1,
+  } as const;
+}
 
 class AgentCancelled extends Error {
   constructor() {
@@ -179,7 +206,7 @@ describe('startWorker - pending_actions 卫生维护', () => {
 
     await vi.advanceTimersByTimeAsync(10);
 
-    expect(queue.complete).toHaveBeenCalledWith(claimed.id, { deliveries: [] });
+    expect(queue.complete).toHaveBeenCalledWith(claimed.id, { deliveries: [] }, 1);
     expect(mockReconcileForJob).toHaveBeenCalledWith(claimed.id);
     expect(queue.fail).not.toHaveBeenCalled();
     expect(errorSpy).toHaveBeenCalledWith(
@@ -202,5 +229,101 @@ describe('startWorker - pending_actions 卫生维护', () => {
       '[maintenance] pending_actions maintenance failed',
       error,
     );
+  });
+});
+
+describe('startWorker - 运行中任务心跳', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    mockMaintainPendingActions.mockReturnValue({ expired: 0, recovered: 0, pruned: 0 });
+    mockReconcileResearchProvenance.mockReturnValue(0);
+    mockPruneOldOperations.mockReturnValue(0);
+  });
+
+  afterEach(() => {
+    stopWorker();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('领取后恰好 30 秒首次续租，长任务持续续租，完成后立即停止', async () => {
+    const job = claimedJob('heartbeat-success');
+    const result = deferred<Record<string, unknown>>();
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    registerHandler('lint', () => result.promise);
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(queue.updateHeartbeat).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(queue.updateHeartbeat).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(queue.updateHeartbeat).toHaveBeenCalledTimes(1);
+    expect(queue.updateHeartbeat).toHaveBeenLastCalledWith(job.id, 1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(queue.updateHeartbeat).toHaveBeenCalledTimes(3);
+
+    result.resolve({ ok: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queue.complete).toHaveBeenCalledWith(job.id, { ok: true }, 1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(queue.updateHeartbeat).toHaveBeenCalledTimes(3);
+  });
+
+  it('handler 失败离开 runJob 后清理心跳定时器', async () => {
+    const job = claimedJob('heartbeat-failure');
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    registerHandler('lint', async () => {
+      throw new Error('business failure');
+    });
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(queue.fail).toHaveBeenCalledWith(job.id, expect.any(Error), 1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(queue.updateHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it('可重试失败完成 requeue 后清理心跳定时器', async () => {
+    const job = claimedJob('heartbeat-retry');
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    registerHandler('lint', async () => {
+      throw new Error('fetch failed');
+    });
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(queue.requeue).not.toHaveBeenCalled();
+    expect(queue.updateHeartbeat).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(queue.requeue).toHaveBeenCalledWith(job.id, 1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(queue.updateHeartbeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('心跳异常被吞掉，不覆盖 handler 的成功结果', async () => {
+    const job = claimedJob('heartbeat-error');
+    const result = deferred<Record<string, unknown>>();
+    vi.mocked(queue.claim).mockReturnValueOnce(job).mockReturnValue(null);
+    vi.mocked(queue.updateHeartbeat).mockImplementationOnce(() => {
+      throw new Error('db busy');
+    });
+    registerHandler('lint', () => result.promise);
+
+    startWorker(10);
+    await vi.advanceTimersByTimeAsync(10);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(queue.updateHeartbeat).toHaveBeenCalledTimes(1);
+
+    result.resolve({ persisted: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(queue.complete).toHaveBeenCalledWith(job.id, { persisted: true }, 1);
+    expect(queue.fail).not.toHaveBeenCalled();
   });
 });

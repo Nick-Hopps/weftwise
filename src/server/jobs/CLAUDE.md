@@ -20,16 +20,17 @@
 ```ts
 enqueue(type, params?, subjectId?): Job  // pending 状态入库（subjectId 写入 jobs.subject_id）
 claim(type?): Job | null              // 原子"pending → running" + 租约
-complete(id, result)
-fail(id, error)
+complete(id, result, expectedAttempt): boolean
+fail(id, error, expectedAttempt): boolean
 get(id): Job | null
 list({ status?, type?, subjectId? }): Job[]
 listRecent(filter, limit): Job[]          // 有界近期状态恢复
 listLatestCompletedLint(subjectId): Job | null // 按 completedAt/id 单行读取
 getOrCreateJobAtomic(input)               // IMMEDIATE 事务内过滤候选 + 精确幂等 matcher
 reingestSourceAtomic(input)               // 同源 ingest 原子复用/requeue/create
-requeue(id)                           // retry 专用：保留 job ID
+requeue(id, expectedAttempt?): boolean // worker 传 fencing token；人工 retry 走管理型重排
 reclaimExpired(): number              // 回收租约过期的 running 任务
+updateHeartbeat(id, expectedAttempt): boolean
 ```
 
 ### `worker.ts`
@@ -41,8 +42,8 @@ stopWorker()
 ```
 
 - **并发调度**：`runningJobs` Map 跟踪当前在跑任务（id→type）；每 tick 用纯函数 `decideClaim(runningTypes, ingestLimit)` 三态决策（可 claim ingest / 可 claim 非 ingest / 都不行）——非 ingest 类型独占（跑着任何非 ingest 任务时不再 claim）、ingest 之间允许并发但受 `app_settings.ingestConcurrency`（默认 2，范围 1-4，每 tick 实时读）上限约束；vault 写入安全靠 `vault-mutex`（进程内队列 + 跨进程文件锁）兜底，而非串行调度。
-- **心跳**：每 30s 调 `queue.updateHeartbeat` 续租。
-- **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / 524 / terminated / other side closed / failed to process successful response / fetch failed / aborted / rate limit，关键字同时搜 `error.message` 和 `error.cause`）；AI SDK 的 `AI_RetryError` 按 `.reason` 精确判定（`maxRetriesExceeded`→retry，`errorNotRetryable`→fail，不猜关键字）；调 `queue.requeue(jobId)` 保持 job ID，前端 SSE 不会丢踪。
+- **租约 fencing**：claim 原子自增的 `attempt_count` 是本次执行 token；每 30s heartbeat 及 complete/fail/requeue 都必须同时匹配 `running + attempt_count`，旧 worker 即使迟到也不能续租或覆盖新 attempt。handler 完成、失败或 requeue 后均在 `finally` 清理定时器。
+- **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / 524 / terminated / other side closed / failed to process successful response / fetch failed / aborted / rate limit，关键字同时搜 `error.message` 和 `error.cause`）；AI SDK 的 `AI_RetryError` 按 `.reason` 精确判定（`maxRetriesExceeded`→retry，`errorNotRetryable`→fail，不猜关键字）；调 `queue.requeue(jobId, attemptCount)` 保持 job ID，只有当前 attempt 可重排。
 - **Research 对账**：job 真正完成或最终失败后调用 `reconcileResearchProvenanceForJob(jobId)`；自动 retry 中间态不对账。worker 启动和维护 tick 再扫描未完成 run，补偿 cancel route、进程崩溃和终态 hook 失败；该扫描先于 operation GC，确保 operation IDs 仍可物化。
 
 ### `events.ts`
@@ -63,7 +64,7 @@ emit(jobId, type, message, data?): void
 | `params_json` / `result_json` | 任意 JSON 入参与结果 |
 | `lease_expires_at` | 租约过期时间（`claim` 时写） |
 | `heartbeat_at` | 上次心跳 |
-| `attempt_count` | 当前重试次数（`requeue` 自增） |
+| `attempt_count` | 成功领取次数（`claim` 原子自增；`requeue` 本身不增，下一次 claim 再增） |
 
 `job_events`：`{ id, job_id, type, message, data_json, created_at }`，SSE 客户端用 `Last-Event-Id` = 最后收到的 `id` 续播。
 
@@ -91,21 +92,16 @@ Phase 3C 的 Ask AI 工作流命令不直接暴露 queue：`workflow.status` 通
 
 - `__tests__/maintenance-tick.test.ts`：`shouldSweep` 节律闸门边界。
 - `job_events` 保留清扫（`pruneJobEvents`）与 jobs 表 CRUD/查询见 `db/repos/__tests__/jobs-repo.test.ts`（queue/worker 是对 jobs-repo 的薄封装）。
-- `__tests__/worker.test.ts::decideJobFailureAction`：`isRetryableError` 分类（含 `AI_RetryError.reason` 精确判定、cause 里才有真实原因的网络错误）。
+- `__tests__/worker.test.ts`：`isRetryableError` 分类，以及 30 秒首跳/连续续租、成功/失败/retry 定时器释放和心跳异常隔离。
 - `services/__tests__/research-provenance-reconciler.test.ts`：终态 hook、维护扫描、delivery/verification 聚合与 operation lineage；`jobs/[id]` cancel/retry 路由测试覆盖 coordinator 立即对账及 Research child 禁止独立复活。
 - `lib/__tests__/error-format.test.ts` + `db/repos/__tests__/jobs-repo-fail.test.ts`：`describeErrorMessage` 补全 `AI_RetryError` 因 lastError message 为空而丢失的真实原因（见下方 2026-07-09 变更）。
 
-仍待补充：
-
-- `claimNextJob` 并发原子性（用 `busy_timeout` + `BEGIN IMMEDIATE`）。
-- `reclaimExpired` 的边界：刚好等于过期时间戳是否回收。
-- `requeue` 对 `attempt_count` 的正确自增。
-- `worker.ts`：心跳续租。
+- `db/repos/__tests__/jobs-repo.test.ts`：双进程 WAL claim 原子性、`lease_expires_at <= now` 的 claim/reclaim 一致边界、requeue/attempt_count 语义与旧 attempt fencing。
 
 ## 常见问题 (FAQ)
 
 - **Worker 挂了任务怎么办？**
-  租约过期后，下次 worker 启动（或仍在跑的 worker）调 `reclaimExpired()`，把那些 running 但租约过期的任务重置为 pending。
+  租约在 `lease_expires_at <= now` 时失效。worker 启动会先调 `reclaimExpired()`；运行中的 worker 也可由 `claimNextJob()` 直接重新领取到期任务。
 - **前端 SSE 断连怎么续播？**
   EventSource 自动携带 `Last-Event-Id`；服务端按此过滤 `job_events`，只推送更晚的事件。
 - **一个任务要运行 10 分钟，会超时吗？**
@@ -124,6 +120,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Worker/DB 不变量测试收尾：所有 runJob 终态清 timer；claim/reclaim 统一 `<= now` 到期语义，`attempt_count` 作为 heartbeat/complete/fail/requeue fencing token；双进程 WAL 竞争与旧 attempt 隔离已有真实 repo 测试 |
 | 2026-07-14 | Workflow 控制 Phase 3C：Ask AI status 只读脱敏；re-enrich/research start 与 cancel 先审批，批准后 job/action 原子收口，取消沿用既有终态、事件和 provenance 语义 |
 | 2026-07-14 | Phase 2C 新增 `research-import` coordinator job；worker 终态 hook、启动与维护扫描执行幂等 Research provenance 对账，且早于 operation GC；自动 retry 中间态不提前终结 delivery，携带 provenance 的 child Ingest 禁止通用手动 retry，coordinator cancel 后 route 立即对账 |
 | 2026-07-13 | queue 暴露最新 lint 单行读取与两类原子 get-or-create；repo 候选 SQL 避免扫描 subject 全历史，同源 ingest 走 JSON 表达式索引 |

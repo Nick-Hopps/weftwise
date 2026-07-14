@@ -137,7 +137,7 @@ export function reingestSourceAtomic(
   return tx.immediate();
 }
 
-const LEASE_DURATION_MS = 2 * 60 * 1000; // 2 minutes
+const LEASE_DURATION_MS = 2 * 60 * 1000; // 2 minutes；到期时刻本身即失效（<= now）
 
 export function claimNextJob(type?: Job['type']): Job | null {
   const sqlite = getRawDb();
@@ -153,7 +153,7 @@ export function claimNextJob(type?: Job['type']): Job | null {
         WHERE id = (
           SELECT id FROM jobs
           WHERE (status = 'pending' AND type = ?)
-             OR (status = 'running' AND type = ? AND lease_expires_at < ?)
+             OR (status = 'running' AND type = ? AND lease_expires_at <= ?)
           ORDER BY created_at ASC LIMIT 1
         )
         RETURNING *
@@ -165,7 +165,7 @@ export function claimNextJob(type?: Job['type']): Job | null {
         WHERE id = (
           SELECT id FROM jobs
           WHERE status = 'pending'
-             OR (status = 'running' AND lease_expires_at < ?)
+             OR (status = 'running' AND lease_expires_at <= ?)
           ORDER BY created_at ASC LIMIT 1
         )
         RETURNING *
@@ -180,13 +180,20 @@ export function claimNextJob(type?: Job['type']): Job | null {
   return rowToJobFromRaw(row);
 }
 
-export function requeueJob(jobId: string): void {
+export function requeueJob(jobId: string, expectedAttempt?: number): boolean {
   const sqlite = getRawDb();
-  sqlite.prepare(`
-    UPDATE jobs SET status = 'pending', lease_expires_at = NULL, heartbeat_at = NULL,
-      cancel_requested = 0
-    WHERE id = ?
-  `).run(jobId);
+  const result = expectedAttempt === undefined
+    ? sqlite.prepare(`
+        UPDATE jobs SET status = 'pending', lease_expires_at = NULL, heartbeat_at = NULL,
+          cancel_requested = 0
+        WHERE id = ?
+      `).run(jobId)
+    : sqlite.prepare(`
+        UPDATE jobs SET status = 'pending', lease_expires_at = NULL, heartbeat_at = NULL,
+          cancel_requested = 0
+        WHERE id = ? AND status = 'running' AND attempt_count = ?
+      `).run(jobId, expectedAttempt);
+  return result.changes === 1;
 }
 
 export function requeueJobWithParams(
@@ -322,19 +329,21 @@ export function reclaimExpiredJobs(): number {
   const now = new Date().toISOString();
   const result = sqlite.prepare(`
     UPDATE jobs SET status = 'pending', lease_expires_at = NULL, heartbeat_at = NULL
-    WHERE status = 'running' AND lease_expires_at < ?
+    WHERE status = 'running' AND lease_expires_at <= ?
   `).run(now);
   return result.changes;
 }
 
-export function updateHeartbeat(jobId: string): void {
+export function updateHeartbeat(jobId: string, expectedAttempt: number): boolean {
   const sqlite = getRawDb();
   const now = new Date();
   const heartbeatAt = now.toISOString();
   const leaseExpiresAt = new Date(now.getTime() + LEASE_DURATION_MS).toISOString();
-  sqlite.prepare(`
-    UPDATE jobs SET heartbeat_at = ?, lease_expires_at = ? WHERE id = ?
-  `).run(heartbeatAt, leaseExpiresAt, jobId);
+  const result = sqlite.prepare(`
+    UPDATE jobs SET heartbeat_at = ?, lease_expires_at = ?
+    WHERE id = ? AND status = 'running' AND attempt_count = ?
+  `).run(heartbeatAt, leaseExpiresAt, jobId, expectedAttempt);
+  return result.changes === 1;
 }
 
 export function getJob(id: string): Job | null {
@@ -434,22 +443,31 @@ export function findLatestIngestJobForSource(
 
 export function completeJob(
   id: string,
-  result: Record<string, unknown>
-): void {
+  result: Record<string, unknown>,
+  expectedAttempt?: number,
+): boolean {
   // WHERE cancel_requested = 0：requestCancel 已把 job 落终态（failed+cancelled）
   // 时，worker 迟到的 complete 不得把它复活成 completed；同时清租约/心跳，
   // 避免终态行仍带活跃租约被 reclaim 逻辑误判。
-  getRawDb()
-    .prepare(
-      `UPDATE jobs
-       SET status = 'completed', result_json = ?, completed_at = ?,
-           lease_expires_at = NULL, heartbeat_at = NULL
-       WHERE id = ? AND cancel_requested = 0`
-    )
-    .run(JSON.stringify(result), new Date().toISOString(), id);
+  const sqlite = getRawDb();
+  const update = expectedAttempt === undefined
+    ? sqlite.prepare(
+        `UPDATE jobs
+         SET status = 'completed', result_json = ?, completed_at = ?,
+             lease_expires_at = NULL, heartbeat_at = NULL
+         WHERE id = ? AND cancel_requested = 0`,
+      ).run(JSON.stringify(result), new Date().toISOString(), id)
+    : sqlite.prepare(
+        `UPDATE jobs
+         SET status = 'completed', result_json = ?, completed_at = ?,
+             lease_expires_at = NULL, heartbeat_at = NULL
+         WHERE id = ? AND status = 'running' AND cancel_requested = 0
+           AND attempt_count = ?`,
+      ).run(JSON.stringify(result), new Date().toISOString(), id, expectedAttempt);
+  return update.changes === 1;
 }
 
-export function failJob(id: string, error: unknown): void {
+export function failJob(id: string, error: unknown, expectedAttempt?: number): boolean {
   const errorObj: Record<string, unknown> =
     error instanceof Error
       ? { message: describeErrorMessage(error), stack: error.stack }
@@ -468,14 +486,24 @@ export function failJob(id: string, error: unknown): void {
   }
 
   // 同 completeJob：已取消的 job 保留 cancelled 结果，不被迟到的失败覆盖。
-  getRawDb()
-    .prepare(
-      `UPDATE jobs
-       SET status = 'failed', result_json = ?, completed_at = ?,
-           lease_expires_at = NULL, heartbeat_at = NULL
-       WHERE id = ? AND cancel_requested = 0`
-    )
-    .run(JSON.stringify({ error: errorObj }), new Date().toISOString(), id);
+  const sqlite = getRawDb();
+  const resultJson = JSON.stringify({ error: errorObj });
+  const completedAt = new Date().toISOString();
+  const update = expectedAttempt === undefined
+    ? sqlite.prepare(
+        `UPDATE jobs
+         SET status = 'failed', result_json = ?, completed_at = ?,
+             lease_expires_at = NULL, heartbeat_at = NULL
+         WHERE id = ? AND cancel_requested = 0`,
+      ).run(resultJson, completedAt, id)
+    : sqlite.prepare(
+        `UPDATE jobs
+         SET status = 'failed', result_json = ?, completed_at = ?,
+             lease_expires_at = NULL, heartbeat_at = NULL
+         WHERE id = ? AND status = 'running' AND cancel_requested = 0
+           AND attempt_count = ?`,
+      ).run(resultJson, completedAt, id, expectedAttempt);
+  return update.changes === 1;
 }
 
 export function appendJobEvent(

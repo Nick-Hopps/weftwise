@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import type { Job } from '@/lib/contracts';
+
+const execFileAsync = promisify(execFile);
 
 let dir: string;
 let prevDb: string | undefined;
@@ -892,5 +897,200 @@ describe('jobs-repo.reingestSourceAtomic', () => {
     expect(repo.getJob(failed.id)).toMatchObject({ status: 'failed' });
     expect(repo.listJobs({ type: 'ingest', subjectId: 's1' })).toHaveLength(1);
     expect(repo.getJobEvents(failed.id)).toEqual([]);
+  });
+});
+
+describe('jobs-repo 租约与领取不变量', () => {
+  async function setupLeaseRepo() {
+    const repo = await import('../jobs-repo');
+    return repo;
+  }
+
+  it('同一 pending job 只能领取一次，type filter 不越界', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00.000Z'));
+    try {
+      const repo = await setupLeaseRepo();
+      const lint = repo.enqueueJob('lint');
+      const ingest = repo.enqueueJob('ingest');
+
+      expect(repo.claimNextJob('ingest')).toMatchObject({
+        id: ingest.id,
+        type: 'ingest',
+        status: 'running',
+        attemptCount: 1,
+      });
+      expect(repo.claimNextJob('ingest')).toBeNull();
+      expect(repo.getJob(lint.id)).toMatchObject({ status: 'pending', attemptCount: 0 });
+
+      expect(repo.claimNextJob()).toMatchObject({ id: lint.id, attemptCount: 1 });
+      expect(repo.claimNextJob()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('两个独立进程并发 claim 时只有一个拿到同一 job', async () => {
+    const repo = await setupLeaseRepo();
+    const job = repo.enqueueJob('lint');
+    const repoUrl = pathToFileURL(
+      join(process.cwd(), 'src/server/db/repos/jobs-repo.ts'),
+    ).href;
+    const script = [
+      `const repoModule = await import(${JSON.stringify(repoUrl)});`,
+      `const repo = repoModule.default ?? repoModule;`,
+      `const claimed = repo.claimNextJob();`,
+      `process.stdout.write(claimed?.id ?? 'null');`,
+    ].join('\n');
+    const runClaim = () => execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', '--input-type=module', '-e', script],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, DATABASE_PATH: join(dir, 'wiki.db') },
+        timeout: 15_000,
+      },
+    );
+
+    const outputs = (await Promise.all([runClaim(), runClaim()]))
+      .map((result) => result.stdout.trim())
+      .sort();
+    expect(outputs).toEqual([job.id, 'null'].sort());
+    expect(repo.getJob(job.id)).toMatchObject({
+      status: 'running',
+      attemptCount: 1,
+    });
+  });
+
+  it('租约到期前不回收，恰好到期即回收并允许第二次 claim', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00.000Z'));
+    try {
+      const repo = await setupLeaseRepo();
+      const job = repo.enqueueJob('lint');
+      const first = repo.claimNextJob();
+      expect(first).toMatchObject({ id: job.id, attemptCount: 1 });
+      const expiresAt = new Date(first!.leaseExpiresAt!);
+
+      vi.setSystemTime(new Date(expiresAt.getTime() - 1));
+      expect(repo.reclaimExpiredJobs()).toBe(0);
+      expect(repo.claimNextJob()).toBeNull();
+
+      vi.setSystemTime(expiresAt);
+      expect(repo.reclaimExpiredJobs()).toBe(1);
+      expect(repo.getJob(job.id)).toMatchObject({
+        status: 'pending',
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+        attemptCount: 1,
+      });
+      expect(repo.claimNextJob()).toMatchObject({ id: job.id, attemptCount: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('claim 可在租约恰好到期时直接重新领取 running job', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00.000Z'));
+    try {
+      const repo = await setupLeaseRepo();
+      const job = repo.enqueueJob('lint');
+      const first = repo.claimNextJob('lint');
+      vi.setSystemTime(new Date(first!.leaseExpiresAt!));
+
+      expect(repo.claimNextJob('lint')).toMatchObject({
+        id: job.id,
+        status: 'running',
+        attemptCount: 2,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('requeue 本身不增加 attempt，下一次成功 claim 才精确加一', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00.000Z'));
+    try {
+      const repo = await setupLeaseRepo();
+      const job = repo.enqueueJob('lint');
+      expect(repo.claimNextJob()).toMatchObject({ id: job.id, attemptCount: 1 });
+
+      repo.requeueJob(job.id);
+      expect(repo.getJob(job.id)).toMatchObject({
+        status: 'pending',
+        attemptCount: 1,
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+      });
+      expect(repo.claimNextJob()).toMatchObject({ id: job.id, attemptCount: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('旧 worker 心跳不得续租 completed 终态任务', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00.000Z'));
+    try {
+      const repo = await setupLeaseRepo();
+      const job = repo.enqueueJob('lint');
+      expect(repo.claimNextJob()).toMatchObject({ id: job.id });
+      repo.completeJob(job.id, { ok: true });
+      expect(repo.getJob(job.id)).toMatchObject({
+        status: 'completed',
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+      });
+
+      vi.setSystemTime(new Date('2026-07-14T01:00:00.000Z'));
+      repo.updateHeartbeat(job.id, 1);
+      expect(repo.getJob(job.id)).toMatchObject({
+        status: 'completed',
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('attempt_count 作为 fencing token，旧 attempt 不能续租或覆盖新 attempt', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:00:00.000Z'));
+    try {
+      const repo = await setupLeaseRepo();
+      const job = repo.enqueueJob('lint');
+      const first = repo.claimNextJob()!;
+      vi.setSystemTime(new Date(first.leaseExpiresAt!));
+      const second = repo.claimNextJob()!;
+      expect(second).toMatchObject({ id: job.id, attemptCount: 2 });
+
+      expect(repo.updateHeartbeat(job.id, 1)).toBe(false);
+      expect(repo.completeJob(job.id, { stale: 'complete' }, 1)).toBe(false);
+      expect(repo.failJob(job.id, new Error('stale failure'), 1)).toBe(false);
+      expect(repo.requeueJob(job.id, 1)).toBe(false);
+      expect(repo.getJob(job.id)).toMatchObject({
+        status: 'running',
+        attemptCount: 2,
+        resultJson: null,
+        leaseExpiresAt: second.leaseExpiresAt,
+        heartbeatAt: second.heartbeatAt,
+      });
+
+      vi.setSystemTime(new Date('2026-07-14T00:02:01.000Z'));
+      expect(repo.updateHeartbeat(job.id, 2)).toBe(true);
+      expect(repo.completeJob(job.id, { owner: 'second' }, 2)).toBe(true);
+      expect(repo.getJob(job.id)).toMatchObject({
+        status: 'completed',
+        attemptCount: 2,
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+      });
+      expect(JSON.parse(repo.getJob(job.id)!.resultJson!)).toEqual({ owner: 'second' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
