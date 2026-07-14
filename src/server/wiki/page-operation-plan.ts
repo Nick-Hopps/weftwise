@@ -9,6 +9,7 @@ import type {
   MetadataPatchInput,
   MetadataPatchResult,
   Subject,
+  TitleResolver,
   WikiDocument,
   WikiFrontmatter,
 } from '@/lib/contracts';
@@ -196,7 +197,11 @@ export async function planPageMove(
   const mutationEpoch = captureSubjectMutationEpoch(subject.id);
   const preHead = await getVaultHead();
   const titleResolver = pagesRepo.getTitleToSlugMap(subject.id);
-  const resolveTitle = (title: string) => titleResolver.get(title) ?? titleResolver.get(title.toLowerCase());
+  const resolveTitle: TitleResolver = (title, targetSubjectSlug = subject.slug) => (
+    targetSubjectSlug === subject.slug
+      ? titleResolver.get(title) ?? titleResolver.get(title.toLowerCase())
+      : undefined
+  );
   const aliases = [...new Set([
     ...(sourceDoc.frontmatter.aliases ?? []),
     input.slug,

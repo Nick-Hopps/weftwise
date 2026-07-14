@@ -99,7 +99,17 @@ export interface ExtractedLink {
   position: { start: number; end: number };
 }
 
-export type TitleResolver = (title: string) => string | undefined;
+/**
+ * 把页面标题解析为 canonical slug。
+ *
+ * `targetSubjectSlug` 是 wikilink 在拆除显式 `subject:` 前缀后确定的目标
+ * Subject；resolver 必须据此隔离同名页面。参数保持可选，以兼容只处理单一
+ * Subject 的旧调用方。
+ */
+export type TitleResolver = (
+  title: string,
+  targetSubjectSlug?: string,
+) => string | undefined;
 
 /** frontmatter + body + links 的组合解析结果 */
 export interface WikiDocument {
