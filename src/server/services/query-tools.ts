@@ -16,8 +16,10 @@ import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-read
 import {
   createPendingActionPreview,
   createPendingHistoryRevertPreview,
+  createPendingWorkflowActionPreview,
 } from './pending-action-service';
 import { listHistory, readHistoryDiff } from './history-tools';
+import { readWorkflowStatus } from './workflow-tools';
 
 /** search_wiki 默认返回条数。 */
 const SEARCH_LIMIT_DEFAULT = 8;
@@ -110,6 +112,21 @@ export function buildQueryToolContext(
           subject,
           operationId,
         }),
+        previewWorkflowReenrich: (slug) => createPendingWorkflowActionPreview({
+          conversationId: options.conversationId!,
+          subject,
+          input: { operation: 'workflow-reenrich-start', payload: { slug } },
+        }),
+        previewWorkflowResearch: (topic) => createPendingWorkflowActionPreview({
+          conversationId: options.conversationId!,
+          subject,
+          input: { operation: 'workflow-research-start', payload: { topic } },
+        }),
+        previewWorkflowCancel: (jobId) => createPendingWorkflowActionPreview({
+          conversationId: options.conversationId!,
+          subject,
+          input: { operation: 'workflow-cancel', payload: { jobId } },
+        }),
         onPendingAction: options.onPendingAction,
       }
     : {};
@@ -121,6 +138,9 @@ export function buildQueryToolContext(
     },
     async readHistoryDiff(input) {
       return readHistoryDiff(subject, input);
+    },
+    async readWorkflowStatus(jobId) {
+      return readWorkflowStatus(subject, jobId);
     },
     async listSubjects() {
       const subjects = subjectsRepo.listSubjects()

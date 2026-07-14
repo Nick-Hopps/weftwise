@@ -19,6 +19,7 @@ describe('resolveToolProfile', () => {
       'source.read',
       'history.list',
       'history.diff',
+      'workflow.status',
     ]);
   });
 
@@ -27,12 +28,20 @@ describe('resolveToolProfile', () => {
     expect(resolveToolProfile('query:read', { webSearchConfigured: false }).tools).not.toContain('web.search');
   });
 
-  it('query:propose 只比 read 多两种审批提案，不包含实际写工具', () => {
+  it('query:propose 只比 read 多审批提案工具，不包含实际写工具', () => {
     const read = resolveToolProfile('query:read', { webSearchConfigured: false }).tools;
     const propose = resolveToolProfile('query:propose', { webSearchConfigured: false }).tools;
-    expect(propose).toEqual([...read, 'wiki.preview_change', 'history.revert']);
+    expect(propose).toEqual([
+      ...read,
+      'wiki.preview_change',
+      'history.revert',
+      'workflow.reenrich.start',
+      'workflow.research.start',
+      'workflow.cancel',
+      'wiki.reenrich',
+    ]);
     for (const writeTool of [
-      'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete', 'wiki.reenrich',
+      'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete',
       'wiki.metadata.patch', 'wiki.link.ensure',
     ]) {
       expect(propose).not.toContain(writeTool);
@@ -106,6 +115,28 @@ describe('resolveToolProfile', () => {
     ] as const) {
       expect(resolveToolProfile(profileId).tools).not.toEqual(
         expect.arrayContaining(historyTools),
+      );
+    }
+  });
+
+  it('工作流控制工具只属于 Query，其他 runner 不可见', () => {
+    const workflowTools = [
+      'workflow.status',
+      'workflow.reenrich.start',
+      'workflow.research.start',
+      'workflow.cancel',
+      'wiki.reenrich',
+    ];
+    for (const profileId of [
+      'fix:links',
+      'fix:contradiction',
+      'curate:auto',
+      'curate:manual',
+      'ingest:planner',
+      'ingest:writer',
+    ] as const) {
+      expect(resolveToolProfile(profileId).tools).not.toEqual(
+        expect.arrayContaining(workflowTools),
       );
     }
   });

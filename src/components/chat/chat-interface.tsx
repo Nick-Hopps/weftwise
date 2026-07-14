@@ -367,7 +367,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       }
       if (!data.action) return;
 
-      if (data.action.jobId) {
+      if (data.action.jobId && data.action.operation !== 'workflow-cancel') {
         window.dispatchEvent(new CustomEvent('wiki:job-started', {
           detail: { jobId: data.action.jobId },
         }));

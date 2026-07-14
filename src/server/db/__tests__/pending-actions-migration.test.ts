@@ -105,10 +105,13 @@ describe('pending_actions CHECK 启动迁移', () => {
       ['a2', 'metadata-patch'],
       ['a3', 'link-ensure'],
       ['a4', 'history-revert'],
+      ['a5', 'workflow-reenrich-start'],
+      ['a6', 'workflow-research-start'],
+      ['a7', 'workflow-cancel'],
     ] as const) {
       expect(() => insert.run(id, operation, now(), now(), expires())).not.toThrow();
     }
-    expect(() => insert.run('a5', 'unknown-operation', now(), now(), expires()))
+    expect(() => insert.run('a8', 'unknown-operation', now(), now(), expires()))
       .toThrow(/CHECK constraint failed/);
   });
 

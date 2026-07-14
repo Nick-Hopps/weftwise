@@ -62,11 +62,11 @@ import {
 } from '../query-prompt';
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
-  it('只说明只读工具与 subject 隔离', () => {
+  it('说明受治理工具与 subject 隔离', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_list');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_search');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_read');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_reenrich');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_status');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/other subject/i);
   });
 
@@ -134,10 +134,19 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT — web search 纪律', () => {
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
   it('不宣称 Ask AI 可直接执行写操作或口头确认授权', () => {
-    for (const tool of ['wiki_create', 'wiki_update', 'wiki_patch', 'wiki_delete', 'wiki_reenrich']) {
+    for (const tool of ['wiki_create', 'wiki_update', 'wiki_patch', 'wiki_delete']) {
       expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain(tool);
     }
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toMatch(/LATER turn|prior turn|confirm before/i);
+  });
+
+  it('Phase 3C 启动与取消只走 PendingAction，并说明 Research 二次审批', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_reenrich_start');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_research_start');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_cancel');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/research candidates[\s\S]*separate approval/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/workflow_status[\s\S]*workflow_cancel/);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/does not enqueue|does not cancel/i);
   });
 
   it('仅允许通过审批预览工具提案，并明确预览不会直接落盘', () => {

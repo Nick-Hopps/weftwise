@@ -29,11 +29,20 @@ const historyMocks = vi.hoisted(() => ({
 vi.mock('../history-tools', () => historyMocks);
 const reenrichMocks = vi.hoisted(() => ({ planReenrich: vi.fn(), enqueueReenrich: vi.fn() }));
 vi.mock('../reenrich-enqueue', () => reenrichMocks);
+const workflowMocks = vi.hoisted(() => ({
+  planWorkflowReenrich: vi.fn(),
+  planWorkflowResearch: vi.fn(),
+  planWorkflowCancel: vi.fn(),
+  reportWorkflowCancellation: vi.fn(),
+}));
+vi.mock('../workflow-tools', () => workflowMocks);
 const operationMocks = vi.hoisted(() => ({ getById: vi.fn() }));
 vi.mock('../../db/repos/operations-repo', () => operationMocks);
 const finalizerMocks = vi.hoisted(() => ({
   finalizeAppliedPageAction: vi.fn(),
   finalizeAppliedHistoryRevertAction: vi.fn(),
+  finalizeWorkflowStartAction: vi.fn(),
+  finalizeWorkflowCancelAction: vi.fn(),
 }));
 vi.mock('../pending-action-finalizer', () => finalizerMocks);
 
@@ -92,6 +101,15 @@ beforeEach(() => {
     originalOperationId: 'op-old', operationId: 'op-revert',
     newCommitSha: 'head-2', affectedSlugs: ['page-a'],
   });
+  workflowMocks.planWorkflowReenrich.mockResolvedValue({ ...preview, kind: 'workflow', diff: null });
+  workflowMocks.planWorkflowResearch.mockResolvedValue({
+    ...preview, kind: 'workflow', summary: '研究主题 SQLite', affectedPages: [], diff: null,
+  });
+  workflowMocks.planWorkflowCancel.mockResolvedValue({
+    ...preview, kind: 'workflow', summary: '取消 research 任务 job-1', affectedPages: [], diff: null,
+  });
+  finalizerMocks.finalizeWorkflowStartAction.mockReturnValue({ id: 'job-1' });
+  finalizerMocks.finalizeWorkflowCancelAction.mockReturnValue({ id: 'job-1' });
 });
 
 describe('approvePendingAction', () => {
@@ -181,7 +199,7 @@ describe('approvePendingAction', () => {
     expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
   });
 
-  it('reenrich 只在 claimExecution 后入队一次并保存 jobId', async () => {
+  it('旧 reenrich action 通过新原子 finalizer 入队并保存 jobId', async () => {
     const workflow = { ...preview, kind: 'workflow', diff: null };
     const reenrichPayload = { slug: 'page-a', effectiveAt: payload.effectiveAt };
     const pending = record('pending', {
@@ -194,15 +212,72 @@ describe('approvePendingAction', () => {
     });
     repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
     reenrichMocks.planReenrich.mockResolvedValue(workflow);
-    reenrichMocks.enqueueReenrich.mockReturnValue({ jobId: 'job-1' });
     const result = await approvePendingAction({ id: 'a1', subject, now });
     expect(repoMocks.claimExecution).toHaveBeenCalledWith('a1', 's1', null, null, now.toISOString());
-    expect(reenrichMocks.enqueueReenrich).toHaveBeenCalledTimes(1);
-    expect(repoMocks.markApplied).toHaveBeenCalledWith(
-      'a1', 's1', now.toISOString(), { jobId: 'job-1' },
-    );
+    expect(finalizerMocks.finalizeWorkflowStartAction).toHaveBeenCalledWith({
+      actionId: 'a1', subjectId: 's1', type: 're-enrich',
+      params: { slug: 'page-a', subjectId: 's1' }, nowIso: now.toISOString(),
+    });
+    expect(repoMocks.markApplied).not.toHaveBeenCalled();
     expect(result.jobId).toBe('job-1');
     expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
+  });
+
+  it('workflow research fresh 批准后原子入队，不直接导入候选', async () => {
+    const workflowPayload = { topic: 'SQLite', effectiveAt: payload.effectiveAt };
+    const workflowPreview = {
+      ...preview, kind: 'workflow' as const, summary: '研究主题 SQLite',
+      affectedPages: [], diff: null,
+    };
+    const pending = record('pending', {
+      operation: 'workflow-research-start', payloadJson: canonicalJson(workflowPayload),
+      payloadHash: hashPendingActionPayload({ conversationId: 'c1', subjectId: 's1',
+        operation: 'workflow-research-start', payload: workflowPayload }),
+      previewJson: JSON.stringify(workflowPreview),
+    });
+    repoMocks.getScoped.mockReturnValueOnce(pending).mockReturnValueOnce({
+      ...pending, status: 'applied', jobId: 'job-1', appliedAt: now.toISOString(),
+    });
+    repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
+    workflowMocks.planWorkflowResearch.mockResolvedValue(workflowPreview);
+
+    const result = await approvePendingAction({ id: 'a1', subject, now });
+
+    expect(repoMocks.claimExecution).toHaveBeenCalledWith('a1', 's1', null, null, now.toISOString());
+    expect(finalizerMocks.finalizeWorkflowStartAction).toHaveBeenCalledWith({
+      actionId: 'a1', subjectId: 's1', type: 'research',
+      params: { topic: 'SQLite', subjectId: 's1' }, nowIso: now.toISOString(),
+    });
+    expect(result.jobId).toBe('job-1');
+  });
+
+  it('workflow cancel fresh 批准后原子取消并发送取消通知', async () => {
+    const workflowPayload = { jobId: 'job-1', effectiveAt: payload.effectiveAt };
+    const workflowPreview = {
+      ...preview, kind: 'workflow' as const, summary: '取消 research 任务 job-1',
+      affectedPages: [], diff: null,
+    };
+    const pending = record('pending', {
+      operation: 'workflow-cancel', payloadJson: canonicalJson(workflowPayload),
+      payloadHash: hashPendingActionPayload({ conversationId: 'c1', subjectId: 's1',
+        operation: 'workflow-cancel', payload: workflowPayload }),
+      previewJson: JSON.stringify(workflowPreview),
+    });
+    repoMocks.getScoped.mockReturnValueOnce(pending).mockReturnValueOnce({
+      ...pending, status: 'applied', jobId: 'job-1', appliedAt: now.toISOString(),
+    });
+    repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
+    workflowMocks.planWorkflowCancel.mockResolvedValue(workflowPreview);
+
+    await approvePendingAction({ id: 'a1', subject, now });
+
+    expect(repoMocks.claimExecution).toHaveBeenCalledWith(
+      'a1', 's1', null, 'job-1', now.toISOString(),
+    );
+    expect(finalizerMocks.finalizeWorkflowCancelAction).toHaveBeenCalledWith({
+      actionId: 'a1', subjectId: 's1', jobId: 'job-1', nowIso: now.toISOString(),
+    });
+    expect(workflowMocks.reportWorkflowCancellation).toHaveBeenCalledWith('job-1');
   });
 
   it('history-revert fresh 批准后执行 Saga 并原子最终化原 operation', async () => {
@@ -396,7 +471,7 @@ describe('approvePendingAction', () => {
     repoMocks.getScoped.mockReturnValueOnce(pending);
     repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
     reenrichMocks.planReenrich.mockResolvedValue(workflow);
-    reenrichMocks.enqueueReenrich.mockImplementation(() => {
+    finalizerMocks.finalizeWorkflowStartAction.mockImplementationOnce(() => {
       throw new Error('enqueue failed');
     });
 
