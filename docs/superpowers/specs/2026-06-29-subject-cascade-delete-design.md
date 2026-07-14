@@ -1,7 +1,8 @@
 # Subject 级联删除设计
 
 > 日期：2026-06-29
-> 状态：已批准（待实现）
+> 状态：已完成（2026-06-29）
+> 实现证据：`a6d063d`（仓储与守卫）、`be50cfb`（API 与 vault 清理）、`1d7666c`（文档收口）
 > 关联：`src/components/subjects/subject-dialog.tsx`、`src/app/api/subjects/[id]/route.ts`、`src/server/db/repos/subjects-repo.ts`、`src/app/api/reset/route.ts`（清理逻辑先例）
 
 ## 一、目标
