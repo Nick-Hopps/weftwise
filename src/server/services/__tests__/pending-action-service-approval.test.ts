@@ -22,11 +22,19 @@ const applyMocks = vi.hoisted(() => ({
   applyPlannedPageOperation: vi.fn(),
 }));
 vi.mock('../../wiki/page-operation-plan', () => applyMocks);
+const historyMocks = vi.hoisted(() => ({
+  planHistoryRevert: vi.fn(),
+  applyPlannedHistoryRevert: vi.fn(),
+}));
+vi.mock('../history-tools', () => historyMocks);
 const reenrichMocks = vi.hoisted(() => ({ planReenrich: vi.fn(), enqueueReenrich: vi.fn() }));
 vi.mock('../reenrich-enqueue', () => reenrichMocks);
 const operationMocks = vi.hoisted(() => ({ getById: vi.fn() }));
 vi.mock('../../db/repos/operations-repo', () => operationMocks);
-const finalizerMocks = vi.hoisted(() => ({ finalizeAppliedPageAction: vi.fn() }));
+const finalizerMocks = vi.hoisted(() => ({
+  finalizeAppliedPageAction: vi.fn(),
+  finalizeAppliedHistoryRevertAction: vi.fn(),
+}));
 vi.mock('../pending-action-finalizer', () => finalizerMocks);
 
 import {
@@ -75,6 +83,15 @@ beforeEach(() => {
   pageMocks.planMetadataPatchInSubject.mockResolvedValue({ ...pagePlan, operation: 'metadata-patch' });
   pageMocks.planLinkEnsureInSubject.mockResolvedValue({ ...pagePlan, operation: 'link-ensure' });
   applyMocks.applyPlannedPageOperation.mockResolvedValue({ operationId: 'op-1' });
+  historyMocks.planHistoryRevert.mockResolvedValue({
+    originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'op-revert' },
+    summary: '回滚历史操作 op-old', affectedPages: preview.affectedPages,
+    diff: 'history diff', warnings: ['会覆盖后续修改'],
+  });
+  historyMocks.applyPlannedHistoryRevert.mockResolvedValue({
+    originalOperationId: 'op-old', operationId: 'op-revert',
+    newCommitSha: 'head-2', affectedSlugs: ['page-a'],
+  });
 });
 
 describe('approvePendingAction', () => {
@@ -186,6 +203,63 @@ describe('approvePendingAction', () => {
     );
     expect(result.jobId).toBe('job-1');
     expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
+  });
+
+  it('history-revert fresh 批准后执行 Saga 并原子最终化原 operation', async () => {
+    const historyPayload = { operationId: 'op-old', effectiveAt: payload.effectiveAt };
+    const historyPreview = { ...preview, summary: '回滚历史操作 op-old', diff: 'history diff' };
+    const pending = record('pending', {
+      operation: 'history-revert',
+      payloadJson: canonicalJson(historyPayload),
+      payloadHash: hashPendingActionPayload({
+        conversationId: 'c1', subjectId: 's1', operation: 'history-revert', payload: historyPayload,
+      }),
+      previewJson: JSON.stringify(historyPreview),
+    });
+    repoMocks.getScoped.mockReturnValueOnce(pending).mockReturnValueOnce({
+      ...pending, status: 'applied', operationId: 'op-revert', appliedAt: now.toISOString(),
+    });
+    repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
+
+    const result = await approvePendingAction({ id: 'a1', subject, now });
+
+    expect(historyMocks.planHistoryRevert).toHaveBeenCalledWith(subject, 'op-old');
+    expect(repoMocks.claimExecution).toHaveBeenCalledWith(
+      'a1', 's1', 'op-revert', null, now.toISOString(),
+    );
+    expect(historyMocks.applyPlannedHistoryRevert).toHaveBeenCalledOnce();
+    expect(finalizerMocks.finalizeAppliedHistoryRevertAction).toHaveBeenCalledWith({
+      actionId: 'a1', subjectId: 's1', originalOperationId: 'op-old', nowIso: now.toISOString(),
+    });
+    expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
+    expect(result.status).toBe('applied');
+  });
+
+  it('history-revert HEAD 变化时刷新预览，必须重新批准且不执行 Saga', async () => {
+    const historyPayload = { operationId: 'op-old', effectiveAt: payload.effectiveAt };
+    const historyPreview = { ...preview, summary: '回滚历史操作 op-old', diff: 'history diff' };
+    const pending = record('pending', {
+      operation: 'history-revert',
+      payloadJson: canonicalJson(historyPayload),
+      payloadHash: hashPendingActionPayload({
+        conversationId: 'c1', subjectId: 's1', operation: 'history-revert', payload: historyPayload,
+      }),
+      previewJson: JSON.stringify(historyPreview),
+    });
+    repoMocks.getScoped.mockReturnValueOnce(pending).mockReturnValueOnce(pending);
+    repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
+    historyMocks.planHistoryRevert.mockResolvedValueOnce({
+      originalOperationId: 'op-old', preHead: 'head-2', changeset: { id: 'op-revert-2' },
+      summary: '回滚历史操作 op-old', affectedPages: preview.affectedPages,
+      diff: 'refreshed history diff', warnings: ['会覆盖后续修改'],
+    });
+
+    await expect(approvePendingAction({ id: 'a1', subject, now }))
+      .rejects.toMatchObject({ code: 'ACTION_STALE_PREVIEW', httpStatus: 409 });
+
+    expect(repoMocks.refreshPreview).toHaveBeenCalledOnce();
+    expect(historyMocks.applyPlannedHistoryRevert).not.toHaveBeenCalled();
+    expect(finalizerMocks.finalizeAppliedHistoryRevertAction).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -385,6 +459,22 @@ describe('拒绝与恢复', () => {
       actionId: 'a1', subjectId: 's1', nowIso: now.toISOString(),
     });
     expect(repoMocks.markApplied).not.toHaveBeenCalled();
+  });
+
+  it('history-revert 恢复时按 payload 最终化原 operation', () => {
+    repoMocks.listRecoverable.mockReturnValue([
+      record('executing', {
+        operation: 'history-revert',
+        operationId: 'op-revert',
+        payloadJson: canonicalJson({ operationId: 'op-old', effectiveAt: payload.effectiveAt }),
+      }),
+    ]);
+    operationMocks.getById.mockReturnValue({ id: 'op-revert', status: 'applied' });
+    expect(recoverPendingActions(now)).toBe(1);
+    expect(finalizerMocks.finalizeAppliedHistoryRevertAction).toHaveBeenCalledWith({
+      actionId: 'a1', subjectId: 's1', originalOperationId: 'op-old', nowIso: now.toISOString(),
+    });
+    expect(finalizerMocks.finalizeAppliedPageAction).not.toHaveBeenCalled();
   });
 
   it('恢复 finalization 失败时保持 executing，后续维护可重试', () => {

@@ -413,7 +413,7 @@ function migratePendingActions(): void {
       conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
       subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
       operation TEXT NOT NULL
-        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure')),
+        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert')),
       payload_json TEXT NOT NULL,
       payload_hash TEXT NOT NULL,
       preview_json TEXT NOT NULL,
@@ -438,7 +438,11 @@ function migratePendingActions(): void {
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pending_actions'`,
   ).get() as { sql: string | null } | undefined;
   const currentSql = definition?.sql?.toLowerCase() ?? '';
-  if (currentSql.includes("'metadata-patch'") && currentSql.includes("'link-ensure'")) {
+  if (
+    currentSql.includes("'metadata-patch'")
+    && currentSql.includes("'link-ensure'")
+    && currentSql.includes("'history-revert'")
+  ) {
     return;
   }
 

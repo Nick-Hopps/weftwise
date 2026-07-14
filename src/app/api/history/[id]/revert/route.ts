@@ -1,19 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { existsSync } from 'node:fs';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as operationsRepo from '@/server/db/repos/operations-repo';
-import { getFileAtCommit } from '@/server/git/git-service';
-import { buildRevertEntries } from '@/server/wiki/revert';
 import {
-  createChangeset,
-  captureSubjectMutationEpoch,
-  validateChangeset,
-  applyChangeset,
-} from '@/server/wiki/wiki-transaction';
-import { vaultPath } from '@/server/config/env';
-import { parseWikiPath } from '@/server/wiki/page-identity';
-import type { ChangesetEntry } from '@/lib/contracts';
+  applyPlannedHistoryRevert,
+  HistoryOperationError,
+  planHistoryRevert,
+} from '@/server/services/history-tools';
 
 export const runtime = 'nodejs';
 
@@ -32,61 +25,34 @@ export async function POST(
   } catch {
     body = {};
   }
-
   const { subject, error } = resolveSubjectFromRequest(request, { required: true, body });
   if (error) return error;
 
   const { id } = await params;
-  const op = operationsRepo.getById(id);
-  if (!op || op.subjectId !== subject.id) {
-    return NextResponse.json({ error: 'Operation not found' }, { status: 404 });
-  }
-  if (op.status === 'reverted') {
-    return NextResponse.json({ error: 'Operation already reverted' }, { status: 409 });
-  }
-  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
-
-  let original: ChangesetEntry[] = [];
   try {
-    const parsed = JSON.parse(op.changesetJson);
-    if (Array.isArray(parsed)) original = parsed as ChangesetEntry[];
-  } catch {
-    original = [];
-  }
-
-  // 预读受影响 path 在 preHead 的内容（getFileAtCommit 是 async，先汇总成同步可查的 Map）
-  const uniquePaths = Array.from(new Set(original.map((e) => e.path)));
-  const preHeadContent = new Map<string, string | null>();
-  for (const p of uniquePaths) {
-    try {
-      preHeadContent.set(p, await getFileAtCommit(p, op.preHead));
-    } catch {
-      preHeadContent.set(p, null); // preHead 不存在该文件 → 操作新建了它 → 回滚删除
+    const plan = await planHistoryRevert(subject, id);
+    const applied = await applyPlannedHistoryRevert(plan);
+    operationsRepo.markReverted(applied.originalOperationId);
+    return NextResponse.json({
+      revertedOperationId: applied.originalOperationId,
+      newCommitSha: applied.newCommitSha,
+      affectedSlugs: applied.affectedSlugs,
+    });
+  } catch (caught) {
+    if (caught instanceof HistoryOperationError) {
+      if (caught.code === 'HISTORY_NOT_FOUND') {
+        return NextResponse.json({ error: 'Operation not found' }, { status: 404 });
+      }
+      if (caught.code === 'HISTORY_ALREADY_REVERTED') {
+        return NextResponse.json({ error: 'Operation already reverted' }, { status: 409 });
+      }
+      if (caught.code === 'HISTORY_REVERT_INVALID') {
+        return NextResponse.json(
+          { error: 'Revert validation failed', errors: caught.details },
+          { status: 422 },
+        );
+      }
     }
+    throw caught;
   }
-
-  const entries = buildRevertEntries(
-    original,
-    (p) => preHeadContent.get(p) ?? null,
-    (p) => existsSync(vaultPath(p)),
-  );
-
-  const changeset = createChangeset(crypto.randomUUID(), subject, entries, mutationEpoch);
-  const validation = validateChangeset(changeset);
-  if (!validation.valid) {
-    return NextResponse.json(
-      { error: 'Revert validation failed', errors: validation.errors },
-      { status: 422 },
-    );
-  }
-
-  const applied = await applyChangeset(changeset);
-  operationsRepo.markReverted(op.id);
-
-  const affectedSlugs = entries.map((e) => parseWikiPath(e.path)?.slug ?? e.path);
-  return NextResponse.json({
-    revertedOperationId: op.id,
-    newCommitSha: applied.postHead,
-    affectedSlugs,
-  });
 }

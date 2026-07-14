@@ -58,8 +58,8 @@ operations.status = 'applied'                   ← 释放 lock
 | `page-ops.ts` | `executePageMerge/Split/Delete/Create/Update/Patch/MetadataPatch/LinkEnsure` + `applyPatchEdits` | 所有页面写入的 direct 执行内核（Saga）；无 emit / 无 embed enqueue，由调用方持有调度。metadata patch 逐字复用正文并把 title relink 放入同一 changeset；link ensure 只把确定性单 edit 委托 patch plan，唯一写对象是 source page |
 | `page-operation-plan.ts` / `unified-diff.ts` | `planPageCreate/Update/Patch/Delete/MetadataPatch/LinkEnsure` + `applyPlannedPageOperation` | direct 与审批共享的 plan/apply 层；plan 只读并产出精确 diff，apply 复用 Saga；`expectedPreHead` 在 vault mutex 内、任何 fs/DB 写入前核对，避免批准陈旧预览覆盖并发提交 |
 | `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, allowedSet, caps })` | 纯函数：scope 扩展（含邻居）；Guard 强制 allowedSet/seed/meta 边界，并分别限制 merge/split/delete/create/update；metadata/link 窄写共用 `canEditPage` 与独立 update cap |
-| `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 POST /api/history/[id]/revert 执行前向 Saga 还原（⑥） |
-| `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 GET /api/history 列表展示（⑥） |
+| `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 History API 与 `services/history-tools.ts` 共用（⑥ / Phase 3B） |
+| `history.ts` | `buildHistoryEntries(rows, commitBySha)` | 纯函数：合成 HistoryEntry[]（类型推断：jobType 优先否则全 delete→delete/否则 edit、受影响页列表、git 时间戳），供 History API 与 `history.list` 共用（⑥ / Phase 3B） |
 | `rebuild.ts` | `rebuildFromVault` | 灾难恢复：遍历 vault/wiki/<subject>/ 全量重建 DB |
 | `vault-mutex.ts` | `acquireVaultLock(tuning?)` | 进程内互斥队列 + **跨进程文件锁**（vault 同级 `.vault.lock`，O_EXCL 原子创建）；持锁期间 30s 心跳刷新锁文件 mtime（`unref()` 定时器，release 时 try/finally 清理），stale 判定收紧为双条件——mtime 距今 > 3×心跳间隔 **且**（持锁进程不存活 **或** mtime 距今 > 硬上限 30min），避免长任务（>10min）被误判悬挂夺锁；写路径分散在 Next.js 与 worker 两进程，仅内存锁不够。`tuning` 参数仅供测试注入更短的常量 |
 | `recovery.ts` | `recoverPendingOperation(changeset): Promise<'rolled-forward' \| 'rolled-back' \| 'orphaned'>` | 崩溃恢复三分支判定（见上文"崩溃恢复"）；被 `worker-entry.ts` 启动时对每条 pending operation 调用，取代旧的"pending 一律回滚" |
@@ -145,6 +145,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | History 工具 Phase 3B：既有 `history.ts/revert.ts` 纯函数由共享 `services/history-tools.ts` 复用；回滚预览以当前 HEAD 生成 inverse diff，批准 apply 使用 `expectedPreHead` 与 vault mutex 拒绝陈旧计划 |
 | 2026-07-13 | Wiki 窄写 Phase 2B：新增 metadata patch 与 link ensure 纯函数、共享 plan/apply/direct 内核；metadata 正文逐字保留且 title relink 同 changeset，link 只写 source page；canonical slug 在任何 HEAD/读取前阻断路径穿越，Curate Guard 增加 allowedSet 内 update cap |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：新增 page-operation-plan/unified-diff 预览层，页面 create/update/patch/delete 统一 plan→apply；`applyChangeset` 支持 expectedPreHead 并在 vault 锁内、首次写入前拒绝陈旧预览 |
 | 2026-07-10 | Curate allowedSet 硬边界：createCurateGuard 新增 allowedSet/isAllowed；merge 两端、split、manual delete 均受 scope 限制，Auto delete/create 固定拒绝；services/curate-tools 的 read/search/list 同步过滤 allowedSet，compile policy 再以同一集合包装上下文 |

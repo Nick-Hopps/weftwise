@@ -13,7 +13,11 @@ import type { PendingActionView, Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
-import { createPendingActionPreview } from './pending-action-service';
+import {
+  createPendingActionPreview,
+  createPendingHistoryRevertPreview,
+} from './pending-action-service';
+import { listHistory, readHistoryDiff } from './history-tools';
 
 /** search_wiki 默认返回条数。 */
 const SEARCH_LIMIT_DEFAULT = 8;
@@ -101,12 +105,23 @@ export function buildQueryToolContext(
           subject,
           input,
         }),
+        previewHistoryRevert: (operationId) => createPendingHistoryRevertPreview({
+          conversationId: options.conversationId!,
+          subject,
+          operationId,
+        }),
         onPendingAction: options.onPendingAction,
       }
     : {};
   return {
     subject,
     ...approvalCapabilities,
+    async listHistory(input) {
+      return listHistory(subject, input);
+    },
+    async readHistoryDiff(input) {
+      return readHistoryDiff(subject, input);
+    },
     async listSubjects() {
       const subjects = subjectsRepo.listSubjects()
         .map((entry) => ({

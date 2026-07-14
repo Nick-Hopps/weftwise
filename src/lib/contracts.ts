@@ -689,6 +689,30 @@ export interface HistoryEntry {
   status: 'applied' | 'reverted';
 }
 
+export interface HistoryListInput {
+  slug?: string;
+  limit?: number;
+}
+
+export interface HistoryListResult {
+  entries: HistoryEntry[];
+}
+
+export interface HistoryDiffInput {
+  operationId: string;
+}
+
+export interface HistoryDiffResult {
+  operationId: string;
+  status: 'applied' | 'reverted';
+  affectedPages: HistoryAffectedPage[];
+  diff: string;
+}
+
+export interface HistoryRevertInput {
+  operationId: string;
+}
+
 export interface Conversation {
   id: string;
   subjectId: SubjectId;
@@ -713,7 +737,8 @@ export type PendingActionOperation =
   | 'delete'
   | 'reenrich'
   | 'metadata-patch'
-  | 'link-ensure';
+  | 'link-ensure'
+  | 'history-revert';
 
 export type PendingActionStatus =
   | 'pending'

@@ -157,7 +157,10 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - \`subject_list\`: list available subjects and their exact slugs. Use before any cross-subject lookup.
 - \`wiki_search_cross_subject\`: search explicitly selected subjects other than the active subject. Results are metadata only.
 - \`wiki_read_cross_subject\`: read one page body from another explicitly named subject. A cross-subject search hit MUST be read before it can support a claim.
+- \`history_list\`: list recent committed operations in the active subject, optionally filtered by affected page slug.
+- \`history_diff\`: inspect the committed diff for one operation returned by \`history_list\`.
 - \`wiki_preview_change\` (only available for mutation requests): create an approval preview for one proposed page change or background re-enrichment. It returns an actionId and never applies the change itself.
+- \`history_revert\` (only available for mutation requests): create a PendingAction preview for reverting one operation returned by \`history_list\`. It never applies the revert itself.
 - \`web_search\` (only available when web search is configured): search the public web. Read-only, no side effects. Only use it under the rules in "Web search" below.
 
 ## Strategy
@@ -166,6 +169,7 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - Before stating a fact, make sure you have \`wiki_read\`'d the page that supports it, so you can cite an exact excerpt.
 - If, after searching and listing, the subject genuinely has nothing relevant, say so clearly. Never invent information.
 - If the user explicitly asks to compare, search across, or use another subject, call \`subject_list\`, then \`wiki_search_cross_subject\`, then \`wiki_read_cross_subject\` on relevant hits. Do not search other subjects speculatively for an ordinary current-subject question.
+- For history questions, call \`history_list\` first and \`history_diff\` only for the selected operation. Never guess an operation id.
 
 ## Web search
 If \`web_search\` is available and the wiki genuinely lacks the information needed (after searching/listing), you may call it to find supplementary information from the public web.
@@ -178,19 +182,22 @@ If \`web_search\` is available and the wiki genuinely lacks the information need
 - Base every claim ONLY on content returned by your tools. Do not use outside knowledge.
 - CITE INLINE: immediately after each statement based on wiki content, append a wikilink to the supporting page. For the active subject use the EXACT slug, e.g. "WAL mode improves concurrent reads [[sqlite-wal]]." For another subject use \`[[subject-slug:page-slug]]\` with both exact slugs. Only cite pages you have actually read with \`wiki_read\` or \`wiki_read_cross_subject\` in this conversation. These inline wikilinks are how citations are collected — an uncited claim will show no source.
 - Do NOT invent slugs. Do NOT cite pages you only saw in search results without reading them.
+- History metadata and diffs may be described only from \`history_list\`/\`history_diff\`; do not present them as page citations.
 - If pages conflict, acknowledge the contradiction explicitly.
 
 ## Subject scoping
 - Current-subject tools remain strictly scoped to the active subject. Cross-subject tools are explicit, read-only, and return identities that include subjectSlug.
 - Never perform or propose a cross-subject write. \`wiki_preview_change\` always targets the active subject, even if evidence was read elsewhere.
+- History tools are also active-subject only. Never infer that an operation id from another subject is accessible.
 
 ## Capability boundary
 - This Ask AI runner never applies changes directly. It can inspect the current subject and answer questions.
 - When \`wiki_preview_change\` is available and the user explicitly requests a mutation, inspect the relevant pages first, call the tool once with the complete intended change, and explain that the result is a preview awaiting approval.
 - For metadata-only changes, call \`wiki_preview_change\` with operation \`metadata-patch\`; include only the requested title, summary, tags, or aliases fields and do not rewrite the page body.
 - For link maintenance, read the source page first, then call \`wiki_preview_change\` with operation \`link-ensure\` and an exact, unique source text anchor. Use mode \`link\`, \`unlink\`, or \`retarget\` to match the request.
+- For an explicit history revert request, call \`history_list\`, inspect the selected operation with \`history_diff\`, then call \`history_revert\` exactly once. Do not substitute a page rewrite for an operation revert.
 - A returned actionId means the change is not applied. The user must use the approval button associated with that actionId; a chat reply is never authorization.
-- When \`wiki_preview_change\` is unavailable, explain that no write action was executed. Never claim a change was applied.`;
+- When proposal tools are unavailable, explain that no write action was executed. Never claim a change was applied.`;
 
 export function buildAgenticUserContent(
   question: string,

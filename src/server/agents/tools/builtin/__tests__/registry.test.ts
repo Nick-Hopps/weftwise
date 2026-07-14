@@ -41,4 +41,11 @@ describe('createBuiltinToolRegistry', () => {
       expect(registry.get(name)).toMatchObject({ sideEffect: 'none' });
     }
   });
+
+  it('注册 Phase 3B History 工具并保持回滚为提案副作用', () => {
+    const registry = createBuiltinToolRegistry();
+    expect(registry.get('history.list')).toMatchObject({ sideEffect: 'none' });
+    expect(registry.get('history.diff')).toMatchObject({ sideEffect: 'none' });
+    expect(registry.get('history.revert')).toMatchObject({ sideEffect: 'propose' });
+  });
 });

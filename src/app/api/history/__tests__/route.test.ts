@@ -2,18 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 
 const mockResolve = vi.fn();
-const mockList = vi.fn();
-const mockGetVaultLog = vi.fn();
+const mockListHistory = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
   resolveSubjectFromRequest: (req: unknown, opts?: unknown) => mockResolve(req, opts),
 }));
-vi.mock('@/server/db/repos/operations-repo', () => ({
-  listForSubject: (id: unknown) => mockList(id),
-}));
-vi.mock('@/server/git/git-service', () => ({
-  getVaultLog: () => mockGetVaultLog(),
+vi.mock('@/server/services/history-tools', () => ({
+  listHistory: (...args: unknown[]) => mockListHistory(...args),
 }));
 
 import { GET } from '../route';
@@ -25,19 +21,17 @@ function call() {
 beforeEach(() => {
   mockResolve.mockReset();
   mockResolve.mockReturnValue({ subject: { id: 's1', slug: 'general' }, error: null });
-  mockList.mockReset();
-  mockGetVaultLog.mockReset();
-  mockGetVaultLog.mockResolvedValue([]);
+  mockListHistory.mockReset();
+  mockListHistory.mockResolvedValue({ entries: [] });
 });
 
 describe('GET /api/history', () => {
   it('返回合成后的 HistoryEntry[]', async () => {
-    mockList.mockReturnValue([
-      { id: 'opA', jobId: 'j', subjectId: 's1', preHead: 'pre', postHead: 'shaA',
-        changesetJson: JSON.stringify([{ action: 'update', path: 'wiki/general/a.md', content: '# A' }]),
-        status: 'applied', jobType: 'ingest' },
-    ]);
-    mockGetVaultLog.mockResolvedValue([{ sha: 'shaA', date: '2026-06-22T00:00:00Z', message: '[subject:general] 摄入' }]);
+    mockListHistory.mockResolvedValue({ entries: [{
+      id: 'opA', sha: 'shaA', date: '2026-06-22T00:00:00Z', type: 'ingest',
+      message: '[subject:general] 摄入',
+      affectedPages: [{ slug: 'a', action: 'update' }], status: 'applied',
+    }] });
     const res = await call();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -52,6 +46,6 @@ describe('GET /api/history', () => {
     mockResolve.mockReturnValue({ subject: null, error: NextResponse.json({ error: 'subject required' }, { status: 400 }) });
     const res = await call();
     expect(res.status).toBe(400);
-    expect(mockList).not.toHaveBeenCalled();
+    expect(mockListHistory).not.toHaveBeenCalled();
   });
 });

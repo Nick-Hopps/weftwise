@@ -32,9 +32,9 @@
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
-| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；两者可显式跨 Subject 只读，propose 只开放 active Subject 的 `wiki.preview_change`；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
+| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；两者可显式跨 Subject 只读并读取 active Subject History，propose 只开放 active Subject 的 `wiki.preview_change/history.revert` 审批提案；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
-| `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，锁内复核 HEAD 后同步执行页面 Saga 或仅入队 re-enrich；陈旧预览 409 返回刷新 action |
+| `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，锁内复核 HEAD 后同步执行页面/History inverse Saga 或仅入队 re-enrich；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
 | `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；先有界读取近期 jobs，再按 subject 批量读取关联 Research run view 交给纯 builder 映射审批/导入/验证终态，避免 N+1；从未跑过返回完整空快照，All Subjects plans 只读 |
@@ -52,7 +52,7 @@
 | `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试：仅普通 failed Ingest；cancelled、source 已删除或携带服务端 `researchProvenance` 的 Research child 均 409，后者只能由 run coordinator/reconciler 恢复，避免绕过候选状态机 |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
-| `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：从 preHead 重建 inverse changeset、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
+| `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：复用 `services/history-tools` 从 preHead 重建 inverse changeset、锁内核对当前 HEAD、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
 | `/api/jobs` | GET | 列出任务（支持 `status` / `type` / `subjectId` filter） |
 | `/api/jobs/[id]` | GET | 取单个任务详情 |
 | `/api/jobs/[id]/events` | GET (SSE) | Server-Sent Events 流，供前端实时追踪任务进度；支持 `Last-Event-Id` 续播 |
@@ -157,6 +157,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | History 工具 Phase 3B：`/api/history*` 改复用共享 History 服务，既有响应/人工确认保持兼容；`/api/query` 可读取 history list/diff，回滚只生成 PendingAction 并由独立批准 API 消费 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：`/api/query` 不再因 active Subject 为空提前退出；流式工具循环可读取其他 Subject，citation schema/persistence 透传可选 subjectSlug，写预览仍绑定 active Subject |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：补齐 `/api/query` save-only 与 question+save 入队契约测试；两种模式继续只创建 subject-scoped `save-to-wiki` job，页面创建统一由 worker 的 shared create command 执行 |
 | 2026-07-14 | Research 批准溯源 Phase 2C：新增 run 读取/批准/忽略 API，批准只接受稳定 candidate ID + version + idempotency key；`lint/latest` 批量注入 run 状态；通用 Ingest route 拒绝客户端 provenance，Research child 禁止独立 retry，coordinator cancel 后立即对账；reset/subject 删除覆盖 provenance 五表 |

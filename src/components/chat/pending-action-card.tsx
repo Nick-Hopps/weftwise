@@ -37,6 +37,9 @@ export function PendingActionCard({
 }: PendingActionCardProps) {
   const titleId = `pending-action-${action.actionId}`;
   const isPending = action.status === 'pending';
+  const title = action.operation === 'history-revert'
+    ? 'Proposed history revert'
+    : 'Proposed wiki change';
 
   return (
     <section
@@ -47,7 +50,7 @@ export function PendingActionCard({
         <StatusIcon status={action.status} />
         <div className="min-w-0 flex-1">
           <h3 id={titleId} className="font-semibold text-foreground">
-            Proposed wiki change
+            {title}
           </h3>
           <p className="mt-1 text-foreground-secondary">{action.summary}</p>
         </div>
