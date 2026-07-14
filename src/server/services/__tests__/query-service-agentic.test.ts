@@ -101,6 +101,17 @@ describe('runQuery（agentic）', () => {
     expect(res.answer).toBe(NO_QUERY_CONTEXT_ANSWER);
   });
 
+  it('工具/模型调用失败 → 原样抛出，不伪装为空答案，也不解析引用或评估 coverage', async () => {
+    const failure = new Error('tool execution failed');
+    mockGenerateTools.mockRejectedValue(failure);
+
+    await expect(runQuery('问题', SUBJECT)).rejects.toBe(failure);
+
+    expect(mockExtractCitations).not.toHaveBeenCalled();
+    expect(mockGenerateStructured).not.toHaveBeenCalled();
+    expect(mockBacklogCreate).not.toHaveBeenCalled();
+  });
+
   it('citations 来自答案内联 wikilink 的确定性解析，不再有第二次结构化输出产出 citations', async () => {
     mockGenerateTools.mockResolvedValue({ text: '答案 [[sqlite]]。' });
     mockExtractCitations.mockReturnValue([{ pageSlug: 'sqlite', excerpt: 'WAL 相关摘录' }]);
