@@ -1,7 +1,10 @@
 # Wiki 窄写工具 Phase 2B 设计
 
-**日期：** 2026-07-13  
-**状态：** 已确认，待执行  
+**日期：** 2026-07-13
+
+**状态：** 已完成（2026-07-13）
+
+**实现证据：** `fe78a3f`–`3e8a3e6`（契约、事务内核、工具、Fix/Curate 与 Query 审批）、`1f0c170`（合并收口）
 **来源：** `docs/superpowers/specs/2026-07-10-wiki-tooling-and-workflow-governance-design.md` 第九章
 
 ## 一、目标
