@@ -29,8 +29,8 @@ export interface ExtractWikiLinksOptions {
    */
   currentSubjectSlug?: string;
   /**
-   * Optional resolver from raw page title to slug. Returning `undefined` falls
-   * back to `normalizeSlug(title)`.
+   * Optional resolver from raw page title + target Subject to slug. Returning
+   * `undefined` falls back to `normalizeSlug(title)`.
    */
   titleResolver?: TitleResolver;
 }
@@ -136,7 +136,7 @@ export function extractWikiLinks(
     const parsed = parseLinkInner(inner, currentSubjectSlug);
     const { rawTitle, alias, targetSubjectSlug } = parsed;
 
-    const target = titleResolver?.(rawTitle) ?? normalizeSlug(rawTitle);
+    const target = titleResolver?.(rawTitle, targetSubjectSlug) ?? normalizeSlug(rawTitle);
     if (target === '') continue;
 
     links.push({

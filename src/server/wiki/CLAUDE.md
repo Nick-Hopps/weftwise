@@ -81,7 +81,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `[[other-subject:Page]]` | 跨主题：明确目标 subject + 该 subject 内的 title 或 slug |
 | `[[other-subject:page-slug\|Alias]]` | 跨主题 + 别名 |
 
-> 解析顺序：`splitFirst(rawInner, ':')` → 若前缀符合 slug 正则 `^[a-z0-9][a-z0-9-]*$` 视为 subject 前缀；否则按本 subject 解析。`extractWikiLinks` 兼容旧 `(md, resolver)` 与新 `(md, options)` 双签名。
+> 解析顺序：`splitFirst(rawInner, ':')` → 若前缀符合 slug 正则 `^[a-z0-9][a-z0-9-]*$` 视为 subject 前缀；否则按本 subject 解析。`extractWikiLinks` 兼容旧 `(md, resolver)` 与新 `(md, options)` 双签名；resolver 接收 `(rawTitle, targetSubjectSlug?)`，必须按目标 Subject 隔离同名 title。
 
 ## 关键依赖与配置
 
@@ -100,12 +100,7 @@ operations.status = 'applied'                   ← 释放 lock
 
 ## 测试与质量
 
-已覆盖（`__tests__/`，vitest，27 文件）：wikilink 解析与跨主题解析、Saga validate/apply/rollback/recovery、frontmatter round-trip、relink/split/meta pages、page identity 与 canonical slug、create/update/patch/delete/move、统一 diff/陈旧 HEAD、Curate Guard、metadata/link 纯窄写与 plan/apply。move 集成测试覆盖 alias/旧 URL 解析、当前与跨 Subject 链接、source sidecar、全部 slug 派生缓存及反向回滚。
-
-仍待补充：
-
-- `parseFrontmatter` / `serializeFrontmatter` 的边界（emoji / code fence / windows 行尾）。
-- `resolveWikiLinkTarget` 对重名 page、大小写的更多分支。
+已覆盖（`__tests__/`，vitest，27 文件）：wikilink 解析与跨主题解析、Subject-aware title resolver（大小写 canonical slug、跨 Subject 同名隔离）、Saga validate/apply/rollback/recovery、frontmatter round-trip（emoji / fenced code / Windows CRLF）、relink/split/meta pages、page identity 与 canonical slug、create/update/patch/delete/move、统一 diff/陈旧 HEAD、Curate Guard、metadata/link 纯窄写与 plan/apply。move 集成测试覆盖 alias/旧 URL 解析、当前与跨 Subject 链接、source sidecar、全部 slug 派生缓存及反向回滚。
 
 ## 常见问题 (FAQ)
 
@@ -147,6 +142,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Wiki 解析边界：frontmatter 补齐 emoji/fenced code/CRLF 语义往返测试；`TitleResolver` 接收目标 Subject，indexer 与页面操作按 Subject 隔离同名 title，跨 Subject 标题正确解析到 canonical slug |
 | 2026-07-14 | 页面身份迁移 Phase 3D：新增 move plan、alias 解析、当前 Subject backlink 与 source sidecar 同 commit 更新；Saga 按 marker 迁移 slug 派生缓存并重建索引，rollback/recovery/History revert 支持反向身份迁移 |
 | 2026-07-14 | History 工具 Phase 3B：既有 `history.ts/revert.ts` 纯函数由共享 `services/history-tools.ts` 复用；回滚预览以当前 HEAD 生成 inverse diff，批准 apply 使用 `expectedPreHead` 与 vault mutex 拒绝陈旧计划 |
 | 2026-07-13 | Wiki 窄写 Phase 2B：新增 metadata patch 与 link ensure 纯函数、共享 plan/apply/direct 内核；metadata 正文逐字保留且 title relink 同 changeset，link 只写 source page；canonical slug 在任何 HEAD/读取前阻断路径穿越，Curate Guard 增加 allowedSet 内 update cap |

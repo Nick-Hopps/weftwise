@@ -46,9 +46,21 @@ function buildWikiPage(
   };
 }
 
-function buildTitleResolver(subjectId: SubjectId): TitleResolver {
-  const titleMap = pagesRepo.getTitleToSlugMap(subjectId);
-  return (title: string) => titleMap.get(title) ?? titleMap.get(title.toLowerCase());
+function buildTitleResolver(currentSubject: Subject): TitleResolver {
+  const titleMaps = new Map<string, Map<string, string>>([
+    [currentSubject.slug, pagesRepo.getTitleToSlugMap(currentSubject.id)],
+  ]);
+
+  return (title: string, targetSubjectSlug = currentSubject.slug) => {
+    let titleMap = titleMaps.get(targetSubjectSlug);
+    if (!titleMap) {
+      const targetSubject = subjectsRepo.getBySlug(targetSubjectSlug);
+      if (!targetSubject) return undefined;
+      titleMap = pagesRepo.getTitleToSlugMap(targetSubject.id);
+      titleMaps.set(targetSubjectSlug, titleMap);
+    }
+    return titleMap.get(title) ?? titleMap.get(title.toLowerCase());
+  };
 }
 
 function resolveLinkTargetSubject(
@@ -144,7 +156,7 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
   }
 
   // Pass 2 — resolve wikilinks with a title map that now includes the batch.
-  const resolver = buildTitleResolver(subjectId);
+  const resolver = buildTitleResolver(subject);
   for (const slug of presentSlugs) {
     const doc = readPageInSubject(subject.slug, slug, {
       currentSubjectSlug: subject.slug,
@@ -234,7 +246,7 @@ export function rebuildPageIndex(): void {
 
     // Pass 2 — resolve wikilinks with full title maps
     for (const subject of allSubjects) {
-      const resolver = buildTitleResolver(subject.id);
+      const resolver = buildTitleResolver(subject);
       const entries = bySubject.get(subject.slug) ?? [];
       for (const entry of entries) {
         const doc = readPageInSubject(subject.slug, entry.slug, {

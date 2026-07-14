@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseFrontmatter,
+  serializeFrontmatter,
   validateFrontmatter,
   stampSystemFrontmatter,
 } from '../frontmatter';
@@ -126,5 +127,72 @@ describe('stampSystemFrontmatter', () => {
     const { data } = parseFrontmatter(stamped);
     expect(data.created).toBe('2025-01-01T00:00:00.000Z');
     expect(data.updated).toBe(NOW);
+  });
+});
+
+describe('frontmatter 语义往返边界', () => {
+  it('完整保留 emoji、CJK 与正文 fenced code 中的 YAML 分隔符', () => {
+    const raw = [
+      '---',
+      'title: "知识网络 🧠"',
+      'created: 2026-07-14T00:00:00.000Z',
+      'updated: 2026-07-14T00:00:00.000Z',
+      'tags:',
+      '  - 中文',
+      '  - "emoji 🚀"',
+      'sources: []',
+      'summary: "保留 Unicode ✨"',
+      '---',
+      '',
+      '# 正文 🧪',
+      '',
+      '```yaml',
+      '---',
+      'title: 代码示例，不是 frontmatter',
+      'link: "[[Fake Page]]"',
+      '---',
+      '```',
+      '',
+      '真实链接 [[真实页面]]。',
+      '',
+    ].join('\n');
+
+    const first = parseFrontmatter(raw);
+    expect(first.data).toEqual(expect.objectContaining({
+      title: '知识网络 🧠',
+      summary: '保留 Unicode ✨',
+      tags: ['中文', 'emoji 🚀'],
+    }));
+    expect(first.body).toContain('title: 代码示例，不是 frontmatter');
+    expect(first.body).toContain('link: "[[Fake Page]]"');
+
+    const second = parseFrontmatter(serializeFrontmatter(first.data, first.body));
+    expect(second).toEqual(first);
+  });
+
+  it('解析 CRLF frontmatter，并在语义往返时保留正文行尾', () => {
+    const raw = [
+      '---',
+      'title: Windows 页面',
+      'created: 2026-07-14T00:00:00.000Z',
+      'updated: 2026-07-14T00:00:00.000Z',
+      'tags: []',
+      'sources: []',
+      '---',
+      '',
+      '# Windows 正文',
+      '',
+      '第一行。',
+      '第二行。',
+      '',
+    ].join('\r\n');
+
+    const first = parseFrontmatter(raw);
+    expect(first.data.title).toBe('Windows 页面');
+    expect(first.body).toContain('# Windows 正文\r\n\r\n第一行。');
+    expect(first.body).not.toContain('\n---\n');
+
+    const second = parseFrontmatter(serializeFrontmatter(first.data, first.body));
+    expect(second).toEqual(first);
   });
 });
