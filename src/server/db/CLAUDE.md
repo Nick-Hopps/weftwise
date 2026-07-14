@@ -47,11 +47,12 @@
 - `claimNextJob(type?): Job | null` —— 原子"pending → running"并写 `lease_expires_at`
 - `updateHeartbeat(id, expectedAttempt)` —— `attempt_count` fencing token 防旧 worker 续租新 attempt
 - `completeJob / failJob / requeueJob / reclaimExpiredJobs`
+- `requestCancel(jobId)` —— pending/running 原子落 failed+cancelled；普通 failed 可终结；completed 或已取消 failed 返回 `already-terminal`
 - `getJob / listJobs({ status?, type?, subjectId? })`
 - `listRecentJobs(filter, limit)` / `listLatestCompletedLint(subjectId)` —— 分别用于有界状态恢复与单行最新 lint CAS
 - `getOrCreateJobAtomic(...)` —— `BEGIN IMMEDIATE` 内只查同 subject/type 的在途或仍可复用 completed 候选，再由 matcher 精确匹配 context
 - `reingestSourceAtomic(...)` / `findLatestIngestJobForSource(subjectId, sourceId)` —— 通过 JSON 表达式索引精确读取同源 ingest；reingest 会读取全部 active 并优先复用 exact-context job，否则任取 active 阻止新建；DELETE 查询只需任一 active；只有无 active 才取最新 terminal，再原子重排或创建
-- `listJobEvents(jobId, afterId?)`
+- `getJobEvents(jobId, afterId?)` —— 按 SQLite rowid 插入顺序读取；afterId 先解析 cursor rowid，避免同毫秒随机 UUID 漏事件
 
 ### `sources-repo.ts`
 
@@ -149,7 +150,7 @@
 | `sources` | `id` | `subject_id` 必填；`content_hash` 用于去重 |
 | `page_sources` | `(subject_id, page_slug, source_id)` | 多对多溯源 |
 | `jobs` | `id` | `subject_id` 可空（全局型 lint / reset）；ingest/save-to-wiki 必填 |
-| `job_events` | `id` | 顺序由 `created_at` 决定；SSE 用 `Last-Event-Id` 续播 |
+| `job_events` | `id` | 持久化顺序由 SQLite `rowid`（INSERT 顺序）决定；SSE 用 `Last-Event-Id` 解析 cursor rowid 后续播 |
 | `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back / reverted`；🆕 GC：`pruneOldOperations` 每 subject 只保留最近 500 条终态行（`pending` 永不删），挂在 worker 低频 sweep（无时间戳列，退化为单条件数量保留，见 operations-repo.ts 注释） |
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
@@ -178,7 +179,7 @@
 
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
-- repos CRUD/查询：subjects / pages（复合 PK、path unique、跨 Subject 同 slug、精确 upsert/delete、`getBacklinks` JOIN）/ sources / jobs（双进程 claim、到期租约、attempt fencing/requeue、事件清扫）/ operations / conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
+- repos CRUD/查询：subjects / pages（复合 PK、path unique、跨 Subject 同 slug、精确 upsert/delete、`getBacklinks` JOIN）/ sources / jobs（双进程 claim、到期租约、attempt fencing/requeue、取消幂等、事件清扫、同毫秒插入顺序与 cursor）/ operations / conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
 - `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描），包含 remediation CAS 候选与同源 ingest JSON 表达式查询；后者同时覆盖损坏历史参数安全性。
 - `pages-repo-invariants.test.ts`：真实 SQLite 覆盖复合身份约束，以及无 trigger 前提下 `updateFtsEntry/deleteFtsEntry/deletePage` 的替换、搜索和 Subject 隔离。
 - `jobs-repo.test.ts`：两个独立 Node 进程同时调用真实 `claimNextJob`，在 WAL + busy_timeout 下只有一个领取；并覆盖 `lease_expires_at <= now`、reclaim 与 attempt 语义。
@@ -216,6 +217,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | job_events 改按 SQLite rowid 的真实插入顺序读取与 afterId 续播，消除同毫秒随机 UUID 乱序/漏读；requestCancel 对已取消 failed 返回 already-terminal，保证取消终态幂等 |
 | 2026-07-14 | Worker/DB 不变量测试收尾：双进程真实 repo claim、到期租约与 attempt fencing/requeue 边界；旧 attempt 不得 heartbeat/complete/fail/requeue 新 attempt；pages 复合 PK/path unique、跨 Subject 同 slug 与手动 FTS update/delete/search 一致性 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：`page_aliases` 增加 subject+oldSlug 唯一索引并由索引器从 frontmatter aliases 同步；pending_actions CHECK 增加 `move`，Drizzle 0007 与启动迁移均先去重再升级旧库 |
 | 2026-07-14 | History 工具 Phase 3B：pending_actions operation CHECK 增加 `history-revert`，Drizzle 0005 与启动期原子重建兼容旧库；operations repo 增加 subject/status 条件标记供审批最终化 |
