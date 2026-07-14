@@ -85,6 +85,59 @@ describe('findingId', () => {
   ] as const)('%s 变化时不改变 ID', (_field, change) => {
     expect(findingId({ ...base, ...change })).toBe(findingId(base));
   });
+
+  it('missing-crossref 使用 source 与 target 身份，description 改写不改变 ID', () => {
+    const semantic: IdentityInput = {
+      ...base,
+      type: 'missing-crossref',
+      pageSlug: 'source-page',
+      targetSlug: 'target-page',
+      evidence: [{ pageSlug: 'source-page', quote: 'Target Page' }],
+    };
+
+    expect(findingId({ ...semantic, description: 'First wording.' })).toBe(
+      findingId({ ...semantic, description: 'Completely different wording.' }),
+    );
+    expect(findingId({ ...semantic, targetSlug: 'another-target' })).not.toBe(
+      findingId(semantic),
+    );
+  });
+
+  it('coverage-gap 使用目标 slug，contradiction 使用排序后的逐页引文', () => {
+    const gap: IdentityInput = {
+      ...base,
+      type: 'coverage-gap',
+      targetSlug: 'missing-topic',
+      evidence: [
+        { pageSlug: 'a', quote: 'Missing topic' },
+        { pageSlug: 'b', quote: 'missing topic' },
+      ],
+    };
+    expect(findingId({ ...gap, pageSlug: 'another-source', description: 'Reworded.' }))
+      .toBe(findingId(gap));
+
+    const contradiction: IdentityInput = {
+      ...base,
+      type: 'contradiction',
+      evidence: [
+        { pageSlug: 'a', quote: 'The value is 1.' },
+        { pageSlug: 'b', quote: 'The value is 2.' },
+      ],
+    };
+    expect(findingId({
+      ...contradiction,
+      pageSlug: 'b',
+      description: 'Reworded.',
+      evidence: [...contradiction.evidence!].reverse(),
+    })).toBe(findingId(contradiction));
+    expect(findingId({
+      ...contradiction,
+      evidence: [
+        { pageSlug: 'a', quote: 'The value is 1.' },
+        { pageSlug: 'b', quote: 'The value is 3.' },
+      ],
+    })).not.toBe(findingId(contradiction));
+  });
 });
 
 describe('identifyFindings', () => {

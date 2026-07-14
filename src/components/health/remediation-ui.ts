@@ -286,6 +286,24 @@ export function recentOutcomeCounts(
   return counts;
 }
 
+export function summarizeFixOutcomes(value: unknown): {
+  fixed: number;
+  failed: number;
+  skipped: number;
+} {
+  const summary = { fixed: 0, failed: 0, skipped: 0 };
+  if (!isRecord(value)) return summary;
+
+  if (!isRecord(value.perFindingOutcomes)) return summary;
+
+  for (const outcome of Object.values(value.perFindingOutcomes)) {
+    if (outcome === 'fixed' || outcome === 'failed' || outcome === 'skipped') {
+      summary[outcome] += 1;
+    }
+  }
+  return summary;
+}
+
 export function recentOutcomeBannerTone(
   counts: { fixed: number; failed: number; skipped: number },
 ): 'success' | 'warning' | 'danger' {

@@ -27,6 +27,7 @@ import {
   selectRecoverableHealthJobs,
   researchBacklogPatchBody,
   researchApprovalBody,
+  summarizeFixOutcomes,
 } from '../remediation-ui';
 import { FindingRow, remediationStatusLabel } from '../finding-row';
 
@@ -153,6 +154,32 @@ describe('Health remediation UI helper', () => {
       fixed: 55,
       failed: 7,
       skipped: 3,
+    });
+  });
+
+  it('Fix 完成摘要按逐 finding 结果统计，不把 writes 当 fixed', () => {
+    expect(summarizeFixOutcomes({
+      writes: 5,
+      residualCount: 7,
+      perFindingOutcomes: {
+        a: 'fixed', b: 'fixed', c: 'fixed',
+        d: 'failed', e: 'failed', f: 'failed', g: 'failed',
+        h: 'failed', i: 'failed', j: 'failed', k: 'failed',
+        l: 'skipped',
+      },
+    })).toEqual({ fixed: 3, failed: 8, skipped: 1 });
+  });
+
+  it('Fix 完成摘要对缺失或非法逐 finding 结果保守降级', () => {
+    expect(summarizeFixOutcomes({ writes: 2 })).toEqual({
+      fixed: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    expect(summarizeFixOutcomes(null)).toEqual({
+      fixed: 0,
+      failed: 0,
+      skipped: 0,
     });
   });
 
