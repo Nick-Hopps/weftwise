@@ -28,7 +28,7 @@ import {
   researchBacklogPatchBody,
   researchApprovalBody,
 } from '../remediation-ui';
-import { FindingRow } from '../finding-row';
+import { FindingRow, remediationStatusLabel } from '../finding-row';
 
 vi.mock('@/components/ui/tag', async () => {
   const ReactModule = await import('react');
@@ -190,9 +190,23 @@ describe('Health remediation UI helper', () => {
       onAction: () => undefined,
     }));
 
-    expect(html).toContain('plan unavailable');
+    expect(html).toContain('Plan unavailable');
     expect(html).toContain('Re-run the health check');
     expect(html).not.toContain('Fix issues');
+  });
+
+  it('FindingRow 展示用户态处置状态而非内部枚举', () => {
+    const html = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: broken,
+      plan: {
+        ...plan(broken.id, [{ type: 'fix', label: 'Fix issue', destructive: false }]),
+        status: 'awaiting-approval',
+      },
+    }));
+
+    expect(remediationStatusLabel('awaiting-approval')).toBe('Needs action');
+    expect(html).toContain('Needs action');
+    expect(html).not.toContain('awaiting-approval');
   });
 
   it('acting 变化或动作点击会解除删除确认状态', () => {
