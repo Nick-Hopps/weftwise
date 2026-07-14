@@ -24,6 +24,12 @@ vi.mock('../page-write', () => pagePlanMocks);
 
 const reenrichMocks = vi.hoisted(() => ({ planReenrich: vi.fn() }));
 vi.mock('../reenrich-enqueue', () => reenrichMocks);
+const workflowMocks = vi.hoisted(() => ({
+  planWorkflowReenrich: vi.fn(),
+  planWorkflowResearch: vi.fn(),
+  planWorkflowCancel: vi.fn(),
+}));
+vi.mock('../workflow-tools', () => workflowMocks);
 const operationPlanMocks = vi.hoisted(() => ({
   applyPlannedPageOperation: vi.fn(),
 }));
@@ -40,6 +46,7 @@ import {
   PendingActionError,
   createPendingActionPreview,
   createPendingHistoryRevertPreview,
+  createPendingWorkflowActionPreview,
   listPendingActions,
 } from '../pending-action-service';
 
@@ -80,6 +87,18 @@ beforeEach(() => {
     originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'cs-history' },
     summary: '回滚历史操作 op-old', affectedPages: pagePreview.affectedPages,
     diff: 'history diff', warnings: ['会覆盖后续修改'],
+  });
+  workflowMocks.planWorkflowReenrich.mockResolvedValue({
+    kind: 'workflow', preHead: 'head-1', summary: '重新丰富 page-a',
+    affectedPages: [{ slug: 'page-a', action: 'update' }], diff: null, warnings: [],
+  });
+  workflowMocks.planWorkflowResearch.mockResolvedValue({
+    kind: 'workflow', preHead: 'head-1', summary: '研究主题 SQLite',
+    affectedPages: [], diff: null, warnings: ['候选仍需批准'],
+  });
+  workflowMocks.planWorkflowCancel.mockResolvedValue({
+    kind: 'workflow', preHead: 'head-1', summary: '取消 research 任务 job-1',
+    affectedPages: [], diff: null, warnings: ['任务会终止'],
   });
   repoMocks.createPendingAction.mockImplementation((input: Record<string, unknown>) => ({
     ...input,
@@ -151,6 +170,31 @@ describe('createPendingActionPreview', () => {
       operation: 'history-revert', kind: 'page-change', diff: 'history diff', status: 'pending',
     });
     expect(historyMocks.applyPlannedHistoryRevert).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['workflow-reenrich-start', { slug: ' page-a ' }, 'planWorkflowReenrich', 'page-a'],
+    ['workflow-research-start', { topic: ' SQLite ' }, 'planWorkflowResearch', 'SQLite'],
+    ['workflow-cancel', { jobId: ' job-1 ' }, 'planWorkflowCancel', 'job-1'],
+  ] as const)('%s 保存规范化 workflow payload，预览阶段零 job 副作用', async (
+    operation,
+    actionPayload,
+    planner,
+    expected,
+  ) => {
+    const view = await createPendingWorkflowActionPreview({
+      conversationId: 'c1',
+      subject,
+      input: { operation, payload: actionPayload } as never,
+      now,
+    });
+
+    expect(workflowMocks[planner]).toHaveBeenCalledWith(subject, expected);
+    expect(repoMocks.createPendingAction).toHaveBeenCalledWith(expect.objectContaining({
+      operation,
+      payloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    }));
+    expect(view).toMatchObject({ operation, kind: 'workflow', status: 'pending' });
   });
 
   it('metadata/link 预览复用共享 planner，绝不 apply 或触发 embedding', async () => {

@@ -10,7 +10,7 @@ import {
 describe('tool-activity', () => {
   it('已知工具映射 icon/verb（含 wiki_reenrich）', () => {
     expect(toolActivityIcon('wiki_reenrich')).toBe('✨');
-    expect(toolActivityVerb('wiki_reenrich')).toBe('Re-enriching');
+    expect(toolActivityVerb('wiki_reenrich')).toBe('Planning re-enrichment');
     expect(toolActivityIcon('wiki_search')).toBe('🔍');
     expect(toolActivityVerb('wiki_read')).toBe('Reading');
     expect(toolActivityIcon('wiki_list')).toBe('🗂');
@@ -124,6 +124,28 @@ describe('toolActivityLine', () => {
 
   it('未知工具回落工具名', () => {
     expect(toolActivityLine('mystery_tool', { x: 1 })).toBe('• mystery_tool…');
+  });
+});
+
+describe('Phase 3C workflow activity', () => {
+  it('使用计划语义并只展示安全参数', () => {
+    expect(toolActivityIcon('workflow_status')).toBe('🧭');
+    expect(toolActivityVerb('workflow_status')).toBe('Checking workflow');
+    expect(toolActivityLine('workflow_status', { jobId: 'job-1', secret: 'x' }))
+      .toBe('🧭 Checking workflow "job-1"…');
+
+    expect(toolActivityIcon('workflow_reenrich_start')).toBe('✨');
+    expect(toolActivityVerb('wiki_reenrich')).toBe('Planning re-enrichment');
+    expect(toolActivityLine('workflow_reenrich_start', { slug: 'page-a', body: 'secret' }))
+      .toBe('✨ Planning re-enrichment "page-a"…');
+
+    expect(toolActivityIcon('workflow_research_start')).toBe('🌐');
+    expect(toolActivityLine('workflow_research_start', { topic: 'SQLite', apiKey: 'secret' }))
+      .toBe('🌐 Planning research "SQLite"…');
+
+    expect(toolActivityIcon('workflow_cancel')).toBe('⏹️');
+    expect(toolActivityLine('workflow_cancel', { jobId: 'job-1', result: 'secret' }))
+      .toBe('⏹️ Planning cancellation "job-1"…');
   });
 });
 

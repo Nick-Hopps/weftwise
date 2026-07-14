@@ -127,6 +127,99 @@ describe('finalizeAppliedHistoryRevertAction', () => {
   });
 });
 
+describe('finalizeWorkflowStartAction', () => {
+  it('workflow job 与 action applied 同事务提交，失败时不留下孤儿 job', async () => {
+    const { getRawDb } = await import('../../db/client');
+    const db = getRawDb();
+    const nowIso = '2026-07-14T01:00:00.000Z';
+    seedSubjectAndConversation(db, nowIso);
+    const repo = await import('../../db/repos/pending-actions-repo');
+    const { finalizeWorkflowStartAction } = await import('../pending-action-finalizer');
+    repo.createPendingAction({
+      id: 'a-start', conversationId: 'c1', subjectId: 's1',
+      operation: 'workflow-research-start', payloadJson: '{}', payloadHash: 'hash',
+      previewJson: '{}', createdAt: nowIso, updatedAt: nowIso,
+      expiresAt: '2026-07-14T01:30:00.000Z',
+    });
+    repo.claimApproval('a-start', 's1', nowIso);
+    repo.claimExecution('a-start', 's1', null, null, nowIso);
+
+    const mark = vi.spyOn(repo, 'markApplied').mockImplementationOnce(() => {
+      throw new Error('mark failed');
+    });
+    expect(() => finalizeWorkflowStartAction({
+      actionId: 'a-start', subjectId: 's1', type: 'research',
+      params: { topic: 'SQLite', subjectId: 's1' }, nowIso,
+    })).toThrow(/mark failed/i);
+    expect(repo.getScoped('a-start', 's1')?.status).toBe('executing');
+    expect(jobCount(db)).toBe(0);
+    mark.mockRestore();
+
+    const job = finalizeWorkflowStartAction({
+      actionId: 'a-start', subjectId: 's1', type: 'research',
+      params: { topic: 'SQLite', subjectId: 's1' }, nowIso,
+    });
+    expect(job).toMatchObject({ type: 'research', subjectId: 's1', status: 'pending' });
+    expect(repo.getScoped('a-start', 's1')).toMatchObject({
+      status: 'applied', jobId: job.id,
+    });
+    expect(jobCount(db)).toBe(1);
+  });
+});
+
+describe('finalizeWorkflowCancelAction', () => {
+  it('job 取消与 action applied 同事务提交，失败时回滚取消', async () => {
+    const { getRawDb } = await import('../../db/client');
+    const db = getRawDb();
+    const nowIso = '2026-07-14T02:00:00.000Z';
+    seedSubjectAndConversation(db, nowIso);
+    const queue = await import('../../jobs/queue');
+    const target = queue.enqueue('research', { topic: 'SQLite', subjectId: 's1' }, 's1');
+    const repo = await import('../../db/repos/pending-actions-repo');
+    const { finalizeWorkflowCancelAction } = await import('../pending-action-finalizer');
+    repo.createPendingAction({
+      id: 'a-cancel', conversationId: 'c1', subjectId: 's1',
+      operation: 'workflow-cancel', payloadJson: '{}', payloadHash: 'hash', previewJson: '{}',
+      createdAt: nowIso, updatedAt: nowIso, expiresAt: '2026-07-14T02:30:00.000Z',
+    });
+    repo.claimApproval('a-cancel', 's1', nowIso);
+    repo.claimExecution('a-cancel', 's1', null, target.id, nowIso);
+
+    const mark = vi.spyOn(repo, 'markApplied').mockImplementationOnce(() => {
+      throw new Error('mark failed');
+    });
+    expect(() => finalizeWorkflowCancelAction({
+      actionId: 'a-cancel', subjectId: 's1', jobId: target.id, nowIso,
+    })).toThrow(/mark failed/i);
+    expect(queue.get(target.id)).toMatchObject({ status: 'pending' });
+    expect(repo.getScoped('a-cancel', 's1')?.status).toBe('executing');
+    mark.mockRestore();
+
+    const cancelled = finalizeWorkflowCancelAction({
+      actionId: 'a-cancel', subjectId: 's1', jobId: target.id, nowIso,
+    });
+    expect(cancelled).toMatchObject({ id: target.id, status: 'failed' });
+    expect(JSON.parse(cancelled.resultJson!)).toMatchObject({ cancelled: true });
+    expect(repo.getScoped('a-cancel', 's1')).toMatchObject({
+      status: 'applied', jobId: target.id,
+    });
+  });
+});
+
+function seedSubjectAndConversation(
+  db: import('better-sqlite3').Database,
+  nowIso: string,
+): void {
+  db.prepare(`
+    INSERT INTO subjects (id, slug, name, description, augmentation_level, created_at, updated_at)
+    VALUES ('s1', 'subject-1', 'Subject 1', '', 'standard', ?, ?)
+  `).run(nowIso, nowIso);
+  db.prepare(`
+    INSERT INTO conversations (id, subject_id, title, created_at, updated_at)
+    VALUES ('c1', 's1', 'Conversation', ?, ?)
+  `).run(nowIso, nowIso);
+}
+
 function jobCount(db: import('better-sqlite3').Database): number {
   return (db.prepare(`SELECT COUNT(*) AS count FROM jobs`).get() as { count: number }).count;
 }

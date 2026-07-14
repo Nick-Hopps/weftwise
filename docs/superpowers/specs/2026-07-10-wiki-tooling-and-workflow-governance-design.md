@@ -1,7 +1,7 @@
 # Wiki 工具面与工作流治理重构 — 设计 Spec
 
 日期：2026-07-10  
-状态：Phase 0–2 已完成；Phase 3 执行中（Phase 3A–3B 已实现）
+状态：Phase 0–2 已完成；Phase 3 执行中（Phase 3A–3C 已实现）
 
 ## 一、背景
 
@@ -725,7 +725,7 @@ Worker 启动时：
 
 1. subject/cross-subject read tools（Phase 3A 已完成）；
 2. history tools（Phase 3B 已完成）；
-3. workflow start/status/cancel；
+3. workflow start/status/cancel（Phase 3C 已完成）；
 4. `wiki.move` 单独立项。
 
 ## 十五、测试策略

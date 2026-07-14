@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import type { PendingActionOperation, PreviewChangeInput } from '@/lib/contracts';
+import type {
+  PendingActionOperation,
+  PreviewChangeInput,
+  WorkflowPreviewInput,
+} from '@/lib/contracts';
 import { normalizeMetadataPatch } from '@/server/wiki/narrow-write';
 
 const TrimmedTextSchema = z.string().trim().min(1);
@@ -69,6 +73,21 @@ export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   }).strict(),
 ]);
 
+export const WorkflowPreviewInputSchema = z.discriminatedUnion('operation', [
+  z.object({
+    operation: z.literal('workflow-reenrich-start'),
+    payload: z.object({ slug: TrimmedTextSchema }).strict(),
+  }).strict(),
+  z.object({
+    operation: z.literal('workflow-research-start'),
+    payload: z.object({ topic: TrimmedTextSchema.max(500) }).strict(),
+  }).strict(),
+  z.object({
+    operation: z.literal('workflow-cancel'),
+    payload: z.object({ jobId: TrimmedTextSchema }).strict(),
+  }).strict(),
+]);
+
 export type NormalizedPreviewInput = PreviewChangeInput extends infer Input
   ? Input extends { operation: infer Operation; payload: infer Payload }
     ? { operation: Operation; payload: Payload & { effectiveAt: string } }
@@ -122,4 +141,18 @@ export function normalizePreviewInput(
     operation: parsed.operation,
     payload: { ...parsed.payload, effectiveAt: timestamp },
   } as NormalizedPreviewInput;
+}
+
+export function normalizeWorkflowPreviewInput(
+  input: WorkflowPreviewInput,
+  effectiveAt: string,
+): WorkflowPreviewInput & { payload: Record<string, unknown> & { effectiveAt: string } } {
+  const parsed = WorkflowPreviewInputSchema.parse(input);
+  const timestamp = z.string().datetime().parse(effectiveAt);
+  return {
+    operation: parsed.operation,
+    payload: { ...parsed.payload, effectiveAt: timestamp },
+  } as WorkflowPreviewInput & {
+    payload: Record<string, unknown> & { effectiveAt: string };
+  };
 }

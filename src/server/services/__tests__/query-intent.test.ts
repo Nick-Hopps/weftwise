@@ -16,6 +16,12 @@ describe('resolveQueryMode', () => {
     '回滚历史操作 op-123',
     '把知识库版本 op-123 恢复到变更前',
     'Revert wiki history operation op-123',
+    '开始研究 SQLite WAL',
+    '启动 Research：SQLite WAL',
+    'Start research on SQLite WAL',
+    '取消任务 job-123',
+    '终止工作流 job-123',
+    'Cancel job job-123',
   ])('明确写入命令进入 propose：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('propose');
   });
@@ -31,6 +37,12 @@ describe('resolveQueryMode', () => {
     'What would happen if I delete this page?',
     '如何回滚历史操作？',
     '不要回滚知识库版本 op-123',
+    '如何启动 Research？',
+    '你能取消任务吗？',
+    '不要取消任务 job-123',
+    'How do I start research?',
+    'Can you cancel a job?',
+    'Do not cancel job job-123',
     '总结一下量子计算',
   ])('教程、能力、否定和普通问答保持 read：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('read');
