@@ -15,6 +15,7 @@
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
 | `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
+| `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `subject-nav.ts` | 🆕 subject 切换的可记忆路径判定与 query 拼接：`isRememberablePath`（`/wiki/*` / `/sources/*` 判定）/ `withSubjectParam`（`?s=<subject-slug>` 拼接） + 单测 |
 | `error-format.ts` | 🆕 `describeErrorMessage(error)`：AI SDK `RetryError` 最后一次尝试自身 message 为空时，补上 `.lastError` 的 message/cause，避免真实原因丢失；`server/jobs/worker.ts` 与 `server/db/repos/jobs-repo.ts::failJob` 共用 |
@@ -36,7 +37,8 @@ JobEvent       { id, jobId, type, message, dataJson, createdAt }
 Source         { id, subjectId, filename, contentHash, parsedAt, metadataJson }
 IngestResult   { pagesCreated: string[], pagesUpdated: string[],
                  linksAdded: number, commitSha: string }
-QueryResult    { answer, citations: { pageSlug, excerpt }[], savedAsPage }
+WikiCitation  { pageSlug, excerpt, subjectSlug? }
+QueryResult    { answer, citations: WikiCitation[], savedAsPage }
 LintFinding    { type, severity, pageSlug, description, suggestedFix }
 EnrichedLintFinding { ...LintFinding, id, subjectId, subjectSlug }
 RemediationAction { type: 'fix'|'curate'|'research'|'re-ingest'|'review-source', label, destructive:false, href? }
@@ -51,7 +53,7 @@ Changeset      { id, jobId, subjectId, subjectSlug, entries, preHead, postHead,
 HistoryEntry   { id, sha, date, type: string, message, affectedPages: HistoryAffectedPage[], status: 'applied'|'reverted' }
 HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
 Conversation   { id, subjectId, title, createdAt, updatedAt }
-ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: {pageSlug,excerpt}[]|null, createdAt }
+ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: WikiCitation[]|null, createdAt }
 MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
 LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
 PendingActionOperation = 'create'|'update'|'patch'|'delete'|'reenrich'|'metadata-patch'|'link-ensure'
@@ -145,6 +147,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | 跨 Subject 只读 Phase 3A：contracts 新增跨主题工具输入输出与可选 `WikiCitation.subjectSlug`；`wiki-citation.ts` 统一聊天跳转和 Save-to-Wiki wikilink 序列化；旧 citation JSON 继续兼容 |
 | 2026-07-14 | contracts 新增 Research run/finding/candidate/approval/delivery/provenance 行与 view 契约、API error code、`research-import` job type；candidate ID 批准与服务端注入 Ingest lineage 取代客户端 URL 直提交流程 |
 | 2026-07-13 | contracts 新增 metadata/link 窄写输入结果，并把 PendingAction operation/preview 扩展到 `metadata-patch` / `link-ensure`；tool-activity 增加两种工具的安全摘要，metadata 值与链接锚点不进入活动日志 |
 | 2026-07-12 | Health 修复闭环 Phase 2A：`EnrichedLintFinding` 增加稳定 `id`；新增 `RemediationStatus / Workflow / Action / Plan / Context` 与 `HealthSnapshot` 共享契约，彻底移除数组位置身份语义 |
