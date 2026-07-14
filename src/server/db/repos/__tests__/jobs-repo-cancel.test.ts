@@ -82,6 +82,20 @@ describe('jobs-repo.requestCancel / isCancelRequested', () => {
     expect(JSON.parse(after.resultJson!).ok).toBe(true);
   });
 
+  it('重复取消已取消的任务 → already-terminal，不重复改写终态', async () => {
+    const { jobsRepo } = await repos();
+    const job = jobsRepo.enqueueJob('ingest', {}, null);
+
+    expect(jobsRepo.requestCancel(job.id)).toBe('cancelled');
+    const first = jobsRepo.getJob(job.id)!;
+    expect(jobsRepo.requestCancel(job.id)).toBe('already-terminal');
+
+    const second = jobsRepo.getJob(job.id)!;
+    expect(second.status).toBe('failed');
+    expect(second.resultJson).toBe(first.resultJson);
+    expect(JSON.parse(second.resultJson!).cancelled).toBe(true);
+  });
+
   it('不存在的 job → not-found', async () => {
     const { jobsRepo } = await repos();
     expect(jobsRepo.requestCancel('does-not-exist')).toBe('not-found');

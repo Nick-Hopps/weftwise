@@ -43,7 +43,8 @@ stopWorker()
 
 - **并发调度**：`runningJobs` Map 跟踪当前在跑任务（id→type）；每 tick 用纯函数 `decideClaim(runningTypes, ingestLimit)` 三态决策（可 claim ingest / 可 claim 非 ingest / 都不行）——非 ingest 类型独占（跑着任何非 ingest 任务时不再 claim）、ingest 之间允许并发但受 `app_settings.ingestConcurrency`（默认 2，范围 1-4，每 tick 实时读）上限约束；vault 写入安全靠 `vault-mutex`（进程内队列 + 跨进程文件锁）兜底，而非串行调度。
 - **租约 fencing**：claim 原子自增的 `attempt_count` 是本次执行 token；每 30s heartbeat 及 complete/fail/requeue 都必须同时匹配 `running + attempt_count`，旧 worker 即使迟到也不能续租或覆盖新 attempt。handler 完成、失败或 requeue 后均在 `finally` 清理定时器。
-- **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / 524 / terminated / other side closed / failed to process successful response / fetch failed / aborted / rate limit，关键字同时搜 `error.message` 和 `error.cause`）；AI SDK 的 `AI_RetryError` 按 `.reason` 精确判定（`maxRetriesExceeded`→retry，`errorNotRetryable`→fail，不猜关键字）；调 `queue.requeue(jobId, attemptCount)` 保持 job ID，只有当前 attempt 可重排。
+- **重试**：`MAX_RETRIES=2`，基础延迟 5s，仅对可识别的临时错误（timeout / econnreset / 429 / 502 / 503 / 524 / terminated / other side closed / failed to process successful response / fetch failed / aborted / rate limit，关键字同时搜 `error.message` 和 `error.cause`）；AI SDK 的 `AI_RetryError` 按 `.reason` 精确判定（`maxRetriesExceeded`→retry，`errorNotRetryable`→fail，不猜关键字）；调 `queue.requeue(jobId, attemptCount)` 保持 job ID，只有当前 attempt 可重排，且仅在 requeue 成功、状态已为 pending 后发布 `job:retrying`。
+- **终态事件契约**：service 业务事件 → 带 attempt fencing 的状态迁移 → 对应 `job:*` 状态事件 → provenance 对账。complete/fail/requeue/requestCancel 的 CAS 未命中时旧 Worker 静默退出，不发布与 jobs 表冲突的状态事件；重复取消已取消任务返回 `already-terminal`。
 - **Research 对账**：job 真正完成或最终失败后调用 `reconcileResearchProvenanceForJob(jobId)`；自动 retry 中间态不对账。worker 启动和维护 tick 再扫描未完成 run，补偿 cancel route、进程崩溃和终态 hook 失败；该扫描先于 operation GC，确保 operation IDs 仍可物化。
 
 ### `events.ts`
@@ -66,7 +67,7 @@ emit(jobId, type, message, data?): void
 | `heartbeat_at` | 上次心跳 |
 | `attempt_count` | 成功领取次数（`claim` 原子自增；`requeue` 本身不增，下一次 claim 再增） |
 
-`job_events`：`{ id, job_id, type, message, data_json, created_at }`，SSE 客户端用 `Last-Event-Id` = 最后收到的 `id` 续播。
+`job_events`：`{ id, job_id, type, message, data_json, created_at }`，持久化读取按 SQLite `rowid`（真实 INSERT 顺序）；SSE 客户端用 `Last-Event-Id` = 最后收到的 `id` 续播，服务端先解析对应 rowid，再读取其后的事件。同毫秒事件不依赖随机 UUID 排序。
 
 Phase 3C 的 Ask AI 工作流命令不直接暴露 queue：`workflow.status` 通过 services 层只返回 active Subject 脱敏摘要；start/cancel 先进入 PendingAction，批准后才在 SQLite 事务中把 job 状态与 action applied 一起提交。取消继续复用 `requestCancel`、`job:cancelled` 与 Research provenance 对账。
 
@@ -91,8 +92,9 @@ Phase 3C 的 Ask AI 工作流命令不直接暴露 queue：`workflow.status` 通
 已覆盖：
 
 - `__tests__/maintenance-tick.test.ts`：`shouldSweep` 节律闸门边界。
-- `job_events` 保留清扫（`pruneJobEvents`）与 jobs 表 CRUD/查询见 `db/repos/__tests__/jobs-repo.test.ts`（queue/worker 是对 jobs-repo 的薄封装）。
-- `__tests__/worker.test.ts`：`isRetryableError` 分类，以及 30 秒首跳/连续续租、成功/失败/retry 定时器释放和心跳异常隔离。
+- `job_events` 保留清扫、同毫秒 INSERT 顺序与 `afterId` 续播，以及 jobs 表 CRUD/查询见 `db/repos/__tests__/jobs-repo.test.ts`（queue/worker 是对 jobs-repo 的薄封装）。
+- `__tests__/worker.test.ts`：`isRetryableError` 分类，以及 30 秒首跳/连续续租、成功/失败/retry 定时器释放、心跳异常隔离、状态迁移 fencing 与终态事件闸门。
+- `__tests__/worker-terminal-consistency.test.ts`：真实 SQLite + trigger 锁定 Saga 业务事件 → failed 状态 → `job:failed` 的顺序，并验证失败结果与租约清理。
 - `services/__tests__/research-provenance-reconciler.test.ts`：终态 hook、维护扫描、delivery/verification 聚合与 operation lineage；`jobs/[id]` cancel/retry 路由测试覆盖 coordinator 立即对账及 Research child 禁止独立复活。
 - `lib/__tests__/error-format.test.ts` + `db/repos/__tests__/jobs-repo-fail.test.ts`：`describeErrorMessage` 补全 `AI_RetryError` 因 lastError message 为空而丢失的真实原因（见下方 2026-07-09 变更）。
 
@@ -120,6 +122,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Saga/Worker 终态一致性：状态迁移成功后才发布 completed/failed/retrying/cancelled，CAS/fencing 未命中静默退出；重复取消幂等；job_events 按 rowid 插入顺序读取与续播，并以真实 SQLite trigger 锁定 Saga 失败顺序 |
 | 2026-07-14 | Worker/DB 不变量测试收尾：所有 runJob 终态清 timer；claim/reclaim 统一 `<= now` 到期语义，`attempt_count` 作为 heartbeat/complete/fail/requeue fencing token；双进程 WAL 竞争与旧 attempt 隔离已有真实 repo 测试 |
 | 2026-07-14 | Workflow 控制 Phase 3C：Ask AI status 只读脱敏；re-enrich/research start 与 cancel 先审批，批准后 job/action 原子收口，取消沿用既有终态、事件和 provenance 语义 |
 | 2026-07-14 | Phase 2C 新增 `research-import` coordinator job；worker 终态 hook、启动与维护扫描执行幂等 Research provenance 对账，且早于 operation GC；自动 retry 中间态不提前终结 delivery，携带 provenance 的 child Ingest 禁止通用手动 retry，coordinator cancel 后 route 立即对账 |

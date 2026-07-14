@@ -53,6 +53,40 @@ describe('jobs-repo.pruneJobEvents', () => {
   });
 });
 
+describe('jobs-repo job_events 插入顺序', () => {
+  it('同一毫秒事件按 INSERT 顺序读取，不受随机 UUID 字典序影响', async () => {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    const insert = db.prepare(`
+      INSERT INTO job_events (id, job_id, type, message, data_json, created_at)
+      VALUES (?, 'job-order', ?, ?, NULL, '2026-07-14T00:00:00.000Z')
+    `);
+    insert.run('z-business-event', 'ingest:rollback', 'Saga rollback completed');
+    insert.run('a-terminal-event', 'job:failed', 'Saga failed');
+    const repo = await import('../jobs-repo');
+
+    expect(repo.getJobEvents('job-order').map((event) => event.id)).toEqual([
+      'z-business-event',
+      'a-terminal-event',
+    ]);
+  });
+
+  it('afterId 能续播同一毫秒内后插入且 UUID 更小的事件', async () => {
+    const { getRawDb } = await import('../../client');
+    const db = getRawDb();
+    const insert = db.prepare(`
+      INSERT INTO job_events (id, job_id, type, message, data_json, created_at)
+      VALUES (?, 'job-cursor', ?, ?, NULL, '2026-07-14T00:00:00.000Z')
+    `);
+    insert.run('z-cursor', 'ingest:rollback', 'Saga rollback completed');
+    insert.run('a-after-cursor', 'job:failed', 'Saga failed');
+    const repo = await import('../jobs-repo');
+
+    expect(repo.getJobEvents('job-cursor', 'z-cursor').map((event) => event.id))
+      .toEqual(['a-after-cursor']);
+  });
+});
+
 describe('jobs-repo.listRecentJobs', () => {
   async function setupRecentJobs() {
     const { getRawDb } = await import('../../client');
