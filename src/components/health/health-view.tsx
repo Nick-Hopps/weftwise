@@ -2,16 +2,24 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, RefreshCw, Search, Wand2, Wrench } from 'lucide-react';
+import {
+  Activity,
+  ChevronDown,
+  ListFilter,
+  RefreshCw,
+  Search,
+  Wand2,
+  Wrench,
+} from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { useLintSummary } from '@/hooks/use-lint-summary';
 import { Button } from '@/components/ui/button';
-import { Tag } from '@/components/ui/tag';
 import { Input } from '@/components/ui/input';
-import { groupBySeverity, SEVERITY_TONE } from './lint-findings';
-import { FindingRow } from './finding-row';
+import { Select } from '@/components/ui/select';
+import { groupBySeverity } from './lint-findings';
+import { FindingRow, findingTypeLabel } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
 import { ResearchBacklogSection } from './research-backlog-section';
 import { blockImeEnterSubmit } from '@/lib/keyboard';
@@ -36,7 +44,6 @@ import {
   persistedBusyActions,
   readResearchRun,
   readResearchRunId,
-  recentOutcomeBannerTone,
   recentOutcomeCounts,
   researchApprovalBody,
   selectRecoverableHealthJobs,
@@ -446,6 +453,7 @@ export function HealthView() {
   const [researchError, setResearchError] = useState<string | null>(null);
   const [candidateResult, setCandidateResult] = useState<CandidateResult | null>(null);
   const [topicInput, setTopicInput] = useState('');
+  const [researchComposerOpen, setResearchComposerOpen] = useState(false);
   const [researchActing, setResearchActing] = useState(false);
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
@@ -873,6 +881,8 @@ export function HealthView() {
     setCandidateResult(null);
     setResearchActing(false);
     setResearchError(null);
+    setResearchComposerOpen(false);
+    setTopicInput('');
     setRemediationError(null);
     setBusyActions(new Set());
     setActingFindingByAction({});
@@ -911,178 +921,286 @@ export function HealthView() {
   const recentTerminalCount = recentOutcomeSummary.fixed
     + recentOutcomeSummary.failed
     + recentOutcomeSummary.skipped;
-  const recentTone = recentOutcomeBannerTone(recentOutcomeSummary);
-  const recentBannerClass = recentTone === 'danger'
-    ? 'border-danger/40 bg-danger-bg text-danger'
-    : recentTone === 'warning'
-      ? 'border-warning/40 bg-warning-bg text-warning'
-      : 'border-success/40 bg-success-bg text-success';
+  const activeMessages = [
+    running ? latestMessage || 'Running health check...' : null,
+    researching ? 'Researching sources...' : null,
+    curating ? curateMessage || 'Curating structure...' : null,
+    fixing ? fixMessage || 'Fixing issues...' : null,
+  ].filter((message): message is string => message !== null);
 
-  // 动作条一行 5 个控件超出 65ch 阅读宽度，本页放宽到 max-w-4xl
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 w-full space-y-6">
-      <header className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
-            <Activity className="h-5 w-5 text-foreground-tertiary" />
-            Health
-          </h1>
-          <p className="mt-1 text-sm text-foreground-secondary">
-            {allSubjects
-              ? 'Quality findings across all subjects.'
-              : `Quality findings for "${subjectSlug}".`}
-            {data?.ranAt && (
-              <span className="text-foreground-tertiary"> · Last checked {new Date(data.ranAt).toLocaleString()}</span>
-            )}
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+      <header className="mb-6 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2.5">
+            <Activity className="h-5 w-5 text-accent" aria-hidden />
+            <h1 className="text-2xl font-semibold text-foreground">Health</h1>
+          </div>
+          <p className="mt-1.5 truncate text-sm text-foreground-secondary">
+            {allSubjects ? 'All subjects' : subjectSlug}
+            <span className="text-foreground-tertiary">
+              {data?.ranAt
+                ? ` · Checked ${new Date(data.ranAt).toLocaleString()}`
+                : ' · Not checked yet'}
+            </span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-md border border-border overflow-hidden">
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            role="radiogroup"
+            aria-label="Health check scope"
+            className="inline-flex h-8 rounded-md border border-border bg-surface p-0.5"
+          >
             <button
               type="button"
+              role="radio"
+              aria-checked={!allSubjects}
               onClick={() => switchScope('subject')}
               className={
-                'h-8 px-3 text-sm whitespace-nowrap transition-colors ' +
-                (!allSubjects ? 'bg-subtle text-foreground font-medium' : 'text-foreground-secondary hover:bg-subtle')
+                'rounded-sm px-2.5 text-xs font-medium transition-colors ' +
+                (!allSubjects
+                  ? 'bg-subtle text-foreground shadow-xs'
+                  : 'text-foreground-secondary hover:text-foreground')
               }
             >
               This subject
             </button>
             <button
               type="button"
+              role="radio"
+              aria-checked={allSubjects}
               onClick={() => switchScope('all')}
               className={
-                'h-8 px-3 text-sm whitespace-nowrap transition-colors border-l border-border ' +
-                (allSubjects ? 'bg-subtle text-foreground font-medium' : 'text-foreground-secondary hover:bg-subtle')
+                'rounded-sm px-2.5 text-xs font-medium transition-colors ' +
+                (allSubjects
+                  ? 'bg-subtle text-foreground shadow-xs'
+                  : 'text-foreground-secondary hover:text-foreground')
               }
             >
               All subjects
             </button>
           </div>
           <Button intent="primary" onClick={() => void runLint()} loading={running}>
-            {/* loading 时 Button 自带 spinner，隐藏本图标避免双图标 */}
             {!running && <RefreshCw className="h-3.5 w-3.5" />}
-            {neverRun ? 'Run health check' : 'Re-run'}
-          </Button>
-          <Button
-            intent="secondary"
-            onClick={() => void runRemediation('curate', curateFindingIds)}
-            loading={curating}
-            disabled={
-              allSubjects
-              || neverRun
-              || curateFindingIds.length === 0
-              || running
-              || fixing
-              || effectiveBusyActions.has('curate')
-            }
-          >
-            {!curating && <Wand2 className="h-3.5 w-3.5" />}
-            Tidy structure
-          </Button>
-          <Button
-            intent="secondary"
-            onClick={() => void runRemediation('fix', fixFindingIds)}
-            loading={fixing}
-            disabled={
-              allSubjects
-              || neverRun
-              || fixFindingIds.length === 0
-              || running
-              || curating
-              || effectiveBusyActions.has('fix')
-            }
-          >
-            {!fixing && <Wrench className="h-3.5 w-3.5" />}
-            Fix issues
-          </Button>
-          <Button
-            intent="secondary"
-            onClick={() => void runRemediation('research', researchFindingIds)}
-            loading={researching}
-            disabled={
-              allSubjects
-              || neverRun
-              || researchFindingIds.length === 0
-              || effectiveBusyActions.has('research')
-            }
-          >
-            {!researching && <Search className="h-3.5 w-3.5" />}
-            Research gaps{researchFindingIds.length > 0 ? ` (${researchFindingIds.length})` : ''}
+            {neverRun ? 'Run check' : 'Run again'}
           </Button>
         </div>
       </header>
 
-      {!allSubjects && (
-        <form
-          className="flex items-center gap-2"
-          onKeyDown={blockImeEnterSubmit}
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (effectiveBusyActions.has('research')) return;
-            const t = topicInput.trim();
-            if (!t) return;
-            void startResearch(t, 'manual');
-            setTopicInput('');
-          }}
-        >
-          <Input
-            value={topicInput}
-            onChange={(e) => setTopicInput(e.target.value)}
-            placeholder="Research a topic…"
-            className="max-w-xs"
-          />
-          <Button
-            intent="secondary"
-            type="submit"
-            loading={researching}
-            disabled={effectiveBusyActions.has('research') || !topicInput.trim()}
+      <section
+        aria-label="Health summary"
+        className="grid grid-cols-2 overflow-hidden border-y border-border bg-surface sm:grid-cols-4 lg:grid-cols-[1.2fr_repeat(3,0.8fr)_2fr]"
+      >
+        <div className="px-4 py-3.5">
+          <p className="text-xs font-medium text-foreground-tertiary">Open findings</p>
+          <p className="mt-1 text-2xl font-semibold text-foreground">{total}</p>
+        </div>
+        {(['critical', 'warning', 'info'] as const).map((severity) => (
+          <div key={severity} className="border-l border-border-subtle px-4 py-3.5">
+            <p className="text-xs font-medium capitalize text-foreground-tertiary">{severity}</p>
+            <p className={
+              'mt-1 text-xl font-semibold ' +
+              (severity === 'critical'
+                ? 'text-danger'
+                : severity === 'warning'
+                  ? 'text-warning'
+                  : 'text-foreground')
+            }>
+              {data?.bySeverity[severity] ?? 0}
+            </p>
+          </div>
+        ))}
+        <div className="col-span-2 border-t border-border-subtle px-4 py-3.5 sm:col-span-4 lg:col-span-1 lg:border-l lg:border-t-0">
+          <p className="text-xs font-medium text-foreground-tertiary">Recently verified</p>
+          {recentTerminalCount > 0 ? (
+            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              <span><strong className="text-success">{recentOutcomeSummary.fixed}</strong> fixed</span>
+              <span><strong className="text-danger">{recentOutcomeSummary.failed}</strong> failed</span>
+              <span><strong className="text-foreground-secondary">{recentOutcomeSummary.skipped}</strong> skipped</span>
+            </div>
+          ) : (
+            <p className="mt-1.5 text-xs text-foreground-tertiary">No recent results</p>
+          )}
+        </div>
+      </section>
+
+      <div className="sticky top-0 z-10 -mx-4 mt-6 border-y border-border bg-canvas/95 px-4 py-3 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-2">
+            <ListFilter className="h-3.5 w-3.5 text-foreground-tertiary" aria-hidden />
+            <Select
+              aria-label="Filter findings by type"
+              value={typeFilter ?? ''}
+              onChange={(event) => {
+                setTypeFilter(event.target.value
+                  ? event.target.value as LintFinding['type']
+                  : null);
+              }}
+              className="min-w-[170px]"
+            >
+              <option value="">All finding types</option>
+              {presentTypes.map((type) => (
+                <option key={type} value={type}>{findingTypeLabel(type)}</option>
+              ))}
+            </Select>
+            {typeFilter && (
+              <span className="text-xs text-foreground-tertiary">
+                {visibleFindings.length} of {total}
+              </span>
+            )}
+          </div>
+
+          {!allSubjects && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                intent="ghost"
+                onClick={() => setResearchComposerOpen((current) => !current)}
+                aria-expanded={researchComposerOpen}
+              >
+                <Search className="h-3.5 w-3.5" />
+                Custom research
+                <ChevronDown
+                  className={'h-3.5 w-3.5 transition-transform ' + (researchComposerOpen ? 'rotate-180' : '')}
+                />
+              </Button>
+              <span className="hidden h-5 w-px bg-border lg:block" aria-hidden />
+              <Button
+                intent="outline"
+                onClick={() => void runRemediation('curate', curateFindingIds)}
+                loading={curating}
+                disabled={
+                  neverRun
+                  || curateFindingIds.length === 0
+                  || running
+                  || fixing
+                  || effectiveBusyActions.has('curate')
+                }
+                title="Curate orphaned pages"
+              >
+                {!curating && <Wand2 className="h-3.5 w-3.5" />}
+                Tidy {curateFindingIds.length > 0 && `(${curateFindingIds.length})`}
+              </Button>
+              <Button
+                intent="outline"
+                onClick={() => void runRemediation('fix', fixFindingIds)}
+                loading={fixing}
+                disabled={
+                  neverRun
+                  || fixFindingIds.length === 0
+                  || running
+                  || curating
+                  || effectiveBusyActions.has('fix')
+                }
+                title="Fix deterministic findings"
+              >
+                {!fixing && <Wrench className="h-3.5 w-3.5" />}
+                Fix {fixFindingIds.length > 0 && `(${fixFindingIds.length})`}
+              </Button>
+              <Button
+                intent="outline"
+                onClick={() => void runRemediation('research', researchFindingIds)}
+                loading={researching}
+                disabled={
+                  neverRun
+                  || researchFindingIds.length === 0
+                  || effectiveBusyActions.has('research')
+                }
+                title="Research coverage gaps"
+              >
+                {!researching && <Search className="h-3.5 w-3.5" />}
+                Research {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {!allSubjects && researchComposerOpen && (
+          <form
+            className="mt-3 flex animate-slide-down items-center gap-2 border-t border-border-subtle pt-3"
+            onKeyDown={blockImeEnterSubmit}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (effectiveBusyActions.has('research')) return;
+              const topic = topicInput.trim();
+              if (!topic) return;
+              void startResearch(topic, 'manual');
+              setTopicInput('');
+            }}
           >
-            {!researching && <Search className="h-3.5 w-3.5" />}
-            Research
-          </Button>
-        </form>
-      )}
+            <Input
+              value={topicInput}
+              onChange={(event) => setTopicInput(event.target.value)}
+              placeholder="Topic or question"
+              aria-label="Research topic"
+              className="max-w-md"
+            />
+            <Button
+              intent="secondary"
+              type="submit"
+              loading={researching}
+              disabled={effectiveBusyActions.has('research') || !topicInput.trim()}
+            >
+              {!researching && <Search className="h-3.5 w-3.5" />}
+              Start research
+            </Button>
+          </form>
+        )}
+      </div>
 
-      {researchError && (
-        <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
-          {researchError}
-        </div>
-      )}
-
-      {lintError && (
-        <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
-          {lintError}
-        </div>
-      )}
-
-      {remediationError && (
-        <div className="rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
-          {remediationError}
-        </div>
-      )}
-
-      {!allSubjects && activeJobsHydrationError && (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-danger/40 bg-danger-bg px-3 py-2 text-sm text-danger">
-          <span>Active jobs hydration failed. Actions stay disabled; retrying automatically.</span>
-          <Button
-            intent="secondary"
-            size="sm"
-            loading={activeJobsFetching}
-            onClick={() => void refetchActiveJobs()}
-          >
-            Retry
-          </Button>
-        </div>
-      )}
-
-      {recentTerminalCount > 0 && (
-        <div className={`rounded-md border px-3 py-2 text-sm ${recentBannerClass}`}>
-          Recently verified: {recentOutcomeSummary.fixed} fixed
-          {' · '}{recentOutcomeSummary.failed} failed
-          {' · '}{recentOutcomeSummary.skipped} skipped
-        </div>
-      )}
+      <div className="mt-5 space-y-2">
+        {researchError && (
+          <div className="border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+            {researchError}
+          </div>
+        )}
+        {lintError && (
+          <div className="border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+            {lintError}
+          </div>
+        )}
+        {remediationError && (
+          <div className="border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+            {remediationError}
+          </div>
+        )}
+        {!allSubjects && activeJobsHydrationError && (
+          <div className="flex items-center justify-between gap-3 border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
+            <span>Could not restore active jobs. Actions remain disabled while retrying.</span>
+            <Button
+              intent="secondary"
+              size="sm"
+              loading={activeJobsFetching}
+              onClick={() => void refetchActiveJobs()}
+            >
+              Retry
+            </Button>
+          </div>
+        )}
+        {activeMessages.length > 0 && (
+          <div className="flex items-start gap-2 border-l-2 border-accent bg-accent-subtle px-3 py-2 text-sm text-accent-strong">
+            <Activity className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-pulse" aria-hidden />
+            <div>{activeMessages.map((message) => <p key={message}>{message}</p>)}</div>
+          </div>
+        )}
+        {semanticErrored && (
+          <div className="border-l-2 border-warning bg-warning-bg px-3 py-2 text-sm text-warning">
+            Semantic checks did not complete. Only deterministic findings are shown.
+          </div>
+        )}
+        {fixSummary && (
+          <div className="border-l-2 border-accent bg-accent-subtle px-3 py-2 text-sm text-accent-strong">
+            Fixed {fixSummary.fixed} · skipped {fixSummary.skipped} for review
+            {fixSummary.failed > 0 ? ` · failed ${fixSummary.failed}` : ''}. Running a follow-up check.
+          </div>
+        )}
+        {curatePostcondition && (
+          <PostconditionBanner label="Tidy structure" report={curatePostcondition} />
+        )}
+        {fixPostcondition && (
+          <PostconditionBanner label="Fix issues" report={fixPostcondition} />
+        )}
+      </div>
 
       {candidateResult && (
         <ResearchCandidatesDialog
@@ -1094,156 +1212,120 @@ export function HealthView() {
         />
       )}
 
-      {!allSubjects && (
-        <ResearchBacklogSection
-          researchBusy={effectiveBusyActions.has('research')}
-          onResearch={(topic) => startResearch(topic, 'backlog')}
-        />
-      )}
-
-      {running && (
-        <p className="text-sm text-foreground-secondary">{latestMessage || 'Running health check…'}</p>
-      )}
-
-      {researching && (
-        <p className="text-sm text-foreground-secondary">Researching…</p>
-      )}
-
-      {curating && (
-        <p className="text-sm text-foreground-secondary">{curateMessage || 'Curating structure…'}</p>
-      )}
-
-      {fixing && (
-        <p className="text-sm text-foreground-secondary">{fixMessage || 'Fixing issues…'}</p>
-      )}
-
-      {semanticErrored && (
-        <div className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning">
-          Semantic checks did not complete — only deterministic findings are shown.
-        </div>
-      )}
-
-      {fixSummary && (
-        <div className="rounded-md border border-accent/40 bg-accent-subtle px-3 py-2 text-sm text-accent-strong">
-          Fixed {fixSummary.fixed} · skipped {fixSummary.skipped} (needs manual review)
-          {fixSummary.failed > 0 ? ` · failed ${fixSummary.failed}` : ''}. Re-running health check…
-        </div>
-      )}
-
-      {curatePostcondition && (
-        <PostconditionBanner label="Tidy structure" report={curatePostcondition} />
-      )}
-
-      {fixPostcondition && (
-        <PostconditionBanner label="Fix issues" report={fixPostcondition} />
-      )}
-
-      {isLoading ? (
-        <div className="space-y-2">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-12 rounded-md bg-subtle animate-pulse" />
-          ))}
-        </div>
-      ) : neverRun ? (
-        <div className="rounded-md border border-border bg-canvas px-6 py-10 text-center">
-          <p className="text-sm text-foreground-secondary">
-            Never run a health check{allSubjects ? '' : ` for "${subjectSlug}"`} yet.
-          </p>
-          <Button intent="primary" className="mt-3" onClick={() => void runLint()} loading={running}>
-            Run now
-          </Button>
-        </div>
-      ) : total === 0 ? (
-        <p className="text-sm text-foreground-tertiary italic">No findings — looks healthy. ✨</p>
-      ) : (
-        <div className="space-y-4">
-          {/* 概要计数条 */}
-          <div className="flex items-center gap-3">
-            {(['critical', 'warning', 'info'] as const).map((sev) => (
-              <span key={sev} className="inline-flex items-center gap-1.5 text-sm text-foreground-secondary">
-                <Tag tone={SEVERITY_TONE[sev]} size="sm">
-                  {data?.bySeverity[sev] ?? 0}
-                </Tag>
-                {sev}
-              </span>
+      <div className="mt-6">
+        {isLoading ? (
+          <div className="overflow-hidden rounded-md border border-border bg-surface">
+            {[1, 2, 3].map((item) => (
+              <div key={item} className="flex gap-3 border-b border-border-subtle px-4 py-4 last:border-b-0">
+                <div className="h-8 w-8 animate-pulse rounded-md bg-subtle" />
+                <div className="flex-1 space-y-2 py-0.5">
+                  <div className="h-3 w-40 animate-pulse rounded-sm bg-subtle" />
+                  <div className="h-3 w-4/5 animate-pulse rounded-sm bg-subtle" />
+                </div>
+              </div>
             ))}
           </div>
-
-          {/* type 过滤 chips */}
-          {presentTypes.length > 1 && (
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setTypeFilter(null)}
-                className={
-                  'h-6 px-2 rounded-sm text-xs transition-colors ' +
-                  (typeFilter === null ? 'bg-accent-subtle text-accent-strong' : 'bg-subtle text-foreground-secondary hover:text-foreground')
-                }
-              >
-                All
-              </button>
-              {presentTypes.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTypeFilter((cur) => (cur === t ? null : t))}
-                  className={
-                    'h-6 px-2 rounded-sm text-xs transition-colors ' +
-                    (typeFilter === t ? 'bg-accent-subtle text-accent-strong' : 'bg-subtle text-foreground-secondary hover:text-foreground')
-                  }
-                >
-                  {t}
-                </button>
-              ))}
+        ) : neverRun ? (
+          <div className="border-y border-border py-14 text-center">
+            <Activity className="mx-auto h-6 w-6 text-foreground-tertiary" aria-hidden />
+            <p className="mt-3 text-sm font-medium text-foreground">No health check yet</p>
+            <p className="mt-1 text-sm text-foreground-secondary">
+              Run a check to inspect links, sources, coverage, and structure.
+            </p>
+            <Button intent="primary" className="mt-4" onClick={() => void runLint()} loading={running}>
+              Run check
+            </Button>
+          </div>
+        ) : total === 0 ? (
+          <div className="border-y border-border py-14 text-center">
+            <p className="text-sm font-medium text-foreground">No open findings</p>
+            <p className="mt-1 text-sm text-foreground-secondary">This scope passed the latest health check.</p>
+          </div>
+        ) : (
+          <div>
+            <div className="mb-3 flex items-end justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">Open findings</h2>
+                <p className="mt-0.5 text-xs text-foreground-tertiary">
+                  Ordered by severity, then finding type.
+                </p>
+              </div>
+              <span className="text-xs text-foreground-tertiary">
+                Showing {visibleFindings.length} of {total}
+              </span>
             </div>
-          )}
 
-          {/* 分组列表 */}
-          {groups.map((group) =>
-            group.findings.length === 0 ? null : (
-              <section key={group.severity}>
-                <h2 className="text-xs font-medium uppercase tracking-wider text-foreground-tertiary px-3 mb-1">
-                  {group.severity} ({group.findings.length})
-                </h2>
-                <div className="space-y-0.5">
-                  {group.findings.map((finding) => {
-                    const plan = data?.remediations[finding.id];
-                    const actingActions = new Set(
-                      (Object.entries(actingFindingByAction) as Array<
-                        [ExecutableRemediationAction, string]
-                      >)
-                        .filter(([, findingId]) => findingId === finding.id)
-                        .map(([action]) => action),
-                    );
-                    const deleting = finding.sourceId
-                      ? deletingSourceIds.has(finding.sourceId)
-                      : false;
-                    return (
-                      <FindingRow
-                        key={finding.id}
-                        finding={finding}
-                        plan={plan}
-                        showSubject={allSubjects}
-                        acting={actingActions}
-                        deleting={deleting}
-                        busyActions={effectiveBusyActions}
-                        onAction={!allSubjects ? (action) => {
-                          if (action.type !== 'review-source') {
-                            void runRemediation(action.type, [finding.id], finding.id);
-                          }
-                        } : undefined}
-                        onDeleteSource={
-                          finding.type === 'orphan-source' && finding.sourceId && !allSubjects
-                            ? () => deleteSource(finding.sourceId!)
-                            : undefined
-                        }
-                      />
-                    );
-                  })}
-                </div>
-              </section>
-            ),
-          )}
+            <div className="space-y-6">
+              {groups.map((group) =>
+                group.findings.length === 0 ? null : (
+                  <section key={group.severity} aria-labelledby={`health-${group.severity}`}>
+                    <div className="mb-2 flex items-center gap-2 px-1">
+                      <span className={
+                        'h-1.5 w-1.5 rounded-full ' +
+                        (group.severity === 'critical'
+                          ? 'bg-danger'
+                          : group.severity === 'warning'
+                            ? 'bg-warning'
+                            : 'bg-foreground-tertiary')
+                      } />
+                      <h3
+                        id={`health-${group.severity}`}
+                        className="text-xs font-semibold capitalize text-foreground-secondary"
+                      >
+                        {group.severity}
+                      </h3>
+                      <span className="text-xs text-foreground-tertiary">{group.findings.length}</span>
+                    </div>
+                    <div className="divide-y divide-border-subtle overflow-hidden rounded-md border border-border bg-surface shadow-xs">
+                      {group.findings.map((finding) => {
+                        const plan = data?.remediations[finding.id];
+                        const actingActions = new Set(
+                          (Object.entries(actingFindingByAction) as Array<
+                            [ExecutableRemediationAction, string]
+                          >)
+                            .filter(([, findingId]) => findingId === finding.id)
+                            .map(([action]) => action),
+                        );
+                        const deleting = finding.sourceId
+                          ? deletingSourceIds.has(finding.sourceId)
+                          : false;
+                        return (
+                          <FindingRow
+                            key={finding.id}
+                            finding={finding}
+                            plan={plan}
+                            showSubject={allSubjects}
+                            acting={actingActions}
+                            deleting={deleting}
+                            busyActions={effectiveBusyActions}
+                            onAction={!allSubjects ? (action) => {
+                              if (action.type !== 'review-source') {
+                                void runRemediation(action.type, [finding.id], finding.id);
+                              }
+                            } : undefined}
+                            onDeleteSource={
+                              finding.type === 'orphan-source' && finding.sourceId && !allSubjects
+                                ? () => deleteSource(finding.sourceId!)
+                                : undefined
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                  </section>
+                ),
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {!allSubjects && (
+        <div className="mt-10 border-t border-border pt-7">
+          <ResearchBacklogSection
+            researchBusy={effectiveBusyActions.has('research')}
+            onResearch={(topic) => startResearch(topic, 'backlog')}
+          />
         </div>
       )}
     </div>
