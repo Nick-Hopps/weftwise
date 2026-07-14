@@ -2,16 +2,24 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Activity, RefreshCw, Search, Wand2, Wrench } from 'lucide-react';
+import {
+  Activity,
+  ChevronDown,
+  ListFilter,
+  RefreshCw,
+  Search,
+  Wand2,
+  Wrench,
+} from 'lucide-react';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { useLintSummary } from '@/hooks/use-lint-summary';
 import { Button } from '@/components/ui/button';
-import { Tag } from '@/components/ui/tag';
 import { Input } from '@/components/ui/input';
-import { groupBySeverity, SEVERITY_TONE } from './lint-findings';
-import { FindingRow } from './finding-row';
+import { Select } from '@/components/ui/select';
+import { groupBySeverity } from './lint-findings';
+import { FindingRow, findingTypeLabel } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
 import { ResearchBacklogSection } from './research-backlog-section';
 import { blockImeEnterSubmit } from '@/lib/keyboard';
@@ -36,7 +44,6 @@ import {
   persistedBusyActions,
   readResearchRun,
   readResearchRunId,
-  recentOutcomeBannerTone,
   recentOutcomeCounts,
   researchApprovalBody,
   selectRecoverableHealthJobs,
@@ -446,6 +453,7 @@ export function HealthView() {
   const [researchError, setResearchError] = useState<string | null>(null);
   const [candidateResult, setCandidateResult] = useState<CandidateResult | null>(null);
   const [topicInput, setTopicInput] = useState('');
+  const [researchComposerOpen, setResearchComposerOpen] = useState(false);
   const [researchActing, setResearchActing] = useState(false);
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
