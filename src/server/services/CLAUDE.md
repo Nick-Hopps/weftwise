@@ -295,6 +295,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-14 | Citation 标题解析按复合身份隔离：`extractCitationsFromAnswer` 的 title candidate key 加入目标 Subject，多个 Subject 存在同名标题时仍能解析各自已读页面，不再因全局歧义丢失全部引用 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：Query 明确 move/rename-slug 意图后只生成 `wiki.move` PendingAction；批准重算 plan 并复用页面 Saga/finalizer，迁移 alias、引用、source sidecar 与全部 slug 派生缓存；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | Workflow 控制 Phase 3C：新增 active Subject 脱敏 status、re-enrich/research/cancel 计划；Query 只生成 PendingAction，start/cancel 与 action applied 原子收口，取消复用事件与 Research provenance 对账；无新增 LLM task，示例配置不变 |
 | 2026-07-14 | History 工具 Phase 3B：新增 `history-tools.ts` 复用 operations/git/revert/Saga；Query 注入 list/diff 与回滚预览，PendingAction 支持 `history-revert` 的 fresh/stale/apply/恢复最终化；无新增 LLM task，示例配置不变 |

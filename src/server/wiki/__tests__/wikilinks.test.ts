@@ -6,11 +6,10 @@ import {
   type ExtractedLink,
 } from '../wikilinks';
 
-// 实现疑点（仅记录，不修改被测代码）：
-// 1. titleResolver 对带 `subject:` 前缀的跨主题链接同样会被调用（传入的是去前缀后的
-//    rawTitle）。这意味着"本 subject 的 title→slug 映射"可能被错误地套用到其他
-//    subject 的页面标题上。本文件按当前实际行为断言。
-// 2. `target = titleResolver?.(rawTitle) ?? normalizeSlug(rawTitle)` 使用 `??`，
+// 实现注意：
+// 1. titleResolver 同时接收 rawTitle 与解析后的 targetSubjectSlug；生产 resolver 必须
+//    按 Subject 隔离映射，避免跨主题重名页面串线。
+// 2. `target = titleResolver?.(rawTitle, targetSubjectSlug) ?? normalizeSlug(rawTitle)` 使用 `??`，
 //    若 resolver 返回空字符串 ''，不会回退到 normalizeSlug，而是整条链接被丢弃
 //    （`if (target === '') continue`）。resolver 想表达"未命中"必须返回 undefined。
 // 3. maskCodeBlocks 用等长空格替换 code fence / 行内 code，position 偏移量不受影响；
@@ -118,18 +117,35 @@ describe('extractWikiLinks — titleResolver', () => {
     expect(links).toHaveLength(0);
   });
 
-  it('当前行为：跨主题链接也会调用 titleResolver（见文件顶部疑点 1）', () => {
-    const seen: string[] = [];
-    const [link] = extractWikiLinks('[[other:Remote Title]]', {
+  it('resolver 接收目标 Subject，使当前与跨主题同名标题分别解析', () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const links = extractWikiLinks('[[Shared Title]] / [[other:Shared Title]]', {
       currentSubjectSlug: 'general',
-      titleResolver: (t) => {
-        seen.push(t);
-        return 'local-mapped';
+      titleResolver: (title, targetSubjectSlug) => {
+        seen.push([title, targetSubjectSlug]);
+        return targetSubjectSlug === 'general' ? 'general-shared' : 'other-shared';
       },
     });
-    expect(seen).toEqual(['Remote Title']);
-    expect(link.target).toBe('local-mapped');
-    expect(link.targetSubjectSlug).toBe('other');
+    expect(seen).toEqual([
+      ['Shared Title', 'general'],
+      ['Shared Title', 'other'],
+    ]);
+    expect(links.map((link) => [link.targetSubjectSlug, link.target])).toEqual([
+      ['general', 'general-shared'],
+      ['other', 'other-shared'],
+    ]);
+  });
+
+  it('resolver 可忽略标题大小写并返回 canonical slug', () => {
+    const [link] = extractWikiLinks('[[wAl MoDe]]', {
+      currentSubjectSlug: 'general',
+      titleResolver: (title, subjectSlug) => (
+        subjectSlug === 'general' && title.toLowerCase() === 'wal mode'
+          ? 'sqlite-wal'
+          : undefined
+      ),
+    });
+    expect(link.target).toBe('sqlite-wal');
   });
 
   it('兼容旧签名 (md, resolver)', () => {
@@ -223,6 +239,22 @@ describe('resolveWikiLinkTarget', () => {
     expect(resolveWikiLinkTarget('My Note: draft', 'general')).toEqual({
       subjectSlug: 'general',
       slug: 'my-note-draft',
+    });
+  });
+
+  it('大小写不同的同一标题归一到相同 slug', () => {
+    expect(resolveWikiLinkTarget('WAL Mode', 'general'))
+      .toEqual(resolveWikiLinkTarget('wAl MoDe', 'general'));
+  });
+
+  it('当前与跨 Subject 的同名页面保留不同复合身份', () => {
+    expect(resolveWikiLinkTarget('Shared Title', 'general')).toEqual({
+      subjectSlug: 'general',
+      slug: 'shared-title',
+    });
+    expect(resolveWikiLinkTarget('other:Shared Title', 'general')).toEqual({
+      subjectSlug: 'other',
+      slug: 'shared-title',
     });
   });
 });

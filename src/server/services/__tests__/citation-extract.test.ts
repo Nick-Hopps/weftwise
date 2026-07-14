@@ -100,6 +100,35 @@ describe('extractCitationsFromAnswer', () => {
     })]);
   });
 
+  it('多个 Subject 存在同名标题时按显式 Subject 解析各自 canonical slug', () => {
+    const accessed = accessedWith({
+      'general-shared': { title: 'Shared Title', body: 'General 正文。' },
+    });
+    accessed.crossBodies.set('notes\0notes-shared', {
+      subjectSlug: 'notes',
+      slug: 'notes-shared',
+      title: 'Shared Title',
+      body: 'Notes 正文。',
+    });
+    accessed.crossBodies.set('archive\0archive-shared', {
+      subjectSlug: 'archive',
+      slug: 'archive-shared',
+      title: 'Shared Title',
+      body: 'Archive 正文。',
+    });
+
+    const out = extractCitationsFromAnswer(
+      '本主题 [[Shared Title]]；笔记 [[notes:Shared Title]]；归档 [[archive:Shared Title]]。',
+      accessed,
+      'general',
+    );
+    expect(out.map((citation) => [citation.subjectSlug, citation.pageSlug])).toEqual([
+      [undefined, 'general-shared'],
+      ['notes', 'notes-shared'],
+      ['archive', 'archive-shared'],
+    ]);
+  });
+
   it('无任何 wikilink → 空数组', () => {
     const accessed = accessedWith({ sqlite: { title: 'SQLite', body } });
     expect(extractCitationsFromAnswer('没有引用的回答。', accessed, 'general')).toEqual([]);

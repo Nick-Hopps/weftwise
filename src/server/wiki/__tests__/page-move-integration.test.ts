@@ -131,4 +131,41 @@ describe('wiki.move Saga integration', () => {
       ).get(subject.id)).toEqual({ n: 1 });
     }
   });
+
+  it('重建索引时按目标 Subject 隔离同名标题', async () => {
+    const subjectsRepo = await import('../../db/repos/subjects-repo');
+    const pagesRepo = await import('../../db/repos/pages-repo');
+    const { writeVaultFiles } = await import('../wiki-store');
+    const { rebuildPageIndex } = await import('../indexer');
+
+    const suffix = randomUUID().slice(0, 8);
+    const current = subjectsRepo.create({ slug: `current-${suffix}`, name: 'Current' });
+    const other = subjectsRepo.create({ slug: `other-${suffix}`, name: 'Other' });
+    writeVaultFiles([
+      {
+        path: `wiki/${current.slug}/current-shared.md`,
+        content: page('Shared Title', 'Current target.'),
+      },
+      {
+        path: `wiki/${other.slug}/other-shared.md`,
+        content: page('Shared Title', 'Other target.'),
+      },
+      {
+        path: `wiki/${current.slug}/source.md`,
+        content: page(
+          'Source',
+          `Local [[Shared Title]] and remote [[${other.slug}:Shared Title]].`,
+        ),
+      },
+    ]);
+
+    rebuildPageIndex();
+
+    expect(pagesRepo.getBacklinks(current.id, 'current-shared')).toEqual([
+      expect.objectContaining({ subjectId: current.id, slug: 'source' }),
+    ]);
+    expect(pagesRepo.getBacklinks(other.id, 'other-shared')).toEqual([
+      expect.objectContaining({ subjectId: current.id, slug: 'source' }),
+    ]);
+  });
 });

@@ -125,23 +125,30 @@ export function extractCitationsFromAnswer(
 ): WikiCitation[] {
   // 标题→slug 兜底解析：模型写 [[Title]] 也能落到 read 过的页
   const titleCandidates = new Map<string, Set<string>>();
-  const addTitleCandidate = (title: string, slug: string) => {
-    const normalized = normalizeSlug(title);
-    const candidates = titleCandidates.get(normalized) ?? new Set<string>();
+  const titleCandidateKey = (candidateSubjectSlug: string, title: string) => (
+    `${candidateSubjectSlug}\0${normalizeSlug(title)}`
+  );
+  const addTitleCandidate = (candidateSubjectSlug: string, title: string, slug: string) => {
+    const key = titleCandidateKey(candidateSubjectSlug, title);
+    const candidates = titleCandidates.get(key) ?? new Set<string>();
     candidates.add(slug);
-    titleCandidates.set(normalized, candidates);
+    titleCandidates.set(key, candidates);
   };
-  for (const [slug, { title }] of accessed.bodies) addTitleCandidate(title, slug);
+  for (const [slug, { title }] of accessed.bodies) addTitleCandidate(subjectSlug, title, slug);
   for (const [slug, { title }] of accessed.meta) {
-    addTitleCandidate(title, slug);
+    addTitleCandidate(subjectSlug, title, slug);
   }
-  for (const page of accessed.crossBodies.values()) addTitleCandidate(page.title, page.slug);
-  for (const page of accessed.crossMeta.values()) addTitleCandidate(page.title, page.slug);
+  for (const page of accessed.crossBodies.values()) {
+    addTitleCandidate(page.subjectSlug, page.title, page.slug);
+  }
+  for (const page of accessed.crossMeta.values()) {
+    addTitleCandidate(page.subjectSlug, page.title, page.slug);
+  }
 
   const links = extractWikiLinks(answer, {
     currentSubjectSlug: subjectSlug,
-    titleResolver: (title) => {
-      const candidates = titleCandidates.get(normalizeSlug(title));
+    titleResolver: (title, targetSubjectSlug = subjectSlug) => {
+      const candidates = titleCandidates.get(titleCandidateKey(targetSubjectSlug, title));
       return candidates?.size === 1 ? [...candidates][0] : undefined;
     },
   });

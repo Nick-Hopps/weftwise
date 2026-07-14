@@ -84,7 +84,11 @@ export async function executePageMerge(
   );
 
   const titleMap = pagesRepo.getTitleToSlugMap(subject.id);
-  const resolver: TitleResolver = (t) => titleMap.get(t) ?? titleMap.get(t.toLowerCase());
+  const resolver: TitleResolver = (title, targetSubjectSlug = subject.slug) => (
+    targetSubjectSlug === subject.slug
+      ? titleMap.get(title) ?? titleMap.get(title.toLowerCase())
+      : undefined
+  );
   const targetTitle = targetDoc.frontmatter.title;
 
   mergedContent = repointLinksToPage(mergedContent, sourceSlug, targetTitle, subject.slug, resolver);
@@ -147,7 +151,11 @@ export async function executePageSplit(
   const primary = planned.find((p) => p.isPrimary) ?? planned[0];
 
   const titleMap = pagesRepo.getTitleToSlugMap(subject.id);
-  const resolver: TitleResolver = (t) => titleMap.get(t) ?? titleMap.get(t.toLowerCase());
+  const resolver: TitleResolver = (title, targetSubjectSlug = subject.slug) => (
+    targetSubjectSlug === subject.slug
+      ? titleMap.get(title) ?? titleMap.get(title.toLowerCase())
+      : undefined
+  );
   const now = new Date().toISOString();
 
   const entries: ChangesetEntry[] = [];
