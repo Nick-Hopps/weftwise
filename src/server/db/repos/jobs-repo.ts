@@ -263,9 +263,10 @@ export type CancelResult = 'cancelled' | 'already-terminal' | 'not-found';
 /**
  * 取消 / 终结任务（用户主动终止）。原子事务内：
  *  - 不存在 → 'not-found'；已 completed → 'already-terminal'（成功结果不动）；
- *  - 已 failed → **终结**：保留原 result_json.error + 标 cancelled=true + 置 cancel_requested=1
+ *  - 已 failed 且未取消 → **终结**：保留原 result_json.error + 标 cancelled=true + 置 cancel_requested=1
  *    + 删该 job 全部 ingest 检查点（status 仍 failed，但检查点已清 → 不再可 resume；
  *    配合 retry 路由对 cancelled 的拦截，彻底放弃这次报错的摄取）；
+ *  - 已 failed 且已取消 → 'already-terminal'，避免重复发布取消事件；
  *  - pending / running → 落终态 failed + 置 cancel_requested=1 + 清租约/心跳
  *    + 写 cancelled 标记结果 + 删检查点（防断点续传"死而复生"）。
  * 终态复用 'failed'（避免新增 status 字面量引发 SSE/前端终态判定的静默遗漏），
@@ -282,6 +283,7 @@ export function requestCancel(jobId: string): CancelResult {
     if (row.status === 'completed') return 'already-terminal';
 
     if (row.status === 'failed') {
+      if (isCancelledResult(row.result_json)) return 'already-terminal';
       // 终结一个已失败/报错的 ingest：清检查点使其不再可 resume，标 cancelled（保留原错误供查阅）。
       let merged: Record<string, unknown> = { cancelled: true };
       try {
@@ -551,43 +553,47 @@ export function pruneJobEvents(cutoffIso: string): number {
   return result.changes;
 }
 
+/**
+ * 按 SQLite rowid（实际插入顺序）读取事件。
+ * created_at 只有毫秒精度，随机 UUID 不能作为同毫秒事件的可靠次序或游标。
+ */
 export function getJobEvents(jobId: string, afterId?: string): JobEvent[] {
-  if (afterId) {
-    const sqlite = getRawDb();
-    const rows = sqlite.prepare(`
-      SELECT je.*
-      FROM job_events je
-      WHERE je.job_id = ?
-        AND (je.created_at, je.id) > (
-          SELECT created_at, id FROM job_events WHERE id = ?
-        )
-      ORDER BY je.created_at ASC, je.id ASC
-    `).all(jobId, afterId) as Array<{
-      id: string; job_id: string; type: string; message: string;
-      data_json: string | null; created_at: string;
-    }>;
+  const sqlite = getRawDb();
+  type JobEventRow = {
+    id: string; job_id: string; type: string; message: string;
+    data_json: string | null; created_at: string;
+  };
+  const mapRow = (row: JobEventRow): JobEvent => ({
+    id: row.id,
+    jobId: row.job_id,
+    type: row.type,
+    message: row.message,
+    dataJson: row.data_json ?? null,
+    createdAt: row.created_at,
+  });
 
-    if (rows.length > 0 || sqlite.prepare(`SELECT 1 FROM job_events WHERE id = ?`).get(afterId)) {
-      return rows.map((row) => ({
-        id: row.id,
-        jobId: row.job_id,
-        type: row.type,
-        message: row.message,
-        dataJson: row.data_json ?? null,
-        createdAt: row.created_at,
-      }));
+  if (afterId) {
+    const cursor = sqlite.prepare(`
+      SELECT rowid AS row_id FROM job_events WHERE id = ? AND job_id = ?
+    `).get(afterId, jobId) as { row_id: number } | undefined;
+    if (cursor) {
+      const rows = sqlite.prepare(`
+        SELECT id, job_id, type, message, data_json, created_at
+        FROM job_events
+        WHERE job_id = ? AND rowid > ?
+        ORDER BY rowid ASC
+      `).all(jobId, cursor.row_id) as JobEventRow[];
+      return rows.map(mapRow);
     }
   }
 
-  const db = getDb();
-  const rows = db
-    .select()
-    .from(jobEvents)
-    .where(eq(jobEvents.jobId, jobId))
-    .orderBy(asc(jobEvents.createdAt), asc(jobEvents.id))
-    .all();
-
-  return rows.map(rowToJobEvent);
+  const rows = sqlite.prepare(`
+    SELECT id, job_id, type, message, data_json, created_at
+    FROM job_events
+    WHERE job_id = ?
+    ORDER BY rowid ASC
+  `).all(jobId) as JobEventRow[];
+  return rows.map(mapRow);
 }
 
 type RawDb = ReturnType<typeof getRawDb>;
@@ -797,16 +803,5 @@ function rowToJob(row: typeof jobs.$inferSelect): Job {
     leaseExpiresAt: row.leaseExpiresAt ?? null,
     heartbeatAt: row.heartbeatAt ?? null,
     attemptCount: row.attemptCount ?? 0,
-  };
-}
-
-function rowToJobEvent(row: typeof jobEvents.$inferSelect): JobEvent {
-  return {
-    id: row.id,
-    jobId: row.jobId,
-    type: row.type,
-    message: row.message,
-    dataJson: row.dataJson ?? null,
-    createdAt: row.createdAt,
   };
 }
