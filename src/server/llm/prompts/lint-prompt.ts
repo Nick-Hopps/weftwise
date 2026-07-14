@@ -17,6 +17,19 @@ export const LintResultSchema = z.object({
       pageSlug: z
         .string()
         .describe('Slug of the page where the issue was detected'),
+      targetSlug: z
+        .string()
+        .nullable()
+        .describe(
+          'Canonical slug of the linked or missing topic for missing-crossref and coverage-gap; null for contradictions',
+        ),
+      evidence: z
+        .array(z.object({
+          pageSlug: z.string().describe('Slug of the page containing the quote'),
+          quote: z.string().min(1).describe('Exact, verbatim quote copied from that page'),
+        }))
+        .min(1)
+        .describe('Verbatim page evidence that can be checked against the supplied content'),
       description: z
         .string()
         .describe(
@@ -51,23 +64,29 @@ Carefully review the provided wiki pages and identify quality issues. Focus on t
   - Conflicting definitions of the same term
   - One page says X is true; another page says X is false
 - Severity: critical if the contradiction could mislead the reader; warning for minor discrepancies.
-- Always quote BOTH conflicting statements in the description and name both page slugs.
+- Return at least two evidence entries from different pages. Each quote must be copied verbatim.
 
 ### 2. Missing cross-references
 - If a page mentions a concept, person, tool, or topic that has its own wiki page in **the same subject** but does NOT use a [[wikilink]], flag it.
 - Do not flag concepts whose dedicated page lives in a different subject — cross-subject linkage is the user's call.
 - Severity: warning for important concepts; info for peripheral mentions.
+- Set targetSlug to the existing target page slug and provide a verbatim quote from pageSlug.
 
 ### 3. Coverage gaps
 - If multiple pages in the same subject reference a concept that clearly deserves its own page but none exists, flag it.
 - Severity: warning for frequently referenced concepts; info for minor ones.
+- Set targetSlug to the proposed missing page slug and provide verbatim evidence from at least two different pages.
 
 ## Subject scoping
 - The pages provided in a single batch all belong to the same subject. Compare claims only within this batch.
 - Do NOT raise findings about pages or subjects not shown in the batch.
 
 ## Output rules
-- Be thorough: it is better to flag a false positive than to miss a real issue.
+- Precision is mandatory. Omit any issue that you cannot prove from exact page text.
+- Every finding must include evidence with an exact, verbatim quote from each named page.
+- Use targetSlug for missing-crossref and coverage-gap; use null for contradictions.
+- Never report that a link is missing when the source already contains a wikilink to the target.
+- Never report a coverage gap when a page for targetSlug already exists.
 - Contradictions are the highest priority. Spend most effort here.
 - Do not flag stylistic preferences (e.g., heading capitalisation) — only semantic issues.
 - If there are no issues, return an empty findings array.`;

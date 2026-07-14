@@ -88,6 +88,8 @@ worker-entry.ts
 扫 pages + links → 调 LLM 产出 `LintFinding[]`，补 subject 上下文与稳定 ID 后写回 `result_json` 供前端展示。九类 finding：
 `broken-link` / `orphan` / `missing-frontmatter` / `stale-source` / `contradiction` / `missing-crossref` / `coverage-gap` / `orphan-source` / `thin-page`（见 `contracts.ts`）。
 
+语义阶段的模型输出必须携带 `targetSlug + evidence[{ pageSlug, quote }]`，并由 `lint-semantic-validation.ts` 对当前 vault 做第二次事实校验：逐条 quote 必须是页面原文字面片段；missing-crossref 的 source/target 必须存在且当前确实没有同 Subject wikilink；coverage-gap 的目标页必须不存在且至少有两个独立证据页；contradiction 必须有两个不同页面的精确引文。无法证明的模型输出直接丢弃。调用点固定 `temperature: 0` 降低同输入漂移，但真实性只由上述服务端校验决定。
+
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
 `stale-source` 的缺失/哈希变化规则统一由 `sources/source-staleness.ts::isSourceStale` 提供，lint 与 `wiki.inspect` 共用，避免两份判定漂移。
@@ -96,7 +98,7 @@ worker-entry.ts
 
 ### Health remediation Phase 2A — identity、router 与状态闭环
 
-**稳定身份（`finding-identity.ts`）**：`findingId()` 对 `lint-finding:v1 / subjectId / type / pageSlug / sourceId|sourceFilename / 规范化 description` 的 NUL 分隔 tuple 做 SHA-256，产出 64 位小写 hex；description 先做 NFKC、换行统一、空白折叠与 trim。`identifyFindings()` 按计算 ID 去重并保留首次顺序。`lint-service` 写新快照和 `lint-latest::selectLatestFindings()` 读取新旧快照都重算同一身份，不信任持久化 JSON 内的 ID，也不依赖 findings 数组位置。
+**稳定身份（`finding-identity.ts`）**：确定性 finding 与缺少新字段的历史快照继续使用 `lint-finding:v1 / subjectId / type / pageSlug / sourceId|sourceFilename / 规范化 description`；经验证的新语义 finding 使用 `lint-finding:v2`：missing-crossref 由 source+target、coverage-gap 由 target、contradiction 由排序后的 `pageSlug+quote` 证据确定，不再因 description 改写产生新 ID。tuple 做 SHA-256 后产出 64 位小写 hex。`identifyFindings()` 按计算 ID 去重并保留首次顺序；新旧快照读取都重算身份，不信任持久化 JSON 内的 ID。
 
 **九类纯路由（`remediation-router.ts::routeFinding`）**：router 不读 DB、不入队、不写 Vault，只返回服务端 `RemediationPlan`；新增 finding type 会在穷尽 switch 的 `assertNever` 处暴露遗漏。
 
@@ -290,6 +292,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Health 修复收敛：语义 Lint 增加 target/evidence 结构化契约、vault 原文与 wikilink 真实性过滤、调用点 temperature=0；语义 finding identity 升级 v2 并保留历史 v1 fallback，避免全库复检因假阳性与 description 漂移不断制造“新问题” |
 | 2026-07-14 | Saga/Worker 失败边界：真实 SQLite 集成测试锁定业务事件 → failed 状态 → job:failed，并验证 CAS/fencing 未命中不发布虚假终态事件；Services 编排测试清单收口 |
 | 2026-07-14 | Query 编排边界：非流式工具失败原样抛出且不做 citation/coverage；流式 error part 统一抛给 Route 单点收口，失败请求不再伪装成空答案成功或错误记录 coverage gap；正常空流 fallback 行为保持 |
 | 2026-07-14 | Citation 标题解析按复合身份隔离：`extractCitationsFromAnswer` 的 title candidate key 加入目标 Subject，多个 Subject 存在同名标题时仍能解析各自已读页面，不再因全局歧义丢失全部引用 |
