@@ -216,20 +216,11 @@ export function DashboardIngestHero() {
 
   // ── Idle launcher ─────────────────────────────────────────────────────────────
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => router.push('/ingest')}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          router.push('/ingest');
-        }
-      }}
-      aria-label="Ingest a source"
+    <section
+      aria-labelledby="dashboard-ingest-title"
       className={cn(
-        'group relative grid cursor-pointer items-center gap-6 overflow-hidden rounded-lg border-[1.5px] border-dashed border-border-strong bg-surface p-6 shadow-sm',
-        'transition-colors duration-fast ease-standard hover:border-accent hover:bg-accent/[0.04]',
+        'relative grid items-center gap-7 overflow-hidden rounded-lg border border-border bg-surface p-5 shadow-xs sm:p-7',
+        'transition-colors duration-fast ease-standard hover:border-border-strong',
         'md:grid-cols-[minmax(0,1fr)_320px]',
       )}
     >
@@ -238,10 +229,7 @@ export function DashboardIngestHero() {
         type="file"
         accept={ACCEPT}
         className="sr-only"
-        // The programmatic `fileRef.current.click()` dispatches a click that
-        // would otherwise bubble to the card's onClick and navigate to /ingest
-        // before a file is even picked. Stop it here (the file dialog still
-        // opens — that's the input's default action, not propagation).
+        // 阻止程序触发的 input click 冒泡到周边交互区域；文件选择仍走原生默认行为。
         onClick={(e) => e.stopPropagation()}
         onChange={(e) => {
           const file = e.target.files?.[0];
@@ -251,7 +239,7 @@ export function DashboardIngestHero() {
 
       {/* invitation */}
       <div className="flex min-w-0 flex-col gap-3.5">
-        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-accent-strong">
+        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-normal text-accent-strong">
           <Sparkles className="h-3 w-3" /> Start here
         </span>
         <div className="flex items-center gap-3.5">
@@ -259,7 +247,7 @@ export function DashboardIngestHero() {
             <UploadCloud className="h-6 w-6" aria-hidden />
           </span>
           <div className="min-w-0">
-            <h2 className="text-[19px] font-semibold tracking-tight text-foreground">Ingest a source</h2>
+            <h2 id="dashboard-ingest-title" className="text-[20px] font-semibold tracking-normal text-foreground">Ingest a source</h2>
             <p className="mt-0.5 text-sm leading-relaxed text-foreground-secondary text-pretty">
               Drop a document or paste text. The agent reads, writes, links, and lints it into your
               vault — and runs in the background while you keep working.
@@ -267,17 +255,19 @@ export function DashboardIngestHero() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
-          <Button intent="primary" size="lg" onClick={(e) => { e.stopPropagation(); fileRef.current?.click(); }}>
+          <Button intent="primary" size="lg" onClick={() => fileRef.current?.click()}>
             <FileUp className="h-[15px] w-[15px]" /> Choose a file
-            <Kbd className="ml-1 border-transparent bg-accent-hover/40 text-accent-fg">⌘I</Kbd>
           </Button>
-          <span className="text-xs text-foreground-tertiary">or paste text · all in one place</span>
+          <Button intent="ghost" size="lg" onClick={() => router.push('/ingest')}>
+            <Maximize2 className="h-[15px] w-[15px]" /> Open workspace
+            <Kbd className="ml-1">⌘I</Kbd>
+          </Button>
         </div>
       </div>
 
       {/* pipeline preview */}
-      <div className="flex flex-col gap-1 rounded-md border border-border-subtle bg-canvas p-3.5">
-        <span className="mb-1 text-[11px] font-medium uppercase tracking-wider text-foreground-tertiary">
+      <div className="flex flex-col gap-1 border-l border-border-subtle pl-5">
+        <span className="mb-1 text-[11px] font-medium uppercase tracking-normal text-foreground-tertiary">
           What the agent does
         </span>
         {PHASES.map(({ label, Icon }, i) => (
@@ -293,6 +283,6 @@ export function DashboardIngestHero() {
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

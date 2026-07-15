@@ -45,6 +45,7 @@
 
 - `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）；标题行 `actions` 插槽（透传给 FrontmatterDisplay）+ `headerExtra` 插槽（渲染在 frontmatter 之后、正文之前，复用 article reading 宽度）
 - `page-actions.tsx` —— 🆕 阅读页标题行右侧统一功能动作条 `PageActions`（Edit / Sources(N) toggle / Reshape 触发并排）+ `ReshapeStatus`（正文上方细状态行：Reshaping… / Adapted for you＋Show original 切换 / Couldn't reshape）；纯展示，状态由 `wiki-reading-view` 持有并下传
+- `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
@@ -161,7 +162,7 @@ src/components/
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs, switch, segmented, select}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
-├── wiki/         {page-renderer, page-actions, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, selection-ask-button}
+├── wiki/         {page-renderer, page-actions, reading-progress, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, selection-ask-button}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── subjects/     {subject-dialog, augmentation-field, subjects-api}
@@ -176,6 +177,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 整体布局与阅读体验优化：移动导航默认关闭；桌面侧栏/上下文面板改为 264/400px；首页统计与最近页面去卡片化；阅读页收窄至 780px、合并重复 H1、压缩元数据、增加滚动进度并修复窄屏工具提示导致的横向溢出 |
 | 2026-07-16 | 全局任务启动事件携带真实 type/label/queueStatus：顶部 Ingest 胶囊与 dashboard hero 只响应 ingest；re-enrich/research/save-to-wiki 进入 Tasks 面板且先显示 Queued，不再伪装成 ingest 后跳空工作台 |
 | 2026-07-16 | Chat 显示 `/api/query` 的 SSE error 终态，模型超时、工具失败或 workflow 预览失败不再留下空白 assistant/loading 假象 |
 | 2026-07-16 | Maintenance 新增项目范围多选：支持 `All projects` 或若干 Subject，复用 `['subjects']` 缓存并即时保存；范围变化后刷新到期页统计；`settings-rows` 新增带 All 语义的 `MultiSelectRow` |

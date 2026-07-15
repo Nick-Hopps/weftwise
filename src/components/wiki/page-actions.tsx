@@ -32,14 +32,15 @@ export function PageActions({
   const showReshapeTrigger = reshapeState === 'idle' || reshapeState === 'unavailable';
 
   return (
-    <div className="flex items-center gap-2 shrink-0">
+    <div className="flex shrink-0 items-center gap-1.5 self-start">
       <Link
         href={editHref}
         data-tip="Edit this page"
-        className="tip tip-b inline-flex items-center gap-1.5 px-2.5 h-8 rounded-md text-sm font-medium text-foreground-secondary border border-border hover:bg-subtle hover:text-foreground transition-colors focus-ring"
+        aria-label="Edit this page"
+        className="tip tip-b inline-flex h-8 w-8 items-center justify-center gap-1.5 rounded-md border border-border text-sm font-medium text-foreground-secondary transition-colors hover:bg-subtle hover:text-foreground focus-ring sm:w-auto sm:px-2.5"
       >
         <Pencil className="h-3.5 w-3.5" />
-        Edit
+        <span className="hidden sm:inline">Edit</span>
       </Link>
 
       {sourceCount > 0 && (
@@ -48,10 +49,11 @@ export function PageActions({
           size="base"
           onClick={onToggleSplit}
           data-tip="Show the documents this page was written from"
-          className="tip tip-b"
+          aria-label={splitOn ? 'Hide source documents' : `Show ${sourceCount} source documents`}
+          className="tip tip-b w-8 px-0 sm:w-auto sm:px-3"
         >
           <FileStack className="h-3.5 w-3.5" />
-          {splitOn ? 'Hide sources' : `Sources (${sourceCount})`}
+          <span className="hidden sm:inline">{splitOn ? 'Hide sources' : `Sources (${sourceCount})`}</span>
         </Button>
       )}
 
@@ -61,10 +63,11 @@ export function PageActions({
           size="base"
           onClick={onRequestReshape}
           data-tip="Rewrite this page to fit your profile"
-          className="tip tip-b"
+          aria-label="Reshape this page for your profile"
+          className="tip tip-b w-8 px-0 sm:w-auto sm:px-3"
         >
           <Sparkles className="h-3.5 w-3.5" />
-          Reshape
+          <span className="hidden sm:inline">Reshape</span>
         </Button>
       )}
     </div>

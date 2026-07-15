@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import { Menu, Moon, Search, Sun, Sparkles } from 'lucide-react';
+import { Menu, Moon, PanelRight, Search, Sun, Sparkles } from 'lucide-react';
 import { useUIStore } from '@/stores/ui-store';
 import { IconButton } from '@/components/ui/icon-button';
 import { Kbd } from '@/components/ui/kbd';
@@ -95,7 +95,7 @@ export function Header() {
   const isWikiRoute = pathname.startsWith('/wiki/');
 
   return (
-    <header className="flex items-center gap-3 h-header px-3 border-b border-border bg-surface shrink-0 z-header">
+    <header className="z-header flex h-header shrink-0 items-center gap-3 border-b border-border-subtle bg-surface/95 px-3 backdrop-blur-md sm:px-4">
       {/* Left: logo + breadcrumb. The sidebar is resizable but not collapsible
           on desktop (per design); only a mobile hamburger remains. */}
       <div className="flex items-center gap-2 min-w-0 flex-1">
@@ -112,9 +112,9 @@ export function Header() {
         <Link
           href="/"
           aria-label="Agentic Wiki — home"
-          className="flex items-center gap-2 px-1 focus-ring rounded-sm"
+          className="flex items-center gap-2 rounded-sm px-1 focus-ring"
         >
-          <span className="inline-flex h-6 w-6 items-center justify-center rounded-sm bg-accent text-accent-fg">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent text-accent-fg shadow-xs">
             {/* Network glyph — a linked "vault" mark with an accent-cored hub node */}
             <svg width="24" height="24" viewBox="0 0 40 40" fill="none" aria-hidden>
               <path
@@ -133,7 +133,7 @@ export function Header() {
               <circle cx="20" cy="16" r="1.7" className="fill-accent" />
             </svg>
           </span>
-          <span className="hidden sm:inline font-display text-[16px] font-semibold tracking-[-0.02em] text-foreground">
+          <span className="hidden font-display text-[16px] font-semibold tracking-normal text-foreground sm:inline">
             Agentic Wiki
           </span>
         </Link>
@@ -151,7 +151,7 @@ export function Header() {
         type="button"
         onClick={toggleCommandPalette}
         aria-label="Open search (Ctrl+K)"
-        className="hidden sm:flex items-center gap-2 h-8 w-[280px] max-w-[40vw] px-3 rounded-md border border-border bg-canvas text-xs text-foreground-tertiary hover:bg-subtle hover:border-border-strong transition-colors focus-ring"
+        className="hidden h-8 w-[300px] max-w-[34vw] items-center gap-2 rounded-md border border-border bg-canvas/80 px-3 text-xs text-foreground-tertiary shadow-xs transition-colors hover:border-border-strong hover:bg-subtle focus-ring sm:flex"
       >
         <Search className="h-3.5 w-3.5" />
         <span className="flex-1 text-left">Search pages, ask AI…</span>
@@ -200,11 +200,7 @@ export function Header() {
           data-tip={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}
           className={cn('tip tip-b', contextPanelOpen && 'bg-subtle text-foreground')}
         >
-          {/* Simple panel-right glyph */}
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <line x1="15" y1="3" x2="15" y2="21" />
-          </svg>
+          <PanelRight />
           <span className="sr-only">{isWikiRoute ? 'context' : 'chat'}</span>
         </IconButton>
       </div>
