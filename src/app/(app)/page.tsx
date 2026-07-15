@@ -12,6 +12,7 @@ import { DashboardIngestHero } from './_components/dashboard-ingest-hero';
 import { SectionLabel } from '@/components/ui/panel';
 import { Tag } from '@/components/ui/tag';
 import type { Subject } from '@/lib/contracts';
+import { ArrowUpRight, BookOpenText, Database, Link2 } from 'lucide-react';
 
 const SUBJECT_COOKIE = 'wiki_subject';
 
@@ -79,7 +80,7 @@ export default async function DashboardPage() {
 
   if (isEmpty) {
     return (
-      <div className="max-w-[760px] mx-auto px-6 py-10 sm:py-16 space-y-6">
+      <div className="mx-auto max-w-[780px] space-y-8 px-5 py-10 sm:px-8 sm:py-16">
         <DashboardHero pageCount={0} />
         <DashboardIngestHero />
       </div>
@@ -87,15 +88,15 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="max-w-[1200px] mx-auto w-full px-6 py-6 space-y-6">
+    <div className="mx-auto w-full max-w-[1180px] space-y-10 px-5 py-8 sm:px-8 sm:py-10">
       {/* greeting + stats */}
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">
         <DashboardHero pageCount={stats.pageCount} compact />
-        <div className="grid grid-cols-3 gap-2 lg:w-auto lg:min-w-[380px]">
-          <StatCard label="Pages" value={stats.pageCount} />
-          <StatCard label="Links" value={stats.linkCount} />
-          <StatCard label="Sources" value={stats.sourceCount} />
-        </div>
+        <dl className="grid grid-cols-3 divide-x divide-border-subtle border-y border-border-subtle py-3 lg:min-w-[410px] lg:border-y-0 lg:py-0">
+          <DashboardStat icon={BookOpenText} label="Pages" value={stats.pageCount} />
+          <DashboardStat icon={Link2} label="Links" value={stats.linkCount} />
+          <DashboardStat icon={Database} label="Sources" value={stats.sourceCount} />
+        </dl>
       </div>
 
       {/* ingest hero — the dashboard's primary feature */}
@@ -103,22 +104,22 @@ export default async function DashboardPage() {
 
       {/* recent pages */}
       <section aria-labelledby="recent-pages-heading">
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-3 flex items-center justify-between">
           <SectionLabel id="recent-pages-heading">
             Recent Pages — <span className="font-mono normal-case">{subject.slug}</span>
           </SectionLabel>
           <span className="text-xs text-foreground-tertiary font-mono">{recentPages.length}</span>
         </div>
-        <ul className="rounded-md border border-border bg-surface divide-y divide-border">
+        <ul className="divide-y divide-border-subtle border-y border-border-subtle">
           {recentPages.map((page) => {
             const tags = (page.tags ?? []).filter((t) => t !== 'meta').slice(0, 2);
             return (
               <li key={`${page.subjectId}:${page.slug}`}>
                 <Link
                   href={`/wiki/${page.slug}`}
-                  className="group flex items-center gap-3 h-11 px-3 hover:bg-subtle transition-colors focus-ring rounded-md"
+                  className="group flex min-h-12 items-center gap-3 px-2 py-2 transition-colors hover:bg-subtle focus-ring sm:px-3"
                 >
-                  <span className="text-foreground-tertiary text-xs font-mono w-3.5 shrink-0">≡</span>
+                  <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-accent" aria-hidden />
                   <span className="flex-1 min-w-0 flex items-center gap-3">
                     <span className="text-sm font-medium text-foreground group-hover:text-accent-strong transition-colors truncate">
                       {page.title}
@@ -154,9 +155,8 @@ export default async function DashboardPage() {
           <SectionLabel id="wiki-graph-heading">
             Wiki Graph — <span className="font-mono normal-case">{subject.slug}</span>
           </SectionLabel>
-          <span className="text-[10px] italic text-foreground-tertiary">drag · scroll · click</span>
         </div>
-        <div className="h-72 rounded-md border border-border bg-canvas overflow-hidden">
+        <div className="h-80 overflow-hidden rounded-md border border-border bg-canvas shadow-xs">
           <MiniGraphView key={subject.id} fill />
         </div>
       </section>
@@ -164,15 +164,24 @@ export default async function DashboardPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function DashboardStat({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: typeof BookOpenText;
+  label: string;
+  value: number;
+}) {
   return (
-    <div className="rounded-md border border-border bg-surface px-4 py-3 flex flex-col gap-0.5">
-      <span className="text-xl font-semibold text-foreground tabular-nums leading-none">
-        {value}
-      </span>
-      <span className="text-xs text-foreground-secondary font-medium">
+    <div className="flex min-w-0 flex-col gap-1 px-4 first:pl-0 last:pr-0 lg:first:pl-4">
+      <dt className="flex items-center gap-1.5 text-xs font-medium text-foreground-tertiary">
+        <Icon className="h-3.5 w-3.5" aria-hidden />
         {label}
-      </span>
+      </dt>
+      <dd className="text-2xl font-semibold leading-none text-foreground tabular-nums">
+        {value}
+      </dd>
     </div>
   );
 }

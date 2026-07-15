@@ -49,14 +49,14 @@ export function Shell({ children }: ShellProps) {
   );
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-canvas">
+    <div className="flex h-screen flex-col overflow-hidden bg-canvas">
       <Header />
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Left Sidebar — desktop inline (resizable, always present) */}
         <div
-          className="hidden lg:flex flex-col shrink-0 overflow-hidden"
-          style={hydrated ? { width: sidebarWidth } : { width: 240 }}
+          className="hidden shrink-0 flex-col overflow-hidden lg:flex"
+          style={hydrated ? { width: sidebarWidth } : { width: 264 }}
         >
           <Sidebar />
         </div>
@@ -66,36 +66,39 @@ export function Shell({ children }: ShellProps) {
           aria-label="Resize sidebar"
           onPointerDown={handleSidebarResizeStart}
           onDoubleClick={() => useUIStore.getState().resetSidebarWidth()}
-          className="hidden lg:flex items-center justify-center shrink-0 w-1 cursor-col-resize group hover:bg-accent/30 active:bg-accent/50 transition-colors"
+          className="group hidden w-1 shrink-0 cursor-col-resize items-center justify-center transition-colors hover:bg-accent/20 active:bg-accent/40 lg:flex"
         >
-          <div className="w-0.5 h-8 rounded-full bg-border group-hover:bg-accent group-active:bg-accent-active transition-colors" />
+          <div className="h-10 w-px rounded-full bg-border group-hover:bg-accent group-active:bg-accent-active" />
         </div>
 
         {/* Left Sidebar — mobile overlay */}
         {sidebarOpen && (
-          <div className="lg:hidden absolute inset-0 z-overlay flex">
+          <div className="absolute inset-0 z-overlay flex lg:hidden">
             <button
               type="button"
-              className="absolute inset-0 bg-overlay/40 backdrop-blur-sm"
+              className="absolute inset-0 bg-overlay/35 backdrop-blur-[2px] motion-safe:animate-fade-in"
               onClick={toggleSidebar}
               aria-label="Close sidebar"
               tabIndex={-1}
             />
-            <div className="relative z-10 flex h-full w-sidebar">
+            <div className="relative z-10 flex h-full w-[min(86vw,304px)] shadow-lg motion-safe:animate-slide-left">
               <Sidebar onNavigate={closeSidebarIfMobile} />
             </div>
           </div>
         )}
 
         {/* Center */}
-        <main id="main-content" className="flex-1 overflow-y-auto bg-canvas">
+        <main
+          id="main-content"
+          className="relative flex-1 overflow-y-auto overscroll-contain bg-surface"
+        >
           {children}
         </main>
 
         {/* Context Panel — desktop docked, fixed width */}
         {contextPanelOpen && (
           <div
-            className="hidden lg:flex shrink-0 overflow-hidden"
+            className="hidden shrink-0 overflow-hidden motion-safe:animate-slide-left lg:flex"
             style={{ width: CONTEXT_PANEL_WIDTH }}
           >
             <ContextPanel variant="docked" />

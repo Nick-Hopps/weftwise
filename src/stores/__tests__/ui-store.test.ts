@@ -50,3 +50,9 @@ describe('ui-store pendingChatReference mailbox', () => {
     expect(useUIStore.getState().consumePendingChatReference()).toBeNull();
   });
 });
+
+describe('ui-store layout defaults', () => {
+  it('keeps the mobile navigation closed on first load', () => {
+    expect(useUIStore.getInitialState().sidebarOpen).toBe(false);
+  });
+});
