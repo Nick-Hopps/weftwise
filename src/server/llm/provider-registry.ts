@@ -1,4 +1,11 @@
-import { embedMany, generateObject, generateText, stepCountIs, streamText } from 'ai';
+import {
+  embedMany,
+  generateObject,
+  generateText,
+  NoObjectGeneratedError,
+  stepCountIs,
+  streamText,
+} from 'ai';
 import type { ModelMessage, Tool, LanguageModel } from 'ai';
 import type { ZodType } from 'zod';
 import type { LLMRouteOverride, LLMTask, ResolvedTaskRoute } from './config-schema';
@@ -8,6 +15,7 @@ import { resolveTask } from './task-router';
 import { LLMConfigError } from './errors';
 import { AgentCancelled } from '../agents/runtime/errors';
 import { recordUsage } from '../db/repos/usage-repo';
+import { summarizeGenerationError } from './generation-error';
 
 /** shouldCancel 轮询间隔（ms）——固定 2s，兼顾及时性与开销。 */
 const CANCEL_POLL_INTERVAL_MS = 2000;
@@ -75,6 +83,19 @@ export function withAnthropicStructuredOutputDefault(
   };
 }
 
+export interface StructuredOutputOptions {
+  /** 仅在 JSON 解析或 schema 校验失败时重试；上限 2 次。 */
+  schemaRetries?: number;
+}
+
+function schemaRetrySystemPrompt(systemPrompt: string, detail: string | undefined): string {
+  return `${systemPrompt}
+
+=== STRUCTURED OUTPUT RETRY ===
+The previous response could not be validated against the required JSON schema${detail ? `: ${detail}` : '.'}
+Generate the complete result again. Preserve factual accuracy, include every required field, and return only data matching the schema.`;
+}
+
 /**
  * Generate a structured JSON object validated against a Zod schema.
  *
@@ -87,6 +108,7 @@ export async function generateStructuredOutput<T>(
   systemPrompt: string,
   userPrompt: string,
   overrides: LLMRouteOverride = {},
+  options: StructuredOutputOptions = {},
 ): Promise<T> {
   const route = resolveTask(task, overrides);
   const prefix = `[LLM][Task: ${route.task}][Model: ${route.logLabel}]`;
@@ -101,30 +123,48 @@ export async function generateStructuredOutput<T>(
   console.log(`${prefix} generateObject started`);
 
   try {
-    const result = await generateObject({
-      model: getLanguageModel(route),
-      schema,
-      system: systemPrompt,
-      prompt: userPrompt,
-      maxOutputTokens: route.maxTokens,
-      temperature: route.temperature,
-      topP: route.topP,
-      topK: route.topK,
-      presencePenalty: route.presencePenalty,
-      frequencyPenalty: route.frequencyPenalty,
-      seed: route.seed,
-      maxRetries: route.maxRetries,
-      headers: route.headers,
-      providerOptions: withAnthropicStructuredOutputDefault(route),
-      abortSignal: controller.signal,
-    });
+    const schemaRetries = Math.min(2, Math.max(0, Math.trunc(options.schemaRetries ?? 0)));
+    let currentSystemPrompt = systemPrompt;
 
-    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-    console.log(
-      `${prefix} done in ${elapsed}s | tokens: in=${result.usage?.inputTokens ?? 'n/a'} out=${result.usage?.outputTokens ?? 'n/a'}`,
-    );
-    recordCallUsage(route, result.usage);
-    return result.object;
+    for (let attempt = 0; attempt <= schemaRetries; attempt += 1) {
+      try {
+        const result = await generateObject({
+          model: getLanguageModel(route),
+          schema,
+          system: currentSystemPrompt,
+          prompt: userPrompt,
+          maxOutputTokens: route.maxTokens,
+          temperature: route.temperature,
+          topP: route.topP,
+          topK: route.topK,
+          presencePenalty: route.presencePenalty,
+          frequencyPenalty: route.frequencyPenalty,
+          seed: route.seed,
+          maxRetries: route.maxRetries,
+          headers: route.headers,
+          providerOptions: withAnthropicStructuredOutputDefault(route),
+          abortSignal: controller.signal,
+        });
+
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+        console.log(
+          `${prefix} done in ${elapsed}s | tokens: in=${result.usage?.inputTokens ?? 'n/a'} out=${result.usage?.outputTokens ?? 'n/a'}`,
+        );
+        recordCallUsage(route, result.usage);
+        return result.object;
+      } catch (err) {
+        if (attempt >= schemaRetries || !NoObjectGeneratedError.isInstance(err)) throw err;
+
+        const summary = summarizeGenerationError(err, { includeRawText: false });
+        console.warn(
+          `${prefix} structured output invalid; retrying (${attempt + 1}/${schemaRetries})`,
+          summary,
+        );
+        currentSystemPrompt = schemaRetrySystemPrompt(systemPrompt, summary.detail);
+      }
+    }
+
+    throw new Error('Structured output retry loop exhausted unexpectedly');
   } catch (err) {
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
     const details: Record<string, unknown> = { elapsed };

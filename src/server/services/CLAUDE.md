@@ -297,6 +297,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Semantic Lint 对 AI SDK JSON/schema 输出失败启用 1 次定向重试；最终失败事件保存脱敏 `finishReason/detail`，不落模型原始输出或 Wiki 正文 |
 | 2026-07-15 | 修复 Research finding immutable snapshot 与 v2 identity 契约断裂：snapshot 可选保存 targetSlug/evidence，coverage-gap/contradiction 可无损重算 ID，旧 v1 snapshot 保持兼容 |
 | 2026-07-15 | Health 修后验证收敛：Lint 拆分 discovery/verification；Fix/Curate 自动闭环校验 baseline/remediation 关联，只重跑确定性检查并协调原语义 findings，不再因同一 vault 的开放式复检漂移制造新 findings；并发同基线处置聚合完成结果 |
 | 2026-07-15 | Health 修复收敛：语义 Lint 增加 target/evidence 结构化契约、vault 原文与 wikilink 真实性过滤、调用点 temperature=0；语义 finding identity 升级 v2 并保留历史 v1 fallback，避免全库复检因假阳性与 description 漂移不断制造“新问题” |

@@ -18,6 +18,7 @@ import { registerHandler } from '../jobs/worker';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
 import { resolveTask } from '../llm/task-router';
+import { summarizeGenerationError } from '../llm/generation-error';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { runSemanticChecksForSubject } from './lint-semantic';
 import { identifyFindings } from './finding-identity';
@@ -169,7 +170,12 @@ export async function runLintJob(
       );
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      emit('lint:semantic:error', `Subject "${subject.slug}": semantic analysis failed: ${msg}`);
+      const diagnostic = summarizeGenerationError(error, { includeRawText: false });
+      emit(
+        'lint:semantic:error',
+        `Subject "${subject.slug}": semantic analysis failed: ${msg}`,
+        { ...diagnostic },
+      );
       semanticFailures.push(`${subject.slug}: ${msg}`);
     }
   }
