@@ -4,6 +4,7 @@ import type { ZodSchema } from 'zod';
 import type { AgentContext, SkillTemplate } from '../types';
 import { resolveTask } from '../../llm/task-router';
 import { resolveModel, withAnthropicStructuredOutputDefault } from '../../llm/provider-registry';
+import { summarizeGenerationError } from '../../llm/generation-error';
 import { getAgentTaskRouterMode } from '../../db/repos/settings-repo';
 import { recordUsage } from '../../db/repos/usage-repo';
 import { createRunStepTracker } from './budget';
@@ -17,6 +18,7 @@ import {
 
 // 下沉到 errors.ts（叶子模块）以打破与 provider-registry 的循环依赖；此处 re-export 兼容既有调用方。
 export { AgentCancelled } from './errors';
+export { summarizeGenerationError } from '../../llm/generation-error';
 import { AgentCancelled } from './errors';
 
 export interface AgentRunResult {
@@ -553,47 +555,6 @@ export function inputLabel(input: unknown): string | undefined {
     if (typeof v === 'string' && v.length > 0) return v;
   }
   return undefined;
-}
-
-export interface GenerationErrorSummary {
-  finishReason?: string;
-  /** 模型原始输出（截断），用于排查"产了什么导致不符合 schema"。 */
-  rawText?: string;
-  /** schema 校验问题（zod issue 路径）或解析错误信息。 */
-  detail?: string;
-}
-
-/** 把 AI SDK 的 NoObjectGeneratedError 等结构化输出错误提炼成可读诊断（供日志/事件）。 */
-export function summarizeGenerationError(err: unknown): GenerationErrorSummary {
-  if (!err || typeof err !== 'object') return {};
-  const e = err as Record<string, unknown>;
-  const out: GenerationErrorSummary = {};
-  if (typeof e.finishReason === 'string') out.finishReason = e.finishReason;
-  if (typeof e.text === 'string') out.rawText = e.text.length > 800 ? e.text.slice(0, 800) + '…' : e.text;
-  const issues = readZodIssues(e);
-  if (issues) out.detail = issues;
-  else {
-    const cause = e.cause as Record<string, unknown> | undefined;
-    if (cause && typeof cause.message === 'string') out.detail = cause.message;
-    else if (typeof e.message === 'string') out.detail = e.message;
-  }
-  return out;
-}
-
-/** 从 TypeValidationError（err.cause）内层 ZodError（.cause.issues 或 .issues）提取问题路径。 */
-function readZodIssues(e: Record<string, unknown>): string | undefined {
-  const c1 = e.cause as Record<string, unknown> | undefined;
-  const c2 = c1?.cause as Record<string, unknown> | undefined;
-  const raw = c2?.issues ?? c1?.issues;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  return raw
-    .slice(0, 5)
-    .map((i) => {
-      const issue = i as Record<string, unknown>;
-      const path = Array.isArray(issue.path) ? issue.path.join('.') : '';
-      return `${path || '(root)'}: ${String(issue.message ?? 'invalid')}`;
-    })
-    .join('; ');
 }
 
 /**

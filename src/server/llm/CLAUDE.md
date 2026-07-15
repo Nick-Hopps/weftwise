@@ -55,6 +55,7 @@ generateStructuredOutput<T>(
   systemPrompt: string,
   userPrompt: string,
   overrides?: LLMRouteOverride,
+  options?: { schemaRetries?: number },
 ): Promise<T>
 
 streamTextResponse(task, systemPrompt, userPrompt, overrides?): StreamTextResult
@@ -81,6 +82,7 @@ embeddingModelId(): string
 - AbortController 超时（`route.timeoutMs`，默认 8 分钟）。
 - 统一日志前缀 `[LLM][Task: ...][Model: ...]`。
 - 错误上下文补全（`usage` / `finishReason` / `cause`）。
+- `generateStructuredOutput` 可按调用点开启 `schemaRetries`（上限 2）；仅 AI SDK 的 JSON 解析/schema 校验失败会重试，网络与超时错误不重试，所有尝试共享同一个总超时。
 
 后三个（向量模型，⑧）：
 - `generateEmbeddings` — embedMany 包装，支持 openai / openai-compatible / ollama；其余供应商抛 `LLMConfigError`。
@@ -209,6 +211,7 @@ src/server/llm/
 ├── config-loader.ts           # 读取并缓存 llm-config.json
 ├── config-schema.ts           # Zod schema（providers / tasks / overrides）
 ├── errors.ts                  # LLMConfigError
+├── generation-error.ts        # 结构化输出错误的稳定摘要与可选脱敏
 ├── provider-factory.ts        # ResolvedTaskRoute → LanguageModel + getEmbeddingModel（⑧）
 ├── provider-registry.ts       # generateStructuredOutput / streamTextResponse + generateEmbeddings/isEmbeddingConfigured/embeddingModelId（⑧）
 ├── task-router.ts             # defaults ← task ← overrides 合并
@@ -227,6 +230,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | `generateStructuredOutput` 增加调用点级 schema 定向重试（最多 2 次、共享总超时），抽出 `generation-error.ts` 统一错误路径摘要；Lint 开启 1 次重试并仅向 job event 写入脱敏后的 `finishReason/detail` |
 | 2026-07-15 | `lint-prompt.ts` 移除“宁可假阳性”指令，改为精确优先；schema 强制返回 targetSlug 与逐页原文 evidence，供服务层真实性过滤 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：Query prompt 增加 `wiki_move` 的 canonical slug、仅改路径与独立批准纪律；继续复用 `query` task，`llm-config.example.json` 不变 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：`QUERY_AGENTIC_SYSTEM_PROMPT` 新增 subject list → cross search → cross read 策略与 `[[subject:slug]]` 引用纪律；继续复用 `query` task，不修改 LLM 配置 schema 或示例配置 |
