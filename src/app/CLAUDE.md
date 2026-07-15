@@ -49,7 +49,7 @@
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
 | `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源查询 active 优先，故即使存在更新 terminal，只要任意旧 pending/running 仍返回 409 `in-flight`）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
-| `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试：仅普通 failed Ingest；cancelled、source 已删除或携带服务端 `researchProvenance` 的 Research child 均 409，后者只能由 run coordinator/reconciler 恢复，避免绕过候选状态机 |
+| `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试：普通 failed Ingest 直接 requeue；携带服务端 `researchProvenance` 的 Research child 经 run/delivery/job 原子状态机恢复同一 job 与 checkpoint；cancelled、source 已删除、provenance 损坏或已进入 verification 均 409 |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：复用 `services/history-tools` 从 preHead 重建 inverse changeset、锁内核对当前 HEAD、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -169,7 +169,8 @@ src/app/
 | 2026-07-14 | History 工具 Phase 3B：`/api/history*` 改复用共享 History 服务，既有响应/人工确认保持兼容；`/api/query` 可读取 history list/diff，回滚只生成 PendingAction 并由独立批准 API 消费 |
 | 2026-07-14 | 跨 Subject 只读 Phase 3A：`/api/query` 不再因 active Subject 为空提前退出；流式工具循环可读取其他 Subject，citation schema/persistence 透传可选 subjectSlug，写预览仍绑定 active Subject |
 | 2026-07-14 | Query Save-to-Wiki Phase 2D：补齐 `/api/query` save-only 与 question+save 入队契约测试；两种模式继续只创建 subject-scoped `save-to-wiki` job，页面创建统一由 worker 的 shared create command 执行 |
-| 2026-07-14 | Research 批准溯源 Phase 2C：新增 run 读取/批准/忽略 API，批准只接受稳定 candidate ID + version + idempotency key；`lint/latest` 批量注入 run 状态；通用 Ingest route 拒绝客户端 provenance，Research child 禁止独立 retry，coordinator cancel 后立即对账；reset/subject 删除覆盖 provenance 五表 |
+| 2026-07-15 | 修复 Research child Ingest 在工作台无法重试：`POST /api/jobs/[id]/retry` 识别服务端 provenance，先终态对账，再通过 repo 原子恢复同一 child job、delivery 与 run；保留 checkpoint/attempt，拒绝 cancelled、缺失 source、证据不匹配或 verification 后重试 |
+| 2026-07-14 | Research 批准溯源 Phase 2C：新增 run 读取/批准/忽略 API，批准只接受稳定 candidate ID + version + idempotency key；`lint/latest` 批量注入 run 状态；通用 Ingest route 拒绝客户端 provenance，Research child retry 必须经过 provenance 状态机，coordinator cancel 后立即对账；reset/subject 删除覆盖 provenance 五表 |
 | 2026-07-12 | Health 修复闭环 Phase 2A：`GET /api/lint/latest` 升级为完整 `HealthSnapshot`；新增 `POST /api/health/remediations` 统一校验、幂等执行入口；`POST /api/research` 改用稳定 `findingIds + lintJobId` 并接受 `coverage-gap / thin-page`，旧数组下标协议退役 |
 | 2026-07-11 | Wiki 审批闭环 Phase 1B：`/api/query` 新增 read/propose 模式与 `pending-action` SSE；新增 pending-actions 列表/批准/拒绝三个 subject-scoped API，写请求均 requireAuth+CSRF，批准只消费服务端预览而不信任客户端 payload |
 | 2026-04-22 | 初始化：根据实际路由结构生成文档 |

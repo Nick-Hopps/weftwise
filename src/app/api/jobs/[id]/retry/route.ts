@@ -3,6 +3,8 @@ import * as queue from '@/server/jobs/queue';
 import * as events from '@/server/jobs/events';
 import * as sourcesRepo from '@/server/db/repos/sources-repo';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
+import { retryResearchIngestJob } from '@/server/services/research-approval-service';
+import { researchRunErrorResponse } from '../../../research-runs/error-response';
 
 export const runtime = 'nodejs';
 
@@ -54,13 +56,6 @@ export async function POST(
   } catch {
     // 损坏 params 保持既有兼容路径，后续 worker 会给出权威错误。
   }
-  if (jobParams && Object.prototype.hasOwnProperty.call(jobParams, 'researchProvenance')) {
-    return NextResponse.json(
-      { error: 'Research candidate ingests cannot be retried independently. Start a new Research run.' },
-      { status: 409 },
-    );
-  }
-
   // source 已被删除（如通过 Health 页 orphan-source 的 Delete source）时不可重试：
   // 原始文件已不在磁盘，requeue 会让 worker 在 loadCleanText 立即报 "Source file not found"。
   // 与 POST /api/sources/[id]/reingest 的存在性校验保持一致，堵住这一条独立的重试路径。
@@ -78,9 +73,51 @@ export async function POST(
     );
   }
 
+  const provenance = parseResearchProvenance(jobParams?.researchProvenance);
+  if (jobParams && Object.prototype.hasOwnProperty.call(jobParams, 'researchProvenance')) {
+    if (!provenance || !job.subjectId) {
+      return NextResponse.json(
+        { error: 'Research provenance for this ingest is invalid.' },
+        { status: 409 },
+      );
+    }
+    try {
+      const result = retryResearchIngestJob({
+        ...provenance,
+        ingestJobId: id,
+        subjectId: job.subjectId,
+      });
+      events.emit(id, 'job:retrying', 'Manual retry — resuming Research ingest from checkpoint', {
+        manual: true,
+        research: true,
+        runId: provenance.runId,
+      });
+      return NextResponse.json({ ...queue.get(id), researchRun: result.run }, { status: 202 });
+    } catch (error) {
+      return researchRunErrorResponse(error);
+    }
+  }
+
   // 无条件 requeue（刻意绕过 worker 的 isRetryableError，让用户能手动重试业务失败）
   queue.requeue(id);
   events.emit(id, 'job:retrying', 'Manual retry — resuming from checkpoint', { manual: true });
 
   return NextResponse.json(queue.get(id), { status: 202 });
+}
+
+function parseResearchProvenance(value: unknown): {
+  runId: string;
+  approvalId: string;
+  candidateId: string;
+} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (
+    keys.length !== 3
+    || !keys.every((key) => ['runId', 'approvalId', 'candidateId'].includes(key))
+    || ![record.runId, record.approvalId, record.candidateId]
+      .every((candidate) => typeof candidate === 'string' && candidate.trim().length > 0)
+  ) return null;
+  return record as { runId: string; approvalId: string; candidateId: string };
 }

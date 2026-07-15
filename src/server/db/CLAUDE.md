@@ -218,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | `research-provenance-repo` 新增 failed child Ingest 原位重试事务：校验 run/approval/candidate/source/job lineage 后同步恢复 jobs、delivery、run，保留 checkpoint 与 attempt history；取消或 verification 后状态 fail-closed |
 | 2026-07-15 | Research finding run 停止创建 verification lint；repo 支持 `verificationJobId=null` 时从 importing 原子物化目标化 postcondition，旧 verifying run 仍可按既有 job ID 完成；已物化验证结果禁止误走导入重试 |
 | 2026-07-15 | Research finding snapshot JSON 补齐可选 targetSlug/evidence，仓储写前 ID 不变量现可覆盖 v2 coverage-gap/contradiction；字段可选，无 SQLite schema migration |
 | 2026-07-14 | job_events 改按 SQLite rowid 的真实插入顺序读取与 afterId 续播，消除同毫秒随机 UUID 乱序/漏读；requestCancel 对已取消 failed 返回 already-terminal，保证取消终态幂等 |
