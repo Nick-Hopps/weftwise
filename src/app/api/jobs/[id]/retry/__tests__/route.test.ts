@@ -5,6 +5,7 @@ const mockGet = vi.fn();
 const mockRequeue = vi.fn();
 const mockEmit = vi.fn();
 const mockGetSource = vi.fn();
+const mockRetryResearchIngestJob = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
   requireAuth: () => null,
@@ -20,6 +21,25 @@ vi.mock('@/server/jobs/events', () => ({
 vi.mock('@/server/db/repos/sources-repo', () => ({
   getSource: (...args: Parameters<typeof mockGetSource>) => mockGetSource(...args),
 }));
+vi.mock('@/server/services/research-approval-service', () => {
+  class ResearchApprovalServiceError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly httpStatus: number,
+      readonly run?: unknown,
+    ) {
+      super(message);
+      this.name = 'ResearchApprovalServiceError';
+    }
+  }
+  return {
+    ResearchApprovalServiceError,
+    retryResearchIngestJob: (...args: Parameters<typeof mockRetryResearchIngestJob>) => (
+      mockRetryResearchIngestJob(...args)
+    ),
+  };
+});
 
 import { POST } from '../route';
 
@@ -33,6 +53,7 @@ beforeEach(() => {
   mockRequeue.mockReset();
   mockEmit.mockReset();
   mockGetSource.mockReset();
+  mockRetryResearchIngestJob.mockReset();
 });
 
 describe('POST /api/jobs/[id]/retry', () => {
@@ -107,21 +128,61 @@ describe('POST /api/jobs/[id]/retry', () => {
     expect(mockRequeue).toHaveBeenCalledWith('j1');
   });
 
-  it('409 当 failed Ingest 携带 Research provenance，禁止手动复活 delivery', async () => {
+  it('202 当 failed Ingest 携带 Research provenance，原子恢复同一 child job 与 run', async () => {
+    mockGet
+      .mockReturnValueOnce({
+        id: 'j1', type: 'ingest', status: 'failed', subjectId: 'sub1',
+        paramsJson: JSON.stringify({
+          sourceId: 's1', filename: 'a.md', subjectId: 'sub1',
+          researchProvenance: {
+            runId: 'run-1', approvalId: 'approval-1', candidateId: 'candidate-1',
+          },
+        }),
+      })
+      .mockReturnValueOnce({ id: 'j1', type: 'ingest', status: 'pending', subjectId: 'sub1' });
+    mockGetSource.mockReturnValue({ id: 's1', subjectId: 'sub1', filename: 'a.md' });
+    mockRetryResearchIngestJob.mockReturnValue({
+      run: { id: 'run-1', subjectId: 'sub1', status: 'importing', version: 4 },
+    });
+
+    const res = await call();
+
+    expect(res.status).toBe(202);
+    expect(mockRetryResearchIngestJob).toHaveBeenCalledWith({
+      runId: 'run-1',
+      approvalId: 'approval-1',
+      candidateId: 'candidate-1',
+      ingestJobId: 'j1',
+      subjectId: 'sub1',
+    });
+    expect(mockRequeue).not.toHaveBeenCalled();
+    expect(mockEmit).toHaveBeenCalledWith(
+      'j1',
+      'job:retrying',
+      expect.any(String),
+      { manual: true, research: true, runId: 'run-1' },
+    );
+    expect(await res.json()).toMatchObject({
+      id: 'j1',
+      status: 'pending',
+      researchRun: { id: 'run-1', status: 'importing' },
+    });
+  });
+
+  it('409 当 Research provenance 损坏，不触达状态机', async () => {
     mockGet.mockReturnValue({
-      id: 'j1', type: 'ingest', status: 'failed',
+      id: 'j1', type: 'ingest', status: 'failed', subjectId: 'sub1',
       paramsJson: JSON.stringify({
         sourceId: 's1', filename: 'a.md', subjectId: 'sub1',
-        researchProvenance: {
-          runId: 'run-1', approvalId: 'approval-1', candidateId: 'candidate-1',
-        },
+        researchProvenance: { runId: 'run-1', candidateId: 'candidate-1' },
       }),
     });
+    mockGetSource.mockReturnValue({ id: 's1', subjectId: 'sub1', filename: 'a.md' });
 
     const res = await call();
 
     expect(res.status).toBe(409);
     expect(mockRequeue).not.toHaveBeenCalled();
-    expect(mockGetSource).not.toHaveBeenCalled();
+    expect(mockRetryResearchIngestJob).not.toHaveBeenCalled();
   });
 });

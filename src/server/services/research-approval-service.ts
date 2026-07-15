@@ -19,6 +19,7 @@ import {
   validateStoredResearchCandidates,
 } from './research-provenance';
 import { findingId } from './finding-identity';
+import { reconcileResearchProvenanceForJob } from './research-provenance-reconciler';
 
 const SAFE_MESSAGE_LIMIT = 500;
 const SENSITIVE_MESSAGE_PATTERN = /(?:https?:\/\/|file:\/\/|\/(?:Users|home|private|var|etc)\/|[a-z]:\\|bearer\s+|sk-[a-z0-9_-]+|(?:api[-_ ]?key|token|authorization|password|credential)\s*[:=])/i;
@@ -104,6 +105,34 @@ export interface RetryResearchRunServiceInput {
 export interface RetryResearchRunServiceResult {
   run: ResearchRunView;
   coordinatorJobId: string;
+}
+
+export interface RetryResearchIngestJobServiceInput {
+  runId: string;
+  subjectId: string;
+  approvalId: string;
+  candidateId: string;
+  ingestJobId: string;
+}
+
+export interface RetryResearchIngestJobServiceResult {
+  run: ResearchRunView;
+}
+
+/** failed child job 先完成终态对账，再原子恢复同一 job、delivery 与 run。 */
+export function retryResearchIngestJob(
+  input: RetryResearchIngestJobServiceInput,
+): RetryResearchIngestJobServiceResult {
+  reconcileResearchProvenanceForJob(input.ingestJobId);
+  try {
+    return {
+      run: mapStoredResearchRunToView(
+        researchRepo.retryResearchIngestJobAtomic(input),
+      ),
+    };
+  } catch (error) {
+    throw mapApprovalError(error, input.runId, input.subjectId);
+  }
 }
 
 /** failed run 的导入重试：重置 failed delivery、换发 coordinator，run 回到 importing。 */

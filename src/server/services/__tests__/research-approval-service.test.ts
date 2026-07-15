@@ -13,7 +13,11 @@ const repoMock = vi.hoisted(() => ({
   findResearchRunsByJobIds: vi.fn(),
   approveResearchRunAtomic: vi.fn(),
   dismissResearchRunAtomic: vi.fn(),
+  retryResearchRunImportAtomic: vi.fn(),
+  retryResearchIngestJobAtomic: vi.fn(),
 }));
+
+const reconcileMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/server/db/repos/research-provenance-repo', () => {
   class ResearchProvenanceRepoError extends Error {
@@ -24,6 +28,9 @@ vi.mock('@/server/db/repos/research-provenance-repo', () => {
   }
   return { ...repoMock, ResearchProvenanceRepoError };
 });
+vi.mock('../research-provenance-reconciler', () => ({
+  reconcileResearchProvenanceForJob: reconcileMock,
+}));
 
 import { findingId } from '../finding-identity';
 import {
@@ -39,6 +46,7 @@ import {
   getResearchRunsByJobIds,
   mapStoredResearchRunToView,
   ResearchApprovalServiceError,
+  retryResearchIngestJob,
 } from '../research-approval-service';
 import { ResearchProvenanceRepoError } from '@/server/db/repos/research-provenance-repo';
 
@@ -142,6 +150,7 @@ function fixture(): StoredResearchRun {
 
 beforeEach(() => {
   for (const mock of Object.values(repoMock)) mock.mockReset();
+  reconcileMock.mockReset();
 });
 
 describe('mapStoredResearchRunToView', () => {
@@ -268,6 +277,49 @@ describe('Research approval service', () => {
       replayed: false,
       run: { id: 'run-1', status: 'importing' },
     });
+  });
+
+  it('Research child 重试先精确对账，再返回原子恢复后的 run view', () => {
+    const stored = fixture();
+    stored.run.status = 'importing';
+    stored.run.verificationLintJobId = null;
+    stored.findings = [];
+    stored.deliveries[0]!.status = 'queued';
+    stored.deliveries[0]!.completedAt = null;
+    repoMock.retryResearchIngestJobAtomic.mockReturnValue(stored);
+
+    const input = {
+      runId: 'run-1',
+      subjectId: 's1',
+      approvalId: 'approval-1',
+      candidateId: stored.deliveries[0]!.candidateId,
+      ingestJobId: 'ingest-1',
+    };
+    const result = retryResearchIngestJob(input);
+
+    expect(reconcileMock).toHaveBeenCalledWith('ingest-1');
+    expect(repoMock.retryResearchIngestJobAtomic).toHaveBeenCalledWith(input);
+    expect(result.run).toMatchObject({ id: 'run-1', status: 'importing' });
+  });
+
+  it('Research child 不可重试时返回稳定冲突，并携带最新 run', () => {
+    const latest = fixture();
+    latest.run.status = 'failed';
+    latest.run.verificationLintJobId = null;
+    latest.findings = [];
+    repoMock.retryResearchIngestJobAtomic.mockImplementation(() => {
+      throw new ResearchProvenanceRepoError('run-not-retryable', 'internal state');
+    });
+    repoMock.findResearchRunById.mockReturnValue(latest);
+
+    expect(() => retryResearchIngestJob({
+      runId: 'run-1', subjectId: 's1', approvalId: 'approval-1',
+      candidateId: latest.deliveries[0]!.candidateId, ingestJobId: 'ingest-1',
+    })).toThrowError(expect.objectContaining({
+      code: 'RESEARCH_RUN_NOT_RETRYABLE',
+      httpStatus: 409,
+      run: expect.objectContaining({ id: 'run-1' }),
+    }));
   });
 
   it.each([
