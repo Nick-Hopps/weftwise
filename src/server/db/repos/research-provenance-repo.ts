@@ -841,8 +841,11 @@ export function retryResearchRunImportAtomic(
         `Research run is not in a retryable state: ${stored.run.status}`,
       );
     }
-    if (stored.run.verificationLintJobId) {
-      // verification 之后的 failed 已有物化的 finding 终态，导入重试无法恢复语义。
+    if (
+      stored.run.verificationLintJobId
+      || stored.findings.some((finding) => finding.verificationStatus !== 'pending')
+    ) {
+      // 目标化验证或旧 verification lint 已物化 finding 终态，导入重试无法恢复语义。
       throw new ResearchProvenanceRepoError(
         'run-not-retryable',
         'Research run failed after verification and cannot retry the import',
@@ -918,61 +921,10 @@ export function retryResearchRunImportAtomic(
   return transaction.immediate();
 }
 
-/**
- * finding run 的验证 lint 唯一入队原语：重验 delivery 终态、INSERT job、回写 run
- * 均在同一 IMMEDIATE transaction 中完成。
- */
-export function enqueueResearchVerificationLintAtomic(
-  runId: string,
-  now = new Date(),
-): string | null {
-  const sqlite = getRawDb();
-  const transaction = sqlite.transaction((): string | null => {
-    const run = sqlite.prepare(`
-      SELECT subject_id, origin, status, verification_lint_job_id
-      FROM research_runs WHERE id = ?
-    `).get(runId) as {
-      subject_id: string;
-      origin: string;
-      status: string;
-      verification_lint_job_id: string | null;
-    } | undefined;
-    if (!run || run.origin !== 'findings') return null;
-    if (run.verification_lint_job_id) return run.verification_lint_job_id;
-    if (run.status !== 'importing') return null;
-    const counts = researchDeliveryCounts(sqlite, runId);
-    if (counts.total === 0 || counts.terminal !== counts.total || counts.completed === 0) return null;
-
-    const jobId = randomUUID();
-    const nowIso = now.toISOString();
-    sqlite.prepare(`
-      INSERT INTO jobs (
-        id, type, status, subject_id, params_json, result_json, created_at,
-        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
-      ) VALUES (?, 'lint', 'pending', ?, ?, NULL, ?, NULL, NULL, NULL, NULL, 0)
-    `).run(
-      jobId,
-      run.subject_id,
-      JSON.stringify({ subjectId: run.subject_id, researchVerification: { runId } }),
-      nowIso,
-    );
-    const update = sqlite.prepare(`
-      UPDATE research_runs
-      SET verification_lint_job_id = ?, status = 'verifying',
-          version = version + 1, updated_at = ?
-      WHERE id = ? AND status = 'importing' AND origin = 'findings'
-        AND verification_lint_job_id IS NULL
-    `).run(jobId, nowIso, runId);
-    if (update.changes !== 1) throw new Error('Research verification lint claim changed concurrently');
-    return jobId;
-  });
-  return transaction.immediate();
-}
-
-/** verification 结果与 run 终态在同一事务内物化。 */
+/** 目标化 postcondition（verificationJobId=null）或旧 lint verification 的结果与 run 终态原子物化。 */
 export function finalizeResearchVerificationAtomic(
   runId: string,
-  verificationJobId: string,
+  verificationJobId: string | null,
   outcomes: ResearchFindingVerificationOutcome[],
   status: 'completed' | 'partial' | 'failed',
   error: { code?: string; message: string } | null,
@@ -981,10 +933,17 @@ export function finalizeResearchVerificationAtomic(
   const sqlite = getRawDb();
   const transaction = sqlite.transaction((): boolean => {
     const run = sqlite.prepare(`
-      SELECT status FROM research_runs
-      WHERE id = ? AND verification_lint_job_id = ?
-    `).get(runId, verificationJobId) as { status: string } | undefined;
-    if (!run || run.status !== 'verifying') return false;
+      SELECT status, verification_lint_job_id FROM research_runs WHERE id = ?
+    `).get(runId) as {
+      status: string;
+      verification_lint_job_id: string | null;
+    } | undefined;
+    const expectedStatus = verificationJobId === null ? 'importing' : 'verifying';
+    if (
+      !run
+      || run.status !== expectedStatus
+      || run.verification_lint_job_id !== verificationJobId
+    ) return false;
     const rows = sqlite.prepare(`
       SELECT finding_id FROM research_run_findings WHERE run_id = ? ORDER BY finding_id
     `).all(runId) as Array<{ finding_id: string }>;
@@ -1009,19 +968,28 @@ export function finalizeResearchVerificationAtomic(
       );
       if (update.changes !== 1) throw new Error('Research finding verification changed concurrently');
     }
-    const runUpdate = sqlite.prepare(`
-      UPDATE research_runs
-      SET status = ?, version = version + 1, updated_at = ?, completed_at = ?, error_json = ?
-      WHERE id = ? AND status = 'verifying' AND verification_lint_job_id = ?
-    `).run(
-      status,
-      nowIso,
-      nowIso,
-      error ? JSON.stringify(error) : null,
-      runId,
-      verificationJobId,
-    );
-    return runUpdate.changes === 1;
+    const runUpdate = verificationJobId === null
+      ? sqlite.prepare(`
+          UPDATE research_runs
+          SET status = ?, version = version + 1, updated_at = ?, completed_at = ?, error_json = ?
+          WHERE id = ? AND status = 'importing' AND verification_lint_job_id IS NULL
+        `).run(status, nowIso, nowIso, error ? JSON.stringify(error) : null, runId)
+      : sqlite.prepare(`
+          UPDATE research_runs
+          SET status = ?, version = version + 1, updated_at = ?, completed_at = ?, error_json = ?
+          WHERE id = ? AND status = 'verifying' AND verification_lint_job_id = ?
+        `).run(
+          status,
+          nowIso,
+          nowIso,
+          error ? JSON.stringify(error) : null,
+          runId,
+          verificationJobId,
+        );
+    if (runUpdate.changes !== 1) {
+      throw new Error('Research finding postcondition changed concurrently');
+    }
+    return true;
   });
   return transaction.immediate();
 }

@@ -2,6 +2,7 @@ import type {
   EnrichedLintFinding,
   Job,
   ResearchTouchedPage,
+  Subject,
 } from '@/lib/contracts';
 import { describeErrorMessage } from '@/lib/error-format';
 import * as pagesRepo from '../db/repos/pages-repo';
@@ -16,6 +17,8 @@ import {
   parseResearchFindingSnapshot,
   researchFindingSnapshot,
 } from './research-provenance';
+import { checkThinPages } from './lint-deterministic';
+import { normalizeSlug } from '../wiki/page-identity';
 
 const TERMINAL_DELIVERY = new Set(['completed', 'failed']);
 const SAFE_ERROR_LIMIT = 500;
@@ -174,7 +177,30 @@ export function reconcileResearchRun(runId: string): void {
     return;
   }
   if (!stored.run.verificationLintJobId) {
-    researchRepo.enqueueResearchVerificationLintAtomic(runId);
+    let outcomes: researchRepo.ResearchFindingVerificationOutcome[];
+    try {
+      outcomes = verifyResearchFindingPostconditions(stored, subject);
+    } catch {
+      outcomes = stored.findings.map((finding) => ({
+        findingId: finding.findingId,
+        status: 'unverifiable',
+        snapshot: null,
+      }));
+    }
+    const hasResidual = outcomes.some((outcome) => outcome.status === 'residual');
+    const hasUnverifiable = outcomes.some((outcome) => outcome.status === 'unverifiable');
+    const hasDeliveryFailure = stored.deliveries.some((delivery) => delivery.status === 'failed');
+    researchRepo.finalizeResearchVerificationAtomic(
+      runId,
+      null,
+      outcomes,
+      hasUnverifiable
+        ? 'failed'
+        : hasResidual || hasDeliveryFailure ? 'partial' : 'completed',
+      hasUnverifiable
+        ? { code: 'RESEARCH_POSTCONDITION_UNVERIFIABLE', message: 'Research postcondition could not be verified.' }
+        : null,
+    );
     return;
   }
 
@@ -235,6 +261,49 @@ export function reconcileResearchRun(runId: string): void {
     hasResidual || hasDeliveryFailure ? 'partial' : 'completed',
     null,
   );
+}
+
+/** Research 只复核原 finding，不创建新 lint，也不发现无关问题。 */
+export function verifyResearchFindingPostconditions(
+  stored: researchRepo.StoredResearchRun,
+  subject: Subject,
+): researchRepo.ResearchFindingVerificationOutcome[] {
+  let thinPages: Set<string> | null = null;
+
+  return stored.findings.map((row) => {
+    let original: ReturnType<typeof parseResearchFindingSnapshot>;
+    try {
+      original = parseResearchFindingSnapshot(JSON.parse(row.snapshotJson));
+    } catch {
+      return { findingId: row.findingId, status: 'unverifiable', snapshot: null };
+    }
+
+    if (original.type === 'coverage-gap') {
+      const targetSlug = original.targetSlug ? normalizeSlug(original.targetSlug) : '';
+      if (!targetSlug) {
+        return { findingId: row.findingId, status: 'unverifiable', snapshot: null };
+      }
+      const targetPage = pagesRepo.getPageBySlug(subject.id, targetSlug);
+      const resolved = targetPage !== null && !pagesRepo.isMetaPage(targetPage);
+      return {
+        findingId: row.findingId,
+        status: resolved ? 'fixed' : 'residual',
+        snapshot: resolved ? null : original,
+      };
+    }
+
+    if (original.type === 'thin-page') {
+      thinPages ??= new Set(checkThinPages(subject).map((finding) => finding.pageSlug));
+      const resolved = !thinPages.has(original.pageSlug);
+      return {
+        findingId: row.findingId,
+        status: resolved ? 'fixed' : 'residual',
+        snapshot: resolved ? null : original,
+      };
+    }
+
+    return { findingId: row.findingId, status: 'unverifiable', snapshot: null };
+  });
 }
 
 /** worker 终态 hook 的精确对账入口。 */

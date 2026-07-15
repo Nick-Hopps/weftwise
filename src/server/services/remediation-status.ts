@@ -64,6 +64,8 @@ export function buildHealthSnapshot(
 
   const remediations: Record<string, RemediationPlan> = {};
   const currentKeys = new Set<string>();
+  const visibleFindings: typeof lint.findings = [];
+  const projectedOutcomes: RecentOutcomeEntry[] = [];
 
   for (const finding of lint.findings) {
     const key = findingKey(finding.subjectId, finding.id);
@@ -71,13 +73,30 @@ export function buildHealthSnapshot(
 
     const initial = routeFinding(finding, options);
     const related = latestByFinding.get(key);
-    remediations[finding.id] = related
+    const plan = related
       ? applyCurrentJob(initial, related, lint.ranAt, researchRunsByJob)
       : initial;
+    if (plan.status === 'fixed') {
+      projectedOutcomes.push({
+        subjectId: finding.subjectId,
+        findingId: finding.id,
+        outcome: 'fixed',
+      });
+      continue;
+    }
+
+    visibleFindings.push(finding);
+    remediations[finding.id] = plan;
   }
 
-  const recentEntries: RecentOutcomeEntry[] = [];
+  const recentEntries: RecentOutcomeEntry[] = [...projectedOutcomes];
   const recentIdCounts = new Map<string, number>();
+  for (const entry of projectedOutcomes) {
+    recentIdCounts.set(
+      entry.findingId,
+      (recentIdCounts.get(entry.findingId) ?? 0) + 1,
+    );
+  }
 
   for (const [key, contextJob] of latestByFinding) {
     if (currentKeys.has(key)) continue;
@@ -104,7 +123,19 @@ export function buildHealthSnapshot(
     recentOutcomes[key] = entry.outcome;
   }
 
-  return { ...lint, remediations, recentOutcomes };
+  const bySeverity = {
+    critical: visibleFindings.filter((finding) => finding.severity === 'critical').length,
+    warning: visibleFindings.filter((finding) => finding.severity === 'warning').length,
+    info: visibleFindings.filter((finding) => finding.severity === 'info').length,
+  };
+
+  return {
+    ...lint,
+    findings: visibleFindings,
+    bySeverity,
+    remediations,
+    recentOutcomes,
+  };
 }
 
 function applyCurrentJob(
@@ -124,16 +155,23 @@ function applyCurrentJob(
     status = run
       ? researchRunOutcome(run, findingId)
       : researchOutcome(job.resultJson);
+  } else if (context.action === 'fix' || context.action === 'curate') {
+    if (lintRanAt === null || job.completedAt === null) {
+      status = 'queued';
+    } else {
+      const outcome = readPerFindingOutcome(job.resultJson, findingId)
+        ?? completedWriteOutcome(job.resultJson);
+      // baseline 之后的任务结果由任务内 postcondition 直接收敛；更新的 lint 仍可重新发现问题。
+      status = job.completedAt > lintRanAt
+        ? outcome
+        : outcome === 'fixed' ? 'failed' : outcome;
+    }
   } else if (
     lintRanAt === null
     || job.completedAt === null
     || job.completedAt > lintRanAt
   ) {
     status = 'queued';
-  } else if (context.action === 'fix' || context.action === 'curate') {
-    const outcome = readPerFindingOutcome(job.resultJson, findingId)
-      ?? completedWriteOutcome(job.resultJson);
-    status = outcome === 'fixed' ? 'failed' : outcome;
   } else {
     status = 'failed';
   }
@@ -155,6 +193,12 @@ function readRecentOutcome(
       ? outcome
       : null;
   }
+  if (job.status === 'failed') return 'failed';
+  if (context.action === 'fix' || context.action === 'curate') {
+    if (job.completedAt === null) return null;
+    return readPerFindingOutcome(job.resultJson, findingId)
+      ?? completedWriteOutcome(job.resultJson);
+  }
   if (
     lintRanAt === null
     || job.completedAt === null
@@ -162,12 +206,7 @@ function readRecentOutcome(
   ) {
     return null;
   }
-  if (job.status === 'failed') return 'failed';
   if (context.action === 're-ingest') return 'fixed';
-  if (context.action === 'fix' || context.action === 'curate') {
-    return readPerFindingOutcome(job.resultJson, findingId)
-      ?? completedWriteOutcome(job.resultJson);
-  }
 
   return completedWriteOutcome(job.resultJson);
 }
