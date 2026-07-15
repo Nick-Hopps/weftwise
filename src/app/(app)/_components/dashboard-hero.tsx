@@ -39,16 +39,16 @@ export function DashboardHero({ pageCount, compact = false }: DashboardHeroProps
   const subtitle =
     pageCount === 0
       ? 'Your knowledge base is waiting. Ingest your first source to begin.'
-      : `You have ${pageCount} ${pageCount === 1 ? 'page' : 'pages'}. Ask across them, or jump to a topic.`;
+      : 'Search the collection, ask across your sources, or continue from recent work.';
 
   if (compact) {
     return (
-      <section className="space-y-3">
-        <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground">
+      <section className="max-w-[560px] space-y-4">
+        <div className="space-y-1.5">
+          <h1 className="font-display text-3xl font-semibold tracking-normal text-foreground">
             {greeting}.
           </h1>
-          <p className="text-sm text-foreground-secondary">
+          <p className="text-sm leading-6 text-foreground-secondary">
             {subtitle}
           </p>
         </div>
@@ -75,12 +75,12 @@ export function DashboardHero({ pageCount, compact = false }: DashboardHeroProps
   }
 
   return (
-    <section className="space-y-4 py-4">
-      <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+    <section className="space-y-5 py-4">
+      <div className="space-y-1.5">
+        <h1 className="font-display text-3xl font-semibold tracking-normal text-foreground">
           {greeting}.
         </h1>
-        <p className="text-sm text-foreground-secondary">
+        <p className="text-sm leading-6 text-foreground-secondary">
           {subtitle}
         </p>
       </div>

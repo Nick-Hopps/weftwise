@@ -137,17 +137,17 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-canvas border-r border-border overflow-hidden">
+    <aside className="flex h-full w-full flex-col overflow-hidden border-r border-border-subtle bg-canvas" aria-label="Wiki navigation">
       {/* Top quick action (primary CTA) — opens the dedicated ingest workspace */}
-      <div className="px-2 py-2 shrink-0">
+      <div className="shrink-0 px-3 py-2.5">
         <Link
           href="/ingest"
           onClick={onNavigate}
           className={cn(
-            'flex items-center gap-2 h-8 px-2.5 rounded-md text-sm font-medium transition-colors focus-ring',
+            'flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors focus-ring',
             isIngestActive
               ? 'text-accent-fg bg-accent hover:bg-accent'
-              : 'text-accent bg-accent/8 hover:bg-accent/12',
+              : 'bg-accent-subtle text-accent-strong hover:bg-accent/15',
           )}
         >
           <Plus className="h-3.5 w-3.5" />
@@ -158,7 +158,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
       <Separator />
 
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex-1 overflow-y-auto py-3">
         {metaPages.length > 0 && (
           <div className="px-2 mb-3">
             <SectionLabel className="px-2 py-1 flex items-center gap-1.5">
@@ -172,9 +172,9 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                   href={`/wiki/${page.slug}`}
                   onClick={onNavigate}
                   className={cn(
-                    'flex items-center gap-2 h-8 px-2 rounded-md text-sm transition-colors focus-ring',
+                    'relative flex h-8 items-center gap-2 rounded-md px-2 text-sm transition-colors focus-ring',
                     isActive(page.slug)
-                      ? 'bg-subtle text-foreground font-medium'
+                      ? 'bg-surface font-medium text-foreground shadow-xs before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent'
                       : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
                   )}
                 >
@@ -208,7 +208,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                     aria-expanded={!collapsed}
                     className="w-full flex items-center justify-between px-2 h-6 rounded-md text-xs font-medium text-foreground-tertiary hover:text-foreground hover:bg-subtle transition-colors focus-ring"
                   >
-                    <span className="flex items-center gap-1.5 uppercase tracking-wider">
+                    <span className="flex items-center gap-1.5 uppercase tracking-normal">
                       <ChevronDown
                         className={cn('h-3 w-3 transition-transform', collapsed && '-rotate-90')}
                       />
@@ -226,9 +226,9 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                           href={`/wiki/${page.slug}`}
                           onClick={onNavigate}
                           className={cn(
-                            'flex items-center gap-2 h-8 pl-5 pr-2 rounded-md text-sm transition-colors focus-ring',
+                            'relative flex h-8 items-center gap-2 rounded-md pl-5 pr-2 text-sm transition-colors focus-ring',
                             isActive(page.slug)
-                              ? 'bg-accent-subtle text-accent-strong font-medium'
+                              ? 'bg-surface font-medium text-accent-strong shadow-xs before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent'
                               : 'text-foreground hover:bg-subtle',
                           )}
                         >
@@ -253,7 +253,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
               aria-expanded={sourcesOpen}
               className="w-full flex items-center justify-between px-2 h-6 rounded-md text-xs font-medium text-foreground-tertiary hover:text-foreground hover:bg-subtle transition-colors focus-ring"
             >
-              <span className="flex items-center gap-1.5 uppercase tracking-wider">
+              <span className="flex items-center gap-1.5 uppercase tracking-normal">
                 <ChevronDown
                   className={cn('h-3 w-3 transition-transform', !sourcesOpen && '-rotate-90')}
                 />
@@ -272,9 +272,9 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                     onClick={onNavigate}
                     title={`Open ${source.filename}`}
                     className={cn(
-                      'flex items-center gap-2 h-8 pl-5 pr-2 rounded-md text-sm transition-colors focus-ring',
+                      'relative flex h-8 items-center gap-2 rounded-md pl-5 pr-2 text-sm transition-colors focus-ring',
                       pathname === `/sources/${source.id}`
-                        ? 'bg-accent-subtle text-accent-strong font-medium'
+                        ? 'bg-surface font-medium text-accent-strong shadow-xs before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent'
                         : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
                     )}
                   >
@@ -289,7 +289,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
       </div>
 
       {/* Footer */}
-      <div className="shrink-0 border-t border-border px-2 py-2 space-y-1">
+      <div className="shrink-0 space-y-1 border-t border-border-subtle bg-canvas px-3 py-2.5">
         <Link
           href="/health"
           onClick={onNavigate}
@@ -351,6 +351,6 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           </IconButton>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

@@ -150,9 +150,8 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
 
         {/* Graph — compact, interactive neighborhood view */}
         <section aria-labelledby="ctx-graph" className="flex-1 min-h-0">
-          <div className="flex items-baseline justify-between mb-2">
+          <div className="mb-2 flex items-baseline justify-between">
             <SectionLabel id="ctx-graph">Graph</SectionLabel>
-            <span className="text-[10px] text-foreground-tertiary italic">drag · scroll · click</span>
           </div>
           <MiniGraphView key={subjectId ?? 'no-subject'} currentSlug={slug} />
         </section>

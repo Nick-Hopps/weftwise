@@ -16,6 +16,7 @@ import { HtmlSourceFrame } from './html-source-frame';
 import { LensFeedback } from './lens-feedback';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
+import { ReadingProgress } from './reading-progress';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useLens } from '@/hooks/use-lens';
@@ -175,6 +176,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
       <div className="flex flex-col lg:h-[calc(100vh-var(--header-height))]">
         <div className="grid grid-cols-1 lg:grid-cols-2 lg:flex-1 lg:min-h-0">
           <div ref={articleRef} className="min-w-0 lg:overflow-y-auto">
+            <ReadingProgress containerRef={articleRef} useContainerScroll />
             {article}
             <SelectionAskButton containerRef={articleRef} />
           </div>
@@ -188,6 +190,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
 
   return (
     <div ref={articleRef} className="flex min-h-full flex-col">
+      <ReadingProgress containerRef={articleRef} />
       {article}
       <SelectionAskButton containerRef={articleRef} />
     </div>
@@ -197,19 +200,20 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
 function Backlinks({ backlinks }: { backlinks: BacklinkItem[] }) {
   if (backlinks.length === 0) return null;
   return (
-    <div className="mx-auto w-full px-6 pb-12 max-w-[var(--reading-max-width)]">
-      <div className="border-t border-border pt-6">
-        <SectionLabel className="mb-3 flex items-center gap-1.5">
+    <div className="mx-auto w-full max-w-[var(--reading-max-width)] px-5 pb-14 sm:px-8">
+      <div className="border-t border-border-subtle pt-7">
+        <SectionLabel className="mb-2 flex items-center gap-1.5">
           <Link2 className="h-3 w-3" />
           Linked from
         </SectionLabel>
-        <ul className="flex flex-wrap gap-2">
+        <ul className="divide-y divide-border-subtle border-y border-border-subtle">
           {backlinks.map((bl) => (
             <li key={bl.key}>
               <Link
                 href={bl.href}
-                className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md text-sm font-medium text-accent-strong bg-accent-subtle border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-colors focus-ring"
+                className="flex min-h-10 w-full items-center gap-2 px-1 py-2 text-sm font-medium text-foreground-secondary transition-colors hover:bg-subtle hover:px-2 hover:text-accent-strong focus-ring"
               >
+                <Link2 className="h-3.5 w-3.5 text-foreground-tertiary" aria-hidden />
                 {bl.title}
               </Link>
             </li>
