@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
+import type { EnrichedLintFinding } from '@/lib/contracts';
+import { findingId } from '../finding-identity';
 import {
   canonicalizeResearchSelection,
   parseResearchCandidateSnapshot,
@@ -8,11 +10,74 @@ import {
   researchCandidateId,
   researchCandidateSetHash,
   normalizeResearchCandidateUrl,
+  parseResearchFindingSnapshot,
+  researchFindingSnapshot,
   ResearchProvenanceError,
   validateStoredResearchCandidates,
 } from '../research-provenance';
 
 describe('Research provenance 纯函数', () => {
+  it.each([
+    {
+      type: 'coverage-gap' as const,
+      pageSlug: 'rendering-overview',
+      targetSlug: 'physically-based-rendering',
+      evidence: [
+        { pageSlug: 'rendering-overview', quote: 'PBR models material response.' },
+        { pageSlug: 'materials', quote: 'Physically based rendering uses microfacets.' },
+      ],
+      description: 'PBR deserves a dedicated page.',
+    },
+    {
+      type: 'contradiction' as const,
+      pageSlug: 'rendering-a',
+      evidence: [
+        { pageSlug: 'rendering-a', quote: 'The pipeline has four stages.' },
+        { pageSlug: 'rendering-b', quote: 'The pipeline has seven stages.' },
+      ],
+      description: 'The pipeline stage counts conflict.',
+    },
+  ])('%s snapshot 无损保留 v2 identity 字段并可重算同一 finding ID', (semantic) => {
+    const subjectId = 'subject-1';
+    const finding = {
+      ...semantic,
+      id: '',
+      subjectId,
+      subjectSlug: 'graphics',
+      severity: 'warning' as const,
+      suggestedFix: null,
+    } satisfies EnrichedLintFinding;
+    const id = findingId(finding);
+    const snapshot = researchFindingSnapshot({ ...finding, id });
+    const parsed = parseResearchFindingSnapshot(JSON.parse(JSON.stringify(snapshot)));
+
+    expect(parsed.evidence).toEqual(semantic.evidence);
+    if (semantic.type === 'coverage-gap') {
+      expect(parsed.targetSlug).toBe(semantic.targetSlug);
+    } else {
+      expect(parsed).not.toHaveProperty('targetSlug');
+    }
+    expect(findingId({ ...parsed, subjectId })).toBe(id);
+  });
+
+  it('旧 v1 finding snapshot 缺少 target/evidence 时仍可解析', () => {
+    expect(parseResearchFindingSnapshot({
+      type: 'thin-page',
+      severity: 'info',
+      pageSlug: 'stub',
+      description: 'Thin page',
+      suggestedFix: null,
+      subjectSlug: 'general',
+    })).toEqual({
+      type: 'thin-page',
+      severity: 'info',
+      pageSlug: 'stub',
+      description: 'Thin page',
+      suggestedFix: null,
+      subjectSlug: 'general',
+    });
+  });
+
   it('规范化 URL 身份：host 小写、去 hash/default port/trailing slash，保留 query', () => {
     expect(normalizeResearchCandidateUrl(' HTTPS://Example.COM:443/a/../docs/?q=1#part '))
       .toBe('https://example.com/docs?q=1');

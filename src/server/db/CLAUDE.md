@@ -180,6 +180,7 @@
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
 - repos CRUD/查询：subjects / pages（复合 PK、path unique、跨 Subject 同 slug、精确 upsert/delete、`getBacklinks` JOIN）/ sources / jobs（双进程 claim、到期租约、attempt fencing/requeue、取消幂等、事件清扫、同毫秒插入顺序与 cursor）/ operations / conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
+- Research run 仓储还以真实 SQLite 覆盖 v2 finding immutable snapshot（`targetSlug/evidence`）写入及 ID 重算一致性；旧 v1 snapshot 的兼容解析由 service 纯函数测试锁定，无表结构迁移。
 - `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描），包含 remediation CAS 候选与同源 ingest JSON 表达式查询；后者同时覆盖损坏历史参数安全性。
 - `pages-repo-invariants.test.ts`：真实 SQLite 覆盖复合身份约束，以及无 trigger 前提下 `updateFtsEntry/deleteFtsEntry/deletePage` 的替换、搜索和 Subject 隔离。
 - `jobs-repo.test.ts`：两个独立 Node 进程同时调用真实 `claimNextJob`，在 WAL + busy_timeout 下只有一个领取；并覆盖 `lease_expires_at <= now`、reclaim 与 attempt 语义。
@@ -217,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Research finding snapshot JSON 补齐可选 targetSlug/evidence，仓储写前 ID 不变量现可覆盖 v2 coverage-gap/contradiction；字段可选，无 SQLite schema migration |
 | 2026-07-14 | job_events 改按 SQLite rowid 的真实插入顺序读取与 afterId 续播，消除同毫秒随机 UUID 乱序/漏读；requestCancel 对已取消 failed 返回 already-terminal，保证取消终态幂等 |
 | 2026-07-14 | Worker/DB 不变量测试收尾：双进程真实 repo claim、到期租约与 attempt fencing/requeue 边界；旧 attempt 不得 heartbeat/complete/fail/requeue 新 attempt；pages 复合 PK/path unique、跨 Subject 同 slug 与手动 FTS update/delete/search 一致性 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：`page_aliases` 增加 subject+oldSlug 唯一索引并由索引器从 frontmatter aliases 同步；pending_actions CHECK 增加 `move`，Drizzle 0007 与启动迁移均先去重再升级旧库 |
