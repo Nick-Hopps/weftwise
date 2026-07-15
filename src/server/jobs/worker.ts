@@ -12,6 +12,7 @@ import {
 } from '../services/research-provenance-reconciler';
 import {
   getMaintenanceEnabled,
+  getMaintenanceScope,
   getMaintenanceSweepIntervalHours,
   getMaintenanceMaxPagesPerSweep,
   getMaintenanceLastSweepAt,
@@ -105,9 +106,11 @@ function maintenanceTick(): void {
   if (!shouldSweep(getMaintenanceLastSweepAt(), getMaintenanceSweepIntervalHours(), now)) return;
   // 先占位 lastSweepAt 防重入（tick 间隔远小于节律）
   setMaintenanceLastSweepAt(now.toISOString());
+  const scope = getMaintenanceScope();
   const enqueued = runMaintenanceSweep({
     now,
     maxPages: getMaintenanceMaxPagesPerSweep(),
+    subjectIds: scope.mode === 'subjects' ? scope.subjectIds : undefined,
     enqueue: (slug, subjectId) => {
       queue.enqueue('re-enrich', { slug, subjectId }, subjectId);
     },

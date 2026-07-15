@@ -68,8 +68,15 @@ export function SettingsDialog() {
 
   const savePartial = useMutation({
     mutationFn: (patch: Partial<AppSettings>) => putSettings(patch),
-    onSuccess: (data) => {
+    onSuccess: (data, patch) => {
       queryClient.setQueryData(['app-settings'], data);
+      if (
+        patch.maintenanceScope !== undefined ||
+        patch.maintenanceEnabled !== undefined ||
+        patch.maintenanceSweepIntervalHours !== undefined
+      ) {
+        void queryClient.invalidateQueries({ queryKey: ['maintenance-status'] });
+      }
     },
   });
 
