@@ -90,7 +90,7 @@ worker-entry.ts
 
 语义阶段的模型输出必须携带 `targetSlug + evidence[{ pageSlug, quote }]`，并由 `lint-semantic-validation.ts` 对当前 vault 做第二次事实校验：逐条 quote 必须是页面原文字面片段；missing-crossref 的 source/target 必须存在且当前确实没有同 Subject wikilink；coverage-gap 的目标页必须不存在且至少有两个独立证据页；contradiction 必须有两个不同页面的精确引文。无法证明的模型输出直接丢弃。调用点固定 `temperature: 0` 降低同输入漂移，但真实性只由上述服务端校验决定。
 
-Lint 分为两种明确模式：手动 Health check 是 `discovery`，执行确定性扫描与开放式语义发现；Fix/Curate 完成后的自动闭环是 `verification`，由 `lint-verification.ts` 校验 `baselineLintJobId + remediationJobId` 的 subject、终态与 `RemediationContext` 关联，重新执行全部确定性检查，但语义侧只保留基线中尚未被同一基线下已完成处置确认为 `fixed` 的 finding，不调用语义发现模型，也不允许验证输入引入新语义 finding。多个同基线 Fix/Curate 并行排队时聚合其完成结果，保持闭环单调收敛；新的潜在语义问题只在用户手动 discovery 时出现。
+手动 Health check 使用 `discovery`，执行确定性扫描与开放式语义发现。Fix/Curate 完成后不再创建 lint job：任务内 `verifyJobPostconditions` 已产出 `perFindingOutcomes`，`remediation-status.ts` 在读取原 lint 快照时直接隐藏 baseline 之后验证为 `fixed` 的 finding，并重算 severity；failed/skipped/residual 保留。若用户之后手动 discovery 又发现同一 finding，较新的 lint 结果优先并重新展示。`/api/lint` 的显式 `verification` 模式与 `lint-verification.ts` 暂留作旧客户端兼容，不再由 Health UI 调用。
 
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
@@ -297,6 +297,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Health 处置改为 postcondition 驱动的快照投影：Fix/Curate 直接消费逐 finding outcome；Research 导入后只目标化复核原 coverage-gap/thin-page 并原子物化终态，不再创建 verification lint；旧 verifying run 继续兼容对账 |
 | 2026-07-15 | Semantic Lint 对 AI SDK JSON/schema 输出失败启用 1 次定向重试；最终失败事件保存脱敏 `finishReason/detail`，不落模型原始输出或 Wiki 正文 |
 | 2026-07-15 | 修复 Research finding immutable snapshot 与 v2 identity 契约断裂：snapshot 可选保存 targetSlug/evidence，coverage-gap/contradiction 可无损重算 ID，旧 v1 snapshot 保持兼容 |
 | 2026-07-15 | Health 修后验证收敛：Lint 拆分 discovery/verification；Fix/Curate 自动闭环校验 baseline/remediation 关联，只重跑确定性检查并协调原语义 findings，不再因同一 vault 的开放式复检漂移制造新 findings；并发同基线处置聚合完成结果 |

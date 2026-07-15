@@ -755,6 +755,18 @@ describe('research-provenance-repo failed run 导入重试', () => {
     })).toThrow(/verification/);
     sqlite.prepare('UPDATE research_runs SET verification_lint_job_id = NULL WHERE id = ?').run(runId);
 
+    sqlite.prepare(`
+      INSERT INTO research_run_findings (
+        run_id, finding_id, snapshot_json, verification_status, verified_at
+      ) VALUES (?, 'finding-direct', '{}', 'unverifiable', ?)
+    `).run(runId, '2026-07-14T01:30:00.000Z');
+    expect(() => repo.retryResearchRunImportAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+    })).toThrow(/verification/);
+    sqlite.prepare('DELETE FROM research_run_findings WHERE run_id = ?').run(runId);
+
     // 成功重试后 run 进入 importing，重复重试被状态拒绝。
     repo.retryResearchRunImportAtomic({
       runId,

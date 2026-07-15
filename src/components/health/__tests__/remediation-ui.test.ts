@@ -373,12 +373,11 @@ describe('Health remediation UI helper', () => {
   it('lint busy 时同 origin 只排队一次，并在终态 drain', () => {
     const queue = createLintRerunQueue();
     const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
-    const verification = { baselineLintJobId: 'lint-1', remediationJobId: 'fix-1' };
 
     expect(queue.request(origin)).toBe('start');
-    expect(queue.request(origin, verification)).toBe('queued');
-    expect(queue.request(origin, verification)).toBe('queued');
-    expect(queue.finish(origin, origin)).toEqual({ origin, verification });
+    expect(queue.request(origin)).toBe('queued');
+    expect(queue.request(origin)).toBe('queued');
+    expect(queue.finish(origin, origin)).toEqual({ origin });
     expect(queue.request(origin)).toBe('start');
   });
 
@@ -393,7 +392,7 @@ describe('Health remediation UI helper', () => {
     expect(queue.finish(origin, nextOrigin)).toBeNull();
   });
 
-  it('恢复 Health remediation 时保留原 lint baseline 供修后验证', () => {
+  it('恢复 Health remediation 时只恢复原 workflow，不排队修后 lint', () => {
     const selected = selectRecoverableHealthJobs(snapshot, [
       job('fix-1', 'fix', {
         remediationContext: {
@@ -407,8 +406,8 @@ describe('Health remediation UI helper', () => {
     expect(selected.fix).toMatchObject({
       jobId: 'fix-1',
       source: 'remediation',
-      baselineLintJobId: 'lint-origin',
     });
+    expect(selected.fix).not.toHaveProperty('baselineLintJobId');
   });
 
   it('active manual Research 恢复 research workflow busy', () => {

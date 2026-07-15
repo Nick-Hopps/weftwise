@@ -28,6 +28,7 @@ export function defaultResearchCandidateIds(run: ResearchRunView): Set<string> {
 export function researchRunRetryable(run: ResearchRunView): boolean {
   return run.status === 'failed'
     && run.verificationLintJobId === null
+    && run.findings.every((finding) => finding.verificationStatus === 'pending')
     && run.approval !== null
     && run.candidates.some((candidate) => candidate.delivery?.status === 'failed');
 }
