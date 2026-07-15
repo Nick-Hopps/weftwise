@@ -27,10 +27,8 @@ function formatDate(dateStr: string): string {
 }
 
 /**
- * Page frontmatter rendered as a Linear-issue-style property list:
- *  - H1 title
- *  - 88px fixed-width label column + flexible value column
- *  - Hairline border separator from body
+ * 阅读页头：标题承担首要层级，属性压缩为可换行的单行摘要，避免正文开始前
+ * 出现大块表格式元数据。
  */
 export default function FrontmatterDisplay({
   title,
@@ -44,20 +42,20 @@ export default function FrontmatterDisplay({
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
   return (
-    <div className="pb-6 mb-8 border-b border-border">
-      <div className="flex items-start justify-between gap-3 mb-5">
-        <h1 className="text-2xl font-semibold tracking-tight text-prose-heading leading-tight">
+    <header className="mb-10 border-b border-border-subtle pb-7">
+      <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <h1 className="min-w-0 font-display text-3xl font-semibold leading-[1.18] tracking-normal text-prose-heading sm:shrink-0 sm:text-[36px]">
           {title}
         </h1>
         {actions}
       </div>
 
       {hasProps && (
-        <dl className="grid grid-cols-[88px_1fr] gap-y-1.5 text-sm items-start">
+        <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-foreground-tertiary">
           {tags.filter((t) => t !== 'meta').length > 0 && (
-            <>
-              <dt className="text-foreground-secondary pt-0.5">Tags</dt>
-              <dd className="flex flex-wrap gap-1">
+            <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
+              <dt className="sr-only">Tags</dt>
+              <dd className="flex flex-wrap gap-1.5">
                 {tags.filter((t) => t !== 'meta').map((t) =>
                   subjectSlug ? (
                     <TagLink key={t} tag={t} subjectSlug={subjectSlug} size="base" />
@@ -66,38 +64,38 @@ export default function FrontmatterDisplay({
                   ),
                 )}
               </dd>
-            </>
+            </div>
           )}
           {sources.length > 0 && (
-            <>
-              <dt className="text-foreground-secondary pt-0.5">Sources</dt>
-              <dd className="text-sm text-foreground-secondary">
+            <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto">
+              <dt>Sources</dt>
+              <dd className="max-w-[320px] truncate text-foreground-secondary" title={sources.join(', ')}>
                 {sources.join(', ')}
               </dd>
-            </>
+            </div>
           )}
           {created && (
-            <>
-              <dt className="text-foreground-secondary">Created</dt>
+            <div className="flex items-center gap-1.5">
+              <dt>Created</dt>
               <dd>
-                <time dateTime={created} className="font-mono text-xs text-foreground">
+                <time dateTime={created} className="font-mono text-foreground-secondary">
                   {formatDate(created)}
                 </time>
               </dd>
-            </>
+            </div>
           )}
           {updated && (
-            <>
-              <dt className="text-foreground-secondary">Updated</dt>
+            <div className="flex items-center gap-1.5">
+              <dt>Updated</dt>
               <dd>
-                <time dateTime={updated} className="font-mono text-xs text-foreground">
+                <time dateTime={updated} className="font-mono text-foreground-secondary">
                   {formatDate(updated)}
                 </time>
               </dd>
-            </>
+            </div>
           )}
         </dl>
       )}
-    </div>
+    </header>
   );
 }

@@ -83,7 +83,7 @@
   --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ─── SEMANTIC · Surface / Background ───────────────────────────────────── */
-  --color-bg-canvas:   var(--base-neutral-50);
+  --color-bg-canvas:   247 247 246;
   --color-bg-surface:  var(--base-neutral-0);
   --color-bg-subtle:   var(--base-neutral-100);
   --color-bg-elevated: var(--base-neutral-0);
@@ -156,13 +156,13 @@
   --color-scrollbar-thumb-hover: var(--base-neutral-500);
 
   /* ─── COMPONENT · Shell ─────────────────────────────────────────────────── */
-  --header-height:            48px;
-  --sidebar-width:            240px;
+  --header-height:            52px;
+  --sidebar-width:            264px;
   --sidebar-width-collapsed:  0px;
-  --context-panel-width:      320px;
+  --context-panel-width:      400px;
   --content-max-width:        65ch;
-  /* wiki 正文阅读测度：比 content 更宽但保留上限（宽屏两侧留少量留白）。 */
-  --reading-max-width:        1040px;
+  /* 正文保持舒适行长，宽表格和代码块仍可在文章内部横向滚动。 */
+  --reading-max-width:        780px;
 
   /* ─── COMPONENT · z-index ───────────────────────────────────────────────── */
   --z-header:   20;
@@ -244,6 +244,14 @@
     transition:
       background-color var(--duration-base) var(--ease-standard),
       color var(--duration-base) var(--ease-standard);
+  }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    -webkit-tap-highlight-color: transparent;
   }
 
   ::selection {
@@ -416,6 +424,12 @@
 .tip.tip-l:hover::after,
 .tip.tip-l:focus-visible::after {
   transform: translateY(-50%);
+}
+@media (max-width: 639px) {
+  /* 触屏窄视口没有稳定 hover，隐藏伪元素也可避免其长文本撑大滚动宽度。 */
+  .tip::after {
+    display: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .tip::after {

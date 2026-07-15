@@ -15,8 +15,8 @@ export interface PendingChatReference {
 
 export const SIDEBAR_WIDTH_MIN = 200;
 export const SIDEBAR_WIDTH_MAX = 400;
-export const SIDEBAR_WIDTH_DEFAULT = 240;
-export const CONTEXT_PANEL_WIDTH = 460;
+export const SIDEBAR_WIDTH_DEFAULT = 264;
+export const CONTEXT_PANEL_WIDTH = 400;
 
 export const GENERAL_SUBJECT_SLUG = 'general';
 export const SUBJECT_COOKIE_NAME = 'wiki_subject';
@@ -183,7 +183,8 @@ function migratePersisted(persisted: unknown, version: number) {
 export const useUIStore = create<UIState>()(
   persist(
     (set, get) => ({
-      sidebarOpen: true,
+      // 桌面侧栏始终内嵌显示；该状态只控制移动端抽屉，首次进入不应遮住正文。
+      sidebarOpen: false,
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       contextPanelOpen: false,
       contextPanelTab: 'context',
