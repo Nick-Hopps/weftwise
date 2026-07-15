@@ -676,6 +676,137 @@ describe('research-provenance-repo failed run 导入重试', () => {
     return { ...context, runId: stored.run.id, approvalId, candidateId };
   }
 
+  async function createFailedChildTopicRun() {
+    const context = await setup();
+    const candidates = context.provenance.prepareResearchCandidates([
+      { url: 'https://example.com/child', title: 'Child', snippet: 'child', score: 3, reason: null },
+    ]);
+    const stored = context.repo.persistResearchRun({
+      subjectId: 's1', researchJobId: 'research-child-retry', origin: 'topic', lintJobId: null,
+      topic: 'Child', topics: ['Child'], queries: ['Child'], findings: [], candidates,
+    });
+    const approved = context.repo.approveResearchRunAtomic({
+      runId: stored.run.id,
+      subjectId: 's1',
+      candidateIds: [stored.candidates[0]!.id],
+      expectedVersion: 1,
+      idempotencyKey: 'approve-child-retry',
+    });
+    const approvalId = approved.stored.approval!.id;
+    const candidateId = stored.candidates[0]!.id;
+    const ingestJobId = 'ingest-child-retry';
+    const now = '2026-07-14T01:00:00.000Z';
+    context.sqlite.prepare(`
+      INSERT INTO sources (id, subject_id, filename, content_hash, parsed_at, metadata_json)
+      VALUES ('source-child-retry', 's1', 'child.html', 'hash-child', ?, '{}')
+    `).run(now);
+    context.sqlite.prepare(`
+      INSERT INTO jobs (
+        id, type, status, subject_id, params_json, result_json, created_at,
+        started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count,
+        cancel_requested
+      ) VALUES (?, 'ingest', 'failed', 's1', ?, ?, ?, ?, ?, NULL, NULL, 2, 0)
+    `).run(
+      ingestJobId,
+      JSON.stringify({
+        sourceId: 'source-child-retry',
+        filename: 'child.html',
+        subjectId: 's1',
+        researchProvenance: { runId: stored.run.id, approvalId, candidateId },
+      }),
+      JSON.stringify({ error: { message: 'transient ingest failure' } }),
+      now,
+      now,
+      '2026-07-14T01:10:00.000Z',
+    );
+    context.sqlite.prepare(`
+      INSERT INTO ingest_checkpoints (job_id, kind, key, data_json, created_at)
+      VALUES (?, 'writer-page', 'page-a', '{"content":"checkpoint"}', ?)
+    `).run(ingestJobId, now);
+    context.sqlite.prepare(`
+      UPDATE research_candidate_ingests
+      SET status = 'queued', source_id = 'source-child-retry', ingest_job_id = ?
+      WHERE approval_id = ? AND candidate_id = ?
+    `).run(ingestJobId, approvalId, candidateId);
+    expect(context.repo.failResearchDeliveryFromJob(
+      approvalId,
+      candidateId,
+      ingestJobId,
+      { code: 'RESEARCH_INGEST_FAILED', message: 'transient ingest failure' },
+      new Date('2026-07-14T01:10:00.000Z'),
+    )).toBe(true);
+    expect(context.repo.finalizeTopicResearchRunAtomic(
+      stored.run.id,
+      new Date('2026-07-14T01:10:01.000Z'),
+    )).toBe(true);
+    return { ...context, runId: stored.run.id, approvalId, candidateId, ingestJobId };
+  }
+
+  it('原位恢复 failed child job、delivery 与 run，并保留 checkpoint/attempt 历史', async () => {
+    const context = await createFailedChildTopicRun();
+    const before = context.repo.findResearchRunById(context.runId, 's1')!;
+    expect(before.run.status).toBe('failed');
+    expect(before.deliveries[0]).toMatchObject({ status: 'failed', attemptCount: 0 });
+
+    const retried = context.repo.retryResearchIngestJobAtomic({
+      runId: context.runId,
+      subjectId: 's1',
+      approvalId: context.approvalId,
+      candidateId: context.candidateId,
+      ingestJobId: context.ingestJobId,
+      now: new Date('2026-07-14T02:00:00.000Z'),
+    });
+
+    expect(retried.run).toMatchObject({
+      status: 'importing',
+      version: before.run.version + 1,
+      completedAt: null,
+      errorJson: null,
+    });
+    expect(retried.deliveries[0]).toMatchObject({
+      status: 'queued',
+      sourceId: 'source-child-retry',
+      ingestJobId: context.ingestJobId,
+      completedAt: null,
+      errorJson: null,
+    });
+    expect(context.sqlite.prepare(`
+      SELECT status, result_json, completed_at, attempt_count, cancel_requested
+      FROM jobs WHERE id = ?
+    `).get(context.ingestJobId)).toEqual({
+      status: 'pending',
+      result_json: null,
+      completed_at: null,
+      attempt_count: 2,
+      cancel_requested: 0,
+    });
+    expect(context.sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM ingest_checkpoints WHERE job_id = ?
+    `).get(context.ingestJobId)).toEqual({ count: 1 });
+  });
+
+  it('手动终结的 Research child job 不可恢复，事务不改变 run/delivery', async () => {
+    const context = await createFailedChildTopicRun();
+    context.sqlite.prepare(`
+      UPDATE jobs SET cancel_requested = 1, result_json = ? WHERE id = ?
+    `).run(JSON.stringify({ cancelled: true }), context.ingestJobId);
+    const before = context.repo.findResearchRunById(context.runId, 's1')!;
+
+    expect(() => context.repo.retryResearchIngestJobAtomic({
+      runId: context.runId,
+      subjectId: 's1',
+      approvalId: context.approvalId,
+      candidateId: context.candidateId,
+      ingestJobId: context.ingestJobId,
+    })).toThrow(/not retryable/);
+
+    const after = context.repo.findResearchRunById(context.runId, 's1')!;
+    expect(after.run).toMatchObject({ status: before.run.status, version: before.run.version });
+    expect(after.deliveries[0]).toMatchObject({ status: 'failed' });
+    expect(context.sqlite.prepare('SELECT status FROM jobs WHERE id = ?')
+      .get(context.ingestJobId)).toEqual({ status: 'failed' });
+  });
+
   it('重置 failed delivery、换发 coordinator 并把 run CAS 回 importing', async () => {
     const { repo, sqlite, runId, approvalId, candidateId } = await createFailedTopicRun();
     const before = repo.findResearchRunById(runId, 's1')!;
