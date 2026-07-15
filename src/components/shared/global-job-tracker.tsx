@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { JobsPanel, type TrackedJob } from './jobs-panel';
 import { apiFetch } from '@/lib/api-fetch';
 import type { Job } from '@/lib/contracts';
+import { JOB_STARTED_EVENT, type JobStartedEventDetail } from '@/lib/job-started-event';
 
 /** 从 job params 提取一行可读摘要（文件名 / URL / slug），兜底 job 类型名。 */
 function jobLabel(job: Pick<Job, 'type' | 'paramsJson'>): string {
@@ -55,8 +56,7 @@ export function GlobalJobTracker() {
           .map((a) => ({
             id: a.job.id,
             type: a.job.type,
-            // 经 wiki:job-started 补入的行带占位 label（'Starting…'），轮询拿到
-            // params 后要替换为真实文件名，其余情况保留旧 label 防闪变。
+            // 事件已携带即时 label；轮询拿到权威 params 后保留稳定标签，避免闪变。
             label:
               prevById.get(a.job.id)?.label && prevById.get(a.job.id)!.label !== 'Starting…'
                 ? prevById.get(a.job.id)!.label
@@ -82,10 +82,10 @@ export function GlobalJobTracker() {
     return () => clearInterval(interval);
   }, [checkActiveJobs]);
 
-  // 组件启动/重试即时补入（retry 场景同 id 需 bump reconnectKey 重新订阅 SSE）。
+  // 组件入队/重试即时补入；事件必须携带真实 job type，禁止消费者猜成 ingest。
   useEffect(() => {
-    function onJobStarted(e: CustomEvent<{ jobId: string }>) {
-      const jobId = e.detail.jobId;
+    function onJobStarted(e: CustomEvent<JobStartedEventDetail>) {
+      const { jobId, type, label, queueStatus } = e.detail;
       setDismissed((prev) => {
         if (!prev.has(jobId)) return prev;
         const next = new Set(prev);
@@ -97,18 +97,24 @@ export function GlobalJobTracker() {
         if (existing) {
           return prev.map((t) =>
             t.id === jobId
-              ? { ...t, queueStatus: 'running', reconnectKey: t.reconnectKey + 1 }
+              ? {
+                  ...t,
+                  type,
+                  label,
+                  queueStatus,
+                  reconnectKey: t.reconnectKey + 1,
+                }
               : t,
           );
         }
         return [
           ...prev,
-          { id: jobId, type: 'ingest', label: 'Starting…', queueStatus: 'running', reconnectKey: 0 },
+          { id: jobId, type, label, queueStatus, reconnectKey: 0 },
         ];
       });
     }
-    window.addEventListener('wiki:job-started', onJobStarted as EventListener);
-    return () => window.removeEventListener('wiki:job-started', onJobStarted as EventListener);
+    window.addEventListener(JOB_STARTED_EVENT, onJobStarted as EventListener);
+    return () => window.removeEventListener(JOB_STARTED_EVENT, onJobStarted as EventListener);
   }, []);
 
   const handleRemove = useCallback((id: string) => {

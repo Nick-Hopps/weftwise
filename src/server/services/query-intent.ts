@@ -1,5 +1,17 @@
 export type QueryMode = 'read' | 'propose';
 
+const CURRENT_PAGE_REFS = new Set([
+  '',
+  '当前页面',
+  '当前页',
+  '这个页面',
+  '这个页',
+  '本页面',
+  '本页',
+  'current page',
+  'this page',
+]);
+
 const EXPLANATORY_OR_NEGATED = [
   /(?:如何|怎么|怎样|能否|(?:你)?能|可以.{0,8}吗|不要|别|假设|如果).{0,40}(?:创建|新建|更新|修改|编辑|删除|移除|丰富|回滚|恢复|启动|开始|研究|取消|终止|移动|重命名|改.{0,8}slug)/i,
   /\b(?:how\s+(?:do|can|to)|can\s+you|do\s+not|don't|what\s+(?:would|happens?)\s+if|if\s+i)\b/i,
@@ -20,4 +32,35 @@ export function resolveQueryMode(question: string): QueryMode {
   if (HISTORY_REVERT.test(normalized)) return 'propose';
   if (WORKFLOW_ACTION.test(normalized)) return 'propose';
   return WRITE_ACTION.test(normalized) && WIKI_TARGET.test(normalized) ? 'propose' : 'read';
+}
+
+/**
+ * 解析无需 LLM 决策的单页 re-enrich 控制命令。
+ * 只接受整句明确命令；教程、否定、复合请求继续走普通 Query 语义。
+ */
+export function resolveDirectReenrichSlug(
+  question: string,
+  currentPageSlug?: string,
+): string | null {
+  const normalized = question.trim();
+  if (!normalized || resolveQueryMode(normalized) !== 'propose') return null;
+
+  const chinese = normalized.match(
+    /^(?:请)?(?:重新丰富|再丰富)(?:一下)?(?:(?:wiki|知识库))?(?:页面|页)?(?:\s*[：:]\s*|\s+)?(.*?)[。！!]?$/i,
+  );
+  const english = normalized.match(
+    /^(?:please\s+)?re-?enrich(?:\s+the)?(?:\s+wiki)?(?:\s+page)?(?:\s*:\s*|\s+)?(.*?)[.!]?$/i,
+  );
+  const rawTarget = (chinese?.[1] ?? english?.[1]);
+  if (rawTarget === undefined) return null;
+
+  const target = rawTarget
+    .trim()
+    .replace(/^[`'"“”]+|[`'"“”]+$/g, '')
+    .trim();
+  if (/(?:并且?|然后|同时|以及|，|,|;|；|\band\b)/i.test(target)) return null;
+  if (CURRENT_PAGE_REFS.has(target.toLowerCase())) {
+    return currentPageSlug?.trim() || null;
+  }
+  return target || currentPageSlug?.trim() || null;
 }

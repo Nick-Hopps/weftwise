@@ -6,6 +6,7 @@ import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/keyboard';
+import { dispatchJobStarted } from '@/lib/job-started-event';
 import type { Citation } from './message-list';
 
 interface SaveToWikiButtonProps {
@@ -53,7 +54,12 @@ export function SaveToWikiButton({ answer, citations }: SaveToWikiButtonProps) {
       const data = (await response.json()) as { jobId?: string };
       if (data.jobId) {
         setSavedJobId(data.jobId);
-        window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
+        dispatchJobStarted({
+          jobId: data.jobId,
+          type: 'save-to-wiki',
+          label: title.trim(),
+          queueStatus: 'pending',
+        });
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');

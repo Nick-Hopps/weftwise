@@ -32,7 +32,7 @@
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
-| `/api/query` | POST | Chat 流式问答：按问题解析 `read/propose` 模式；两者可显式跨 Subject 只读、读取 active Subject History 与脱敏 workflow status，propose 只开放 active Subject 页面/move/History/workflow PendingAction；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
+| `/api/query` | POST | Chat 流式问答：明确的单页 re-enrich 控制命令确定性直达 PendingAction（不等待 Query LLM）；其余问题按 `read/propose` 模式运行。两者可显式跨 Subject 只读、读取 active Subject History 与脱敏 workflow status，propose 只开放 active Subject 页面/move/History/workflow PendingAction；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，重新规划后执行页面/move/History Saga，或原子 start/cancel workflow job；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
@@ -159,6 +159,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 明确的“重新丰富当前页面 / 重新丰富页面 `<slug>`”由 `/api/query` 确定性创建 workflow PendingAction，不再等待 Query LLM 首次 tool-call；仍须独立批准才入队 |
 | 2026-07-15 | 修正 `GET /api/lint/latest` 处置投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后均直接移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要 |
 | 2026-07-15 | `GET /api/lint/latest` 改为基于处置 postcondition 投影当前快照，fixed finding 直接移除；Health Fix/Tidy/Research 终态不再自动请求 `/api/lint`，显式 verification API 仅保留兼容 |
 | 2026-07-15 | Ingest 工作台支持并行任务切换：批量文件/URL 提交后展示全部成功入队任务，刷新时恢复当前 Subject 的 running + pending + 可续传 failed；仅选中任务建立 SSE，任务条显示 queued/running/completed/failed，排队详情不再误报为正在解析 |

@@ -13,7 +13,8 @@ import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
-import { resolveQueryMode } from '@/server/services/query-intent';
+import { resolveDirectReenrichSlug, resolveQueryMode } from '@/server/services/query-intent';
+import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
 import type { WikiCitation } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
     .listMessages(activeConversationId)
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
+  const directReenrichSlug = resolveDirectReenrichSlug(trimmedQuestion, pageSlug);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -175,6 +177,27 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
+        // 明确的 re-enrich 是控制面命令，不需要让 Query LLM 再做一次工具选择。
+        // 直接生成审批预览可避免模型首个 tool-call 最长等待 route timeout。
+        if (directReenrichSlug) {
+          const action = await createPendingWorkflowActionPreview({
+            conversationId: activeConversationId,
+            subject,
+            input: {
+              operation: 'workflow-reenrich-start',
+              payload: { slug: directReenrichSlug },
+            },
+          });
+          const answer = `已生成页面 \`${directReenrichSlug}\` 的重新丰富审批预览，请确认后启动任务。`;
+          emit('tool-call', { toolName: 'workflow.reenrich.start', args: directReenrichSlug });
+          emit('pending-action', action);
+          emit('answer-delta', { delta: answer });
+          emit('citations', { citations: [] });
+          persistTurn(answer, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          return;
+        }
+
         const mode = resolveQueryMode(trimmedQuestion);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,

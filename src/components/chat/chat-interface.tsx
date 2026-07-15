@@ -14,6 +14,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
+import { dispatchJobStarted, jobStartedDetailForAction } from '@/lib/job-started-event';
 import type { ChatMessage, Citation } from './message-list';
 import type { ConversationMessage, PendingActionView } from '@/lib/contracts';
 
@@ -367,11 +368,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       }
       if (!data.action) return;
 
-      if (data.action.jobId && data.action.operation !== 'workflow-cancel') {
-        window.dispatchEvent(new CustomEvent('wiki:job-started', {
-          detail: { jobId: data.action.jobId },
-        }));
-      }
+      const startedJob = jobStartedDetailForAction(data.action);
+      if (startedJob) dispatchJobStarted(startedJob);
       if (decision === 'approve' && data.action.kind === 'page-change') {
         await Promise.all(
           ['pages', 'page-detail', 'graph', 'search', 'backlinks', 'context', 'frontmatter', 'history']
@@ -500,6 +498,13 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               setPendingActions((current) =>
                 upsertPendingAction(current, data as PendingActionView),
               );
+            } else if (event === 'error') {
+              const message = (data as { error?: unknown }).error;
+              const detail = typeof message === 'string' ? message : 'Query failed';
+              fullContent = fullContent
+                ? `${fullContent}\n\nError: ${detail}`
+                : `Error: ${detail}`;
+              updateLastAssistant((msg) => ({ ...msg, content: fullContent }));
             } else if (event === 'done') {
               const convId = (data as { conversationId?: string }).conversationId;
               if (convId) {

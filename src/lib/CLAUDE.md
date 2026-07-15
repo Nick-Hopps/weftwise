@@ -18,6 +18,7 @@
 | `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `subject-nav.ts` | 🆕 subject 切换的可记忆路径判定与 query 拼接：`isRememberablePath`（`/wiki/*` / `/sources/*` 判定）/ `withSubjectParam`（`?s=<subject-slug>` 拼接） + 单测 |
+| `job-started-event.ts` | 客户端后台任务启动事件契约：必须携带 `jobId/type/label/queueStatus`；PendingAction workflow 映射真实 job 类型，ingest 专属 UI 用 `isIngestJobStarted` 过滤 |
 | `error-format.ts` | 🆕 `describeErrorMessage(error)`：AI SDK `RetryError` 最后一次尝试自身 message 为空时，补上 `.lastError` 的 message/cause，避免真实原因丢失；`server/jobs/worker.ts` 与 `server/db/repos/jobs-repo.ts::failJob` 共用 |
 | `theme/read-theme-vars.ts` | 从 `document.documentElement` 读 CSS 变量（主题同步） |
 
@@ -143,6 +144,7 @@ src/lib/
 ├── markdown-client.ts      # 客户端 markdown 渲染
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
 ├── tool-activity.ts        # 工具活动展示与参数脱敏（含 metadata ✏️ / link 🔗，只显示 slug/字段名/mode，不泄露值或锚点）
+├── job-started-event.ts    # 客户端后台任务启动事件的真实 type/label/queueStatus 契约
 ├── error-format.ts         # 🆕 describeErrorMessage：补全 RetryError 丢失的真实原因
 └── theme/
     └── read-theme-vars.ts  # 读取 CSS 变量
@@ -152,6 +154,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 新增 `job-started-event.ts`：统一 ingest/re-enrich/research/save-to-wiki 的启动事件元数据，禁止全局 tracker 与 Ingest UI 按 jobId 猜类型 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：contracts 新增 `MovePageInput`、PendingAction `move` 与 Changeset `movedFromPath/auxiliary` marker；tool activity 只摘要旧新 slug |
 | 2026-07-14 | Workflow 控制 Phase 3C：contracts 新增脱敏 workflow status 与三类 preview 输入/operation；tool activity 新增 status/start/cancel 安全摘要，旧 `wiki.reenrich` 改 Planning 语义 |
 | 2026-07-14 | History 工具 Phase 3B：contracts 新增 History list/diff/revert 工具契约，并把 PendingAction operation 扩展到 `history-revert`；不改变既有 HistoryEntry JSON |
