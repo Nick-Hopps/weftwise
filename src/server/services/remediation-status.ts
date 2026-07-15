@@ -76,11 +76,14 @@ export function buildHealthSnapshot(
     const plan = related
       ? applyCurrentJob(initial, related, lint.ranAt, researchRunsByJob)
       : initial;
-    if (plan.status === 'fixed') {
+    const handledOutcome = related
+      ? readHandledOutcome(related, lint, researchRunsByJob)
+      : null;
+    if (handledOutcome) {
       projectedOutcomes.push({
         subjectId: finding.subjectId,
         findingId: finding.id,
-        outcome: 'fixed',
+        outcome: handledOutcome,
       });
       continue;
     }
@@ -211,6 +214,48 @@ function readRecentOutcome(
   return completedWriteOutcome(job.resultJson);
 }
 
+/**
+ * Health 中的 finding 是一次 discovery 快照，不是实时问题表。关联处置在该快照之后
+ * 完成自身验证后即视为已处理并隐藏；真实 fixed/failed/skipped 结果仍进入近期摘要。
+ */
+function readHandledOutcome(
+  { job, context, findingId }: FindingContextJob,
+  lint: LintLatestResult,
+  researchRunsByJob: Map<string, ResearchRunView>,
+): RemediationStatus | null {
+  if (job.status !== 'completed') return null;
+
+  if (context.action === 'fix' || context.action === 'curate') {
+    if (!completedAfterSnapshot(job.completedAt, context.lintJobId, lint)) return null;
+    return readPerFindingOutcome(job.resultJson, findingId)
+      ?? readCompletedWriteOutcome(job.resultJson);
+  }
+
+  if (context.action !== 'research') return null;
+  const run = researchRunsByJob.get(researchJobKey(job.subjectId!, job.id));
+  if (!run) {
+    if (!completedAfterSnapshot(job.completedAt, context.lintJobId, lint)) return null;
+    return researchOutcome(job.resultJson) === 'skipped' ? 'skipped' : null;
+  }
+  if (
+    !['completed', 'partial', 'failed', 'dismissed', 'empty'].includes(run.status)
+    || !completedAfterSnapshot(run.completedAt, context.lintJobId, lint)
+  ) {
+    return null;
+  }
+  return researchRunOutcome(run, findingId);
+}
+
+function completedAfterSnapshot(
+  completedAt: string | null,
+  baselineLintJobId: string,
+  lint: Pick<LintLatestResult, 'jobId' | 'ranAt'>,
+): boolean {
+  if (completedAt === null || lint.ranAt === null) return false;
+  return completedAt > lint.ranAt
+    || (completedAt === lint.ranAt && baselineLintJobId === lint.jobId);
+}
+
 /** 新 Fix / Curate 优先使用目标 finding 自身结果；缺失或损坏则回退旧 job-level 逻辑。 */
 function readPerFindingOutcome(
   resultJson: string | null,
@@ -226,6 +271,10 @@ function readPerFindingOutcome(
 }
 
 function completedWriteOutcome(resultJson: string | null): RemediationStatus {
+  return readCompletedWriteOutcome(resultJson) ?? 'failed';
+}
+
+function readCompletedWriteOutcome(resultJson: string | null): RemediationStatus | null {
   const result = parseRecord(resultJson);
   const writes = result?.writes;
   const semanticStatus = result?.semanticStatus;
@@ -238,7 +287,7 @@ function completedWriteOutcome(resultJson: string | null): RemediationStatus {
     || typeof semanticStatus !== 'string'
     || !WRITE_SEMANTIC_STATUSES.has(semanticStatus)
   ) {
-    return 'failed';
+    return null;
   }
   if (
     result.postconditionStatus !== 'clean'
