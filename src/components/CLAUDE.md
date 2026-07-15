@@ -25,9 +25,9 @@
 | `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface`，发问 body 含 subjectId |
 | `settings-dialog.tsx` | 🔀 两栏式 Settings 弹窗容器（`max-w-3xl` + 固定高度）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `appearance`）+ Esc/遮罩关闭；左 `<SettingsNav>` + 右 `<SettingsContent>` |
 | `settings-nav.tsx` | 🆕 左侧分类导航栏（遍历 `SETTINGS_CATEGORIES`，选中高亮 `bg-accent-subtle`/`aria-current`，点击经 `onSelect` 切换） |
-| `settings-content.tsx` | 右内容区：按 `active` 渲染 5 个 panel（Appearance/Language/Agents/Web search/About），复用 `settings-rows` 原语；服务端 `app_settings` 唯一真实源，不写 Zustand |
+| `settings-content.tsx` | 右内容区：按 `active` 渲染设置 panel，复用 `settings-rows` 原语；Maintenance 支持 `All projects` 或多 Subject 范围并同步刷新状态统计；服务端 `app_settings` 唯一真实源，不写 Zustand |
 | `settings-categories.ts` | 🆕 分类元数据单一来源：`CategoryId` 类型 + `SETTINGS_CATEGORIES`(id/label/icon) + `DEFAULT_CATEGORY`，被 dialog/nav/content 共用避免循环依赖 |
-| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/NumberRow/TextRow/TextareaRow（行级保存状态） |
+| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow（行级保存状态） |
 
 ### `ui/` — 设计系统
 
@@ -176,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Maintenance 新增项目范围多选：支持 `All projects` 或若干 Subject，复用 `['subjects']` 缓存并即时保存；范围变化后刷新到期页统计；`settings-rows` 新增带 All 语义的 `MultiSelectRow` |
 | 2026-07-15 | 聚合任务面板新增一键清理 completed/failed 任务；父面板汇总行级 SSE 终态，折叠后按处理中、全部成功或包含失败显示对应图标 |
 | 2026-07-15 | Health Fix/Tidy/Research 终态改为直接刷新服务端快照投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要；手动 Run check 才触发 discovery |
 | 2026-07-15 | Health 自动复检改为 verification：Fix/Curate 终态携带 baseline/remediation ID，刷新恢复与 lint rerun queue 均保留该上下文；手动 Run check 仍为 discovery，避免零写 Curate 后同一 vault 的 findings 随模型漂移增长 |

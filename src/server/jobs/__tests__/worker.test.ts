@@ -37,6 +37,7 @@ vi.mock('@/server/db/repos/usage-repo', () => ({
 }));
 vi.mock('@/server/db/repos/settings-repo', () => ({
   getMaintenanceEnabled: vi.fn(() => false),
+  getMaintenanceScope: vi.fn(() => ({ mode: 'all' })),
   getMaintenanceSweepIntervalHours: vi.fn(() => 24),
   getMaintenanceMaxPagesPerSweep: vi.fn(() => 10),
   getMaintenanceLastSweepAt: vi.fn(() => null),

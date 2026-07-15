@@ -52,4 +52,35 @@ describe('runMaintenanceSweep', () => {
     expect(n).toBe(0);
     expect(enqueue).not.toHaveBeenCalled();
   });
+
+  it('只入队所选项目的到期页，并在过滤后应用页数上限', async () => {
+    const subjectsRepo = await import('../../db/repos/subjects-repo');
+    const maturityRepo = await import('../../db/repos/maturity-repo');
+    const { runMaintenanceSweep } = await import('../maintenance-scheduler');
+
+    const selectedId = subjectsRepo.create({ slug: 'selected', name: 'Selected' }).id;
+    const excludedId = subjectsRepo.create({ slug: 'excluded', name: 'Excluded' }).id;
+    const now = new Date();
+    const past = new Date(now.getTime() - 2 * 86_400_000).toISOString();
+    maturityRepo.ensureRow(excludedId, 'excluded-a', past, 1);
+    maturityRepo.ensureRow(selectedId, 'selected-a', past, 1);
+    maturityRepo.ensureRow(selectedId, 'selected-b', past, 1);
+
+    const enqueue = vi.fn();
+    const log = vi.fn();
+    const n = runMaintenanceSweep({
+      now,
+      maxPages: 1,
+      subjectIds: [selectedId],
+      enqueue,
+      log,
+    });
+
+    expect(n).toBe(1);
+    expect(enqueue).toHaveBeenCalledWith(expect.stringMatching(/^selected-/), selectedId);
+    expect(enqueue).not.toHaveBeenCalledWith('excluded-a', excludedId);
+    expect(log).toHaveBeenCalled();
+    expect(maturityRepo.countDue(now.toISOString(), [selectedId])).toBe(2);
+    expect(maturityRepo.countDue(now.toISOString())).toBe(3);
+  });
 });

@@ -19,9 +19,10 @@ afterEach(() => {
 });
 
 describe('maintenance settings', () => {
-  it('默认值：关、24h、5 页、无上次扫描', async () => {
+  it('默认值：关、全部项目、24h、5 页、无上次扫描', async () => {
     const settings = await import('../settings-repo');
     expect(settings.getMaintenanceEnabled()).toBe(false);
+    expect(settings.getMaintenanceScope()).toEqual({ mode: 'all' });
     expect(settings.getMaintenanceSweepIntervalHours()).toBe(24);
     expect(settings.getMaintenanceMaxPagesPerSweep()).toBe(5);
     expect(settings.getMaintenanceLastSweepAt()).toBeNull();
@@ -30,10 +31,15 @@ describe('maintenance settings', () => {
   it('写后可读回', async () => {
     const settings = await import('../settings-repo');
     settings.setMaintenanceEnabled(true);
+    settings.setMaintenanceScope({ mode: 'subjects', subjectIds: ['subject-b', 'subject-a'] });
     settings.setMaintenanceMaxPagesPerSweep(3);
     const iso = new Date().toISOString();
     settings.setMaintenanceLastSweepAt(iso);
     expect(settings.getMaintenanceEnabled()).toBe(true);
+    expect(settings.getMaintenanceScope()).toEqual({
+      mode: 'subjects',
+      subjectIds: ['subject-b', 'subject-a'],
+    });
     expect(settings.getMaintenanceMaxPagesPerSweep()).toBe(3);
     expect(settings.getMaintenanceLastSweepAt()).toBe(iso);
   });
@@ -52,5 +58,10 @@ describe('maintenance settings', () => {
     expect(() => settings.setMaintenanceSweepIntervalHours(169)).toThrow();
     expect(() => settings.setMaintenanceMaxPagesPerSweep(0)).toThrow();
     expect(() => settings.setMaintenanceMaxPagesPerSweep(51)).toThrow();
+    expect(() => settings.setMaintenanceScope({ mode: 'subjects', subjectIds: [] })).toThrow();
+    expect(() => settings.setMaintenanceScope({
+      mode: 'subjects',
+      subjectIds: ['subject-a', 'subject-a'],
+    })).toThrow();
   });
 });

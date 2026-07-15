@@ -25,11 +25,14 @@ import {
   DEFAULT_WEB_SEARCH_MAX_RESULTS,
   type WebSearchProvider,
   MaintenanceEnabledSchema,
+  MaintenanceScopeSchema,
   MaintenanceSweepIntervalHoursSchema,
   MaintenanceMaxPagesPerSweepSchema,
   DEFAULT_MAINTENANCE_ENABLED,
+  DEFAULT_MAINTENANCE_SCOPE,
   DEFAULT_MAINTENANCE_SWEEP_INTERVAL_HOURS,
   DEFAULT_MAINTENANCE_MAX_PAGES_PER_SWEEP,
+  type MaintenanceScope,
 } from '@/lib/contracts';
 
 const KEY_WIKI_LANGUAGE = 'wikiLanguage';
@@ -267,6 +270,7 @@ export function getWebSearchConfig(): {
 // ─────────────────────────────────────────────────────────────────
 
 const KEY_MAINTENANCE_ENABLED = 'maintenanceEnabled';
+const KEY_MAINTENANCE_SCOPE = 'maintenanceScope';
 const KEY_MAINTENANCE_SWEEP_INTERVAL_HOURS = 'maintenanceSweepIntervalHours';
 const KEY_MAINTENANCE_MAX_PAGES_PER_SWEEP = 'maintenanceMaxPagesPerSweep';
 const KEY_MAINTENANCE_LAST_SWEEP_AT = 'maintenanceLastSweepAt';
@@ -288,6 +292,25 @@ export function setMaintenanceEnabled(value: boolean): boolean {
   const v = MaintenanceEnabledSchema.parse(value);
   writeKey(KEY_MAINTENANCE_ENABLED, v ? 'true' : 'false');
   return v;
+}
+
+/** 返回维护范围；旧配置和损坏值均保守回落为全部项目。 */
+export function getMaintenanceScope(): MaintenanceScope {
+  const raw = readKey(KEY_MAINTENANCE_SCOPE);
+  if (raw === undefined) return DEFAULT_MAINTENANCE_SCOPE;
+  try {
+    const parsed = MaintenanceScopeSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : DEFAULT_MAINTENANCE_SCOPE;
+  } catch {
+    return DEFAULT_MAINTENANCE_SCOPE;
+  }
+}
+
+/** 持久化明确的全部项目或非空 Subject ID 集合。 */
+export function setMaintenanceScope(value: MaintenanceScope): MaintenanceScope {
+  const validated = MaintenanceScopeSchema.parse(value);
+  writeKey(KEY_MAINTENANCE_SCOPE, JSON.stringify(validated));
+  return validated;
 }
 
 /**
