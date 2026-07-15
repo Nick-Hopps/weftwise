@@ -616,6 +616,12 @@ export interface LintLatestResult {
   findings: EnrichedLintFinding[];
 }
 
+/** Fix/Curate 完成后用于定向协调原 Health 快照的 lint 验证上下文。 */
+export interface LintVerificationRequest {
+  baselineLintJobId: string;
+  remediationJobId: string;
+}
+
 export type RemediationStatus =
   | 'fixed'
   | 'queued'

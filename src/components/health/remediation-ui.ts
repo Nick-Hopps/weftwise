@@ -1,6 +1,7 @@
 import type {
   HealthSnapshot,
   Job,
+  LintVerificationRequest,
   RemediationAction,
   RemediationActionType,
   ResearchRunView,
@@ -19,6 +20,12 @@ export interface RecoverableHealthJob {
   workflow: ExecutableRemediationAction;
   source: 'manual' | 'remediation';
   createdAt: string;
+  baselineLintJobId?: string;
+}
+
+export interface QueuedLintRun {
+  origin: HealthOrigin;
+  verification?: LintVerificationRequest;
 }
 
 type ActiveJobsResponse = {
@@ -115,7 +122,7 @@ export async function fetchActiveHealthJobs(
 }
 
 export function selectRecoverableHealthJobs(
-  snapshot: Pick<HealthSnapshot, 'findings' | 'remediations' | 'ranAt'>,
+  snapshot: Pick<HealthSnapshot, 'jobId' | 'findings' | 'remediations' | 'ranAt'>,
   activeJobs: Job[],
 ): Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>> {
   const selected: Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>> = {};
@@ -151,6 +158,7 @@ export function selectRecoverableHealthJobs(
       workflow,
       source: 'remediation',
       createdAt: snapshot.ranAt ?? '',
+      ...(snapshot.jobId ? { baselineLintJobId: snapshot.jobId } : {}),
     };
     if (!current || candidate.jobId > current.jobId) selected[workflow] = candidate;
   }
@@ -166,22 +174,25 @@ export function healthTerminalInvalidationKeys(subjectId: string): string[][] {
 
 function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
   if (job.type === 'fix' || job.type === 'curate') {
+    const context = readStrictRemediationContext(job.paramsJson);
     return {
       jobId: job.id,
       workflow: job.type,
-      source: readStrictRemediationAction(job.paramsJson) === job.type ? 'remediation' : 'manual',
+      source: context?.action === job.type ? 'remediation' : 'manual',
       createdAt: job.createdAt,
+      ...(context?.action === job.type ? { baselineLintJobId: context.lintJobId } : {}),
     };
   }
   if (job.type === 'research') {
+    const context = readStrictRemediationContext(job.paramsJson);
     return {
       jobId: job.id,
       workflow: 'research',
-      source: readStrictRemediationAction(job.paramsJson) === 'research' ? 'remediation' : 'manual',
+      source: context?.action === 'research' ? 'remediation' : 'manual',
       createdAt: job.createdAt,
     };
   }
-  if (job.type === 'ingest' && readStrictRemediationAction(job.paramsJson) === 're-ingest') {
+  if (job.type === 'ingest' && readStrictRemediationContext(job.paramsJson)?.action === 're-ingest') {
     return {
       jobId: job.id,
       workflow: 're-ingest',
@@ -192,7 +203,9 @@ function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
   return null;
 }
 
-function readStrictRemediationAction(paramsJson: string): ExecutableRemediationAction | null {
+function readStrictRemediationContext(
+  paramsJson: string,
+): { action: ExecutableRemediationAction; lintJobId: string } | null {
   try {
     const params: unknown = JSON.parse(paramsJson);
     if (!isRecord(params) || !isRecord(params.remediationContext)) return null;
@@ -203,12 +216,13 @@ function readStrictRemediationAction(paramsJson: string): ExecutableRemediationA
       || context.findingIds.length === 0
       || !context.findingIds.every((id) => typeof id === 'string' && id.length > 0)
     ) return null;
-    return context.action === 'fix'
+    const action = context.action === 'fix'
       || context.action === 'curate'
       || context.action === 'research'
       || context.action === 're-ingest'
       ? context.action
       : null;
+    return action ? { action, lintJobId: context.lintJobId } : null;
   } catch {
     return null;
   }
@@ -228,24 +242,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function createLintRerunQueue() {
-  let active: HealthOrigin | null = null;
-  let pending: HealthOrigin | null = null;
+  let active: QueuedLintRun | null = null;
+  let pending: QueuedLintRun | null = null;
   return {
-    request(origin: HealthOrigin): 'start' | 'queued' | 'ignored' {
+    request(
+      origin: HealthOrigin,
+      verification?: LintVerificationRequest,
+    ): 'start' | 'queued' | 'ignored' {
       if (!active) {
-        active = origin;
+        active = { origin, verification };
         return 'start';
       }
-      if (!isHealthOriginCurrent(active, origin)) return 'ignored';
-      pending = origin;
+      if (!isHealthOriginCurrent(active.origin, origin)) return 'ignored';
+      pending = { origin, verification };
       return 'queued';
     },
-    finish(origin: HealthOrigin, currentOrigin: HealthOrigin): HealthOrigin | null {
-      if (!active || !isHealthOriginCurrent(active, origin)) return null;
+    finish(origin: HealthOrigin, currentOrigin: HealthOrigin): QueuedLintRun | null {
+      if (!active || !isHealthOriginCurrent(active.origin, origin)) return null;
       active = null;
       const next = pending;
       pending = null;
-      return next && isHealthOriginCurrent(next, currentOrigin) ? next : null;
+      return next && isHealthOriginCurrent(next.origin, currentOrigin) ? next : null;
     },
     reset(): void {
       active = null;

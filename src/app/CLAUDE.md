@@ -36,7 +36,7 @@
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，重新规划后执行页面/move/History Saga，或原子 start/cancel workflow job；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
-| `/api/lint` | POST | 入队 `lint` 任务（默认 subject-scoped，`{ allSubjects: true }` 显式触发全量）；返回 `jobId` |
+| `/api/lint` | POST | 入队 `lint` 任务；默认 subject-scoped discovery，`{ allSubjects: true }` 显式全量发现；Fix/Curate 闭环可传 `{ verification: { baselineLintJobId, remediationJobId } }`，服务端校验 job 关联后入队不发现新语义项的修后验证；返回 `jobId + mode` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；先有界读取近期 jobs，再按 subject 批量读取关联 Research run view 交给纯 builder 映射审批/导入/验证终态，避免 N+1；从未跑过返回完整空快照，All Subjects plans 只读 |
 | `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
@@ -157,6 +157,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | `/api/lint` 新增 subject-scoped verification 模式，严格校验 completed baseline lint 与 completed Fix/Curate 的 RemediationContext 关联；All Subjects 禁止 verification，普通请求保持 discovery |
 | 2026-07-14 | Query 编排边界：流式 `error` part、迭代器异常与初始化异常统一为单一 SSE error 终态；失败后不再回落空答案、发送 citations/done、持久化部分回答或触发 coverage；正常空流仍按 `NO_QUERY_CONTEXT_ANSWER` 成功收口 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：`/api/query` 可生成 `wiki.move` PendingAction；旧 slug 的页面 API 返回 308 canonical redirect，阅读页永久重定向并保留 Subject 查询参数 |
 | 2026-07-14 | Workflow 控制 Phase 3C：`/api/query` 可读 active Subject job 脱敏状态，re-enrich/research/cancel 只生成 PendingAction；批准 API 原子启动或取消 job，不信任客户端工作流参数 |
