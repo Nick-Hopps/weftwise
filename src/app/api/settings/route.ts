@@ -24,6 +24,8 @@ import {
   setWebSearchMaxResults,
   getMaintenanceEnabled,
   setMaintenanceEnabled,
+  getMaintenanceScope,
+  setMaintenanceScope,
   getMaintenanceSweepIntervalHours,
   setMaintenanceSweepIntervalHours,
   getMaintenanceMaxPagesPerSweep,
@@ -41,6 +43,7 @@ import {
   WebSearchApiKeySchema,
   WebSearchMaxResultsSchema,
   MaintenanceEnabledSchema,
+  MaintenanceScopeSchema,
   MaintenanceSweepIntervalHoursSchema,
   MaintenanceMaxPagesPerSweepSchema,
   type AppSettings,
@@ -61,6 +64,7 @@ function readSettings(): AppSettings {
     webSearchApiKey: getWebSearchApiKey(),
     webSearchMaxResults: getWebSearchMaxResults(),
     maintenanceEnabled: getMaintenanceEnabled(),
+    maintenanceScope: getMaintenanceScope(),
     maintenanceSweepIntervalHours: getMaintenanceSweepIntervalHours(),
     maintenanceMaxPagesPerSweep: getMaintenanceMaxPagesPerSweep(),
   };
@@ -84,6 +88,7 @@ const PutBodySchema = z.object({
   webSearchApiKey: WebSearchApiKeySchema.optional(),
   webSearchMaxResults: WebSearchMaxResultsSchema.optional(),
   maintenanceEnabled: MaintenanceEnabledSchema.optional(),
+  maintenanceScope: MaintenanceScopeSchema.optional(),
   maintenanceSweepIntervalHours: MaintenanceSweepIntervalHoursSchema.optional(),
   maintenanceMaxPagesPerSweep: MaintenanceMaxPagesPerSweepSchema.optional(),
 });
@@ -121,6 +126,7 @@ export async function PUT(request: NextRequest) {
   if (d.webSearchApiKey !== undefined) setWebSearchApiKey(d.webSearchApiKey);
   if (d.webSearchMaxResults !== undefined) setWebSearchMaxResults(d.webSearchMaxResults);
   if (d.maintenanceEnabled !== undefined) setMaintenanceEnabled(d.maintenanceEnabled);
+  if (d.maintenanceScope !== undefined) setMaintenanceScope(d.maintenanceScope);
   if (d.maintenanceSweepIntervalHours !== undefined) setMaintenanceSweepIntervalHours(d.maintenanceSweepIntervalHours);
   if (d.maintenanceMaxPagesPerSweep !== undefined) setMaintenanceMaxPagesPerSweep(d.maintenanceMaxPagesPerSweep);
 

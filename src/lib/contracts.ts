@@ -920,6 +920,20 @@ export const DEFAULT_MAINTENANCE_MAX_PAGES_PER_SWEEP = 5;
 export const MaintenanceEnabledSchema = z.boolean();
 export const MaintenanceSweepIntervalHoursSchema = z.number().int().min(1).max(168);
 export const MaintenanceMaxPagesPerSweepSchema = z.number().int().min(1).max(50);
+export const MaintenanceScopeSchema = z.discriminatedUnion('mode', [
+  z.object({ mode: z.literal('all') }),
+  z.object({
+    mode: z.literal('subjects'),
+    subjectIds: z.array(z.string().trim().min(1)).min(1).superRefine((ids, ctx) => {
+      if (new Set(ids).size !== ids.length) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Subject IDs must be unique' });
+      }
+    }),
+  }),
+]);
+
+export type MaintenanceScope = z.infer<typeof MaintenanceScopeSchema>;
+export const DEFAULT_MAINTENANCE_SCOPE: MaintenanceScope = { mode: 'all' };
 
 /** 维护层只读运行态（`GET /api/maintenance/status`）；非设置，故不进 AppSettings。 */
 export interface MaintenanceStatus {
@@ -927,7 +941,7 @@ export interface MaintenanceStatus {
   /** 上次 sweep 时间（ISO）；从未扫描为 null。 */
   lastSweepAt: string | null;
   sweepIntervalHours: number;
-  /** 当前全量到期且未毕业的页数（跨主题，与 sweep 同口径）。 */
+  /** 当前维护范围内到期且未毕业的页数（与 sweep 同口径）。 */
   dueCount: number;
 }
 
@@ -943,6 +957,7 @@ export interface AppSettings {
   webSearchApiKey: string;
   webSearchMaxResults: number;
   maintenanceEnabled: boolean;
+  maintenanceScope: MaintenanceScope;
   maintenanceSweepIntervalHours: number;
   maintenanceMaxPagesPerSweep: number;
 }
@@ -959,6 +974,7 @@ export const AppSettingsSchema = z.object({
   webSearchApiKey: WebSearchApiKeySchema,
   webSearchMaxResults: WebSearchMaxResultsSchema,
   maintenanceEnabled: MaintenanceEnabledSchema,
+  maintenanceScope: MaintenanceScopeSchema,
   maintenanceSweepIntervalHours: MaintenanceSweepIntervalHoursSchema,
   maintenanceMaxPagesPerSweep: MaintenanceMaxPagesPerSweepSchema,
 });

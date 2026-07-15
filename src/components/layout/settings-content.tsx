@@ -15,13 +15,23 @@ import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
 import { apiFetch } from '@/lib/api-fetch';
 import { formatTokenCount } from '@/lib/format';
-import type { AppSettings, MaintenanceStatus, StylePrefs, UsageWindow, UsageSummaryRow } from '@/lib/contracts';
+import type {
+  AppSettings,
+  MaintenanceScope,
+  MaintenanceStatus,
+  StylePrefs,
+  SubjectListEntry,
+  UsageWindow,
+  UsageSummaryRow,
+} from '@/lib/contracts';
+import { fetchSubjects } from '@/components/subjects/subjects-api';
 import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
 import {
   SettingRow,
   SwitchRow,
   SegmentedRow,
   SelectRow,
+  MultiSelectRow,
   NumberRow,
   TextRow,
   TextareaRow,
@@ -397,7 +407,13 @@ function MaintenancePanel({
     staleTime: 10_000,
   });
   const status = statusQuery.data;
+  const subjectsQuery = useQuery<SubjectListEntry[]>({
+    queryKey: ['subjects'],
+    queryFn: fetchSubjects,
+    staleTime: 30_000,
+  });
   const save = toSave(savePartial);
+  const scope = settings?.maintenanceScope ?? { mode: 'all' };
 
   return (
     <div className="space-y-4">
@@ -406,6 +422,26 @@ function MaintenancePanel({
         description="Revisit & deepen pages over time (off by default)"
         checked={settings?.maintenanceEnabled ?? false}
         onSave={(v) => savePartial.mutate({ maintenanceEnabled: v })}
+        save={save}
+      />
+
+      <MultiSelectRow
+        label="Maintenance scope"
+        description="Projects eligible for periodic maintenance"
+        allLabel="All projects"
+        value={scope.mode === 'all' ? 'all' : scope.subjectIds}
+        options={(subjectsQuery.data ?? []).map((subject) => ({
+          value: subject.id,
+          label: subject.name,
+          description: subject.slug,
+        }))}
+        loading={subjectsQuery.isLoading}
+        onSave={(value) => {
+          const maintenanceScope: MaintenanceScope = value === 'all'
+            ? { mode: 'all' }
+            : { mode: 'subjects', subjectIds: value };
+          savePartial.mutate({ maintenanceScope });
+        }}
         save={save}
       />
 
