@@ -90,7 +90,7 @@ worker-entry.ts
 
 语义阶段的模型输出必须携带 `targetSlug + evidence[{ pageSlug, quote }]`，并由 `lint-semantic-validation.ts` 对当前 vault 做第二次事实校验：逐条 quote 必须是页面原文字面片段；missing-crossref 的 source/target 必须存在且当前确实没有同 Subject wikilink；coverage-gap 的目标页必须不存在且至少有两个独立证据页；contradiction 必须有两个不同页面的精确引文。无法证明的模型输出直接丢弃。调用点固定 `temperature: 0` 降低同输入漂移，但真实性只由上述服务端校验决定。
 
-手动 Health check 使用 `discovery`，执行确定性扫描与开放式语义发现。Fix/Curate 完成后不再创建 lint job：任务内 `verifyJobPostconditions` 已产出 `perFindingOutcomes`，`remediation-status.ts` 在读取原 lint 快照时直接隐藏 baseline 之后验证为 `fixed` 的 finding，并重算 severity；failed/skipped/residual 保留。若用户之后手动 discovery 又发现同一 finding，较新的 lint 结果优先并重新展示。`/api/lint` 的显式 `verification` 模式与 `lint-verification.ts` 暂留作旧客户端兼容，不再由 Health UI 调用。
+手动 Health check 使用 `discovery`，执行确定性扫描与开放式语义发现。Fix/Curate 完成后不再创建 lint job：任务内 `verifyJobPostconditions` 已产出 `perFindingOutcomes`，`remediation-status.ts` 在读取原 lint 快照时把 baseline 之后已完成验证的关联 finding 直接移除并重算 severity，真实 fixed/failed/skipped 结果保留在近期摘要；Research 等 provenance run 到达验证终态后执行同样投影。若用户之后手动 discovery 又发现同一 finding，较新的 lint 结果优先并重新展示。`/api/lint` 的显式 `verification` 模式与 `lint-verification.ts` 暂留作旧客户端兼容，不再由 Health UI 调用。
 
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
@@ -118,7 +118,7 @@ worker-entry.ts
 
 **统一执行（`remediation-service.ts::remediate`）**：只接受 `fix | curate | research | re-ingest`，在创建任务前通过 `queue.listLatestCompletedLint(subjectId)` 单行读取最新 lint，完成 auth/CSRF 后的 CAS 校验、1–100 个稳定 ID 格式与存在性校验、router action 校验及批量全有或全无校验；`POST /api/research` 的 finding 分支复用同一单行读取边界。规范化 `RemediationContext { lintJobId, action, sorted(unique(findingIds)) }` 既是任务 provenance，也是 `subjectId + context` 幂等键；Fix/Curate/Research 的原子 get-or-create 只把同 subject/type 的 pending/running，或 `lintRanAt` 后完成（兼容时间戳缺失）的候选交给 matcher 做精确 context 匹配，不扫描整个 subject 历史。Re-ingest 通过原子 requeue/create helper 保留 failed ingest checkpoint 并合并 context；同一事务先借助受 `json_valid` 保护的 `sourceId + status` 表达式索引读取全部 pending/running，优先复用 exact-context job，否则任取一条 active 阻止新建；只有不存在 active 时才用 `sourceId + createdAt/id` 索引读取最新 terminal，防止新 terminal 遮蔽旧在途任务。
 
-**状态恢复（`remediation-status.ts`）**：`buildHealthSnapshot()` 将当前 lint、router plan、近期 jobs 与 route 批量注入的 `ResearchRunView[]` 合成为 `HealthSnapshot`，自身保持纯函数。`MAX_REMEDIATION_JOBS = 200`；API 先有界取 jobs，再按 subject 批量读取关联 run，避免逐 finding 查询。无 job 使用 router 初始状态；pending/running 为 `queued`。Research run 映射为：`awaiting-approval` 保持待批，`importing/verifying` 为 queued，`dismissed/empty` 为 skipped，`completed/partial/failed` 对 finding run 读取已物化的逐 finding `fixed/residual/unverifiable`，topic run 按整体终态映射；没有持久化 run 的历史 Research job 继续从旧 `resultJson.candidates` 保守回退。Fix / Curate 仍优先读取 `perFindingOutcomes`，坏结果回退 job-level 判定。已从后续 lint 消失且已有可信终态的 finding 进入 `recentOutcomes`。
+**状态恢复（`remediation-status.ts`）**：`buildHealthSnapshot()` 将当前 lint、router plan、近期 jobs 与 route 批量注入的 `ResearchRunView[]` 合成为 `HealthSnapshot`，自身保持纯函数。`MAX_REMEDIATION_JOBS = 200`；API 先有界取 jobs，再按 subject 批量读取关联 run，避免逐 finding 查询。无 job 使用 router 初始状态；pending/running 为 `queued`。Research run 映射为：`awaiting-approval` 保持待批，`importing/verifying` 为 queued，`dismissed/empty` 为 skipped，`completed/partial/failed` 对 finding run 读取已物化的逐 finding `fixed/residual/unverifiable`，topic run 按整体终态映射；没有持久化 run 的历史 Research job 继续从旧 `resultJson.candidates` 保守回退。Fix / Curate 优先读取 `perFindingOutcomes`。关联处置在当前 lint 快照之后完成自身验证后，无论逐 finding 结果为 fixed/failed/skipped，都从当前 findings 移除并把真实结果写入 `recentOutcomes`；Research 仅在 provenance run 到达验证终态后执行相同投影。更新的手动 lint 可重新发现并展示同一 finding，损坏或缺少验证结果的 completed job 不得误隐藏。
 
 Research finding 的 immutable `snapshot_json` 必须无损覆盖 finding identity 所需字段：除既有 type/page/description/source 外，v2 语义身份还保存可选 `targetSlug + evidence[]`；字段保持可选以兼容旧 v1 snapshot。仓储写入与 view 读取都从 snapshot 重算 finding ID，任一字段漂移继续 fail-closed。
 
@@ -297,6 +297,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | 修复 Health 处置投影只隐藏 fixed 的契约偏差：Tidy/Fix 完成任务内验证及 Research provenance 到达验证终态后直接移除关联 finding，failed/skipped 真实结果保留在近期摘要；损坏结果 fail-closed |
 | 2026-07-15 | Health 处置改为 postcondition 驱动的快照投影：Fix/Curate 直接消费逐 finding outcome；Research 导入后只目标化复核原 coverage-gap/thin-page 并原子物化终态，不再创建 verification lint；旧 verifying run 继续兼容对账 |
 | 2026-07-15 | Semantic Lint 对 AI SDK JSON/schema 输出失败启用 1 次定向重试；最终失败事件保存脱敏 `finishReason/detail`，不落模型原始输出或 Wiki 正文 |
 | 2026-07-15 | 修复 Research finding immutable snapshot 与 v2 identity 契约断裂：snapshot 可选保存 targetSlug/evidence，coverage-gap/contradiction 可无损重算 ID，旧 v1 snapshot 保持兼容 |

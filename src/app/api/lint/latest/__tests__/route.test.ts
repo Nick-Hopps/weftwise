@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Job, RemediationContext } from '@/lib/contracts';
 import { MAX_REMEDIATION_JOBS } from '@/server/services/remediation-status';
+import {
+  findingId as computeFindingId,
+  type FindingIdentityInput,
+} from '@/server/services/finding-identity';
 
 const mockAuth = vi.fn();
 const mockListLatestCompletedLint = vi.fn();
@@ -30,6 +34,7 @@ const SUBJECT_TWO_FINDING_ID = 'fac9b0cfcfc6f3b1516c5d9ee0e6cfa8361cb08e061c1f01
 const COVERAGE_GAP_FINDING_ID = 'ab60ee82e27a3772fd7ecde79913840340a5458fd7b0a0a47828bd58c26fcc15';
 const LINT_RAN_AT = '2026-07-13T12:00:00.000Z';
 const BEFORE_LINT = '2026-07-13T11:00:00.000Z';
+const AFTER_LINT = '2026-07-13T13:00:00.000Z';
 
 function call(query = '') {
   return GET(new NextRequest(`http://localhost/api/lint/latest${query}`));
@@ -57,7 +62,7 @@ function job(overrides: Partial<Job> & { id: string }): Job {
 function lintJob(
   id: string,
   subjectId: string | null,
-  findings: Array<Record<string, unknown>>,
+  findings: unknown[],
   overrides: Partial<Job> = {},
 ): Job {
   return job({
@@ -68,7 +73,7 @@ function lintJob(
   });
 }
 
-function finding(overrides: Record<string, unknown> = {}) {
+function finding(overrides: Partial<FindingIdentityInput> = {}): FindingIdentityInput {
   return {
     type: 'broken-link',
     severity: 'warning',
@@ -117,6 +122,46 @@ beforeEach(() => {
 });
 
 describe('GET /api/lint/latest', () => {
+  it.each(['fix', 'curate'] as const)(
+    'completed %s 的 skipped finding 不再出现在真实 API 快照中',
+    async (action) => {
+      const currentFinding = finding({ type: action === 'curate' ? 'orphan' : 'broken-link' });
+      const currentFindingId = computeFindingId(currentFinding);
+      const lint = lintJob('lint-current', 's1', [currentFinding]);
+      const handled = remediationJob(
+        `${action}-completed`,
+        's1',
+        [currentFindingId],
+        {
+          action,
+          status: 'completed',
+          completedAt: AFTER_LINT,
+          resultJson: JSON.stringify({
+            writes: action === 'curate' ? 1 : 0,
+            postconditionStatus: 'clean',
+            semanticStatus: 'not-needed',
+            perFindingOutcomes: { [currentFindingId]: 'skipped' },
+          }),
+        },
+      );
+      mockResolve.mockReturnValue({
+        subject: { id: 's1', slug: 'general' },
+        error: null,
+      });
+      mockListLatestCompletedLint.mockReturnValue(lint);
+      mockListRecent.mockReturnValue([handled]);
+
+      const response = await call();
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.findings).toEqual([]);
+      expect(body.remediations).toEqual({});
+      expect(body.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
+      expect(body.recentOutcomes).toEqual({ [currentFindingId]: 'skipped' });
+    },
+  );
+
   it('subject-scoped 返回完整处置计划、当前状态与近期结果', async () => {
     const lint = lintJob('lint-created-early-completed-late', 's1', [finding()], {
       createdAt: '2026-07-13T09:00:00.000Z',
