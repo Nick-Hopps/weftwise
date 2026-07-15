@@ -90,6 +90,8 @@ worker-entry.ts
 
 语义阶段的模型输出必须携带 `targetSlug + evidence[{ pageSlug, quote }]`，并由 `lint-semantic-validation.ts` 对当前 vault 做第二次事实校验：逐条 quote 必须是页面原文字面片段；missing-crossref 的 source/target 必须存在且当前确实没有同 Subject wikilink；coverage-gap 的目标页必须不存在且至少有两个独立证据页；contradiction 必须有两个不同页面的精确引文。无法证明的模型输出直接丢弃。调用点固定 `temperature: 0` 降低同输入漂移，但真实性只由上述服务端校验决定。
 
+Lint 分为两种明确模式：手动 Health check 是 `discovery`，执行确定性扫描与开放式语义发现；Fix/Curate 完成后的自动闭环是 `verification`，由 `lint-verification.ts` 校验 `baselineLintJobId + remediationJobId` 的 subject、终态与 `RemediationContext` 关联，重新执行全部确定性检查，但语义侧只保留基线中尚未被同一基线下已完成处置确认为 `fixed` 的 finding，不调用语义发现模型，也不允许验证输入引入新语义 finding。多个同基线 Fix/Curate 并行排队时聚合其完成结果，保持闭环单调收敛；新的潜在语义问题只在用户手动 discovery 时出现。
+
 > 默认 **subject-scoped**（`params.subjectId` 必填）；`{ allSubjects: true }` 显式触发全量。deterministic 与 semantic 两阶段都按 subjectId 扫描。
 
 `stale-source` 的缺失/哈希变化规则统一由 `sources/source-staleness.ts::isSourceStale` 提供，lint 与 `wiki.inspect` 共用，避免两份判定漂移。
@@ -175,7 +177,7 @@ Health 前端刷新时按 subject 读取 active jobs，并可从 queued 或 awai
 
 **事件**：`fix:start` / `fix:deterministic`（阶段1 commit）/ `fix:agent:start`（进入阶段2 工具循环前，报 finding 数/受影响页数）/ `fix:tool`（每次工具调用，`toolActivityLine` 渲染成可读一行，经 `generateTextWithTools` 的 `onToolCall` 回调触发）/ `fix:page`（单页阶段2 工具循环修复，仅有值的 success）/ `fix:create`（create 工具成功）/ `fix:skip`（工具拒绝 / LLM 无可修）/ `fix:verify:start` / `fix:verify:complete` / `fix:complete`。
 
-完成后 UI 自动重跑 lint（`health-view` 在 job completed 事件后触发），该全量体检只负责刷新 Health findings，不替代当前 Fix Job 的定向 postcondition。
+完成后 UI 自动入队 verification lint（`health-view` 在 job completed 事件后携带原 lint 与 remediation job ID 触发），只刷新确定性结果并协调原语义 findings，不重新做开放式发现；用户手动重跑 Health check 才执行 discovery。该验证仍不替代当前 Fix Job 的定向 postcondition。
 
 ### `reenrich-service.ts` 🆕 — 任务类型 `'re-enrich'`
 
@@ -273,6 +275,7 @@ src/server/services/
 ├── pending-action-maintenance.ts # TTL/崩溃恢复/finalizer 重试/GC
 ├── conversation-title.ts # 确定性会话标题派生纯函数
 ├── lint-service.ts      # 全库 lint 扫描
+├── lint-verification.ts # 修后验证：校验 baseline/remediation 关联并单调协调 findings
 ├── curate-service.ts    # 🆕 agent 策展（curate 任务：tool-loop 驱动，generateTextWithTools + buildCurateToolContext + CurateGuard）
 ├── curate-tools.ts      # worker 侧 ToolContext：evidence reader + 写能力经 guard 把守
 ├── fix-service.ts       # 🆕 一键修复 lint findings（fix 任务：确定性阶段1 + LLM 阶段2 tool-loop）
@@ -292,6 +295,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Health 修后验证收敛：Lint 拆分 discovery/verification；Fix/Curate 自动闭环校验 baseline/remediation 关联，只重跑确定性检查并协调原语义 findings，不再因同一 vault 的开放式复检漂移制造新 findings；并发同基线处置聚合完成结果 |
 | 2026-07-15 | Health 修复收敛：语义 Lint 增加 target/evidence 结构化契约、vault 原文与 wikilink 真实性过滤、调用点 temperature=0；语义 finding identity 升级 v2 并保留历史 v1 fallback，避免全库复检因假阳性与 description 漂移不断制造“新问题” |
 | 2026-07-14 | Saga/Worker 失败边界：真实 SQLite 集成测试锁定业务事件 → failed 状态 → job:failed，并验证 CAS/fencing 未命中不发布虚假终态事件；Services 编排测试清单收口 |
 | 2026-07-14 | Query 编排边界：非流式工具失败原样抛出且不做 citation/coverage；流式 error part 统一抛给 Route 单点收口，失败请求不再伪装成空答案成功或错误记录 coverage gap；正常空流 fallback 行为保持 |

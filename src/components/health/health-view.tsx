@@ -26,6 +26,7 @@ import { blockImeEnterSubmit } from '@/lib/keyboard';
 import type {
   Job,
   LintFinding,
+  LintVerificationRequest,
   PostconditionReport,
   ResearchRunView,
 } from '@/lib/contracts';
@@ -54,7 +55,11 @@ import {
 
 type Scope = 'subject' | 'all';
 type ResearchOrigin = 'manual' | 'backlog' | 'remediation';
-type ActionJobMeta = { jobId: string; origin: HealthOrigin };
+type ActionJobMeta = {
+  jobId: string;
+  origin: HealthOrigin;
+  baselineLintJobId?: string;
+};
 type ResearchJobMeta = ActionJobMeta & { source: ResearchOrigin };
 type CandidateResult = {
   run: ResearchRunView;
@@ -167,7 +172,7 @@ export function HealthView() {
   const recoverableJobs = useMemo(
     () => !allSubjects
       ? selectRecoverableHealthJobs(
-          data ?? { findings: [], remediations: {}, ranAt: null },
+          data ?? { jobId: null, findings: [], remediations: {}, ranAt: null },
           activeJobs,
         )
       : {},
@@ -278,14 +283,14 @@ export function HealthView() {
       lintJobMetaRef.current = null;
       setJobId(null);
       const rerun = lintRerunQueueRef.current.finish(meta.origin, captureOrigin());
-      if (rerun) void runLint(rerun);
+      if (rerun) void runLint(rerun.origin, rerun.verification);
     } else if (streamStatus === 'failed') {
       if (!isCurrentOrigin(meta.origin)) return;
       setLintError('Health check failed — see job details for the underlying error.');
       lintJobMetaRef.current = null;
       setJobId(null);
       const rerun = lintRerunQueueRef.current.finish(meta.origin, captureOrigin());
-      if (rerun) void runLint(rerun);
+      if (rerun) void runLint(rerun.origin, rerun.verification);
     }
     // jobId 变化时 useJobStream 尚可能保留上个任务的终态，不能据此提前结算新任务。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -293,9 +298,12 @@ export function HealthView() {
 
   const running = starting || (jobId !== null && streamStatus !== 'completed' && streamStatus !== 'failed');
 
-  async function runLint(expectedOrigin: HealthOrigin = captureOrigin()) {
+  async function runLint(
+    expectedOrigin: HealthOrigin = captureOrigin(),
+    verification?: LintVerificationRequest,
+  ) {
     if (!isCurrentOrigin(expectedOrigin)) return;
-    const decision = lintRerunQueueRef.current.request(expectedOrigin);
+    const decision = lintRerunQueueRef.current.request(expectedOrigin, verification);
     if (decision !== 'start') return;
     setStarting(true);
     setSemanticErrored(false);
@@ -308,7 +316,10 @@ export function HealthView() {
         body: JSON.stringify(
           expectedOrigin.scope === 'all'
             ? { allSubjects: true }
-            : { subjectId: expectedOrigin.subjectId },
+            : {
+                subjectId: expectedOrigin.subjectId,
+                ...(verification ? { verification } : {}),
+              },
         ),
       });
       if (!isCurrentOrigin(expectedOrigin)) return;
@@ -346,7 +357,7 @@ export function HealthView() {
       if (isCurrentOrigin(expectedOrigin)) setStarting(false);
       if (!accepted) {
         const rerun = lintRerunQueueRef.current.finish(expectedOrigin, captureOrigin());
-        if (rerun) void runLint(rerun);
+        if (rerun) void runLint(rerun.origin, rerun.verification);
       }
     }
   }
@@ -380,7 +391,12 @@ export function HealthView() {
       delete actionJobMetaRef.current.curate;
       setCurateJobId(null);
       releaseAction('curate', meta.origin);
-      void runLint(meta.origin);
+      if (meta.baselineLintJobId) {
+        void runLint(meta.origin, {
+          baselineLintJobId: meta.baselineLintJobId,
+          remediationJobId: meta.jobId,
+        });
+      }
     } else if (curateStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
@@ -407,8 +423,13 @@ export function HealthView() {
       delete actionJobMetaRef.current.fix;
       setFixJobId(null);
       releaseAction('fix', meta.origin);
-      // 闭环：修复后自动重跑体检刷新 findings
-      void runLint(meta.origin);
+      // 闭环：只复核原快照与确定性不变量，不重新开放式发现语义问题。
+      if (meta.baselineLintJobId) {
+        void runLint(meta.origin, {
+          baselineLintJobId: meta.baselineLintJobId,
+          remediationJobId: meta.jobId,
+        });
+      }
     } else if (fixStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
@@ -482,7 +503,13 @@ export function HealthView() {
         actionGateRef.current.tryAcquire(workflow, origin);
       }
       setBusyActions((current) => new Set(current).add(workflow));
-      const meta = { jobId: candidate.jobId, origin };
+      const meta = {
+        jobId: candidate.jobId,
+        origin,
+        ...(candidate.baselineLintJobId
+          ? { baselineLintJobId: candidate.baselineLintJobId }
+          : {}),
+      };
       actionJobMetaRef.current[workflow] = meta;
 
       switch (workflow) {
@@ -691,7 +718,7 @@ export function HealthView() {
       };
       if (!isCurrentOrigin(origin) || !remediationJobId) return;
       accepted = true;
-      const meta = { jobId: remediationJobId, origin };
+      const meta = { jobId: remediationJobId, origin, baselineLintJobId: lintJobId };
       actionJobMetaRef.current[action] = meta;
       switch (action) {
         case 'fix':
@@ -1231,7 +1258,7 @@ export function HealthView() {
             {fixSummary.fixed + fixSummary.failed + fixSummary.skipped > 0
               ? `Verified ${fixSummary.fixed} fixed · ${fixSummary.failed} failed · ${fixSummary.skipped} skipped`
               : 'Per-finding verification was unavailable'}
-            . Running a full follow-up check for newly discovered issues.
+            . Verifying the selected findings.
           </div>
         )}
         {curatePostcondition && (

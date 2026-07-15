@@ -79,9 +79,9 @@
 
 ### `health/`
 
-- `health-view.tsx` —— 🆕 知识库体检工作台；页头只保留范围与重跑，严重级别/近期验证集中为摘要带，类型筛选与批量动作组成 sticky 工具栏；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/verifying，终态刷新 pages/lint/active jobs
+- `health-view.tsx` —— 🆕 知识库体检工作台；页头只保留范围与重跑，严重级别/近期验证集中为摘要带，类型筛选与批量动作组成 sticky 工具栏；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；Fix/Curate 完成后携带 baseline lint 与 remediation job ID 自动触发 verification，手动重跑才做 discovery；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/verifying，终态刷新 pages/lint/active jobs
 - `finding-row.tsx` —— 单条 finding 采用稳定的摘要/状态/动作三段布局，长描述限制两行，建议与 plan reason 按需展开；内部 status 映射为用户态文案（如 `awaiting-approval` → `Needs action`）；无 plan 时显示 `Plan unavailable`，不按 finding type 猜测动作；`review-source` 只导航
-- `remediation-ui.ts` —— 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy；Fix 完成摘要只统计 `perFindingOutcomes`，不把 `writes` 解释为 finding 或页面数；同时严格解析 Research job locator/run view，并构造不含 URL 的批准 body
+- `remediation-ui.ts` —— 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy；恢复 remediation job 时保留 baseline lint ID，lint rerun queue 连同 verification 上下文排队；Fix 完成摘要只统计 `perFindingOutcomes`，不把 `writes` 解释为 finding 或页面数；同时严格解析 Research job locator/run view，并构造不含 URL 的批准 body
 - `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可操作，持久展示 importing/verifying/terminal 与 child delivery
 - `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
 
@@ -176,6 +176,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Health 自动复检改为 verification：Fix/Curate 终态携带 baseline/remediation ID，刷新恢复与 lint rerun queue 均保留该上下文；手动 Run check 仍为 discovery，避免零写 Curate 后同一 vault 的 findings 随模型漂移增长 |
 | 2026-07-15 | Health 修复结果纠偏：完成提示改按 `perFindingOutcomes` 统计 fixed/failed/skipped，不再展示或解释 `writes`；明确后续全库检查可能发现新问题，不再把写入次数误报为修复数量 |
 | 2026-07-15 | Health 工作台视觉重构：范围与重跑收敛到页头，新增无卡片摘要带、sticky 类型筛选/批量动作工具栏；finding 改为紧凑摘要行与可展开详情，内部审批枚举改为用户态状态文案，Research backlog 同步统一列表层级 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：PendingAction 卡片区分页面 move 并提示旧 slug alias 兼容；tool activity 仅展示 `slug → newSlug`，不暴露 sidecar 内容 |

@@ -21,10 +21,21 @@ import { resolveTask } from '../llm/task-router';
 import { runDeterministicChecksForSubject } from './lint-deterministic';
 import { runSemanticChecksForSubject } from './lint-semantic';
 import { identifyFindings } from './finding-identity';
-import type { EnrichedLintFinding, LintFinding, Job, Subject } from '@/lib/contracts';
+import {
+  reconcileVerificationFindings,
+  resolveLintVerificationContext,
+} from './lint-verification';
+import type {
+  EnrichedLintFinding,
+  Job,
+  LintFinding,
+  LintVerificationRequest,
+  Subject,
+} from '@/lib/contracts';
 
 interface LintParams {
   subjectId?: string;
+  verification?: LintVerificationRequest;
 }
 
 /** findings 分类统计（severity/type 计数 + 单行文案），供 lint 事件与 result 附带。 */
@@ -70,12 +81,19 @@ function lintModelLabel(): string | null {
   }
 }
 
-async function runLintJob(
+export async function runLintJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
 ): Promise<Record<string, unknown>> {
   const params = JSON.parse(job.paramsJson) as LintParams;
   const targetSubjectId = params.subjectId ?? job.subjectId ?? null;
+  const verification = params.verification && targetSubjectId
+    ? resolveLintVerificationContext(targetSubjectId, params.verification)
+    : null;
+
+  if (params.verification && !verification) {
+    throw new Error('Lint verification requires one subject');
+  }
 
   const targets: Subject[] = targetSubjectId
     ? (() => {
@@ -100,13 +118,38 @@ async function runLintJob(
     emit('lint:deterministic:start', `Subject "${subject.slug}": running deterministic checks...`);
     const deterministicFindings = runDeterministicChecksForSubject(subject);
     const identifiedDeterministicFindings = identifySubjectFindings(subject, deterministicFindings);
-    allFindings.push(...identifiedDeterministicFindings);
     emit(
       'lint:deterministic:done',
       `Subject "${subject.slug}": ${identifiedDeterministicFindings.length} deterministic finding(s)`,
       { findings: identifiedDeterministicFindings, subject: subject.slug }
     );
 
+    if (verification) {
+      const verifiedFindings = reconcileVerificationFindings(
+        verification.baseline.findings,
+        identifiedDeterministicFindings,
+        verification.remediationJobs,
+      );
+      allFindings.push(...verifiedFindings);
+      const semanticCount = verifiedFindings.filter((finding) => (
+        finding.type === 'contradiction'
+        || finding.type === 'missing-crossref'
+        || finding.type === 'coverage-gap'
+      )).length;
+      emit(
+        'lint:verification:done',
+        `Subject "${subject.slug}": verified the existing snapshot without discovering unrelated semantic findings`,
+        {
+          baselineLintJobId: verification.request.baselineLintJobId,
+          remediationJobId: verification.request.remediationJobId,
+          deterministicFindings: identifiedDeterministicFindings.length,
+          residualSemanticFindings: semanticCount,
+        },
+      );
+      continue;
+    }
+
+    allFindings.push(...identifiedDeterministicFindings);
     const pageCount = pagesRepo.getAllPages(subject.id).filter((p) => !pagesRepo.isMetaPage(p)).length;
     const model = lintModelLabel();
     emit(
@@ -146,7 +189,14 @@ async function runLintJob(
     { totalFindings: allFindings.length, bySeverity: stats.bySeverity, byType: stats.byType },
   );
 
-  return { findings: allFindings };
+  return {
+    findings: allFindings,
+    mode: verification ? 'verification' : 'discovery',
+    ...(verification ? {
+      baselineLintJobId: verification.request.baselineLintJobId,
+      remediationJobId: verification.request.remediationJobId,
+    } : {}),
+  };
 }
 
 registerHandler('lint', runLintJob);

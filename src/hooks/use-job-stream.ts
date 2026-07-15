@@ -199,6 +199,7 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         'lint:semantic:start',
         'lint:semantic:done',
         'lint:semantic:error',
+        'lint:verification:done',
         'lint:complete',
         // Save-to-wiki events
         'save:start',
