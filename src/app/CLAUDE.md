@@ -116,7 +116,9 @@ src/app/
 │   ├── tags/[tag]/page.tsx              # 🆕 单标签页
 │   └── _components/
 │       ├── dashboard-hero.tsx
-│       └── dashboard-ingest-panel.tsx
+│       ├── ingest-workbench.tsx          # Ingest 提交 + 多任务恢复/选择
+│       ├── ingest-task-switcher.tsx      # 并行 Ingest 任务切换条
+│       └── ingest-live-view.tsx          # 单任务实时进度详情
 └── api/
     ├── subjects/route.ts                # 🆕 GET 列表 / POST 创建
     ├── subjects/[id]/route.ts           # 🆕 GET / PATCH / DELETE
@@ -157,6 +159,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Ingest 工作台支持并行任务切换：批量文件/URL 提交后展示全部成功入队任务，刷新时恢复当前 Subject 的 running + pending + 可续传 failed；仅选中任务建立 SSE，任务条显示 queued/running/completed/failed，排队详情不再误报为正在解析 |
 | 2026-07-15 | `/api/lint` 新增 subject-scoped verification 模式，严格校验 completed baseline lint 与 completed Fix/Curate 的 RemediationContext 关联；All Subjects 禁止 verification，普通请求保持 discovery |
 | 2026-07-14 | Query 编排边界：流式 `error` part、迭代器异常与初始化异常统一为单一 SSE error 终态；失败后不再回落空答案、发送 citations/done、持久化部分回答或触发 coverage；正常空流仍按 `NO_QUERY_CONTEXT_ANSWER` 成功收口 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：`/api/query` 可生成 `wiki.move` PendingAction；旧 slug 的页面 API 返回 308 canonical redirect，阅读页永久重定向并保留 Subject 查询参数 |

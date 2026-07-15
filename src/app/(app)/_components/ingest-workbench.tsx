@@ -27,7 +27,14 @@ import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/cn';
+import {
+  ingestTaskFromJob,
+  mergeIngestTasks,
+  pickInitialIngestTaskId,
+  type IngestTask,
+} from '@/lib/ingest-task-list';
 import { IngestLiveView } from './ingest-live-view';
+import { IngestTaskSwitcher } from './ingest-task-switcher';
 import type { CheckpointProgress, Job } from '@/lib/contracts';
 
 /** The real ingest pipeline's six phases — shown as a "what happens" preview. */
@@ -48,6 +55,152 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function queuedTask(jobId: string, sourceName: string, order = 0): IngestTask {
+  return {
+    id: jobId,
+    sourceName,
+    queueStatus: 'pending',
+    createdAt: new Date(Date.now() + order).toISOString(),
+    checkpointProgress: null,
+  };
+}
+
+function IngestTaskDetail({
+  task,
+  onBackground,
+  onStartNew,
+  onRemove,
+  onStatusChange,
+}: {
+  task: IngestTask;
+  onBackground: () => void;
+  onStartNew: () => void;
+  onRemove: (jobId: string) => void;
+  onStatusChange: (jobId: string, status: IngestTask['queueStatus']) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [reconnectKey, setReconnectKey] = useState(0);
+  const [retrying, setRetrying] = useState(false);
+  const [terminating, setTerminating] = useState(false);
+  const [checkpointProgress, setCheckpointProgress] = useState<CheckpointProgress | null>(
+    task.checkpointProgress,
+  );
+  const [createdPages, setCreatedPages] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const { events, status, latestMessage } = useJobStream(task.id, reconnectKey);
+  const isDone = status === 'completed';
+  const hasEvents = events.length > 0;
+
+  useEffect(() => {
+    if (status === 'completed' || status === 'failed') {
+      onStatusChange(task.id, status);
+    } else if (status === 'streaming' && hasEvents) {
+      onStatusChange(task.id, 'running');
+    }
+  }, [hasEvents, onStatusChange, status, task.id]);
+
+  useEffect(() => {
+    if (!isDone) return;
+    queryClient.invalidateQueries({ queryKey: ['pages'] });
+    queryClient.invalidateQueries({ queryKey: ['sources'] });
+  }, [isDone, queryClient]);
+
+  useEffect(() => {
+    if (!isDone) return;
+    const doneEvent = events.find((event) =>
+      event.type === 'job:completed' || event.type === 'ingest:complete');
+    const result = (doneEvent?.data?.data as { result?: { pagesCreated?: string[] } } | undefined)
+      ?.result;
+    if (result?.pagesCreated) setCreatedPages(result.pagesCreated);
+  }, [isDone, events]);
+
+  const handleRetry = useCallback(async () => {
+    setRetrying(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/jobs/${task.id}/retry`, { method: 'POST' });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Retry failed (${res.status})`);
+      }
+      setCheckpointProgress(null);
+      onStatusChange(task.id, 'pending');
+      setReconnectKey((key) => key + 1);
+      window.dispatchEvent(
+        new CustomEvent('wiki:job-started', { detail: { jobId: task.id } }),
+      );
+    } catch (retryError) {
+      setError(retryError instanceof Error ? retryError.message : String(retryError));
+    } finally {
+      setRetrying(false);
+    }
+  }, [onStatusChange, task.id]);
+
+  const handleTerminate = useCallback(async () => {
+    if (terminating) return;
+    setTerminating(true);
+    try {
+      await apiFetch(`/api/jobs/${task.id}/cancel`, { method: 'POST' });
+    } catch {
+      // 即便请求失败也允许用户从工作台移除这个卡住的任务。
+    } finally {
+      setTerminating(false);
+      onRemove(task.id);
+    }
+  }, [onRemove, task.id, terminating]);
+
+  useEffect(() => {
+    if (status !== 'failed') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/jobs/${task.id}`);
+        if (!res.ok) return;
+        const job = (await res.json()) as { checkpointProgress?: CheckpointProgress | null };
+        if (!cancelled) setCheckpointProgress(job.checkpointProgress ?? null);
+      } catch {
+        // 续传进度只用于优化按钮文案。
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status, task.id]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {error && (
+        <p role="alert" className="shrink-0 border-b border-danger-border/40 bg-danger-bg px-6 py-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
+      <div className="min-h-0 flex-1">
+        <IngestLiveView
+          inline
+          jobId={task.id}
+          sourceName={task.sourceName}
+          status={status}
+          events={events}
+          latestMessage={latestMessage}
+          createdPages={createdPages}
+          onBackground={onBackground}
+          onIngestAnother={onStartNew}
+          onRetry={handleRetry}
+          retrying={retrying}
+          retryLabel={
+            checkpointProgress
+              ? `Resume${checkpointProgress.totalPages ? ` · ${checkpointProgress.writerPages}/${checkpointProgress.totalPages} pages` : ''}`
+              : 'Retry'
+          }
+          onTerminate={handleTerminate}
+          terminating={terminating}
+          queued={task.queueStatus === 'pending' && !hasEvents}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
  * The dedicated ingest workspace (route `/ingest`). One surface that moves from
  * setup → live progress → completion. The job keeps running in the background
@@ -55,7 +208,6 @@ function formatBytes(bytes: number): string {
  */
 export function IngestWorkbench() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { slug: subjectSlug } = useCurrentSubject();
 
   const [mode, setMode] = useState<'file' | 'text' | 'url'>('file');
@@ -63,11 +215,8 @@ export function IngestWorkbench() {
   const [urlResults, setUrlResults] = useState<
     Array<{ url: string; jobId?: string; sourceId?: string; error?: string }> | null
   >(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [reconnectKey, setReconnectKey] = useState(0);
-  const [retrying, setRetrying] = useState(false);
-  const [terminating, setTerminating] = useState(false);
-  const [checkpointProgress, setCheckpointProgress] = useState<CheckpointProgress | null>(null);
+  const [tasks, setTasks] = useState<IngestTask[]>([]);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,100 +226,50 @@ export function IngestWorkbench() {
   >(null);
   const [textInput, setTextInput] = useState('');
   const [filenameInput, setFilenameInput] = useState('');
-  const [sourceName, setSourceName] = useState('');
-  const [createdPages, setCreatedPages] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { events, status, latestMessage } = useJobStream(jobId, reconnectKey);
-
-  const isDone = status === 'completed';
-
-  // Refresh the vault views once an ingest commits.
-  useEffect(() => {
-    if (!isDone) return;
-    queryClient.invalidateQueries({ queryKey: ['pages'] });
-    queryClient.invalidateQueries({ queryKey: ['sources'] });
-  }, [isDone, queryClient]);
-
-  useEffect(() => {
-    if (!isDone) return;
-    const doneEvent = events.find((e) => e.type === 'job:completed' || e.type === 'ingest:complete');
-    const result = (doneEvent?.data?.data as { result?: { pagesCreated?: string[] } } | undefined)?.result;
-    if (result?.pagesCreated) setCreatedPages(result.pagesCreated);
-  }, [isDone, events]);
-
   const reset = useCallback(() => {
-    setJobId(null);
+    setTasks([]);
+    setSelectedTaskId(null);
     setError(null);
-    setCreatedPages([]);
     setSelectedFiles([]);
     setFileResults(null);
     setTextInput('');
     setFilenameInput('');
-    setSourceName('');
     setUrlInput('');
     setUrlResults(null);
-    setCheckpointProgress(null);
     setMode('file');
     if (fileRef.current) fileRef.current.value = '';
   }, []);
 
-  const handleRetry = useCallback(async () => {
-    if (!jobId) return;
-    setRetrying(true);
-    setError(null);
-    try {
-      const res = await apiFetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Retry failed (${res.status})`);
-      }
-      setCheckpointProgress(null);
-      setReconnectKey((k) => k + 1);
-      // The job kept its id, so the global ProgressToast / IngestPill (which
-      // subscribe by id) are still pinned to the closed, failed stream. Tell
-      // them the job restarted so they re-subscribe and resume live progress.
-      window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId } }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRetrying(false);
-    }
-  }, [jobId]);
+  const handleTaskStatusChange = useCallback(
+    (jobId: string, queueStatus: IngestTask['queueStatus']) => {
+      setTasks((current) => {
+        let changed = false;
+        const next = current.map((task) => {
+          if (task.id !== jobId || task.queueStatus === queueStatus) return task;
+          changed = true;
+          return { ...task, queueStatus };
+        });
+        return changed ? next : current;
+      });
+    },
+    [],
+  );
 
-  // 手动结束当前 ingest：停掉运行中的任务、或放弃已报错的任务（后端清检查点使其不可 resume），
-  // 然后清空工作台回到上传态。终态以 SSE/后端为准，这里失败也不阻断关闭。
-  const handleTerminate = useCallback(async () => {
-    if (!jobId || terminating) return;
-    setTerminating(true);
-    try {
-      await apiFetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
-    } catch {
-      /* 忽略：即便请求失败也允许用户离开这个卡住的任务 */
-    } finally {
-      setTerminating(false);
-      reset();
-    }
-  }, [jobId, terminating, reset]);
-
-  // After a failure, fetch the checkpoint progress for the resume label.
-  useEffect(() => {
-    if (status !== 'failed' || !jobId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await apiFetch(`/api/jobs/${jobId}`);
-        if (!res.ok) return;
-        const job = (await res.json()) as { checkpointProgress?: CheckpointProgress | null };
-        if (!cancelled) setCheckpointProgress(job.checkpointProgress ?? null);
-      } catch {
-        /* the progress label is a nicety */
+  const handleRemoveTask = useCallback(
+    (jobId: string) => {
+      const removedIndex = tasks.findIndex((task) => task.id === jobId);
+      const next = tasks.filter((task) => task.id !== jobId);
+      setTasks(next);
+      if (selectedTaskId === jobId) {
+        setSelectedTaskId(
+          next[Math.min(Math.max(removedIndex, 0), next.length - 1)]?.id ?? null,
+        );
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [status, jobId]);
+    },
+    [selectedTaskId, tasks],
+  );
 
   // A file handed off from the dashboard "Choose a file" hero takes precedence:
   // start its upload immediately and watch it live here. The ref guard keeps
@@ -188,9 +287,8 @@ export function IngestWorkbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // On mount: reflect an in-progress background ingest, or restore the most
-  // recent resumable failed one for this subject. Skipped when a dashboard
-  // handoff is already driving a fresh upload.
+  // 首次进入时恢复当前 Subject 的全部活跃任务与可续传失败任务；并发槽位占满时
+  // pending 任务同样必须进入切换列表。
   useEffect(() => {
     if (handoffStarted.current) return;
     let cancelled = false;
@@ -198,27 +296,36 @@ export function IngestWorkbench() {
       const subjectId = useUIStore.getState().currentSubjectId;
       if (!subjectId) return;
       try {
-        const runningRes = await apiFetch(
-          `/api/jobs?status=running&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
+        const query = (status: Job['status']) =>
+          apiFetch(
+            `/api/jobs?status=${status}&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
+          );
+        const [runningRes, pendingRes, failedRes] = await Promise.all([
+          query('running'),
+          query('pending'),
+          query('failed'),
+        ]);
+        const readJobs = async (response: Response) =>
+          response.ok
+            ? ((await response.json()) as Array<
+                Job & { checkpointProgress: CheckpointProgress | null }
+              >)
+            : [];
+        const [running, pending, failed] = await Promise.all([
+          readJobs(runningRes),
+          readJobs(pendingRes),
+          readJobs(failedRes),
+        ]);
+        const restored = mergeIngestTasks(
+          [],
+          [...running, ...pending, ...failed.filter((job) => job.checkpointProgress)].map(
+            ingestTaskFromJob,
+          ),
         );
-        if (runningRes.ok) {
-          const running = (await runningRes.json()) as Job[];
-          if (running.length > 0) {
-            if (!cancelled) setJobId(running[running.length - 1].id);
-            return;
-          }
-        }
-        const res = await apiFetch(
-          `/api/jobs?status=failed&type=ingest&subjectId=${encodeURIComponent(subjectId)}`,
-        );
-        if (!res.ok) return;
-        const jobs = (await res.json()) as Array<Job & { checkpointProgress: CheckpointProgress | null }>;
-        const resumable = jobs.filter((j) => j.checkpointProgress);
-        if (resumable.length === 0) return;
-        const latest = resumable[resumable.length - 1];
+        if (restored.length === 0) return;
         if (cancelled) return;
-        setCheckpointProgress(latest.checkpointProgress);
-        setJobId(latest.id);
+        setTasks(restored);
+        setSelectedTaskId(pickInitialIngestTaskId(restored));
       } catch {
         /* silent */
       }
@@ -232,9 +339,7 @@ export function IngestWorkbench() {
 
   const startUpload = useCallback(async (file: File) => {
     setError(null);
-    setCreatedPages([]);
     setUploading(true);
-    setSourceName(file.name);
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
       const formData = new FormData();
@@ -246,7 +351,9 @@ export function IngestWorkbench() {
         throw new Error(body.error || `Upload failed (${res.status})`);
       }
       const data = await res.json();
-      setJobId(data.jobId);
+      const task = queuedTask(data.jobId, file.name);
+      setTasks([task]);
+      setSelectedTaskId(task.id);
       window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -267,7 +374,6 @@ export function IngestWorkbench() {
       }
       // 批量：逐个上传（每文件独立 job），逐条归集结果，留在本页展示结果面板
       setError(null);
-      setCreatedPages([]);
       setFileResults(null);
       setUploading(true);
       const subjectId = useUIStore.getState().currentSubjectId;
@@ -298,6 +404,21 @@ export function IngestWorkbench() {
       setSelectedFiles([]);
       if (fileRef.current) fileRef.current.value = '';
       setUploading(false);
+      const queued = results.flatMap((result, index) =>
+        result.jobId ? [queuedTask(result.jobId, result.filename, index)] : [],
+      );
+      if (queued.length > 0) {
+        setTasks(queued);
+        setSelectedTaskId(queued[0].id);
+        const failures = results.filter((result) => result.error);
+        if (failures.length > 0) {
+          setError(
+            `${failures.length} ${failures.length === 1 ? 'file' : 'files'} could not be queued: ${failures
+              .map((result) => `${result.filename} — ${result.error}`)
+              .join('; ')}`,
+          );
+        }
+      }
       return;
     }
     if (mode === 'url') {
@@ -311,7 +432,6 @@ export function IngestWorkbench() {
         return;
       }
       setError(null);
-      setCreatedPages([]);
       setUrlResults(null);
       setUploading(true);
       try {
@@ -326,17 +446,26 @@ export function IngestWorkbench() {
           throw new Error(data.error || `Submit failed (${res.status})`);
         }
         const results = (data.results ?? []) as Array<{ url: string; jobId?: string; error?: string }>;
-        const jobIds = results.filter((r) => r.jobId).map((r) => r.jobId!);
+        const queued = results.flatMap((result, index) =>
+          result.jobId ? [queuedTask(result.jobId, result.url, index)] : [],
+        );
+        const jobIds = queued.map((task) => task.id);
         // 通知全局 ProgressToast 追踪每个后台 job
         for (const id of jobIds) {
           window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: id } }));
         }
-        if (jobIds.length === 1 && results.length === 1) {
-          // 单 URL 全成功：直接进入现有 live view
-          setSourceName(results[0].url);
-          setJobId(jobIds[0]);
+        if (queued.length > 0) {
+          setTasks(queued);
+          setSelectedTaskId(queued[0].id);
+          const failures = results.filter((result) => result.error);
+          if (failures.length > 0) {
+            setError(
+              `${failures.length} ${failures.length === 1 ? 'URL' : 'URLs'} could not be queued: ${failures
+                .map((result) => `${result.url} — ${result.error}`)
+                .join('; ')}`,
+            );
+          }
         } else {
-          // 批量：留在本页展示逐条结果（jobs 在后台跑，toast 追踪）
           setUrlResults(results);
         }
       } catch (err) {
@@ -352,10 +481,8 @@ export function IngestWorkbench() {
       return;
     }
     setError(null);
-    setCreatedPages([]);
     setUploading(true);
     const filename = filenameInput.trim() || `note-${Date.now()}.md`;
-    setSourceName(filename);
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
       const res = await apiFetch('/api/ingest', {
@@ -370,7 +497,9 @@ export function IngestWorkbench() {
         throw new Error(body.error || `Submit failed (${res.status})`);
       }
       const data = await res.json();
-      setJobId(data.jobId);
+      const task = queuedTask(data.jobId, filename);
+      setTasks([task]);
+      setSelectedTaskId(task.id);
       window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -391,28 +520,24 @@ export function IngestWorkbench() {
   }, []);
 
   // ── Live / done / failed: the unified progress surface ──────────────────────
-  if (jobId) {
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  if (selectedTask) {
     return (
-      <IngestLiveView
-        inline
-        jobId={jobId}
-        sourceName={sourceName || 'Ingesting source'}
-        status={status}
-        events={events}
-        latestMessage={latestMessage}
-        createdPages={createdPages}
-        onBackground={() => router.push('/')}
-        onIngestAnother={reset}
-        onRetry={handleRetry}
-        retrying={retrying}
-        retryLabel={
-          checkpointProgress
-            ? `Resume${checkpointProgress.totalPages ? ` · ${checkpointProgress.writerPages}/${checkpointProgress.totalPages} pages` : ''}`
-            : 'Retry'
-        }
-        onTerminate={handleTerminate}
-        terminating={terminating}
-      />
+      <IngestTaskSwitcher
+        tasks={tasks}
+        selectedId={selectedTask.id}
+        onSelect={setSelectedTaskId}
+        error={error}
+      >
+        <IngestTaskDetail
+          key={selectedTask.id}
+          task={selectedTask}
+          onBackground={() => router.push('/')}
+          onStartNew={reset}
+          onRemove={handleRemoveTask}
+          onStatusChange={handleTaskStatusChange}
+        />
+      </IngestTaskSwitcher>
     );
   }
 

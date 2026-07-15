@@ -47,6 +47,8 @@ interface IngestLiveViewProps {
    *  (clears its checkpoints so it can't be resumed). */
   onTerminate?: () => void;
   terminating?: boolean;
+  /** 任务尚未被 worker claim 时显示真实排队状态。 */
+  queued?: boolean;
 }
 
 interface Phase {
@@ -153,10 +155,11 @@ export function IngestLiveView({
   retryLabel = 'Retry',
   onTerminate,
   terminating = false,
+  queued = false,
 }: IngestLiveViewProps) {
   const done = status === 'completed';
   const failed = status === 'failed';
-  const running = status === 'streaming' || status === 'idle';
+  const running = !queued && (status === 'streaming' || status === 'idle');
 
   // Elapsed — ticks while running, freezes on completion/failure.
   const startedAt = useRef<number>(Date.now());
@@ -217,7 +220,7 @@ export function IngestLiveView({
   );
 
   const phase = PHASES[Math.min(curPhase, PHASES.length - 1)];
-  const progress = done ? 1 : Math.min(0.97, (curPhase + 0.5) / PHASES.length);
+  const progress = queued ? 0 : done ? 1 : Math.min(0.97, (curPhase + 0.5) / PHASES.length);
 
   return (
     <div
@@ -232,10 +235,24 @@ export function IngestLiveView({
           <span
             className={cn(
               'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md',
-              done ? 'bg-success/12 text-success' : failed ? 'bg-danger/12 text-danger' : 'bg-accent/12 text-accent',
+              done
+                ? 'bg-success/12 text-success'
+                : failed
+                  ? 'bg-danger/12 text-danger'
+                  : queued
+                    ? 'bg-subtle text-foreground-tertiary'
+                    : 'bg-accent/12 text-accent',
             )}
           >
-            {done ? <Check className="h-[18px] w-[18px]" /> : failed ? <X className="h-[18px] w-[18px]" /> : <Loader2 className="h-[18px] w-[18px] animate-spin" />}
+            {done ? (
+              <Check className="h-[18px] w-[18px]" />
+            ) : failed ? (
+              <X className="h-[18px] w-[18px]" />
+            ) : queued ? (
+              <Clock className="h-[18px] w-[18px]" />
+            ) : (
+              <Loader2 className="h-[18px] w-[18px] animate-spin" />
+            )}
           </span>
 
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -253,6 +270,8 @@ export function IngestLiveView({
                 </>
               ) : failed ? (
                 <span className="text-danger">{latestMessage || 'Ingest failed'}</span>
+              ) : queued ? (
+                <strong className="font-semibold text-foreground">Queued · waiting for a worker</strong>
               ) : (
                 <>
                   <strong className="font-semibold text-foreground">{phase.verb}…</strong> · phase {curPhase + 1} of {PHASES.length}
@@ -322,7 +341,13 @@ export function IngestLiveView({
         {/* phase stepper */}
         <div className="flex items-stretch gap-1.5 overflow-x-auto px-6 pb-3">
           {PHASES.map((p, order) => {
-            const state = done || order < curPhase ? 'done' : order === curPhase ? 'active' : 'pending';
+            const state = queued
+              ? 'pending'
+              : done || order < curPhase
+                ? 'done'
+                : order === curPhase
+                  ? 'active'
+                  : 'pending';
             return (
               <div
                 key={p.id}
@@ -388,7 +413,13 @@ export function IngestLiveView({
       {/* split body */}
       <div className="grid min-h-0 flex-1 grid-rows-[1fr_1fr] lg:grid-cols-[minmax(380px,460px)_1fr] lg:grid-rows-1">
         <div className="min-h-0 overflow-y-auto border-b border-border bg-canvas lg:border-b-0 lg:border-r">
-          <IngestTimeline events={events} curPhase={curPhase} done={done} createdPages={createdPages} />
+          <IngestTimeline
+            events={events}
+            curPhase={curPhase}
+            done={done}
+            queued={queued}
+            createdPages={createdPages}
+          />
         </div>
         <div className="relative min-h-0 bg-graph-canvas">
           <IngestGraph
@@ -396,6 +427,7 @@ export function IngestLiveView({
             phase={phase}
             done={done}
             failed={failed}
+            queued={queued}
             latestMessage={latestMessage}
             stepCount={stepCount}
           />
@@ -411,11 +443,13 @@ function IngestTimeline({
   events,
   curPhase,
   done,
+  queued,
   createdPages,
 }: {
   events: JobStreamEvent[];
   curPhase: number;
   done: boolean;
+  queued: boolean;
   createdPages: string[];
 }) {
   // Bucket events into phases for the rail.
@@ -447,7 +481,13 @@ function IngestTimeline({
       )}
 
       {PHASES.map((p, order) => {
-        const state = done || order < curPhase ? 'done' : order === curPhase ? 'active' : 'pending';
+        const state = queued
+          ? 'pending'
+          : done || order < curPhase
+            ? 'done'
+            : order === curPhase
+              ? 'active'
+              : 'pending';
         const entries = byPhase[order];
         const isLast = order === PHASES.length - 1;
         return (
@@ -528,6 +568,7 @@ function IngestGraph({
   phase,
   done,
   failed,
+  queued,
   latestMessage,
   stepCount,
 }: {
@@ -535,12 +576,13 @@ function IngestGraph({
   phase: Phase;
   done: boolean;
   failed: boolean;
+  queued: boolean;
   latestMessage: string;
   stepCount: number;
 }) {
   const hub = { x: 50, y: 47 };
   const activeIdx = nodes.length - 1;
-  const running = !done && !failed;
+  const running = !done && !failed && !queued;
 
   return (
     <div className="absolute inset-0 overflow-hidden">
@@ -548,30 +590,60 @@ function IngestGraph({
       <div
         className={cn(
           'absolute inset-x-4 top-4 z-[2] flex items-center gap-2.5 rounded-md border px-3 py-2.5 shadow-sm backdrop-blur',
-          done ? 'border-success-border/50' : failed ? 'border-danger/40' : 'border-accent/30',
+          done
+            ? 'border-success-border/50'
+            : failed
+              ? 'border-danger/40'
+              : queued
+                ? 'border-border'
+                : 'border-accent/30',
           'bg-elevated/85',
         )}
       >
         <span
           className={cn(
             'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
-            done ? 'bg-success/12 text-success' : failed ? 'bg-danger/12 text-danger' : 'bg-accent/12 text-accent',
+            done
+              ? 'bg-success/12 text-success'
+              : failed
+                ? 'bg-danger/12 text-danger'
+                : queued
+                  ? 'bg-subtle text-foreground-tertiary'
+                  : 'bg-accent/12 text-accent',
           )}
         >
-          {done ? <CircleCheck className="h-[15px] w-[15px]" /> : failed ? <X className="h-[15px] w-[15px]" /> : <phase.Icon className="h-[15px] w-[15px]" />}
+          {done ? (
+            <CircleCheck className="h-[15px] w-[15px]" />
+          ) : failed ? (
+            <X className="h-[15px] w-[15px]" />
+          ) : queued ? (
+            <Clock className="h-[15px] w-[15px]" />
+          ) : (
+            <phase.Icon className="h-[15px] w-[15px]" />
+          )}
         </span>
         <div className="min-w-0 flex-1">
           <span
             className={cn(
               'block text-[10px] font-semibold uppercase tracking-wider',
-              done ? 'text-success' : failed ? 'text-danger' : 'text-accent-strong',
+              done
+                ? 'text-success'
+                : failed
+                  ? 'text-danger'
+                  : queued
+                    ? 'text-foreground-tertiary'
+                    : 'text-accent-strong',
             )}
           >
-            {done ? 'Complete' : failed ? 'Failed' : phase.label}
+            {done ? 'Complete' : failed ? 'Failed' : queued ? 'Queued' : phase.label}
           </span>
           <span className="block truncate text-sm font-medium text-foreground">
-            {done ? 'Committed to the vault' : latestMessage || 'Starting…'}
-            {!done && !failed && <span className="ig-caret ml-0.5 text-accent">▍</span>}
+            {done
+              ? 'Committed to the vault'
+              : queued
+                ? 'Waiting for a worker'
+                : latestMessage || 'Starting…'}
+            {running && <span className="ig-caret ml-0.5 text-accent">▍</span>}
           </span>
         </div>
       </div>
