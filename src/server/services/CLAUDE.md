@@ -130,7 +130,7 @@ Research finding 的 immutable `snapshot_json` 必须无损覆盖 finding identi
 
 `research-service.ts` 完成查询与 triage 后，不再把 job `resultJson.candidates` 当批准事实，而是用稳定 run/candidate ID 持久化候选快照、finding 快照、topics 与 queries；客户端与审批链路只将 job result 的 `runId` 作为权威定位，兼容字段不能参与批准。`research-approval-service.ts` 将存储行严格映射为脱敏 `ResearchRunView`，批准 API 只接受 candidate ID、expectedVersion 与 idempotency key；repo 在单个 `IMMEDIATE` transaction 内 CAS run、写 approval、冻结 selected/rejected decision、建立每候选 delivery 并创建唯一 `research-import` coordinator。
 
-`research-import-service.ts` 只接受 run/approval/subject ID，URL 必须回读服务端候选快照。每条 delivery 用 claim token + lease CAS；抓取后在同一事务重验 token，再完成 source get-or-create、sourceId 回写和 child Ingest 入队。child params 的 `researchProvenance` 由服务端注入，通用 Ingest API 不接受客户端 provenance。`research-provenance-reconciler.ts` 汇总 coordinator/child 终态，物化 source、Ingest job、operation IDs、touched pages、commit SHA 与安全错误；finding run 至少一条导入成功后唯一入队 verification lint，并用 exact finding ID 或稳定 locus 物化 `fixed/residual/unverifiable`。worker 终态 hook、启动扫描和维护 tick 共用同一幂等对账原语，补偿取消与崩溃窗口。
+`research-import-service.ts` 只接受 run/approval/subject ID，URL 必须回读服务端候选快照。每条 delivery 用 claim token + lease CAS；抓取后在同一事务重验 token，再完成 source get-or-create、sourceId 回写和 child Ingest 入队。child params 的 `researchProvenance` 由服务端注入，通用 Ingest API 不接受客户端 provenance。`research-provenance-reconciler.ts` 汇总 coordinator/child 终态，物化 source、Ingest job、operation IDs、touched pages、commit SHA 与安全错误；finding run 至少一条导入成功后唯一入队 verification lint，并用 exact finding ID 或稳定 locus 物化 `fixed/residual/unverifiable`。worker 终态 hook、启动扫描和维护 tick 共用同一幂等对账原语，补偿取消与崩溃窗口。工作台手动重试 failed child 时，`research-approval-service::retryResearchIngestJob` 先精确对账，再由 repo 在一个 IMMEDIATE transaction 内恢复同一 job、delivery 与 run；job ID、attempt 与 checkpoint 保留，已取消、source 缺失、lineage 不匹配或 verification 已物化时 fail-closed。
 
 Health 前端刷新时按 subject 读取 active jobs，并可从 queued 或 awaiting-approval plan 的原 Research job ID 恢复 run。Research job 完成后先从 result 提取 `runId`，再 GET 持久化 view；批准只提交 candidate ID，网络结果不确定时 GET 同一 run 对账并保留同一 selection 的幂等键。`importing/verifying` 轮询 run，终态失效 pages、active-jobs 与 lint snapshot。普通关闭不等同 dismiss，显式忽略走独立 API。切换 subject/scope 会同步作废旧请求、候选 view 与幂等键。All Subjects 只构造只读 plans，不允许执行。
 
@@ -297,6 +297,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Research child Ingest 支持工作台原位续传：重试前精确对账，job/delivery/run 在同一事务恢复，保留 checkpoint/attempt 与既有 lineage；取消、缺源、证据错配和 verification 后状态拒绝恢复 |
 | 2026-07-15 | 修复 Health 处置投影只隐藏 fixed 的契约偏差：Tidy/Fix 完成任务内验证及 Research provenance 到达验证终态后直接移除关联 finding，failed/skipped 真实结果保留在近期摘要；损坏结果 fail-closed |
 | 2026-07-15 | Health 处置改为 postcondition 驱动的快照投影：Fix/Curate 直接消费逐 finding outcome；Research 导入后只目标化复核原 coverage-gap/thin-page 并原子物化终态，不再创建 verification lint；旧 verifying run 继续兼容对账 |
 | 2026-07-15 | Semantic Lint 对 AI SDK JSON/schema 输出失败启用 1 次定向重试；最终失败事件保存脱敏 `finishReason/detail`，不落模型原始输出或 Wiki 正文 |

@@ -814,6 +814,154 @@ export interface RetryResearchRunImportResult {
   coordinatorJobId: string;
 }
 
+export interface RetryResearchIngestJobInput {
+  runId: string;
+  subjectId: SubjectId;
+  approvalId: string;
+  candidateId: string;
+  ingestJobId: string;
+  now?: Date;
+}
+
+/**
+ * failed Research child Ingest 的原位续传原语：保留 job ID 与 checkpoint，
+ * 同时恢复 delivery/run 状态，避免独立 requeue 绕过 provenance 状态机。
+ */
+export function retryResearchIngestJobAtomic(
+  input: RetryResearchIngestJobInput,
+): StoredResearchRun {
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): StoredResearchRun => {
+    const stored = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
+    if (!stored) {
+      throw new ResearchProvenanceRepoError('run-not-found', 'Research run not found');
+    }
+    if (
+      !['importing', 'partial', 'failed'].includes(stored.run.status)
+      || stored.run.verificationLintJobId
+      || stored.findings.some((finding) => finding.verificationStatus !== 'pending')
+    ) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest failed after the run became terminal or entered verification',
+      );
+    }
+    if (!stored.approval || stored.approval.id !== input.approvalId) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest approval evidence does not match',
+      );
+    }
+
+    const delivery = stored.deliveries.find((row) => (
+      row.approvalId === input.approvalId
+      && row.candidateId === input.candidateId
+      && row.ingestJobId === input.ingestJobId
+    ));
+    if (!delivery || delivery.status !== 'failed' || !delivery.sourceId) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest delivery is not retryable',
+      );
+    }
+
+    const job = sqlite.prepare(`
+      SELECT type, status, subject_id, cancel_requested, result_json
+      FROM jobs WHERE id = ?
+    `).get(input.ingestJobId) as {
+      type: string;
+      status: string;
+      subject_id: string | null;
+      cancel_requested: number | null;
+      result_json: string | null;
+    } | undefined;
+    if (
+      !job
+      || job.type !== 'ingest'
+      || job.status !== 'failed'
+      || job.subject_id !== input.subjectId
+      || job.cancel_requested === 1
+      || isCancelledJobResult(job.result_json)
+    ) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest job is not retryable',
+      );
+    }
+
+    const source = sqlite.prepare(`
+      SELECT 1 FROM sources WHERE id = ? AND subject_id = ?
+    `).get(delivery.sourceId, input.subjectId);
+    if (!source) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest source is unavailable',
+      );
+    }
+
+    const nowIso = (input.now ?? new Date()).toISOString();
+    const jobUpdate = sqlite.prepare(`
+      UPDATE jobs
+      SET status = 'pending', result_json = NULL, completed_at = NULL,
+          lease_expires_at = NULL, heartbeat_at = NULL, cancel_requested = 0
+      WHERE id = ? AND type = 'ingest' AND status = 'failed'
+        AND subject_id = ? AND cancel_requested = 0
+    `).run(input.ingestJobId, input.subjectId);
+    if (jobUpdate.changes !== 1) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest changed concurrently',
+      );
+    }
+
+    const deliveryUpdate = sqlite.prepare(`
+      UPDATE research_candidate_ingests
+      SET status = 'queued', completed_at = NULL, error_json = NULL,
+          operation_ids_json = '[]', touched_pages_json = '[]', commit_sha = NULL,
+          claim_token = NULL, lease_expires_at = NULL, updated_at = ?
+      WHERE approval_id = ? AND candidate_id = ? AND run_id = ?
+        AND ingest_job_id = ? AND status = 'failed' AND source_id = ?
+    `).run(
+      nowIso,
+      input.approvalId,
+      input.candidateId,
+      input.runId,
+      input.ingestJobId,
+      delivery.sourceId,
+    );
+    if (deliveryUpdate.changes !== 1) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research child ingest delivery changed concurrently',
+      );
+    }
+
+    const runUpdate = sqlite.prepare(`
+      UPDATE research_runs
+      SET status = 'importing', version = version + 1, updated_at = ?,
+          completed_at = NULL, error_json = NULL
+      WHERE id = ? AND subject_id = ? AND status = ? AND version = ?
+    `).run(
+      nowIso,
+      input.runId,
+      input.subjectId,
+      stored.run.status,
+      stored.run.version,
+    );
+    if (runUpdate.changes !== 1) {
+      throw new ResearchProvenanceRepoError(
+        'run-stale',
+        'Research run version changed concurrently',
+      );
+    }
+
+    const latest = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
+    if (!latest) throw new Error('Failed to reload retried Research run');
+    return latest;
+  });
+  return transaction.immediate();
+}
+
 /**
  * failed run 的导入重试原语：只接受尚未进入 verification 的 failed run，
  * 把 failed delivery 重置回 pending、换发新的 research-import coordinator、
@@ -1223,6 +1371,19 @@ function parsePersistedSelection(json: string): string[] {
 function sameStringArray(left: string[], right: string[]): boolean {
   return left.length === right.length
     && left.every((value, index) => value === right[index]);
+}
+
+function isCancelledJobResult(resultJson: string | null): boolean {
+  if (!resultJson) return false;
+  try {
+    const value: unknown = JSON.parse(resultJson);
+    return !!value
+      && typeof value === 'object'
+      && !Array.isArray(value)
+      && (value as { cancelled?: unknown }).cancelled === true;
+  } catch {
+    return false;
+  }
 }
 
 function assertLeaseDuration(leaseMs: number): void {
