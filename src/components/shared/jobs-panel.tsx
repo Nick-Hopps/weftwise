@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronRight, Loader2, ListTodo, Square, X } from 'lucide-react';
+import { Check, ChevronRight, Loader2, ListTodo, Square, Trash2, X } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
+import type { JobStreamStatus } from '@/hooks/job-stream-logic';
 import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { JobDetailDialog } from './job-detail-dialog';
+import { summarizeJobsPanel } from './jobs-panel-state';
 
 export interface TrackedJob {
   id: string;
@@ -51,8 +53,16 @@ function RowStatusIcon({ status, queueStatus }: { status: string; queueStatus: s
   return <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />;
 }
 
-/** 单任务行：running 时持有自己的 SSE 订阅；终态后驻留（completed 定时移除）。 */
-function JobRow({ job, onRemove }: { job: TrackedJob; onRemove: (id: string) => void }) {
+/** 单任务行：running 时持有自己的 SSE 订阅；终态后驻留，等待单条或批量清理。 */
+function JobRow({
+  job,
+  onRemove,
+  onStatusChange,
+}: {
+  job: TrackedJob;
+  onRemove: (id: string) => void;
+  onStatusChange: (id: string, status: JobStreamStatus) => void;
+}) {
   // pending 行不建 SSE（浏览器每域 SSE 连接有限；轮询会在其转 running 后接上）
   const streamId = job.queueStatus === 'running' ? job.id : null;
   const { events, status, latestMessage } = useJobStream(streamId, job.reconnectKey);
@@ -63,6 +73,10 @@ function JobRow({ job, onRemove }: { job: TrackedJob; onRemove: (id: string) => 
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
   const wasCancelled = events.some((e) => e.type === 'job:cancelled');
+
+  useEffect(() => {
+    onStatusChange(job.id, status);
+  }, [job.id, onStatusChange, status]);
 
   // 任一 job 完成 → 失效列表缓存（保持旧 GlobalJobTracker 语义）
   useEffect(() => {
@@ -156,6 +170,21 @@ export function JobsPanel({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
+  const [statuses, setStatuses] = useState<Record<string, JobStreamStatus>>({});
+
+  const handleStatusChange = useCallback((id: string, status: JobStreamStatus) => {
+    setStatuses((current) => current[id] === status ? current : { ...current, [id]: status });
+  }, []);
+
+  useEffect(() => {
+    const jobIds = new Set(jobs.map((job) => job.id));
+    setStatuses((current) => {
+      const entries = Object.entries(current).filter(([id]) => jobIds.has(id));
+      return entries.length === Object.keys(current).length
+        ? current
+        : Object.fromEntries(entries) as Record<string, JobStreamStatus>;
+    });
+  }, [jobs]);
 
   useEffect(() => {
     if (jobs.length > 0) {
@@ -165,9 +194,19 @@ export function JobsPanel({
     setVisible(false);
   }, [jobs.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (jobs.length === 0) return null;
+  const summary = useMemo(() => summarizeJobsPanel(jobs, statuses), [jobs, statuses]);
+  const finishedCount = summary.completedCount + summary.failedCount;
+  const summaryText = [
+    summary.runningCount > 0 && `${summary.runningCount} running`,
+    summary.pendingCount > 0 && `${summary.pendingCount} queued`,
+    finishedCount > 0 && `${finishedCount} finished`,
+  ].filter(Boolean).join(' · ');
 
-  const runningCount = jobs.filter((j) => j.queueStatus === 'running').length;
+  const handleClearFinished = () => {
+    for (const id of summary.finishedJobIds) onRemove(id);
+  };
+
+  if (jobs.length === 0) return null;
 
   return (
     <div className="fixed bottom-4 right-0 z-sheet pointer-events-none">
@@ -188,9 +227,20 @@ export function JobsPanel({
           <span className="flex-1 text-sm font-medium text-foreground">
             Tasks
             <span className="ml-1.5 font-mono text-xs text-foreground-tertiary">
-              {runningCount} running · {jobs.length - runningCount} queued/done
+              {summaryText}
             </span>
           </span>
+          {finishedCount > 0 && (
+            <IconButton
+              size="sm"
+              onClick={handleClearFinished}
+              aria-label="Clear finished tasks"
+              className="tip tip-l"
+              data-tip="Clear finished tasks"
+            >
+              <Trash2 />
+            </IconButton>
+          )}
           <IconButton
             size="sm"
             onClick={() => setCollapsed(true)}
@@ -203,12 +253,17 @@ export function JobsPanel({
         </div>
         <ul className="max-h-72 divide-y divide-border-subtle overflow-y-auto">
           {jobs.map((job) => (
-            <JobRow key={job.id} job={job} onRemove={onRemove} />
+            <JobRow
+              key={job.id}
+              job={job}
+              onRemove={onRemove}
+              onStatusChange={handleStatusChange}
+            />
           ))}
         </ul>
       </div>
 
-      {/* 折叠后的边缘把手（贴右缘，展示 running 计数） */}
+      {/* 折叠后的边缘把手（贴右缘，展示任务总数） */}
       <button
         type="button"
         onClick={() => setCollapsed(false)}
@@ -222,10 +277,12 @@ export function JobsPanel({
             : 'translate-x-full opacity-0 pointer-events-none',
         )}
       >
-        {runningCount > 0 ? (
+        {summary.collapsedStatus === 'processing' ? (
           <Loader2 className="h-4 w-4 animate-spin text-accent" />
-        ) : (
+        ) : summary.collapsedStatus === 'completed' ? (
           <Check className="h-4 w-4 text-success" />
+        ) : (
+          <X className="h-4 w-4 text-danger" />
         )}
         <span className="font-mono text-[10px] tabular-nums text-foreground-tertiary">
           {jobs.length}
