@@ -215,14 +215,21 @@ describe('buildHealthSnapshot', () => {
       .toMatchObject({ status: 'queued', jobId: 'job-1' });
   });
 
-  it.each(['fix', 'curate'] as const)(
-    '%s 在 baseline 之后完成并验证 fixed 时直接从 Health 快照移除',
-    (action) => {
+  it.each([
+    ['fix', 'fixed'],
+    ['fix', 'skipped'],
+    ['fix', 'failed'],
+    ['curate', 'fixed'],
+    ['curate', 'skipped'],
+    ['curate', 'failed'],
+  ] as const)(
+    '%s 在 baseline 之后完成验证为 %s 时从 Health 快照移除并保留真实结果',
+    (action, outcome) => {
       const current = lint([
-        finding('fixed', { type: action === 'curate' ? 'orphan' : 'broken-link' }),
+        finding('handled', { type: action === 'curate' ? 'orphan' : 'broken-link' }),
         finding('open', { severity: 'critical' }),
       ]);
-      const related = remediationJob(`${action}-1`, ['fixed'], {
+      const related = remediationJob(`${action}-1`, ['handled'], {
         action,
         status: 'completed',
         completedAt: AFTER_LINT,
@@ -230,18 +237,32 @@ describe('buildHealthSnapshot', () => {
           writes: 1,
           postconditionStatus: 'clean',
           semanticStatus: 'not-needed',
-          perFindingOutcomes: { fixed: 'fixed' },
+          perFindingOutcomes: { handled: outcome },
         }),
       });
 
       const snapshot = buildHealthSnapshot(current, [related]);
 
       expect(snapshot.findings.map((item) => item.id)).toEqual(['open']);
-      expect(snapshot.remediations.fixed).toBeUndefined();
-      expect(snapshot.recentOutcomes).toEqual({ fixed: 'fixed' });
+      expect(snapshot.remediations.handled).toBeUndefined();
+      expect(snapshot.recentOutcomes).toEqual({ handled: outcome });
       expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 0 });
     },
   );
+
+  it('completed 结果损坏时不把 finding 误判为已完成验证', () => {
+    const current = lint([finding('finding-1')]);
+    const related = remediationJob('fix-1', ['finding-1'], {
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: '{',
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related]);
+
+    expect(snapshot.findings.map((item) => item.id)).toEqual(['finding-1']);
+    expect(snapshot.remediations['finding-1']).toMatchObject({ status: 'failed' });
+  });
 
   it('新 lint 再次发现同一 finding 时覆盖旧 fixed 结果并重新展示', () => {
     const current = lint([finding('finding-1')]);
@@ -280,8 +301,15 @@ describe('buildHealthSnapshot', () => {
       resultJson,
     });
 
-    expect(buildHealthSnapshot(current, [related]).remediations['finding-1'])
-      .toMatchObject({ status, jobId: 'job-1' });
+    const snapshot = buildHealthSnapshot(current, [related]);
+    if (status === 'skipped') {
+      expect(snapshot.findings).toEqual([]);
+      expect(snapshot.remediations['finding-1']).toBeUndefined();
+      expect(snapshot.recentOutcomes).toEqual({ 'finding-1': 'skipped' });
+    } else {
+      expect(snapshot.remediations['finding-1'])
+        .toMatchObject({ status, jobId: 'job-1' });
+    }
   });
 
   it.each([
@@ -299,9 +327,17 @@ describe('buildHealthSnapshot', () => {
       resultJson: JSON.stringify({ runId: 'run-1' }),
     });
 
-    expect(buildHealthSnapshot(current, [related], {
+    const snapshot = buildHealthSnapshot(current, [related], {
       researchRuns: [researchRun(runStatus)],
-    }).remediations['finding-1']).toMatchObject({ status: expected, jobId: 'job-1' });
+    });
+    if (runStatus === 'dismissed' || runStatus === 'empty') {
+      expect(snapshot.findings).toEqual([]);
+      expect(snapshot.remediations['finding-1']).toBeUndefined();
+      expect(snapshot.recentOutcomes).toEqual({ 'finding-1': 'skipped' });
+    } else {
+      expect(snapshot.remediations['finding-1'])
+        .toMatchObject({ status: expected, jobId: 'job-1' });
+    }
   });
 
   it.each([
@@ -332,15 +368,29 @@ describe('buildHealthSnapshot', () => {
       });
 
       const snapshot = buildHealthSnapshot(current, [related], { researchRuns: [run] });
-      if (expected === 'fixed') {
-        expect(snapshot.findings).toEqual([]);
-        expect(snapshot.remediations['finding-1']).toBeUndefined();
-        expect(snapshot.recentOutcomes).toEqual({ 'finding-1': 'fixed' });
-      } else {
-        expect(snapshot.remediations['finding-1'].status).toBe(expected);
-      }
+      expect(snapshot.findings).toEqual([]);
+      expect(snapshot.remediations['finding-1']).toBeUndefined();
+      expect(snapshot.recentOutcomes).toEqual({ 'finding-1': expected });
     },
   );
+
+  it('Research 终态早于新 lint 时不隐藏重新发现的 finding', () => {
+    const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: BEFORE_LINT,
+      resultJson: JSON.stringify({ runId: 'run-1' }),
+    });
+    const run = researchRun('completed', {
+      completedAt: BEFORE_LINT,
+      updatedAt: BEFORE_LINT,
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related], { researchRuns: [run] });
+
+    expect(snapshot.findings.map((item) => item.id)).toEqual(['finding-1']);
+  });
 
   it('Research finding 消失后把已物化 fixed 计入 recent outcome', () => {
     const related = remediationJob('job-1', ['finding-1'], {
