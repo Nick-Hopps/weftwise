@@ -185,6 +185,26 @@ describe('ResearchCandidatesDialog', () => {
       ...failedRun(),
       verificationLintJobId: 'lint-verify',
     })).toBe(false);
+    expect(researchRunRetryable({
+      ...failedRun(),
+      origin: 'findings',
+      findings: [{
+        findingId: 'finding-1',
+        finding: {
+          id: 'finding-1',
+          subjectId: 'subject-1',
+          subjectSlug: 'general',
+          type: 'coverage-gap',
+          severity: 'warning',
+          pageSlug: 'source',
+          description: 'Missing topic',
+          suggestedFix: null,
+        },
+        verificationStatus: 'unverifiable',
+        verifiedAt: '2026-07-14T01:00:00.000Z',
+        verificationFinding: null,
+      }],
+    })).toBe(false);
     const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
       run: run('failed'),
       onClose: vi.fn(),

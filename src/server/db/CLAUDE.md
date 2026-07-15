@@ -159,7 +159,7 @@
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 | `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
-| `research_runs` | `id` | `research_job_id` UNIQUE；subject/origin/status/version/candidate_set_hash；finding run 可关联来源 lint 与唯一 verification lint |
+| `research_runs` | `id` | `research_job_id` UNIQUE；subject/origin/status/version/candidate_set_hash；finding run 关联来源 lint；`verification_lint_job_id` 仅兼容升级前在途验证 |
 | `research_run_findings` | `(run_id, finding_id)` | 原始 finding snapshot + `pending/fixed/residual/unverifiable` 验证终态；随 run 级联删除 |
 | `research_candidates` | `id` | `(run_id, normalized_url)` UNIQUE；稳定候选快照、rank、decision 与 approval 复合外键，客户端不能改 URL |
 | `research_approvals` | `id` | 每 run 唯一；保存 canonical candidate ID selection、payload hash、idempotency key 与 coordinator job ID |
@@ -179,7 +179,7 @@
 
 已覆盖（`__tests__/` + `repos/__tests__/`，vitest）：
 
-- repos CRUD/查询：subjects / pages（复合 PK、path unique、跨 Subject 同 slug、精确 upsert/delete、`getBacklinks` JOIN）/ sources / jobs（双进程 claim、到期租约、attempt fencing/requeue、取消幂等、事件清扫、同毫秒插入顺序与 cursor）/ operations / conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、verification lint CAS 与 subject/reset 级联。
+- repos CRUD/查询：subjects / pages（复合 PK、path unique、跨 Subject 同 slug、精确 upsert/delete、`getBacklinks` JOIN）/ sources / jobs（双进程 claim、到期租约、attempt fencing/requeue、取消幂等、事件清扫、同毫秒插入顺序与 cursor）/ operations / conversations / embeddings / maturity / checkpoints / settings；Research provenance 另覆盖 run 原子创建/批准/忽略、候选约束、delivery token/lease CAS、source+child job 同事务唯一入队、目标化 finding postcondition 终态物化、旧 verification lint 兼容与 subject/reset 级联。
 - Research run 仓储还以真实 SQLite 覆盖 v2 finding immutable snapshot（`targetSlug/evidence`）写入及 ID 重算一致性；旧 v1 snapshot 的兼容解析由 service 纯函数测试锁定，无表结构迁移。
 - `indexes.test.ts`：用 `EXPLAIN QUERY PLAN` 断言 wiki_links / job_events / jobs 热路径走索引（非全表扫描），包含 remediation CAS 候选与同源 ingest JSON 表达式查询；后者同时覆盖损坏历史参数安全性。
 - `pages-repo-invariants.test.ts`：真实 SQLite 覆盖复合身份约束，以及无 trigger 前提下 `updateFtsEntry/deleteFtsEntry/deletePage` 的替换、搜索和 Subject 隔离。
@@ -218,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-15 | Research finding run 停止创建 verification lint；repo 支持 `verificationJobId=null` 时从 importing 原子物化目标化 postcondition，旧 verifying run 仍可按既有 job ID 完成；已物化验证结果禁止误走导入重试 |
 | 2026-07-15 | Research finding snapshot JSON 补齐可选 targetSlug/evidence，仓储写前 ID 不变量现可覆盖 v2 coverage-gap/contradiction；字段可选，无 SQLite schema migration |
 | 2026-07-14 | job_events 改按 SQLite rowid 的真实插入顺序读取与 afterId 续播，消除同毫秒随机 UUID 乱序/漏读；requestCancel 对已取消 failed 返回 already-terminal，保证取消终态幂等 |
 | 2026-07-14 | Worker/DB 不变量测试收尾：双进程真实 repo claim、到期租约与 attempt fencing/requeue 边界；旧 attempt 不得 heartbeat/complete/fail/requeue 新 attempt；pages 复合 PK/path unique、跨 Subject 同 slug 与手动 FTS update/delete/search 一致性 |

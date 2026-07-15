@@ -1,7 +1,6 @@
 import type {
   HealthSnapshot,
   Job,
-  LintVerificationRequest,
   RemediationAction,
   RemediationActionType,
   ResearchRunView,
@@ -20,12 +19,10 @@ export interface RecoverableHealthJob {
   workflow: ExecutableRemediationAction;
   source: 'manual' | 'remediation';
   createdAt: string;
-  baselineLintJobId?: string;
 }
 
 export interface QueuedLintRun {
   origin: HealthOrigin;
-  verification?: LintVerificationRequest;
 }
 
 type ActiveJobsResponse = {
@@ -158,7 +155,6 @@ export function selectRecoverableHealthJobs(
       workflow,
       source: 'remediation',
       createdAt: snapshot.ranAt ?? '',
-      ...(snapshot.jobId ? { baselineLintJobId: snapshot.jobId } : {}),
     };
     if (!current || candidate.jobId > current.jobId) selected[workflow] = candidate;
   }
@@ -180,7 +176,6 @@ function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
       workflow: job.type,
       source: context?.action === job.type ? 'remediation' : 'manual',
       createdAt: job.createdAt,
-      ...(context?.action === job.type ? { baselineLintJobId: context.lintJobId } : {}),
     };
   }
   if (job.type === 'research') {
@@ -245,16 +240,13 @@ export function createLintRerunQueue() {
   let active: QueuedLintRun | null = null;
   let pending: QueuedLintRun | null = null;
   return {
-    request(
-      origin: HealthOrigin,
-      verification?: LintVerificationRequest,
-    ): 'start' | 'queued' | 'ignored' {
+    request(origin: HealthOrigin): 'start' | 'queued' | 'ignored' {
       if (!active) {
-        active = { origin, verification };
+        active = { origin };
         return 'start';
       }
       if (!isHealthOriginCurrent(active.origin, origin)) return 'ignored';
-      pending = { origin, verification };
+      pending = { origin };
       return 'queued';
     },
     finish(origin: HealthOrigin, currentOrigin: HealthOrigin): QueuedLintRun | null {
