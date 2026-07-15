@@ -290,13 +290,14 @@ src/server/services/
 ├── embedding-service.ts # 向量嵌入索引（embed-index 任务，Saga 外独立）（⑧）
 ├── maintenance-policy.ts # 🆕 纯函数：递减回报间隔策略（SPACING_LADDER / countCallouts / nextMaturity，P5；T1.8 起 nextMaturity 质量优先——qualityDelta<=0 时体量信号清零 + staleSource 前置阻断毕业）
 ├── page-quality-signal.ts # 🆕 T1.8：re-enrich 单页质量信号取数（IO 层，确定性零 LLM）——countPageDeterministicFindings（单页 broken-link+frontmatter）/ pageHasStaleSources（复用 lint-deterministic 单页判定，不跑全库）
-└── maintenance-scheduler.ts # 🆕 纯函数：sweep 页面选取（runMaintenanceSweep，P5）
+└── maintenance-scheduler.ts # sweep 页面选取（runMaintenanceSweep，P5；可按 Subject ID 集合过滤，缺省全量）
 ```
 
 ## 变更记录 (Changelog)
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Maintenance sweep 接入全局 `maintenanceScope`：worker 读取 `all | subjects` 设置，调度器只从范围内到期页按既有 priority/上限入队，状态 API 与其保持同口径 |
 | 2026-07-15 | Research child Ingest 支持工作台原位续传：重试前精确对账，job/delivery/run 在同一事务恢复，保留 checkpoint/attempt 与既有 lineage；取消、缺源、证据错配和 verification 后状态拒绝恢复 |
 | 2026-07-15 | 修复 Health 处置投影只隐藏 fixed 的契约偏差：Tidy/Fix 完成任务内验证及 Research provenance 到达验证终态后直接移除关联 finding，failed/skipped 真实结果保留在近期摘要；损坏结果 fail-closed |
 | 2026-07-15 | Health 处置改为 postcondition 驱动的快照投影：Fix/Curate 直接消费逐 finding outcome；Research 导入后只目标化复核原 coverage-gap/thin-page 并原子物化终态，不再创建 verification lint；旧 verifying run 继续兼容对账 |

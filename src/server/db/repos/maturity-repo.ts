@@ -55,26 +55,40 @@ export function ensureRow(
 }
 
 /** 查询到期且未毕业的页面，按 priority DESC，next_due_at ASC 排序。 */
-export function listDue(nowIso: string, limit: number): { subjectId: string; slug: string }[] {
+export function listDue(
+  nowIso: string,
+  limit: number,
+  subjectIds?: readonly string[],
+): { subjectId: string; slug: string }[] {
+  if (subjectIds?.length === 0) return [];
+  const scopeClause = subjectIds
+    ? ` AND subject_id IN (${subjectIds.map(() => '?').join(', ')})`
+    : '';
   const rows = getRawDb()
     .prepare(
       `SELECT subject_id, slug FROM page_maturity
        WHERE state != 'graduated' AND next_due_at <= ?
+       ${scopeClause}
        ORDER BY priority DESC, next_due_at ASC
        LIMIT ?`,
     )
-    .all(nowIso, limit) as Array<{ subject_id: string; slug: string }>;
+    .all(nowIso, ...(subjectIds ?? []), limit) as Array<{ subject_id: string; slug: string }>;
   return rows.map((r) => ({ subjectId: r.subject_id, slug: r.slug }));
 }
 
-/** 全量统计到期且未毕业的页数（跨主题，与调度器 sweep 同口径）；供维护状态展示。 */
-export function countDue(nowIso: string): number {
+/** 统计范围内到期且未毕业的页数；subjectIds 缺省为全量，与调度器 sweep 同口径。 */
+export function countDue(nowIso: string, subjectIds?: readonly string[]): number {
+  if (subjectIds?.length === 0) return 0;
+  const scopeClause = subjectIds
+    ? ` AND subject_id IN (${subjectIds.map(() => '?').join(', ')})`
+    : '';
   const row = getRawDb()
     .prepare(
       `SELECT COUNT(*) AS n FROM page_maturity
-       WHERE state != 'graduated' AND next_due_at <= ?`,
+       WHERE state != 'graduated' AND next_due_at <= ?
+       ${scopeClause}`,
     )
-    .get(nowIso) as { n: number };
+    .get(nowIso, ...(subjectIds ?? [])) as { n: number };
   return row.n;
 }
 

@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { Check, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, Loader2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Segmented } from '@/components/ui/segmented';
 import { Select } from '@/components/ui/select';
@@ -201,6 +201,121 @@ export function SelectRow<T extends string>(props: {
           </Select>
         </div>
       </SettingRow>
+      <RowError error={status.rowError} />
+    </div>
+  );
+}
+
+export function MultiSelectRow<T extends string>(props: {
+  label: string;
+  description?: string;
+  allLabel: string;
+  value: 'all' | readonly T[];
+  options: Array<{ value: T; label: string; description?: string }>;
+  onSave: (value: 'all' | T[]) => void;
+  save?: RowSaveState;
+  loading?: boolean;
+}) {
+  const status = useRowSaveStatus(props.save);
+  const [open, setOpen] = useState(false);
+  const validValues = new Set(props.options.map((option) => option.value));
+  const selected = props.value === 'all'
+    ? new Set(props.options.map((option) => option.value))
+    : new Set(props.value.filter((value) => validValues.has(value)));
+  const disabled = status.saving || props.loading;
+  const summary = props.value === 'all'
+    ? props.allLabel
+    : `${selected.size} project${selected.size === 1 ? '' : 's'}`;
+
+  const commit = (value: 'all' | T[]) => {
+    status.markSaving();
+    props.onSave(value);
+  };
+
+  return (
+    <div>
+      <SettingRow label={props.label} description={props.description}>
+        <div className="flex items-center gap-2">
+          <SaveIndicator saving={status.saving} saved={status.saved} />
+          <button
+            type="button"
+            aria-expanded={open}
+            disabled={disabled}
+            onClick={() => setOpen((current) => !current)}
+            className={cn(
+              'inline-flex h-7 min-w-32 items-center justify-between gap-2 rounded-md border border-input-border',
+              'bg-input-bg px-2 text-xs text-foreground transition-colors',
+              'hover:border-border-strong focus-ring disabled:cursor-not-allowed disabled:opacity-50',
+            )}
+          >
+            <span className="truncate">{summary}</span>
+            <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
+          </button>
+        </div>
+      </SettingRow>
+
+      {open && (
+        <div className="mt-2 ml-auto max-h-48 w-full max-w-sm overflow-y-auto rounded-md border border-border bg-surface py-1">
+          <label className="flex min-h-8 cursor-pointer items-center gap-2 px-2.5 text-xs text-foreground hover:bg-subtle">
+            <input
+              type="checkbox"
+              checked={props.value === 'all'}
+              disabled={disabled || props.options.length === 0}
+              onChange={(event) => {
+                if (event.target.checked) {
+                  commit('all');
+                } else {
+                  commit(props.options.map((option) => option.value));
+                }
+              }}
+              className="h-3.5 w-3.5 rounded border-input-border accent-accent"
+            />
+            <span className="font-medium">{props.allLabel}</span>
+          </label>
+
+          <div className="mx-2 border-t border-border" />
+          {props.loading ? (
+            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">Loading projects…</div>
+          ) : props.options.length === 0 ? (
+            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">No projects available</div>
+          ) : (
+            props.options.map((option) => {
+              const checked = selected.has(option.value);
+              const isLastSelected = props.value !== 'all' && checked && selected.size === 1;
+              return (
+                <label
+                  key={option.value}
+                  title={isLastSelected ? 'Select another project before removing this one' : undefined}
+                  className={cn(
+                    'flex min-h-9 items-center gap-2 px-2.5 text-xs hover:bg-subtle',
+                    isLastSelected || disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled || isLastSelected}
+                    onChange={(event) => {
+                      const next = props.options
+                        .map((item) => item.value)
+                        .filter((value) => value !== option.value && selected.has(value));
+                      if (event.target.checked) next.push(option.value);
+                      if (next.length > 0) commit(next);
+                    }}
+                    className="h-3.5 w-3.5 rounded border-input-border accent-accent"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-foreground">{option.label}</span>
+                    {option.description && (
+                      <span className="block truncate text-[11px] text-foreground-tertiary">{option.description}</span>
+                    )}
+                  </span>
+                </label>
+              );
+            })
+          )}
+        </div>
+      )}
       <RowError error={status.rowError} />
     </div>
   );
