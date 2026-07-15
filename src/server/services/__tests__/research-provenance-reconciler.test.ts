@@ -1,22 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Job } from '@/lib/contracts';
 import type { OperationRow } from '../../db/repos/operations-repo';
+import type { StoredResearchRun } from '../../db/repos/research-provenance-repo';
 
 let dir: string;
 let previousDb: string | undefined;
+let previousVault: string | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'research-reconciler-'));
   previousDb = process.env.DATABASE_PATH;
+  previousVault = process.env.VAULT_PATH;
   process.env.DATABASE_PATH = join(dir, 'wiki.db');
+  process.env.VAULT_PATH = join(dir, 'vault');
   vi.resetModules();
 });
 
 afterEach(() => {
   process.env.DATABASE_PATH = previousDb;
+  process.env.VAULT_PATH = previousVault;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -115,12 +120,14 @@ async function setupRun(origin: 'topic' | 'findings') {
   const provenance = await import('../research-provenance');
   const findingIdentity = await import('../finding-identity');
   const repo = await import('../../db/repos/research-provenance-repo');
+  const pagesRepo = await import('../../db/repos/pages-repo');
   const { getRawDb } = await import('../../db/client');
   const subject = subjectsRepo.getBySlug('general')!;
   const finding = {
     type: 'coverage-gap' as const,
     severity: 'info' as const,
     pageSlug: 'distributed-systems',
+    targetSlug: 'distributed-systems',
     description: 'Needs stronger sources',
     suggestedFix: null,
     subjectSlug: subject.slug,
@@ -151,6 +158,17 @@ async function setupRun(origin: 'topic' | 'findings') {
   const sqlite = getRawDb();
   const childJobId = `ingest-${origin}`;
   const now = '2026-07-14T01:00:00.000Z';
+  pagesRepo.upsertPage({
+    subjectId: subject.id,
+    slug: 'distributed-systems',
+    title: 'Distributed Systems',
+    path: 'wiki/general/distributed-systems.md',
+    summary: 'Research-backed page',
+    contentHash: 'hash',
+    tags: [],
+    createdAt: now,
+    updatedAt: now,
+  });
   sqlite.prepare(`
     INSERT INTO jobs (
       id, type, status, subject_id, params_json, result_json, created_at,
@@ -193,6 +211,30 @@ async function setupRun(origin: 'topic' | 'findings') {
     originalFindingId,
     finding,
   };
+}
+
+function stageLegacyVerification(
+  context: Awaited<ReturnType<typeof setupRun>>,
+): string {
+  const verificationJobId = `lint-legacy-${context.runId}`;
+  const now = '2026-07-14T01:30:00.000Z';
+  context.sqlite.prepare(`
+    UPDATE research_candidate_ingests
+    SET status = 'completed', completed_at = ?, updated_at = ?
+    WHERE run_id = ?
+  `).run(now, now, context.runId);
+  context.sqlite.prepare(`
+    INSERT INTO jobs (
+      id, type, status, subject_id, params_json, result_json, created_at,
+      started_at, completed_at, lease_expires_at, heartbeat_at, attempt_count
+    ) VALUES (?, 'lint', 'pending', ?, '{}', NULL, ?, NULL, NULL, NULL, NULL, 0)
+  `).run(verificationJobId, context.subject.id, now);
+  context.sqlite.prepare(`
+    UPDATE research_runs
+    SET status = 'verifying', verification_lint_job_id = ?, updated_at = ?
+    WHERE id = ?
+  `).run(verificationJobId, now, context.runId);
+  return verificationJobId;
 }
 
 describe('Research provenance 终态对账', () => {
@@ -242,7 +284,7 @@ describe('Research provenance 终态对账', () => {
     expect(terminal.run.status).toBe('failed');
   });
 
-  it('finding run 全部 delivery 终态后只创建一个 verification lint', async () => {
+  it('finding run 全部 delivery 终态后直接验证并完成，不创建 lint job', async () => {
     const context = await setupRun('findings');
     const reconciler = await import('../research-provenance-reconciler');
 
@@ -250,23 +292,83 @@ describe('Research provenance 终态对账', () => {
     reconciler.reconcileResearchRun(context.runId);
 
     const stored = context.repo.findResearchRunById(context.runId, context.subject.id)!;
-    expect(stored.run.status).toBe('verifying');
-    expect(stored.run.verificationLintJobId).toBeTruthy();
+    expect(stored.run.status).toBe('completed');
+    expect(stored.run.verificationLintJobId).toBeNull();
+    expect(stored.findings[0]).toMatchObject({ verificationStatus: 'fixed' });
     expect(context.sqlite.prepare("SELECT count(*) AS count FROM jobs WHERE type = 'lint'").get())
-      .toEqual({ count: 1 });
-    const lint = context.sqlite.prepare('SELECT params_json FROM jobs WHERE id = ?')
-      .get(stored.run.verificationLintJobId!) as { params_json: string };
-    expect(JSON.parse(lint.params_json)).toEqual({
-      subjectId: context.subject.id,
-      researchVerification: { runId: context.runId },
+      .toEqual({ count: 0 });
+  });
+
+  it('finding run 的目标页仍不存在时直接物化 residual，不创建 lint job', async () => {
+    const context = await setupRun('findings');
+    const pagesRepo = await import('../../db/repos/pages-repo');
+    const reconciler = await import('../research-provenance-reconciler');
+    pagesRepo.deletePage(context.subject.id, 'distributed-systems');
+
+    reconciler.reconcileResearchRun(context.runId);
+
+    const stored = context.repo.findResearchRunById(context.runId, context.subject.id)!;
+    expect(stored.run.status).toBe('partial');
+    expect(stored.run.verificationLintJobId).toBeNull();
+    expect(stored.findings[0]).toMatchObject({ verificationStatus: 'residual' });
+    expect(context.sqlite.prepare("SELECT count(*) AS count FROM jobs WHERE type = 'lint'").get())
+      .toEqual({ count: 0 });
+  });
+
+  it('目标化验证读取失败时物化 unverifiable 终态，不让 run 卡在 importing', async () => {
+    const context = await setupRun('findings');
+    const pagesRepo = await import('../../db/repos/pages-repo');
+    const reconciler = await import('../research-provenance-reconciler');
+    vi.spyOn(pagesRepo, 'getPageBySlug').mockImplementation(() => {
+      throw new Error('database unavailable');
     });
+
+    reconciler.reconcileResearchRun(context.runId);
+
+    const stored = context.repo.findResearchRunById(context.runId, context.subject.id)!;
+    expect(stored.run.status).toBe('failed');
+    expect(JSON.parse(stored.run.errorJson!)).toMatchObject({
+      code: 'RESEARCH_POSTCONDITION_UNVERIFIABLE',
+    });
+    expect(stored.findings[0]).toMatchObject({ verificationStatus: 'unverifiable' });
+  });
+
+  it('thin-page 只复核原页面，正文达到阈值后由 residual 变为 fixed', async () => {
+    const context = await setupRun('topic');
+    const reconciler = await import('../research-provenance-reconciler');
+    const pageDir = join(process.env.VAULT_PATH!, 'wiki', context.subject.slug);
+    const pagePath = join(pageDir, 'thin-topic.md');
+    mkdirSync(pageDir, { recursive: true });
+    writeFileSync(pagePath, '---\ntitle: Thin Topic\nsources: []\n---\nshort');
+    const stored = {
+      findings: [{
+        findingId: 'thin-finding',
+        snapshotJson: JSON.stringify({
+          type: 'thin-page',
+          severity: 'info',
+          pageSlug: 'thin-topic',
+          description: 'Thin topic needs research',
+          suggestedFix: null,
+          subjectSlug: context.subject.slug,
+        }),
+      }],
+    } as unknown as StoredResearchRun;
+
+    expect(reconciler.verifyResearchFindingPostconditions(stored, context.subject))
+      .toMatchObject([{ findingId: 'thin-finding', status: 'residual' }]);
+
+    writeFileSync(
+      pagePath,
+      `---\ntitle: Thin Topic\nsources: []\n---\n${'knowledge '.repeat(80)}`,
+    );
+    expect(reconciler.verifyResearchFindingPostconditions(stored, context.subject))
+      .toEqual([{ findingId: 'thin-finding', status: 'fixed', snapshot: null }]);
   });
 
   it('verification lint 用稳定 locus 保守识别 residual，并聚合 partial', async () => {
     const context = await setupRun('findings');
     const reconciler = await import('../research-provenance-reconciler');
-    reconciler.reconcileResearchRun(context.runId);
-    const verifying = context.repo.findResearchRunById(context.runId, context.subject.id)!;
+    const verificationJobId = stageLegacyVerification(context);
     const changed = {
       ...context.finding,
       id: 'ignored-by-parser',
@@ -278,7 +380,7 @@ describe('Research provenance 终态对账', () => {
     `).run(
       JSON.stringify({ findings: [changed] }),
       '2026-07-14T02:00:00.000Z',
-      verifying.run.verificationLintJobId,
+      verificationJobId,
     );
 
     reconciler.reconcileResearchRun(context.runId);
@@ -294,14 +396,13 @@ describe('Research provenance 终态对账', () => {
   it('verification lint 中原 finding 消失时物化 fixed，并聚合 completed', async () => {
     const context = await setupRun('findings');
     const reconciler = await import('../research-provenance-reconciler');
-    reconciler.reconcileResearchRun(context.runId);
-    const verifying = context.repo.findResearchRunById(context.runId, context.subject.id)!;
+    const verificationJobId = stageLegacyVerification(context);
     context.sqlite.prepare(`
       UPDATE jobs SET status = 'completed', result_json = ?, completed_at = ? WHERE id = ?
     `).run(
       JSON.stringify({ findings: [] }),
       '2026-07-14T02:00:00.000Z',
-      verifying.run.verificationLintJobId,
+      verificationJobId,
     );
 
     reconciler.reconcileResearchRun(context.runId);
@@ -317,14 +418,13 @@ describe('Research provenance 终态对账', () => {
   it('verification lint 失败时 finding 标记 unverifiable，run 聚合 failed', async () => {
     const context = await setupRun('findings');
     const reconciler = await import('../research-provenance-reconciler');
-    reconciler.reconcileResearchRun(context.runId);
-    const verifying = context.repo.findResearchRunById(context.runId, context.subject.id)!;
+    const verificationJobId = stageLegacyVerification(context);
     context.sqlite.prepare(`
       UPDATE jobs SET status = 'failed', result_json = ?, completed_at = ? WHERE id = ?
     `).run(
       JSON.stringify({ error: { message: 'lint failed' } }),
       '2026-07-14T02:00:00.000Z',
-      verifying.run.verificationLintJobId,
+      verificationJobId,
     );
 
     reconciler.reconcileResearchRun(context.runId);
