@@ -170,7 +170,7 @@ export function FindingRow({
           </div>
         </div>
 
-        <div className="flex items-center justify-between gap-3 pl-11 sm:min-w-[230px] sm:justify-end sm:pl-0">
+        <div className="flex items-center justify-between gap-3 pl-11 sm:grid sm:w-[264px] sm:grid-cols-[104px_144px] sm:gap-4 sm:pl-0">
           <div className="min-w-[96px]">
             {plan ? (
               <>
@@ -190,7 +190,7 @@ export function FindingRow({
             )}
           </div>
 
-          <div className="flex shrink-0 items-center gap-1.5">
+          <div className="flex shrink-0 items-center justify-end gap-1.5">
             {plan?.actions.map((item) =>
               item.type === 'review-source' && item.href ? (
                 <Link

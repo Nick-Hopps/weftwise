@@ -100,7 +100,7 @@
 ### `shared/`
 
 - `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），托管 `JobsPanel`
-- `jobs-panel.tsx` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）：仅 running 行才建 SSE 连接，pending 行不建连接；completed 行 5s 后自动移除，failed 行常驻
+- `jobs-panel.tsx` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）：仅 running 行才建 SSE 连接，pending 行不建连接；终态行支持单条关闭或一键清理，折叠态按处理中/全部成功/包含失败显示对应图标
 - `progress-toast.tsx` —— SSE 进度条 toast 组件（保留，但不再被 `global-job-tracker` 挂载，供 `JobsPanel` 内部行复用）
 
 > Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
@@ -176,7 +176,8 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
-| 2026-07-15 | Health Fix/Tidy/Research 终态改为直接刷新服务端快照投影：验证为 fixed 的关联 finding 立即隐藏，failed/skipped/residual 保留；移除 Fix/Curate 自动 `/api/lint` 与前端 baseline/verification rerun 状态，手动 Run check 才触发 discovery |
+| 2026-07-15 | 聚合任务面板新增一键清理 completed/failed 任务；父面板汇总行级 SSE 终态，折叠后按处理中、全部成功或包含失败显示对应图标 |
+| 2026-07-15 | Health Fix/Tidy/Research 终态改为直接刷新服务端快照投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要；手动 Run check 才触发 discovery |
 | 2026-07-15 | Health 自动复检改为 verification：Fix/Curate 终态携带 baseline/remediation ID，刷新恢复与 lint rerun queue 均保留该上下文；手动 Run check 仍为 discovery，避免零写 Curate 后同一 vault 的 findings 随模型漂移增长 |
 | 2026-07-15 | Health 修复结果纠偏：完成提示改按 `perFindingOutcomes` 统计 fixed/failed/skipped，不再展示或解释 `writes`；明确后续全库检查可能发现新问题，不再把写入次数误报为修复数量 |
 | 2026-07-15 | Health 工作台视觉重构：范围与重跑收敛到页头，新增无卡片摘要带、sticky 类型筛选/批量动作工具栏；finding 改为紧凑摘要行与可展开详情，内部审批枚举改为用户态状态文案，Research backlog 同步统一列表层级 |
