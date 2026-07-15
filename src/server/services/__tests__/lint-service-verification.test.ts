@@ -3,6 +3,7 @@ import type { EnrichedLintFinding, Job, Subject } from '@/lib/contracts';
 
 const registerMock = vi.hoisted(() => vi.fn());
 const subjectsMock = vi.hoisted(() => ({ getById: vi.fn(), listSubjects: vi.fn() }));
+const pagesMock = vi.hoisted(() => ({ getAllPages: vi.fn(), isMetaPage: vi.fn() }));
 const deterministicMock = vi.hoisted(() => vi.fn());
 const semanticMock = vi.hoisted(() => vi.fn());
 const verificationMock = vi.hoisted(() => ({
@@ -12,10 +13,7 @@ const verificationMock = vi.hoisted(() => ({
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: registerMock }));
 vi.mock('@/server/db/repos/subjects-repo', () => subjectsMock);
-vi.mock('@/server/db/repos/pages-repo', () => ({
-  getAllPages: vi.fn(),
-  isMetaPage: vi.fn(),
-}));
+vi.mock('@/server/db/repos/pages-repo', () => pagesMock);
 vi.mock('@/server/llm/task-router', () => ({ resolveTask: vi.fn() }));
 vi.mock('@/server/services/lint-deterministic', () => ({
   runDeterministicChecksForSubject: deterministicMock,
@@ -77,6 +75,8 @@ function lintJob(): Job {
 beforeEach(() => {
   vi.clearAllMocks();
   subjectsMock.getById.mockReturnValue(subject);
+  pagesMock.getAllPages.mockReturnValue([]);
+  pagesMock.isMetaPage.mockReturnValue(false);
   deterministicMock.mockReturnValue([{
     type: 'orphan',
     severity: 'info',
@@ -111,5 +111,39 @@ describe('runLintJob verification', () => {
       expect.objectContaining({ residualSemanticFindings: 1 }),
     );
     expect(emit.mock.calls.some(([type]) => type === 'lint:semantic:start')).toBe(false);
+  });
+
+  it('语义 schema 失败时写入脱敏诊断，但不把模型原始输出落入事件', async () => {
+    const emit = vi.fn();
+    const job = {
+      ...lintJob(),
+      id: 'lint-discovery',
+      paramsJson: JSON.stringify({ subjectId: subject.id }),
+    };
+    const schemaError = Object.assign(
+      new Error('No object generated: response did not match schema.'),
+      {
+        finishReason: 'stop',
+        text: 'PRIVATE WIKI CONTENT',
+        cause: {
+          cause: {
+            issues: [{ path: ['findings', 0, 'targetSlug'], message: 'Required' }],
+          },
+        },
+      },
+    );
+    semanticMock.mockRejectedValue(schemaError);
+
+    await expect(runLintJob(job, emit)).rejects.toThrow('Semantic lint failed');
+
+    expect(emit).toHaveBeenCalledWith(
+      'lint:semantic:error',
+      expect.stringContaining('response did not match schema'),
+      {
+        finishReason: 'stop',
+        detail: 'findings.0.targetSlug: Required',
+      },
+    );
+    expect(JSON.stringify(emit.mock.calls)).not.toContain('PRIVATE WIKI CONTENT');
   });
 });
