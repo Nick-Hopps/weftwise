@@ -23,6 +23,11 @@ import { useUIStore } from '@/stores/ui-store';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/cn';
+import {
+  isIngestJobStarted,
+  JOB_STARTED_EVENT,
+  type JobStartedEventDetail,
+} from '@/lib/job-started-event';
 
 /** The real ingest pipeline's six phases, in order. */
 const PHASES: ReadonlyArray<{ label: string; verb: string; Icon: LucideIcon }> = [
@@ -128,11 +133,11 @@ export function DashboardIngestHero() {
 
   useEffect(() => {
     const onStarted = (e: Event) => {
-      const detail = (e as CustomEvent<{ jobId: string }>).detail;
-      if (detail?.jobId) setJobId(detail.jobId);
+      const detail = (e as CustomEvent<JobStartedEventDetail>).detail;
+      if (isIngestJobStarted(detail)) setJobId(detail.jobId);
     };
-    window.addEventListener('wiki:job-started', onStarted);
-    return () => window.removeEventListener('wiki:job-started', onStarted);
+    window.addEventListener(JOB_STARTED_EVENT, onStarted);
+    return () => window.removeEventListener(JOB_STARTED_EVENT, onStarted);
   }, []);
 
   // Drop the tracked job shortly after it settles.

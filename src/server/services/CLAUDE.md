@@ -58,6 +58,7 @@ worker-entry.ts
   2. 根据 `resolveQueryMode(question)` 选择 `query:read` 或 `query:propose`；两者都有只读 evidence、History list/diff 与 `workflow.status`，只有 propose 额外获得页面/move/History/workflow PendingAction 工具，再由必传 `ToolExecutionPolicy` 编译；
   3. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；
   4. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
+- `query-intent::resolveDirectReenrichSlug(question, currentPageSlug?)` — 只识别整句、单动作的 re-enrich 控制命令；`/api/query` 命中后直接调用 `createPendingWorkflowActionPreview` 并发送 `pending-action/answer-delta/done`，不调用 Query LLM、不做 coverage，但仍只生成待批准预览。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
   1. 始终进入 `generateTextWithTools` 工具循环；active Subject 为空时仍可显式查询其他 Subject；
   2. 引用使用**流后确定性解析**（零 LLM 二次调用）：`extractCitationsFromAnswer(answer, accessed, subject.slug)`（`citation-extract.ts`）。
@@ -191,6 +192,8 @@ Health 前端刷新时按 subject 读取 active jobs，并可从 queued 或 awai
 
 `buildReenrichInitialInput` 把现有正文 seed 进 `writerOutputs`（enricher 的 `injectPriorPageAs:'draftContent'` 据此取用）；同时把 `buildProfileHint(getProfileOrDefault(LOCAL_USER_ID))` 的输出作 `profileHint` 传给 supplement 阶段。
 
+**预算**：读取现有正文后用 `countTokens` + `estimateIngestCost(..., inline=true)` 复用三轮内容流水线成本模型；估算总成本超过 `agentMaxTokensPerJob` 时在任何 LLM 调用前 fail-fast，否则通过 `estimatePerPageTokens` 注入每阶段预扣。禁止回退到单页 `maxTokensPerJob / 1`，否则第一阶段产生任意实际消费后，第二阶段都会因“实际消费 + 整份预算预扣”伪超限。
+
 **画像仅作探针**（`buildProfileHint`）：读取单租户画像（`LOCAL_USER_ID`）的 `backgroundSummary` + `stylePrefs`（readingLevel/verbosity/exampleDensity），拼成一句话提示——**只用来定位读者大概率不懂的概念，补充内容本身必须写成中性、对任何读者都普遍适用的讲解**；这是与 Cognitive Lens（读时按读者重塑讲法）的宪法边界：canonical 正文永远中性，读者专属讲法只在读时发生。无背景资料时回落「中级读者」中性假设。
 
 **忠实度护栏**（`supplement-guard.ts::checkSupplementFidelity`，薄转发到统一模块 `wiki/rewrite-fidelity.ts::checkRewriteFidelity(…, FIDELITY_PROFILES.supplement)`，T1.4）——因允许「插入 + 局部改写」无法逐字比对，用组合式软护栏，floor=0.95：
@@ -297,7 +300,9 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Ask AI 单页 re-enrich 命令增加确定性控制面短路：解析当前页/显式 slug 后直接持久化 workflow PendingAction，复合句、教程、否定或缺目标仍走既有 Query 语义 |
 | 2026-07-16 | Maintenance sweep 接入全局 `maintenanceScope`：worker 读取 `all | subjects` 设置，调度器只从范围内到期页按既有 priority/上限入队，状态 API 与其保持同口径 |
+| 2026-07-16 | 修复 re-enrich 单页三阶段预算预扣误用完整 job 上限：复用 ingest 内容成本估算做启动前预检与每阶段预扣，避免首个 supplement 后稳定伪报 `3M + actual / 3M` |
 | 2026-07-15 | Research child Ingest 支持工作台原位续传：重试前精确对账，job/delivery/run 在同一事务恢复，保留 checkpoint/attempt 与既有 lineage；取消、缺源、证据错配和 verification 后状态拒绝恢复 |
 | 2026-07-15 | 修复 Health 处置投影只隐藏 fixed 的契约偏差：Tidy/Fix 完成任务内验证及 Research provenance 到达验证终态后直接移除关联 finding，failed/skipped 真实结果保留在近期摘要；损坏结果 fail-closed |
 | 2026-07-15 | Health 处置改为 postcondition 驱动的快照投影：Fix/Curate 直接消费逐 finding outcome；Research 导入后只目标化复核原 coverage-gap/thin-page 并原子物化终态，不再创建 verification lint；旧 verifying run 继续兼容对账 |

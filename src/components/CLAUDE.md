@@ -58,7 +58,7 @@
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，批准页面变更后失效页面/图/历史等缓存，workflow start 派发 `wiki:job-started`，cancel 不误报为新任务
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label，cancel 与同步页面写入不误报为新任务
 - `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/页面 move/History 回滚/工作流标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；move 明确提示旧链接 alias 兼容，Research start 提醒候选二次审批，cancel 显示终止语义；刷新不会丢卡片，也不会把聊天回复当批准
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
@@ -176,6 +176,8 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 全局任务启动事件携带真实 type/label/queueStatus：顶部 Ingest 胶囊与 dashboard hero 只响应 ingest；re-enrich/research/save-to-wiki 进入 Tasks 面板且先显示 Queued，不再伪装成 ingest 后跳空工作台 |
+| 2026-07-16 | Chat 显示 `/api/query` 的 SSE error 终态，模型超时、工具失败或 workflow 预览失败不再留下空白 assistant/loading 假象 |
 | 2026-07-16 | Maintenance 新增项目范围多选：支持 `All projects` 或若干 Subject，复用 `['subjects']` 缓存并即时保存；范围变化后刷新到期页统计；`settings-rows` 新增带 All 语义的 `MultiSelectRow` |
 | 2026-07-15 | 聚合任务面板新增一键清理 completed/failed 任务；父面板汇总行级 SSE 终态，折叠后按处理中、全部成功或包含失败显示对应图标 |
 | 2026-07-15 | Health Fix/Tidy/Research 终态改为直接刷新服务端快照投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要；手动 Run check 才触发 discovery |

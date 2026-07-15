@@ -140,8 +140,8 @@ export interface AgentContext {
   /**
    * T1.5：fanout 每项启动前的 token 预扣估算函数（入参=本次 fanout 的项数，出参=单项预扣量）。
    * ingest 注入时复用 `ingest-prep.ts::estimatePerPageTokens`（按预检总估算折算）；
-   * 未注入（如 re-enrich 等单页/小规模场景）时 orchestrator 回退为
-   * `maxTokensPerJob / itemCount` 的均分估算，不新造第二套估算体系。
+   * ingest 与 re-enrich 都应注入同源成本估算；仅其他未注入调用方由 orchestrator
+   * 回退为 `maxTokensPerJob / itemCount` 的均分估算。
    */
   estimateFanoutReserve?: (itemCount: number) => number;
   /**

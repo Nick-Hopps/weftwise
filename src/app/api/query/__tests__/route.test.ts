@@ -7,6 +7,8 @@ const mockAccessedToContext = vi.fn();
 const mockExtractCitations = vi.fn();
 const mockAssessCoverage = vi.fn();
 const mockResolveQueryMode = vi.fn();
+const mockResolveDirectReenrichSlug = vi.fn();
+const mockCreateWorkflowPreview = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
 const mockListMsgs = vi.fn();
@@ -32,6 +34,10 @@ vi.mock('@/server/services/citation-extract', () => ({
 }));
 vi.mock('@/server/services/query-intent', () => ({
   resolveQueryMode: (...a: unknown[]) => mockResolveQueryMode(...a),
+  resolveDirectReenrichSlug: (...a: unknown[]) => mockResolveDirectReenrichSlug(...a),
+}));
+vi.mock('@/server/services/pending-action-service', () => ({
+  createPendingWorkflowActionPreview: (...a: unknown[]) => mockCreateWorkflowPreview(...a),
 }));
 vi.mock('@/server/services/conversation-title', () => ({
   deriveConversationTitle: (q: string) => `T:${q.slice(0, 5)}`,
@@ -78,6 +84,8 @@ beforeEach(() => {
   mockResolveQueryMode.mockReset().mockImplementation((question: string) =>
     question.includes('删除') ? 'propose' : 'read',
   );
+  mockResolveDirectReenrichSlug.mockReset().mockReturnValue(null);
+  mockCreateWorkflowPreview.mockReset();
   mockCreate.mockReset();
   mockCreate.mockImplementation((s: string) => ({ id: 'new-conv', subjectId: s, title: 'T', createdAt: 't', updatedAt: 't' }));
   mockGet.mockReset();
@@ -360,5 +368,39 @@ describe('POST /api/query 流式持久化', () => {
     }));
     expect(sse).toContain('event: pending-action');
     expect(sse).toContain(`data: ${JSON.stringify(action)}`);
+  });
+
+  it('明确 re-enrich 命令直接生成审批预览，不等待 Query LLM', async () => {
+    const action = {
+      actionId: 'reenrich-a1',
+      conversationId: 'new-conv',
+      operation: 'workflow-reenrich-start',
+      status: 'pending',
+    };
+    mockResolveDirectReenrichSlug.mockReturnValue('page-a');
+    mockCreateWorkflowPreview.mockResolvedValue(action);
+
+    const res = await call({
+      question: '重新丰富当前页面',
+      pageSlug: 'page-a',
+      subjectId: 's1',
+    });
+    const sse = await readSSE(res);
+
+    expect(mockCreateWorkflowPreview).toHaveBeenCalledWith({
+      conversationId: 'new-conv',
+      subject: { id: 's1', slug: 'general' },
+      input: {
+        operation: 'workflow-reenrich-start',
+        payload: { slug: 'page-a' },
+      },
+    });
+    expect(mockAgentic).not.toHaveBeenCalled();
+    expect(mockAssessCoverage).not.toHaveBeenCalled();
+    expect(sse).toContain('event: pending-action');
+    expect(sse).toContain('reenrich-a1');
+    expect(sse).toContain('event: answer-delta');
+    expect(sse).toContain('event: done');
+    expect(mockAppend).toHaveBeenCalledTimes(2);
   });
 });

@@ -6,6 +6,11 @@ import { Loader2 } from 'lucide-react';
 import { useJobStream, type JobStreamEvent } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
+import {
+  isIngestJobStarted,
+  JOB_STARTED_EVENT,
+  type JobStartedEventDetail,
+} from '@/lib/job-started-event';
 
 const PHASES = ['Parse', 'Plan', 'Write', 'Enrich', 'Verify', 'Commit'];
 
@@ -73,14 +78,14 @@ export function IngestPill() {
 
   useEffect(() => {
     const onStarted = (e: Event) => {
-      const detail = (e as CustomEvent<{ jobId: string }>).detail;
-      if (detail?.jobId) {
+      const detail = (e as CustomEvent<JobStartedEventDetail>).detail;
+      if (isIngestJobStarted(detail)) {
         setJobId(detail.jobId);
         setReconnectKey((k) => k + 1);
       }
     };
-    window.addEventListener('wiki:job-started', onStarted);
-    return () => window.removeEventListener('wiki:job-started', onStarted);
+    window.addEventListener(JOB_STARTED_EVENT, onStarted);
+    return () => window.removeEventListener(JOB_STARTED_EVENT, onStarted);
   }, []);
 
   // Drop the tracked job shortly after it settles so the pill clears.

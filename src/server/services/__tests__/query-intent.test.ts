@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveQueryMode } from '../query-intent';
+import { resolveDirectReenrichSlug, resolveQueryMode } from '../query-intent';
 
 describe('resolveQueryMode', () => {
   it.each([
@@ -52,5 +52,28 @@ describe('resolveQueryMode', () => {
     '总结一下量子计算',
   ])('教程、能力、否定和普通问答保持 read：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('read');
+  });
+});
+
+describe('resolveDirectReenrichSlug', () => {
+  it.each([
+    ['重新丰富当前页面', 'page-a', 'page-a'],
+    ['重新丰富页面', 'page-a', 'page-a'],
+    ['再丰富本页', 'page-a', 'page-a'],
+    ['Re-enrich this page', 'page-a', 'page-a'],
+    ['重新丰富页面 linear-algebra', 'page-a', 'linear-algebra'],
+    ['Re-enrich the page `linear-algebra`', 'page-a', 'linear-algebra'],
+  ])('解析明确控制命令：%s', (question, currentPageSlug, expected) => {
+    expect(resolveDirectReenrichSlug(question, currentPageSlug)).toBe(expected);
+  });
+
+  it.each([
+    ['如何重新丰富当前页面？', 'page-a'],
+    ['不要重新丰富当前页面', 'page-a'],
+    ['重新丰富当前页面并总结它', 'page-a'],
+    ['总结当前页面', 'page-a'],
+    ['重新丰富页面', undefined],
+  ])('非明确或缺少目标时不走直接控制命令：%s', (question, currentPageSlug) => {
+    expect(resolveDirectReenrichSlug(question, currentPageSlug)).toBeNull();
   });
 });

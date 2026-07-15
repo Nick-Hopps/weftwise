@@ -36,6 +36,7 @@ import {
 import { IngestLiveView } from './ingest-live-view';
 import { IngestTaskSwitcher } from './ingest-task-switcher';
 import type { CheckpointProgress, Job } from '@/lib/contracts';
+import { dispatchJobStarted } from '@/lib/job-started-event';
 
 /** The real ingest pipeline's six phases — shown as a "what happens" preview. */
 const PIPELINE: ReadonlyArray<{ label: string; Icon: LucideIcon }> = [
@@ -126,15 +127,18 @@ function IngestTaskDetail({
       setCheckpointProgress(null);
       onStatusChange(task.id, 'pending');
       setReconnectKey((key) => key + 1);
-      window.dispatchEvent(
-        new CustomEvent('wiki:job-started', { detail: { jobId: task.id } }),
-      );
+      dispatchJobStarted({
+        jobId: task.id,
+        type: 'ingest',
+        label: task.sourceName,
+        queueStatus: 'pending',
+      });
     } catch (retryError) {
       setError(retryError instanceof Error ? retryError.message : String(retryError));
     } finally {
       setRetrying(false);
     }
-  }, [onStatusChange, task.id]);
+  }, [onStatusChange, task.id, task.sourceName]);
 
   const handleTerminate = useCallback(async () => {
     if (terminating) return;
@@ -354,7 +358,12 @@ export function IngestWorkbench() {
       const task = queuedTask(data.jobId, file.name);
       setTasks([task]);
       setSelectedTaskId(task.id);
-      window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
+      dispatchJobStarted({
+        jobId: data.jobId,
+        type: 'ingest',
+        label: file.name,
+        queueStatus: 'pending',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -390,9 +399,12 @@ export function IngestWorkbench() {
           }
           const data = await res.json();
           results.push({ filename: file.name, jobId: data.jobId });
-          window.dispatchEvent(
-            new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }),
-          );
+          dispatchJobStarted({
+            jobId: data.jobId,
+            type: 'ingest',
+            label: file.name,
+            queueStatus: 'pending',
+          });
         } catch (err) {
           results.push({
             filename: file.name,
@@ -449,10 +461,14 @@ export function IngestWorkbench() {
         const queued = results.flatMap((result, index) =>
           result.jobId ? [queuedTask(result.jobId, result.url, index)] : [],
         );
-        const jobIds = queued.map((task) => task.id);
-        // 通知全局 ProgressToast 追踪每个后台 job
-        for (const id of jobIds) {
-          window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: id } }));
+        // 通知全局任务面板追踪每个后台 job。
+        for (const task of queued) {
+          dispatchJobStarted({
+            jobId: task.id,
+            type: 'ingest',
+            label: task.sourceName,
+            queueStatus: 'pending',
+          });
         }
         if (queued.length > 0) {
           setTasks(queued);
@@ -500,7 +516,12 @@ export function IngestWorkbench() {
       const task = queuedTask(data.jobId, filename);
       setTasks([task]);
       setSelectedTaskId(task.id);
-      window.dispatchEvent(new CustomEvent('wiki:job-started', { detail: { jobId: data.jobId } }));
+      dispatchJobStarted({
+        jobId: data.jobId,
+        type: 'ingest',
+        label: filename,
+        queueStatus: 'pending',
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

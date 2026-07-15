@@ -31,7 +31,9 @@ import {
 } from '../db/repos/settings-repo';
 import { renderLanguageDirective, renderAugmentationDirective } from '../llm/prompts/prompt-context';
 import { getRuntimeRegistries } from '../worker-runtime';
+import { countTokens } from '../sources/source-chunker';
 import { enqueueEmbedIndex } from './embedding-service';
+import { estimateIngestCost, estimatePerPageTokens } from './ingest-prep';
 import { countCallouts, nextMaturity, proseGrowthIncrement, type MaturityNext } from './maintenance-policy';
 import { countPageDeterministicFindings, pageHasStaleSources } from './page-quality-signal';
 
@@ -168,6 +170,23 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
   const existing = await overlay.readPage(subject.slug, slug);
   if (!existing?.markdown) throw new Error(`Existing content not found for ${slug}`);
 
+  // re-enrich 与 inline ingest 都是单页三轮内容处理。复用同一成本模型，避免单页场景
+  // 回退为 maxTokensPerJob / 1，把整份 job 预算误当成每个阶段的预扣量。
+  const pageTokens = countTokens(existing.markdown);
+  const estimatedCost = estimateIngestCost(pageTokens, 1, true);
+  emit('reenrich:budget', `Estimated re-enrich cost ~${estimatedCost} tokens`, {
+    slug,
+    pageTokens,
+    estimatedCost,
+  });
+  if (estimatedCost > budgetSnapshot.maxTokensPerJob) {
+    throw new Error(
+      `Estimated re-enrich cost ~${estimatedCost} tokens exceeds budget ` +
+      `agentMaxTokensPerJob=${budgetSnapshot.maxTokensPerJob}; raise it to >= ` +
+      `${Math.ceil(estimatedCost * 1.1)} in Settings and retry`,
+    );
+  }
+
   const ctx: AgentContext = {
     job,
     subject,
@@ -185,6 +204,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
     budgetSnapshot,
     checkpoint,
     citedSources: new Map(),
+    estimateFanoutReserve: (itemCount) => estimatePerPageTokens(estimatedCost, itemCount),
   };
   for (const c of checkpoint.getCitedSources()) ctx.citedSources!.set(c.url, c);
 
