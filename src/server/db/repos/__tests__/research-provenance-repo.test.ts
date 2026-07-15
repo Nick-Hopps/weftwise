@@ -45,6 +45,11 @@ describe('research-provenance-repo run 持久化', () => {
       type: 'coverage-gap' as const,
       severity: 'info' as const,
       pageSlug: 'distributed-systems',
+      targetSlug: 'distributed-systems-reliability',
+      evidence: [
+        { pageSlug: 'distributed-systems', quote: 'Retries need bounded backoff.' },
+        { pageSlug: 'operations', quote: 'Reliability requires failure budgets.' },
+      ],
       description: 'Needs sources',
       suggestedFix: null,
       subjectSlug: 'subject-one',
