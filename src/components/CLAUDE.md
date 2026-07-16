@@ -19,10 +19,11 @@
 | `header.tsx` | 顶栏：logo、`<SubjectSwitcher />`、面包屑、命令面板触发、dark mode toggle、context panel toggle |
 | `sidebar.tsx` | 左侧目录树（按 `currentSubjectId` 过滤的 wiki pages + 最近访问） |
 | `subject-switcher.tsx` | 🔀 cmdk + 自定义浮层；显示 subjects 列表；⌘O 唤起；切换时写 store + cookie + invalidate 8 个 query key + `router.refresh()`；"New subject…" 改调 openSubjectDialog（删 ?new=1），切换复用 useSwitchSubject |
-| `context-panel.tsx` | 右侧上下文面板容器（Tabs: context / chat） |
-| `context-panel-sheet.tsx` | 移动端抽屉版本（off-canvas） |
-| `context-panel-context-tab.tsx` | "上下文"Tab：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
-| `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface`，发问 body 含 subjectId |
+| `context-panel.tsx` | 右侧页面 Context 检查器（backlinks / frontmatter / mini-graph） |
+| `context-panel-sheet.tsx` | Context 的移动端右侧抽屉版本 |
+| `context-panel-context-tab.tsx` | Context 内容：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
+| `ask-ai-floating-panel.tsx` | Ask AI 响应式容器：桌面 fixed 悬浮拖动，移动端 Bottom Sheet 下滑关闭 |
+| `context-panel-chat-tab.tsx` | Ask AI 工作面内容：会话切换 + 内嵌 `chat-interface`，发问 body 含 subjectId |
 | `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
 | `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
 | `settings-content.tsx` | 按一级入口组合原有设置 section；Automation 同页收纳 Agents / Web search / Maintenance，复用 `settings-rows` 即时保存原语 |
@@ -57,7 +58,7 @@
 - `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装；`height="100%"` 撑满父高，`components.preview` 接 `previewRenderer` 自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
 - `editor-preview.tsx` —— 🆕 编辑器实时预览：复用 `PageRenderer`（**不传 title**→跳过 FrontmatterDisplay、仅正文），与阅读页同管线（wikilink/callout/mermaid/数学公式一致），`renderMarkdown` 的 `remarkFrontmatter` 自动剥离 `---` 块
 - `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
-- `selection-ask-button.tsx` —— 🆕 正文选区上方浮出的「Ask AI」按钮：消费 `hooks/use-text-selection`（选区限定在 `wiki-reading-view` 包的正文容器 ref 内），`position: fixed` 贴选区上方（顶部不足时翻到下方），点击调 `ui-store.askAboutSelection`（写瞬态信箱 `pendingChatReference` + 打开 chat tab）；滚动/折叠/落在容器外自动隐藏
+- `selection-ask-button.tsx` —— 正文选区末端浮出的「Ask AI」按钮：消费 `hooks/use-text-selection`（选区限定在 `wiki-reading-view` 包的正文容器 ref 内），点击调 `ui-store.askAboutSelection`（写瞬态信箱 `pendingChatReference` + 以选区末端为锚点打开悬浮工作面）；滚动/折叠/落在容器外自动隐藏
 
 ### `chat/`
 
@@ -147,9 +148,9 @@ React 错误边界，包裹 `(app)/layout.tsx` 主内容。
   3. 数据请求用 React Query + `api-fetch`；
   4. 全局状态放 `stores/ui-store`（有持久化+迁移支持）。
 - **新增 ContextPanel Tab**：
-  1. 扩展 `useUIStore::ContextPanelTab` 联合类型 + 迁移函数；
-  2. 新建 `context-panel-<name>-tab.tsx`；
-  3. 在 `context-panel.tsx` 的 Tabs 里注册。
+  1. Context 检查器新增内容时，优先扩展 `context-panel-context-tab.tsx`；
+  2. Ask AI 的容器交互放在 `ask-ai-floating-panel.tsx`，对话能力继续复用 `chat/*`；
+  3. 全局打开/关闭与位置状态放在 `ui-store.ts`，不要镜像到组件局部状态。
 
 ## 测试与质量
 
@@ -166,7 +167,7 @@ src/components/
 ├── providers.tsx
 ├── error-boundary.tsx
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs, switch, segmented, select, workspace-page}
-├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
+├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, ask-ai-floating-panel, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
 ├── wiki/         {page-renderer, page-actions, reading-progress, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, selection-ask-button}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
@@ -182,6 +183,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Ask AI 从 Context 固定侧栏迁为召唤式工作面：桌面正文空白双击/Header/⌘J 打开 fixed 悬浮面板并支持安全区拖动；正文选区以末端锚点携带引用；移动端退化为 Bottom Sheet 并支持下滑关闭；Context 面板收敛为纯页面检查器。 |
 | 2026-07-16 | Health、Tags 与 History 统一为 1080px 知识运维工作区：新增 `workspace-page` 页头/指标带/sticky 工具栏/状态原语；Health 与 Tags 收敛列表边界和状态层级；History 将主从浏览收进标准页面框架并默认选中最新记录，移动端保持行内详情 |
 | 2026-07-16 | Settings 一级入口由 8 项精简为 General / Personalization / Automation / Usage 四组，原模块改为组内 section；About 移到导航底部；弹窗与设置行增加移动端横向导航和上下布局 |
 | 2026-07-16 | Tags Review 升级为解释型清理队列：显示动态待处理数，分开呈现格式变体/非重复单次标签/未标记页面；格式变体可直接打开预填 Merge 的既有治理弹窗，Review 搜索覆盖三个分区，All 目录保持原有排序 |
