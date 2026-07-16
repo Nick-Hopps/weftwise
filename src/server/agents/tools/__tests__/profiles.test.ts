@@ -79,9 +79,11 @@ describe('resolveToolProfile', () => {
     ]);
   });
 
-  it('ingest profile 保持不变', () => {
+  it('ingest planner/writer 保持原权限，enricher 仅获得 Mermaid 生图', () => {
     expect(resolveToolProfile('ingest:planner').tools).toEqual(['wiki.read', 'wiki.search']);
     expect(resolveToolProfile('ingest:writer').tools).toEqual(['wiki.read', 'wiki.search']);
+    expect(resolveToolProfile('ingest:enricher').tools).toEqual(['image.generate']);
+    expect(resolveToolProfile('ingest:enricher').allowedSideEffects).toEqual(['none']);
   });
 
   it('跨主题只读工具只属于 Query profile', () => {
@@ -97,6 +99,7 @@ describe('resolveToolProfile', () => {
       'curate:manual',
       'ingest:planner',
       'ingest:writer',
+      'ingest:enricher',
     ] as const) {
       expect(resolveToolProfile(profileId).tools).not.toEqual(
         expect.arrayContaining(crossSubjectTools),
@@ -113,6 +116,7 @@ describe('resolveToolProfile', () => {
       'curate:manual',
       'ingest:planner',
       'ingest:writer',
+      'ingest:enricher',
     ] as const) {
       expect(resolveToolProfile(profileId).tools).not.toEqual(
         expect.arrayContaining(historyTools),
@@ -135,6 +139,7 @@ describe('resolveToolProfile', () => {
       'curate:manual',
       'ingest:planner',
       'ingest:writer',
+      'ingest:enricher',
     ] as const) {
       expect(resolveToolProfile(profileId).tools).not.toEqual(
         expect.arrayContaining(workflowTools),
@@ -148,6 +153,7 @@ describe('resolveToolProfile', () => {
     for (const profileId of [
       'fix:links', 'fix:contradiction', 'curate:auto', 'curate:manual',
       'ingest:planner', 'ingest:writer',
+      'ingest:enricher',
     ] as const) {
       expect(resolveToolProfile(profileId).tools).not.toContain('wiki.move');
     }
@@ -175,9 +181,10 @@ describe('createToolExecutionPolicy', () => {
 });
 
 describe('profileForIngestSkill', () => {
-  it('planner 映射到 planner，其余 ingest 内容步骤映射到 writer', () => {
+  it('planner/writer/enricher 映射到各自 profile，其余步骤回落 writer', () => {
     expect(profileForIngestSkill('ingest-planner')).toBe('ingest:planner');
     expect(profileForIngestSkill('ingest-writer')).toBe('ingest:writer');
+    expect(profileForIngestSkill('ingest-enricher')).toBe('ingest:enricher');
     expect(profileForIngestSkill('ingest-verifier')).toBe('ingest:writer');
   });
 });

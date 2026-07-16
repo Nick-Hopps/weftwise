@@ -21,8 +21,13 @@ function slugFromPath(path: string): string | null {
 /** 合并暂存条目与调用方补充条目；同 path 由调用方补充版本覆盖。 */
 function mergeEntriesByPath(staged: ChangesetEntry[], supplied: ChangesetEntry[]): ChangesetEntry[] {
   const byPath = new Map<string, ChangesetEntry>();
-  for (const entry of staged) byPath.set(entry.path, entry);
-  for (const entry of supplied) byPath.set(entry.path, entry);
+  const add = (entry: ChangesetEntry): void => {
+    const { attachments, ...pageEntry } = entry;
+    byPath.set(pageEntry.path, pageEntry);
+    for (const asset of attachments ?? []) byPath.set(asset.path, asset);
+  };
+  for (const entry of staged) add(entry);
+  for (const entry of supplied) add(entry);
   return [...byPath.values()];
 }
 
@@ -48,7 +53,7 @@ export async function commitPending(
 
   const now = new Date().toISOString();
   const entries = mergedEntries.map((entry) => {
-    if (entry.action === 'delete') return entry;
+    if (entry.action === 'delete' || entry.auxiliary) return entry;
     const slug = slugFromPath(entry.path);
     const existing = slug ? pagesRepo.getPageBySlug(ctx.subject.id, slug) : null;
     return {

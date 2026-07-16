@@ -711,14 +711,33 @@ export interface PostconditionReport {
   verificationError: string | null;
 }
 
+export type ChangesetContentEncoding = 'utf8' | 'base64';
+
+export interface ChangesetAssetEntry {
+  action: 'create' | 'update' | 'delete';
+  path: string;
+  content: string | null;
+  contentEncoding?: ChangesetContentEncoding;
+  auxiliary: true;
+  auxiliaryKind: 'asset';
+  /** Page slug that references this asset; used for checkpoint recovery only. */
+  assetFor: string;
+}
+
 export interface ChangesetEntry {
   action: 'create' | 'update' | 'delete';
   path: string;
   content: string | null;
+  /** Binary vault assets are serialized as base64 in the changeset. */
+  contentEncoding?: ChangesetContentEncoding;
   /** 新 canonical 页面由哪个旧路径迁移而来；仅允许出现在 wiki create entry。 */
   movedFromPath?: string;
   /** 受 Saga 管理但不属于页面索引的 vault 辅助文件（当前仅 source sidecar）。 */
   auxiliary?: boolean;
+  auxiliaryKind?: 'source-sidecar' | 'asset';
+  assetFor?: string;
+  /** Enricher page checkpoint carries generated assets for crash recovery. */
+  attachments?: ChangesetAssetEntry[];
 }
 
 export interface Changeset {

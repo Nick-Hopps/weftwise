@@ -103,6 +103,27 @@ export function validateChangeset(
 
     if (entry.auxiliary) {
       const escapedSubject = subject.slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (entry.auxiliaryKind === 'asset') {
+        const assetPattern = new RegExp(
+          `^assets/${escapedSubject}/[A-Za-z0-9][A-Za-z0-9._-]*\\.(?:png|jpe?g|webp)$`,
+          'i',
+        );
+        if (!assetPattern.test(entry.path)) {
+          errors.push(`[${entry.path}] Auxiliary asset path is invalid`);
+        }
+        if (!entry.assetFor || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.assetFor)) {
+          errors.push(`[${entry.path}] Auxiliary asset must identify a page slug`);
+        }
+        if (entry.movedFromPath) errors.push(`[${entry.path}] Auxiliary entry cannot carry movedFromPath`);
+        if (entry.action !== 'delete' && entry.content !== null) {
+          if (entry.contentEncoding !== 'base64' || !/^[A-Za-z0-9+/]*={0,2}$/.test(entry.content)) {
+            errors.push(`[${entry.path}] Auxiliary asset must contain base64 content`);
+          } else if (Buffer.byteLength(entry.content, 'base64') > 8 * 1024 * 1024) {
+            errors.push(`[${entry.path}] Auxiliary asset exceeds 8 MiB`);
+          }
+        }
+        continue;
+      }
       const sidecarPattern = new RegExp(
         `^\\.llm-wiki/sources/${escapedSubject}/[A-Za-z0-9_-]+\\.json$`,
       );
@@ -145,6 +166,7 @@ export function validateChangeset(
   // Per-entry frontmatter + wikilink syntax validation.
   for (const entry of changeset.entries) {
     if (entry.auxiliary) {
+      if (entry.auxiliaryKind === 'asset') continue;
       if (entry.action !== 'delete' && entry.content !== null) {
         try {
           JSON.parse(entry.content);
@@ -335,12 +357,12 @@ export async function applyChangeset(
     const insertedSourceLinks: Array<{ pageSlug: string; sourceId: string }> = [];
 
     try {
-      const writeEntries: { path: string; content: string }[] = [];
+      const writeEntries: { path: string; content: string; contentEncoding?: 'utf8' | 'base64' }[] = [];
       const deleteEntries: string[] = [];
       for (const entry of working.entries) {
         if (entry.action === 'create' || entry.action === 'update') {
           if (entry.content !== null && entry.content !== undefined) {
-            writeEntries.push({ path: entry.path, content: entry.content });
+            writeEntries.push({ path: entry.path, content: entry.content, contentEncoding: entry.contentEncoding });
           }
         } else if (entry.action === 'delete') {
           deleteEntries.push(entry.path);
