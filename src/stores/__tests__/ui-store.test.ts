@@ -17,21 +17,37 @@ describe('ui-store pendingChatReference mailbox', () => {
   beforeEach(() => {
     useUIStore.setState({
       pendingChatReference: null,
+      askAiOpen: false,
+      askAiAnchor: null,
+      askAiPosition: null,
       contextPanelOpen: false,
       contextPanelTab: 'context',
     });
   });
 
-  it('askAboutSelection writes a derived ref and opens the chat tab', () => {
-    useUIStore.getState().askAboutSelection({ section: 'Intro', text: 'hello world' });
+  it('askAboutSelection writes a derived ref and opens Ask AI at the selection', () => {
+    useUIStore.getState().askAboutSelection(
+      { section: 'Intro', text: 'hello world' },
+      { x: 320, y: 240 },
+    );
     const s = useUIStore.getState();
     expect(s.pendingChatReference).toEqual({
       id: expect.stringMatching(/^sel-/),
       section: 'Intro',
       text: 'hello world',
     });
-    expect(s.contextPanelOpen).toBe(true);
-    expect(s.contextPanelTab).toBe('chat');
+    expect(s.askAiOpen).toBe(true);
+    expect(s.askAiAnchor).toEqual({ x: 320, y: 240 });
+    expect(s.contextPanelOpen).toBe(false);
+  });
+
+  it('opens from explicit entry without discarding the last dragged position', () => {
+    useUIStore.getState().setAskAiPosition({ x: 480, y: 80 });
+    useUIStore.getState().openAskAi();
+    const state = useUIStore.getState();
+    expect(state.askAiOpen).toBe(true);
+    expect(state.askAiAnchor).toBeNull();
+    expect(state.askAiPosition).toEqual({ x: 480, y: 80 });
   });
 
   it('derives a stable id for identical text', () => {

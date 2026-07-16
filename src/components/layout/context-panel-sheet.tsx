@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
 import { ContextPanel } from './context-panel';
 
@@ -32,9 +33,10 @@ export function ContextPanelSheet() {
   const open = useUIStore((s) => s.contextPanelOpen);
   const close = useUIStore((s) => s.closeContextPanel);
   const isMobile = useMatchesMobile();
+  const pathname = usePathname();
   const sheetRef = useRef<HTMLDivElement>(null);
 
-  const active = open && isMobile;
+  const active = open && isMobile && pathname?.startsWith('/wiki/') === true;
 
   // Body scroll lock — only when the sheet is actually visible.
   useEffect(() => {
