@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * 两栏式 Settings 的右侧内容区 —— 按选中分类（active）渲染对应 panel：
- * Appearance / Language / Agents / Web search / About。
+ * Settings 的右侧内容区：四个一级入口按用户任务组织，原有设置模块作为
+ * section 组合渲染。
  * query / mutation 由 SettingsDialog 持有并通过 props 注入，
  * 本文件只负责渲染与本地交互。服务端 app_settings 表是唯一真实源，不写 Zustand。
  */
@@ -37,7 +37,13 @@ import {
   TextareaRow,
   type RowSaveState,
 } from './settings-rows';
-import { SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
+import {
+  APP_VERSION,
+  SETTINGS_CATEGORIES,
+  SETTINGS_SECTIONS,
+  type CategoryId,
+  type SettingsSectionId,
+} from './settings-categories';
 
 /** mutation → RowSaveState 适配。*/
 function toSave(m: { isPending: boolean; isError: boolean; error: unknown }): RowSaveState {
@@ -56,8 +62,6 @@ const WIKI_LANGUAGE_PRESETS = [
   { value: 'Italian', label: 'Italiano' },
   { value: 'Russian', label: 'Русский' },
 ] as const;
-
-const APP_VERSION = '0.1.0';
 
 interface SaveLanguageMutation {
   mutate: (v: string) => void;
@@ -87,48 +91,86 @@ interface SettingsContentProps {
 
 export function SettingsContent(props: SettingsContentProps) {
   const category = SETTINGS_CATEGORIES.find((c) => c.id === props.active);
+  const sections: readonly SettingsSectionId[] = SETTINGS_SECTIONS[props.active];
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="space-y-5 p-5">
-        <h3 className="text-sm font-semibold text-foreground">{category?.label}</h3>
+      <div key={props.active} className="animate-fade-in p-5 md:p-7">
+        <header className="mb-7">
+          <h3 className="text-base font-semibold text-foreground">{category?.label}</h3>
+          <p className="mt-1 text-xs text-foreground-tertiary">{category?.description}</p>
+        </header>
 
-        {props.active === 'appearance' && (
-          <AppearancePanel
-            darkMode={props.darkMode}
-            toggleDarkMode={props.toggleDarkMode}
-            sidebarWidth={props.sidebarWidth}
-            resetSidebarWidth={props.resetSidebarWidth}
-          />
-        )}
+        <div className="space-y-7">
+          {sections.includes('appearance') && (
+            <SettingsSection title="Appearance">
+              <AppearancePanel
+                darkMode={props.darkMode}
+                toggleDarkMode={props.toggleDarkMode}
+                sidebarWidth={props.sidebarWidth}
+                resetSidebarWidth={props.resetSidebarWidth}
+              />
+            </SettingsSection>
+          )}
 
-        {props.active === 'language' && (
-          <LanguagePanel
-            settings={props.settings}
-            settingsLoading={props.settingsLoading}
-            saveLanguage={props.saveLanguage}
-          />
-        )}
+          {sections.includes('language') && (
+            <SettingsSection title="Content language">
+              <LanguagePanel
+                settings={props.settings}
+                settingsLoading={props.settingsLoading}
+                saveLanguage={props.saveLanguage}
+              />
+            </SettingsSection>
+          )}
 
-        {props.active === 'cognitive-lens' && <CognitiveLensPanel />}
+          {sections.includes('cognitive-lens') && (
+            <SettingsSection title="Cognitive Lens">
+              <CognitiveLensPanel />
+            </SettingsSection>
+          )}
 
-        {props.active === 'agents' && (
-          <AgentsPanel settings={props.settings} savePartial={props.savePartial} />
-        )}
+          {sections.includes('agents') && (
+            <SettingsSection title="Agent behavior">
+              <AgentsPanel settings={props.settings} savePartial={props.savePartial} />
+            </SettingsSection>
+          )}
 
-        {props.active === 'web-search' && (
-          <WebSearchPanel settings={props.settings} savePartial={props.savePartial} />
-        )}
+          {sections.includes('web-search') && (
+            <SettingsSection title="Web grounding">
+              <WebSearchPanel settings={props.settings} savePartial={props.savePartial} />
+            </SettingsSection>
+          )}
 
-        {props.active === 'maintenance' && (
-          <MaintenancePanel settings={props.settings} savePartial={props.savePartial} />
-        )}
+          {sections.includes('maintenance') && (
+            <SettingsSection title="Periodic maintenance">
+              <MaintenancePanel settings={props.settings} savePartial={props.savePartial} />
+            </SettingsSection>
+          )}
 
-        {props.active === 'usage' && <UsagePanel />}
+          {sections.includes('usage') && (
+            <SettingsSection title="LLM usage">
+              <UsagePanel />
+            </SettingsSection>
+          )}
 
-        {props.active === 'about' && <AboutPanel />}
+          {props.active === 'general' && (
+            <div className="flex items-baseline justify-between border-t border-border pt-5 text-xs md:hidden">
+              <span className="font-medium text-foreground-secondary">Agentic Wiki</span>
+              <span className="tabular-nums text-foreground-tertiary">v{APP_VERSION}</span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
+  );
+}
+
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border-t border-border pt-6 first:border-t-0 first:pt-0">
+      <h4 className="mb-4 text-xs font-semibold text-foreground-secondary">{title}</h4>
+      {children}
+    </section>
   );
 }
 
@@ -520,53 +562,52 @@ function UsagePanel() {
       ) : rows.length === 0 ? (
         <p className="text-xs text-foreground-tertiary">No usage recorded yet.</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs text-foreground-tertiary">
-              <th className="py-1.5 pr-2 font-medium">Task</th>
-              <th className="py-1.5 pr-2 font-medium">Model</th>
-              <th className="py-1.5 pr-2 text-right font-medium">Calls</th>
-              <th className="py-1.5 pr-2 text-right font-medium">Input</th>
-              <th className="py-1.5 text-right font-medium">Output</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={`${r.task}:${r.model}`} className="border-b border-border/50">
-                <td className="py-1.5 pr-2 font-mono text-xs">{r.task}</td>
-                <td className="py-1.5 pr-2 truncate max-w-[10rem] text-xs text-foreground-secondary" title={r.model}>
-                  {r.model}
-                </td>
-                <td className="py-1.5 pr-2 text-right tabular-nums">{r.calls}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums">{formatTokenCount(r.inputTokens)}</td>
-                <td className="py-1.5 text-right tabular-nums">{formatTokenCount(r.outputTokens)}</td>
+        <div className="-mx-1 overflow-x-auto px-1">
+          <table className="w-full min-w-[34rem] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-foreground-tertiary">
+                <th className="py-1.5 pr-2 font-medium">Task</th>
+                <th className="py-1.5 pr-2 font-medium">Model</th>
+                <th className="py-1.5 pr-2 text-right font-medium">Calls</th>
+                <th className="py-1.5 pr-2 text-right font-medium">Input</th>
+                <th className="py-1.5 text-right font-medium">Output</th>
               </tr>
-            ))}
-            <tr className="font-medium">
-              <td className="py-1.5 pr-2 text-xs">Total</td>
-              <td className="py-1.5 pr-2" />
-              <td className="py-1.5 pr-2 text-right tabular-nums">{totals.calls}</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums">{formatTokenCount(totals.inputTokens)}</td>
-              <td className="py-1.5 text-right tabular-nums">{formatTokenCount(totals.outputTokens)}</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={`${r.task}:${r.model}`} className="border-b border-border/50">
+                  <td className="py-1.5 pr-2 font-mono text-xs">{r.task}</td>
+                  <td
+                    className="max-w-[10rem] truncate py-1.5 pr-2 text-xs text-foreground-secondary"
+                    title={r.model}
+                  >
+                    {r.model}
+                  </td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums">{r.calls}</td>
+                  <td className="py-1.5 pr-2 text-right tabular-nums">
+                    {formatTokenCount(r.inputTokens)}
+                  </td>
+                  <td className="py-1.5 text-right tabular-nums">
+                    {formatTokenCount(r.outputTokens)}
+                  </td>
+                </tr>
+              ))}
+              <tr className="font-medium">
+                <td className="py-1.5 pr-2 text-xs">Total</td>
+                <td className="py-1.5 pr-2" />
+                <td className="py-1.5 pr-2 text-right tabular-nums">{totals.calls}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums">
+                  {formatTokenCount(totals.inputTokens)}
+                </td>
+                <td className="py-1.5 text-right tabular-nums">
+                  {formatTokenCount(totals.outputTokens)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
       <p className="text-xs text-foreground-tertiary">Usage data is retained for 90 days.</p>
-    </div>
-  );
-}
-
-function AboutPanel() {
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between text-sm text-foreground">
-        <span>Agentic Wiki</span>
-        <span className="tabular-nums text-foreground-tertiary">v{APP_VERSION}</span>
-      </div>
-      <p className="text-xs text-foreground-tertiary">
-        Personal knowledge base, incrementally built and maintained by LLM agents.
-      </p>
     </div>
   );
 }

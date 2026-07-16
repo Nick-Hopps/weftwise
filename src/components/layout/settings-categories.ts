@@ -1,36 +1,62 @@
 /**
- * 设置分类元数据 —— 两栏式 Settings 的单一来源。
- * 被 settings-dialog（默认选中）、settings-nav（导航列表）、
- * settings-content（分类标题）共用，避免三者循环依赖与漂移。
+ * 设置一级入口与组内分区的单一来源。
+ * 一级入口按用户任务组织，原有设置模块作为 section 收纳，避免分类粒度漂移。
  */
 
-import { Palette, Languages, Bot, Globe, Info, RefreshCw, Brain, BarChart3, type LucideIcon } from 'lucide-react';
+import { BarChart3, Bot, Brain, Settings2, type LucideIcon } from 'lucide-react';
 
-export type CategoryId =
+export type CategoryId = 'general' | 'personalization' | 'automation' | 'usage';
+
+export type SettingsSectionId =
   | 'appearance'
   | 'language'
   | 'cognitive-lens'
   | 'agents'
   | 'web-search'
   | 'maintenance'
-  | 'usage'
-  | 'about';
+  | 'usage';
 
 export interface SettingsCategory {
   id: CategoryId;
   label: string;
+  description: string;
   icon: LucideIcon;
 }
 
+export const APP_VERSION = '0.1.0';
+
 export const SETTINGS_CATEGORIES: SettingsCategory[] = [
-  { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'language', label: 'Language', icon: Languages },
-  { id: 'cognitive-lens', label: 'Cognitive Lens', icon: Brain },
-  { id: 'agents', label: 'Agents', icon: Bot },
-  { id: 'web-search', label: 'Web search', icon: Globe },
-  { id: 'maintenance', label: 'Maintenance', icon: RefreshCw },
-  { id: 'usage', label: 'Usage', icon: BarChart3 },
-  { id: 'about', label: 'About', icon: Info },
+  {
+    id: 'general',
+    label: 'General',
+    description: 'Appearance and content defaults',
+    icon: Settings2,
+  },
+  {
+    id: 'personalization',
+    label: 'Personalization',
+    description: 'How pages adapt to you',
+    icon: Brain,
+  },
+  {
+    id: 'automation',
+    label: 'Automation',
+    description: 'Agents, grounding, and upkeep',
+    icon: Bot,
+  },
+  {
+    id: 'usage',
+    label: 'Usage',
+    description: 'LLM activity and tokens',
+    icon: BarChart3,
+  },
 ];
 
-export const DEFAULT_CATEGORY: CategoryId = 'appearance';
+export const SETTINGS_SECTIONS = {
+  general: ['appearance', 'language'],
+  personalization: ['cognitive-lens'],
+  automation: ['agents', 'web-search', 'maintenance'],
+  usage: ['usage'],
+} satisfies Record<CategoryId, SettingsSectionId[]>;
+
+export const DEFAULT_CATEGORY: CategoryId = 'general';
