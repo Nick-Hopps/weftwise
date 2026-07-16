@@ -3,6 +3,7 @@ import {
   canonicalJson,
   hashPendingActionPayload,
   normalizePreviewInput,
+  normalizeTagBatchPreviewInput,
 } from '../pending-action-payload';
 
 describe('pending-action payload', () => {
@@ -88,6 +89,27 @@ describe('pending-action payload', () => {
     expect(() => normalizePreviewInput({
       operation: 'move', payload: { slug: 'old-page', newSlug: 'old-page' },
     }, '2026-07-14T00:00:00.000Z')).toThrow(/differ/i);
+  });
+
+  it('tag-batch 规范化标签并强制 action 对应的 target 形状', () => {
+    expect(normalizeTagBatchPreviewInput(
+      { action: 'merge', sourceTag: ' Old Tag ', targetTag: ' Canonical ' },
+      '2026-07-16T00:00:00.000Z',
+    )).toEqual({
+      operation: 'tag-batch',
+      payload: {
+        action: 'merge', sourceTag: 'Old Tag', targetTag: 'Canonical',
+        effectiveAt: '2026-07-16T00:00:00.000Z',
+      },
+    });
+    expect(() => normalizeTagBatchPreviewInput(
+      { action: 'rename', sourceTag: 'old' },
+      '2026-07-16T00:00:00.000Z',
+    )).toThrow(/targetTag/i);
+    expect(() => normalizeTagBatchPreviewInput(
+      { action: 'delete', sourceTag: 'old', targetTag: 'new' },
+      '2026-07-16T00:00:00.000Z',
+    )).toThrow(/not allowed/i);
   });
 
   it('拒绝 undefined 与非有限数字', () => {

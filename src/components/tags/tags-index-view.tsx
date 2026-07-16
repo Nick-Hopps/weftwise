@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertTriangle, ArrowUpRight, Hash, Search } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'next/navigation';
+import { AlertTriangle, ArrowUpRight, Hash, MoreHorizontal, Search } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import {
+  buildTagReviewQueue,
+  filterTagReviewQueue,
   filterTagSummaries,
   sortTagSummaries,
   summarizeTags,
@@ -14,19 +17,19 @@ import {
   type TagSort,
 } from '@/lib/tags';
 import { Button } from '@/components/ui/button';
+import { IconButton } from '@/components/ui/icon-button';
 import { Input } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 import { Select } from '@/components/ui/select';
-import type { WikiPage } from '@/lib/contracts';
+import type { PendingActionView, WikiPage } from '@/lib/contracts';
 import { cn } from '@/lib/cn';
+import { PendingActionCard } from '@/components/chat/pending-action-card';
+import { TagGovernanceDialog } from './tag-governance-dialog';
+import { selectActiveTagAction } from './tag-governance-state';
+import { TagReviewQueueView } from './tag-review-queue';
 import { useTagSearchParams } from './use-tag-search-params';
 
 type DirectoryScope = 'all' | 'review';
-
-const SCOPE_OPTIONS = [
-  { value: 'all' as const, label: 'All' },
-  { value: 'review' as const, label: 'Review' },
-];
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
@@ -52,6 +55,8 @@ function Stat({ label, value, index }: { label: string; value: number | string; 
 
 export function TagsIndexView() {
   const apiFetch = useApiFetch();
+  const queryClient = useQueryClient();
+  const router = useRouter();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
   const { searchParams, updateSearchParams } = useTagSearchParams();
   const queryParam = searchParams.get('q') ?? '';
@@ -60,8 +65,20 @@ export function TagsIndexView() {
   const sort: TagSort = sortParam === 'name' || sortParam === 'recent' ? sortParam : 'count';
   const scope: DirectoryScope = scopeParam === 'review' ? 'review' : 'all';
   const [query, setQuery] = useState(queryParam);
+  const [governanceIntent, setGovernanceIntent] = useState<{
+    sourceTag: string;
+    suggestedTarget?: string;
+  } | null>(null);
+  const [localAction, setLocalAction] = useState<PendingActionView | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => setQuery(queryParam), [queryParam]);
+  useEffect(() => {
+    setGovernanceIntent(null);
+    setLocalAction(null);
+    setActionError(null);
+  }, [subjectId]);
 
   const {
     data: pages = [],
@@ -78,26 +95,80 @@ export function TagsIndexView() {
     enabled: !!subjectId,
     staleTime: 30_000,
   });
+  const { data: serverActions = [] } = useQuery({
+    queryKey: ['tag-actions', subjectId],
+    queryFn: async () => {
+      const response = await apiFetch('/api/tag-actions');
+      if (!response.ok) return [] as PendingActionView[];
+      const data = await response.json() as { actions?: PendingActionView[] };
+      return data.actions ?? [];
+    },
+    enabled: !!subjectId,
+    staleTime: 5_000,
+  });
 
   const summaries = useMemo(() => summarizeTags(pages), [pages]);
   const stats = useMemo(() => tagStats(pages, summaries), [pages, summaries]);
-  const reviewTags = useMemo(() => {
-    const tags = new Set(summaries.filter((item) => item.count === 1).map((item) => item.tag));
-    for (const group of stats.duplicateGroups) {
-      for (const tag of group) tags.add(tag);
-    }
-    return tags;
-  }, [stats.duplicateGroups, summaries]);
+  const reviewQueue = useMemo(() => buildTagReviewQueue(pages, summaries), [pages, summaries]);
+  const visibleReviewQueue = useMemo(
+    () => filterTagReviewQueue(reviewQueue, query),
+    [query, reviewQueue],
+  );
   const visibleTags = useMemo(() => {
-    const scoped = scope === 'review'
-      ? summaries.filter((summary) => reviewTags.has(summary.tag))
-      : summaries;
-    return sortTagSummaries(filterTagSummaries(scoped, query), sort);
-  }, [query, reviewTags, scope, sort, summaries]);
+    return sortTagSummaries(filterTagSummaries(summaries, query), sort);
+  }, [query, sort, summaries]);
+  const scopeOptions = useMemo(() => [
+    { value: 'all' as const, label: 'All' },
+    { value: 'review' as const, label: `Review ${reviewQueue.issueCount}` },
+  ], [reviewQueue.issueCount]);
+  const recommendedTargetBySource = useMemo(() => {
+    const targets = new Map<string, string>();
+    for (const group of reviewQueue.variantGroups) {
+      for (const variant of group.variants) targets.set(variant.tag, group.canonical.tag);
+    }
+    return targets;
+  }, [reviewQueue.variantGroups]);
+  const currentAction = localAction ?? selectActiveTagAction(serverActions);
+  const actionInProgress = Boolean(
+    currentAction && ['pending', 'approved', 'executing'].includes(currentAction.status),
+  );
 
   function updateQuery(value: string) {
     setQuery(value);
     updateSearchParams({ q: value || null });
+  }
+
+  async function consumeAction(actionId: string, decision: 'approve' | 'reject') {
+    if (!subjectId) return;
+    setActionBusy(true);
+    setActionError(null);
+    try {
+      const response = await apiFetch(`/api/pending-actions/${actionId}/${decision}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ subjectId }),
+      });
+      const data = await response.json() as { action?: PendingActionView; error?: string };
+      if (data.action) setLocalAction(data.action);
+      if (!response.ok) {
+        setActionError(data.error ?? 'The tag action could not be updated.');
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: ['tag-actions', subjectId] });
+      if (decision === 'approve' && data.action?.status === 'applied') {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['pages'] }),
+          queryClient.invalidateQueries({ queryKey: ['history'] }),
+          queryClient.invalidateQueries({ queryKey: ['search'] }),
+          queryClient.invalidateQueries({ queryKey: ['graph'] }),
+        ]);
+        router.refresh();
+      }
+    } catch {
+      setActionError('The tag action could not be updated.');
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   return (
@@ -128,6 +199,30 @@ export function TagsIndexView() {
         </dl>
       )}
 
+      {currentAction && (
+        <section aria-label="Tag action approval" className="space-y-2">
+          <PendingActionCard
+            action={currentAction}
+            busy={actionBusy}
+            onApprove={(actionId) => void consumeAction(actionId, 'approve')}
+            onReject={(actionId) => void consumeAction(actionId, 'reject')}
+          />
+          {actionError && <p role="alert" className="text-xs text-danger">{actionError}</p>}
+          {['applied', 'rejected', 'expired', 'failed'].includes(currentAction.status) && (
+            <Button
+              intent="ghost"
+              size="sm"
+              onClick={() => {
+                setLocalAction(null);
+                setActionError(null);
+              }}
+            >
+              Dismiss
+            </Button>
+          )}
+        </section>
+      )}
+
       <div className="sticky top-0 z-10 -mx-2 flex flex-col gap-3 border-y border-border-subtle bg-canvas/95 px-2 py-3 backdrop-blur sm:flex-row sm:items-center">
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">Search tags or pages</span>
@@ -142,22 +237,24 @@ export function TagsIndexView() {
         <div className="flex items-center justify-between gap-2 sm:justify-start">
           <Segmented
             value={scope}
-            options={SCOPE_OPTIONS}
+            options={scopeOptions}
             onChange={(value) => updateSearchParams({ scope: value === 'all' ? null : value })}
             aria-label="Tag directory scope"
           />
-          <Select
-            value={sort}
-            onChange={(event) => updateSearchParams({
-              sort: event.target.value === 'count' ? null : event.target.value,
-            })}
-            aria-label="Sort tags"
-            className="h-8"
-          >
-            <option value="count">Most used</option>
-            <option value="name">Name</option>
-            <option value="recent">Recently updated</option>
-          </Select>
+          {scope === 'all' && (
+            <Select
+              value={sort}
+              onChange={(event) => updateSearchParams({
+                sort: event.target.value === 'count' ? null : event.target.value,
+              })}
+              aria-label="Sort tags"
+              className="h-8"
+            >
+              <option value="count">Most used</option>
+              <option value="name">Name</option>
+              <option value="recent">Recently updated</option>
+            </Select>
+          )}
         </div>
       </div>
 
@@ -173,19 +270,41 @@ export function TagsIndexView() {
           <p className="text-sm text-foreground-secondary">Tags could not be loaded.</p>
           <Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
         </div>
+      ) : scope === 'review' && visibleReviewQueue.issueCount === 0 && reviewQueue.issueCount > 0 ? (
+        <div className="py-10 text-center">
+          <p className="text-sm text-foreground-secondary">No review items match this search.</p>
+          <Button
+            intent="ghost"
+            size="sm"
+            className="mt-2"
+            onClick={() => updateQuery('')}
+          >
+            Clear search
+          </Button>
+        </div>
+      ) : scope === 'review' ? (
+        <TagReviewQueueView
+          queue={visibleReviewQueue}
+          subjectSlug={subjectSlug}
+          actionDisabled={actionInProgress}
+          onManageTag={(sourceTag, suggestedTarget) => setGovernanceIntent({
+            sourceTag,
+            ...(suggestedTarget ? { suggestedTarget } : {}),
+          })}
+        />
       ) : summaries.length === 0 ? (
         <p className="py-10 text-center text-sm italic text-foreground-tertiary">No tags yet.</p>
       ) : visibleTags.length === 0 ? (
         <div className="py-10 text-center">
           <p className="text-sm text-foreground-secondary">No tags match this view.</p>
-          {(query || scope === 'review') && (
+          {query && (
             <Button
               intent="ghost"
               size="sm"
               className="mt-2"
               onClick={() => {
                 setQuery('');
-                updateSearchParams({ q: null, scope: null });
+                updateSearchParams({ q: null });
               }}
             >
               Clear filters
@@ -194,17 +313,18 @@ export function TagsIndexView() {
         </div>
       ) : (
         <section aria-labelledby="tag-directory-heading">
-          <div className="grid grid-cols-[minmax(0,1fr)_4rem] gap-3 border-b border-border-subtle px-2 pb-2 text-xs text-foreground-tertiary sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem]">
+          <div className="grid grid-cols-[minmax(0,1fr)_4rem_2rem] gap-3 border-b border-border-subtle px-2 pb-2 text-xs text-foreground-tertiary sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem_2rem]">
             <h2 id="tag-directory-heading" className="font-normal">Tag</h2>
             <span className="text-right">Pages</span>
             <span className="hidden text-right sm:block">Coverage</span>
             <span className="hidden text-right sm:block">Updated</span>
+            <span className="sr-only">Actions</span>
           </div>
           <ul className="divide-y divide-border-subtle border-b border-border-subtle">
             {visibleTags.map((summary) => {
               const href = `/tags/${encodeURIComponent(summary.tag)}${subjectSlug ? `?s=${encodeURIComponent(subjectSlug)}` : ''}`;
               return (
-                <li key={summary.tag} className="group grid min-h-16 grid-cols-[minmax(0,1fr)_4rem] items-center gap-3 px-2 py-2.5 transition-colors hover:bg-subtle sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem]">
+                <li key={summary.tag} className="group grid min-h-16 grid-cols-[minmax(0,1fr)_4rem_2rem] items-center gap-3 px-2 py-2.5 transition-colors hover:bg-subtle sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem_2rem]">
                   <div className="min-w-0">
                     <Link
                       href={href}
@@ -225,14 +345,43 @@ export function TagsIndexView() {
                   <time className="hidden text-right text-xs tabular-nums text-foreground-tertiary sm:block" dateTime={summary.updatedAt ?? undefined}>
                     {formatDate(summary.updatedAt)}
                   </time>
+                  <IconButton
+                    size="sm"
+                    disabled={actionInProgress}
+                    onClick={() => setGovernanceIntent({
+                      sourceTag: summary.tag,
+                      ...(recommendedTargetBySource.get(summary.tag)
+                        ? { suggestedTarget: recommendedTargetBySource.get(summary.tag) }
+                        : {}),
+                    })}
+                    aria-label={`Manage ${summary.tag}`}
+                    title={actionInProgress ? 'Resolve the current tag action first' : `Manage ${summary.tag}`}
+                  >
+                    <MoreHorizontal aria-hidden />
+                  </IconButton>
                 </li>
               );
             })}
           </ul>
           <p className="mt-3 text-xs tabular-nums text-foreground-tertiary">
-            {visibleTags.length} of {scope === 'review' ? reviewTags.size : summaries.length} tags
+            {visibleTags.length} of {summaries.length} tags
           </p>
         </section>
+      )}
+
+      {governanceIntent && subjectId && (
+        <TagGovernanceDialog
+          sourceTag={governanceIntent.sourceTag}
+          suggestedTarget={governanceIntent.suggestedTarget}
+          existingTags={summaries.map((summary) => summary.tag)}
+          subjectId={subjectId}
+          onClose={() => setGovernanceIntent(null)}
+          onCreated={(action) => {
+            setLocalAction(action);
+            setActionError(null);
+            void queryClient.invalidateQueries({ queryKey: ['tag-actions', subjectId] });
+          }}
+        />
       )}
     </div>
   );
