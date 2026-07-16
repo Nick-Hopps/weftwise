@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   FileCode2,
@@ -17,11 +17,13 @@ import { LensFeedback } from './lens-feedback';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
 import { ReadingProgress } from './reading-progress';
+import { ArticleToc } from './article-toc';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useLens } from '@/hooks/use-lens';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
+import { extractArticleToc } from '@/lib/article-toc';
 import type { PageSourceDoc, PageSourceFormat } from '@/lib/contracts';
 
 interface BacklinkItem {
@@ -119,6 +121,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const reshapeUsable = reshaped != null && lens.data?.source !== 'canonical';
   const usingReshaped = reshapeUsable && !showOriginal;
   const displayContent = usingReshaped ? reshaped : props.content;
+  const tocHeadings = useMemo(() => extractArticleToc(displayContent), [displayContent]);
 
   const reshapeState: ReshapeState = lens.state === 'ready'
     ? 'reshaped'
@@ -150,23 +153,30 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     );
 
   const article = (
-    <>
-      <PageRenderer
-        {...rendererProps}
-        content={displayContent}
-        actions={actions}
-        headerExtra={headerExtra}
+    <div className="wiki-reading-layout">
+      <ArticleToc
+        headings={tocHeadings}
+        containerRef={articleRef}
+        useContainerScroll={showSplit}
       />
-      <Backlinks backlinks={backlinks} />
-      <LensFeedback slug={slug} />
-    </>
+      <div className="wiki-reading-body min-w-0">
+        <PageRenderer
+          {...rendererProps}
+          content={displayContent}
+          actions={actions}
+          headerExtra={headerExtra}
+        />
+        <Backlinks backlinks={backlinks} />
+        <LensFeedback slug={slug} />
+      </div>
+    </div>
   );
 
   if (showSplit) {
     return (
       <div className="flex flex-col lg:h-[calc(100vh-var(--header-height))]">
         <div className="grid grid-cols-1 lg:grid-cols-2 lg:flex-1 lg:min-h-0">
-          <div ref={articleRef} className="min-w-0 lg:overflow-y-auto">
+          <div ref={articleRef} className="wiki-reading-container min-w-0 lg:overflow-y-auto">
             <ReadingProgress containerRef={articleRef} useContainerScroll />
             {article}
             <SelectionAskButton containerRef={articleRef} />
@@ -180,7 +190,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   }
 
   return (
-    <div ref={articleRef} className="flex min-h-full flex-col">
+    <div ref={articleRef} className="wiki-reading-container flex min-h-full flex-col">
       <ReadingProgress containerRef={articleRef} />
       {article}
       <SelectionAskButton containerRef={articleRef} />

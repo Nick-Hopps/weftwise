@@ -71,7 +71,10 @@ export default function PageRenderer({
   headerExtra,
   subjectSlug,
 }: PageRendererProps) {
-  const rendered = useMemo(() => renderMarkdown(content, titleSlugMap, { math: true }), [content, titleSlugMap]);
+  const rendered = useMemo(
+    () => renderMarkdown(content, titleSlugMap, { math: true, headingAnchors: true }),
+    [content, titleSlugMap],
+  );
 
   return (
     <article className="wp-rise mx-auto w-full min-w-0 max-w-[var(--reading-max-width)] px-5 py-8 sm:px-8 sm:py-12">
@@ -87,7 +90,9 @@ export default function PageRenderer({
         />
       )}
       {headerExtra}
-      <div className={proseClassName}>{rendered}</div>
+      <div className={`${proseClassName} [&>h2]:scroll-mt-20 [&>h3]:scroll-mt-20 [&>h4]:scroll-mt-20`}>
+        {rendered}
+      </div>
     </article>
   );
 }
