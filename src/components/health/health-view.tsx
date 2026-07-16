@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
+  CheckCircle2,
   ChevronDown,
   ListFilter,
   RefreshCw,
@@ -18,6 +19,14 @@ import { useLintSummary } from '@/hooks/use-lint-summary';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
+import {
+  WorkspaceMetric,
+  WorkspacePage,
+  WorkspacePageHeader,
+  WorkspaceState,
+  WorkspaceSummary,
+  WorkspaceToolbar,
+} from '@/components/ui/workspace-page';
 import { groupBySeverity } from './lint-findings';
 import { FindingRow, findingTypeLabel } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
@@ -967,24 +976,21 @@ export function HealthView() {
   ].filter((message): message is string => message !== null);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-      <header className="mb-6 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2.5">
-            <Activity className="h-5 w-5 text-accent" aria-hidden />
-            <h1 className="text-2xl font-semibold text-foreground">Health</h1>
-          </div>
-          <p className="mt-1.5 truncate text-sm text-foreground-secondary">
+    <WorkspacePage>
+      <WorkspacePageHeader
+        icon={<Activity className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
+        title="Health"
+        description={(
+          <span className="block truncate">
             {allSubjects ? 'All subjects' : subjectSlug}
             <span className="text-foreground-tertiary">
               {data?.ranAt
                 ? ` · Checked ${new Date(data.ranAt).toLocaleString()}`
                 : ' · Not checked yet'}
             </span>
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+          </span>
+        )}
+        actions={<div className="flex flex-wrap items-center gap-2">
           <div
             role="radiogroup"
             aria-label="Health check scope"
@@ -1023,47 +1029,50 @@ export function HealthView() {
             {!running && <RefreshCw className="h-3.5 w-3.5" />}
             {neverRun ? 'Run check' : 'Run again'}
           </Button>
-        </div>
-      </header>
+        </div>}
+      />
 
-      <section
+      <WorkspaceSummary
         aria-label="Health summary"
-        className="grid grid-cols-2 overflow-hidden border-y border-border bg-surface sm:grid-cols-4 lg:grid-cols-[1.2fr_repeat(3,0.8fr)_2fr]"
+        className="grid-cols-2 sm:grid-cols-4 lg:grid-cols-[1.15fr_repeat(3,0.85fr)_1.5fr]"
       >
-        <div className="px-4 py-3.5">
-          <p className="text-xs font-medium text-foreground-tertiary">Open findings</p>
-          <p className="mt-1 text-2xl font-semibold text-foreground">{total}</p>
-        </div>
-        {(['critical', 'warning', 'info'] as const).map((severity) => (
-          <div key={severity} className="border-l border-border-subtle px-4 py-3.5">
-            <p className="text-xs font-medium capitalize text-foreground-tertiary">{severity}</p>
-            <p className={
-              'mt-1 text-xl font-semibold ' +
-              (severity === 'critical'
-                ? 'text-danger'
-                : severity === 'warning'
-                  ? 'text-warning'
-                  : 'text-foreground')
-            }>
-              {data?.bySeverity[severity] ?? 0}
-            </p>
-          </div>
-        ))}
-        <div className="col-span-2 border-t border-border-subtle px-4 py-3.5 sm:col-span-4 lg:col-span-1 lg:border-l lg:border-t-0">
-          <p className="text-xs font-medium text-foreground-tertiary">Recently verified</p>
-          {recentTerminalCount > 0 ? (
-            <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <WorkspaceMetric
+          label="Open findings"
+          value={total}
+          className="border-b border-r border-border-subtle sm:border-b-0"
+        />
+        <WorkspaceMetric
+          label="Critical"
+          value={data?.bySeverity.critical ?? 0}
+          tone="danger"
+          className="border-b border-border-subtle sm:border-b-0 sm:border-r"
+        />
+        <WorkspaceMetric
+          label="Warning"
+          value={data?.bySeverity.warning ?? 0}
+          tone="warning"
+          className="border-r border-border-subtle sm:border-r-0 lg:border-r"
+        />
+        <WorkspaceMetric
+          label="Info"
+          value={data?.bySeverity.info ?? 0}
+          className="sm:border-r lg:border-r"
+        />
+        <WorkspaceMetric
+          label="Recently verified"
+          value={recentTerminalCount}
+          className="col-span-2 border-t border-border-subtle sm:col-span-4 lg:col-span-1 lg:border-t-0"
+          detail={recentTerminalCount > 0 ? (
+            <span className="flex flex-wrap gap-x-3 gap-y-1">
               <span><strong className="text-success">{recentOutcomeSummary.fixed}</strong> fixed</span>
               <span><strong className="text-danger">{recentOutcomeSummary.failed}</strong> failed</span>
               <span><strong className="text-foreground-secondary">{recentOutcomeSummary.skipped}</strong> skipped</span>
-            </div>
-          ) : (
-            <p className="mt-1.5 text-xs text-foreground-tertiary">No recent results</p>
-          )}
-        </div>
-      </section>
+            </span>
+          ) : 'No recent results'}
+        />
+      </WorkspaceSummary>
 
-      <div className="sticky top-0 z-10 -mx-4 mt-6 border-y border-border bg-canvas/95 px-4 py-3 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+      <WorkspaceToolbar aria-label="Health controls">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2">
             <ListFilter className="h-3.5 w-3.5 text-foreground-tertiary" aria-hidden />
@@ -1184,7 +1193,7 @@ export function HealthView() {
             </Button>
           </form>
         )}
-      </div>
+      </WorkspaceToolbar>
 
       <div className="mt-5 space-y-2">
         {researchError && (
@@ -1266,21 +1275,18 @@ export function HealthView() {
             ))}
           </div>
         ) : neverRun ? (
-          <div className="border-y border-border py-14 text-center">
-            <Activity className="mx-auto h-6 w-6 text-foreground-tertiary" aria-hidden />
-            <p className="mt-3 text-sm font-medium text-foreground">No health check yet</p>
-            <p className="mt-1 text-sm text-foreground-secondary">
-              Run a check to inspect links, sources, coverage, and structure.
-            </p>
-            <Button intent="primary" className="mt-4" onClick={() => void runLint()} loading={running}>
-              Run check
-            </Button>
-          </div>
+          <WorkspaceState
+            icon={<Activity className="h-6 w-6 text-foreground-tertiary" aria-hidden />}
+            title="No health check yet"
+            description="Run a check to inspect links, sources, coverage, and structure."
+            action={<Button intent="primary" onClick={() => void runLint()} loading={running}>Run check</Button>}
+          />
         ) : total === 0 ? (
-          <div className="border-y border-border py-14 text-center">
-            <p className="text-sm font-medium text-foreground">No open findings</p>
-            <p className="mt-1 text-sm text-foreground-secondary">This scope passed the latest health check.</p>
-          </div>
+          <WorkspaceState
+            icon={<CheckCircle2 className="h-6 w-6 text-success" aria-hidden />}
+            title="No open findings"
+            description="This scope passed the latest health check."
+          />
         ) : (
           <div>
             <div className="mb-3 flex items-end justify-between gap-3">
@@ -1316,7 +1322,7 @@ export function HealthView() {
                       </h3>
                       <span className="text-xs text-foreground-tertiary">{group.findings.length}</span>
                     </div>
-                    <div className="divide-y divide-border-subtle overflow-hidden rounded-md border border-border bg-surface shadow-xs">
+                    <div className="divide-y divide-border-subtle border-y border-border-subtle bg-surface">
                       {group.findings.map((finding) => {
                         const plan = data?.remediations[finding.id];
                         const actingActions = new Set(
@@ -1368,6 +1374,6 @@ export function HealthView() {
           />
         </div>
       )}
-    </div>
+    </WorkspacePage>
   );
 }

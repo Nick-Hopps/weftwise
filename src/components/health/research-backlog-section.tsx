@@ -99,7 +99,7 @@ export function ResearchBacklogSection({
           {error}
         </div>
       )}
-      <div className="divide-y divide-border-subtle overflow-hidden rounded-md border border-border bg-surface shadow-xs">
+      <div className="divide-y divide-border-subtle border-y border-border-subtle bg-surface">
         {entries.map((entry) => {
           const busy = pendingId === entry.id;
           return (
