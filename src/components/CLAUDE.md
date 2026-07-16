@@ -76,7 +76,8 @@
 
 ### `tags/`
 
-- `tags-index-view.tsx` —— 标签目录工作台：聚合当前 Subject 页面元数据，展示覆盖率/单次标签/格式变体统计，支持按标签或关联页面搜索、使用次数/名称/更新时间排序，以及 All/Review 范围切换；状态同步到 URL
+- `tags-index-view.tsx` —— 标签目录工作台：聚合当前 Subject 页面元数据，展示覆盖率统计，All 支持标签/页面搜索与三种排序；Review 显示待处理数量并切换到解释型清理队列；URL 保存 scope/search/sort，治理意图继续交给既有 PendingAction 审批
+- `tag-review-queue.tsx` —— 无请求的 Review 展示层：按格式变体、非重复单次标签、未标记页面分区；格式变体使用 `Preview merge` 上抛源标签与推荐目标，未标记页面只导航、不复制 metadata 写入能力
 - `tag-pages-view.tsx` —— 标签组合浏览：单标签页面列表扩展为摘要/更新时间/关联标签视图，相关标签可叠加为 `with` 条件并在 `Match all / Match any` 间切换；搜索、排序、组合条件同步到 URL
 - `use-tag-search-params.ts` / `tags-route-fallback.tsx` —— 两个 Tags 路由共用的 URL 状态更新器与 Suspense 加载态
 - `tag-governance-dialog.tsx` / `tag-governance-state.ts` —— Rename/Merge/Delete 意图表单与工作台审批恢复逻辑；表单只请求服务端预览，批准/拒绝复用 PendingActionCard 和通用审批 API
@@ -169,7 +170,7 @@ src/components/
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── subjects/     {subject-dialog, augmentation-field, subjects-api}
-├── tags/         {tags-index-view, tag-pages-view}
+├── tags/         {tags-index-view, tag-review-queue, tag-pages-view, tag-governance-dialog, tag-governance-state}
 ├── health/       {health-view, finding-row, remediation-ui, research-backlog-section, research-candidates-dialog, postcondition-summary}
 ├── history/      {operation-list, operation-diff, revert-button}
 ├── graph/        {mini-graph-view}
@@ -181,6 +182,7 @@ src/components/
 | 日期 | 变更 |
 |------|------|
 | 2026-07-16 | Settings 一级入口由 8 项精简为 General / Personalization / Automation / Usage 四组，原模块改为组内 section；About 移到导航底部；弹窗与设置行增加移动端横向导航和上下布局 |
+| 2026-07-16 | Tags Review 升级为解释型清理队列：显示动态待处理数，分开呈现格式变体/非重复单次标签/未标记页面；格式变体可直接打开预填 Merge 的既有治理弹窗，Review 搜索覆盖三个分区，All 目录保持原有排序 |
 | 2026-07-16 | Tags Review 接入服务端治理审批：列表行省略号打开 Rename/Merge/Delete 表单，创建预览后在主工作区展示可恢复的 PendingActionCard；批准终态刷新 pages/history/search/graph，重复工作台审批由服务端 action 恢复 |
 | 2026-07-16 | Tags 升级为标签工作台：默认列表取代词云，增加覆盖率/单次标签/格式变体统计、标签与关联页面搜索、三种排序和 Review 视图；详情页支持相关标签组合筛选、AND/OR、页面摘要/时间/其他标签，并将所有筛选状态写入 URL |
 | 2026-07-16 | 重设计 Mermaid 图表：新增浅/深色 `base` 主题、紧凑节点/曲线参数、主节点与边标签层级；主题切换自动重绘；Diagram callout 改为无灰底的上下分隔图解区并压低图注层级 |

@@ -8,6 +8,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import {
+  buildTagReviewQueue,
+  filterTagReviewQueue,
   filterTagSummaries,
   sortTagSummaries,
   summarizeTags,
@@ -24,14 +26,10 @@ import { cn } from '@/lib/cn';
 import { PendingActionCard } from '@/components/chat/pending-action-card';
 import { TagGovernanceDialog } from './tag-governance-dialog';
 import { selectActiveTagAction } from './tag-governance-state';
+import { TagReviewQueueView } from './tag-review-queue';
 import { useTagSearchParams } from './use-tag-search-params';
 
 type DirectoryScope = 'all' | 'review';
-
-const SCOPE_OPTIONS = [
-  { value: 'all' as const, label: 'All' },
-  { value: 'review' as const, label: 'Review' },
-];
 
 function formatDate(value: string | null): string {
   if (!value) return '—';
@@ -67,14 +65,17 @@ export function TagsIndexView() {
   const sort: TagSort = sortParam === 'name' || sortParam === 'recent' ? sortParam : 'count';
   const scope: DirectoryScope = scopeParam === 'review' ? 'review' : 'all';
   const [query, setQuery] = useState(queryParam);
-  const [governanceTag, setGovernanceTag] = useState<string | null>(null);
+  const [governanceIntent, setGovernanceIntent] = useState<{
+    sourceTag: string;
+    suggestedTarget?: string;
+  } | null>(null);
   const [localAction, setLocalAction] = useState<PendingActionView | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => setQuery(queryParam), [queryParam]);
   useEffect(() => {
-    setGovernanceTag(null);
+    setGovernanceIntent(null);
     setLocalAction(null);
     setActionError(null);
   }, [subjectId]);
@@ -108,19 +109,25 @@ export function TagsIndexView() {
 
   const summaries = useMemo(() => summarizeTags(pages), [pages]);
   const stats = useMemo(() => tagStats(pages, summaries), [pages, summaries]);
-  const reviewTags = useMemo(() => {
-    const tags = new Set(summaries.filter((item) => item.count === 1).map((item) => item.tag));
-    for (const group of stats.duplicateGroups) {
-      for (const tag of group) tags.add(tag);
-    }
-    return tags;
-  }, [stats.duplicateGroups, summaries]);
+  const reviewQueue = useMemo(() => buildTagReviewQueue(pages, summaries), [pages, summaries]);
+  const visibleReviewQueue = useMemo(
+    () => filterTagReviewQueue(reviewQueue, query),
+    [query, reviewQueue],
+  );
   const visibleTags = useMemo(() => {
-    const scoped = scope === 'review'
-      ? summaries.filter((summary) => reviewTags.has(summary.tag))
-      : summaries;
-    return sortTagSummaries(filterTagSummaries(scoped, query), sort);
-  }, [query, reviewTags, scope, sort, summaries]);
+    return sortTagSummaries(filterTagSummaries(summaries, query), sort);
+  }, [query, sort, summaries]);
+  const scopeOptions = useMemo(() => [
+    { value: 'all' as const, label: 'All' },
+    { value: 'review' as const, label: `Review ${reviewQueue.issueCount}` },
+  ], [reviewQueue.issueCount]);
+  const recommendedTargetBySource = useMemo(() => {
+    const targets = new Map<string, string>();
+    for (const group of reviewQueue.variantGroups) {
+      for (const variant of group.variants) targets.set(variant.tag, group.canonical.tag);
+    }
+    return targets;
+  }, [reviewQueue.variantGroups]);
   const currentAction = localAction ?? selectActiveTagAction(serverActions);
   const actionInProgress = Boolean(
     currentAction && ['pending', 'approved', 'executing'].includes(currentAction.status),
@@ -230,22 +237,24 @@ export function TagsIndexView() {
         <div className="flex items-center justify-between gap-2 sm:justify-start">
           <Segmented
             value={scope}
-            options={SCOPE_OPTIONS}
+            options={scopeOptions}
             onChange={(value) => updateSearchParams({ scope: value === 'all' ? null : value })}
             aria-label="Tag directory scope"
           />
-          <Select
-            value={sort}
-            onChange={(event) => updateSearchParams({
-              sort: event.target.value === 'count' ? null : event.target.value,
-            })}
-            aria-label="Sort tags"
-            className="h-8"
-          >
-            <option value="count">Most used</option>
-            <option value="name">Name</option>
-            <option value="recent">Recently updated</option>
-          </Select>
+          {scope === 'all' && (
+            <Select
+              value={sort}
+              onChange={(event) => updateSearchParams({
+                sort: event.target.value === 'count' ? null : event.target.value,
+              })}
+              aria-label="Sort tags"
+              className="h-8"
+            >
+              <option value="count">Most used</option>
+              <option value="name">Name</option>
+              <option value="recent">Recently updated</option>
+            </Select>
+          )}
         </div>
       </div>
 
@@ -261,19 +270,41 @@ export function TagsIndexView() {
           <p className="text-sm text-foreground-secondary">Tags could not be loaded.</p>
           <Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
         </div>
+      ) : scope === 'review' && visibleReviewQueue.issueCount === 0 && reviewQueue.issueCount > 0 ? (
+        <div className="py-10 text-center">
+          <p className="text-sm text-foreground-secondary">No review items match this search.</p>
+          <Button
+            intent="ghost"
+            size="sm"
+            className="mt-2"
+            onClick={() => updateQuery('')}
+          >
+            Clear search
+          </Button>
+        </div>
+      ) : scope === 'review' ? (
+        <TagReviewQueueView
+          queue={visibleReviewQueue}
+          subjectSlug={subjectSlug}
+          actionDisabled={actionInProgress}
+          onManageTag={(sourceTag, suggestedTarget) => setGovernanceIntent({
+            sourceTag,
+            ...(suggestedTarget ? { suggestedTarget } : {}),
+          })}
+        />
       ) : summaries.length === 0 ? (
         <p className="py-10 text-center text-sm italic text-foreground-tertiary">No tags yet.</p>
       ) : visibleTags.length === 0 ? (
         <div className="py-10 text-center">
           <p className="text-sm text-foreground-secondary">No tags match this view.</p>
-          {(query || scope === 'review') && (
+          {query && (
             <Button
               intent="ghost"
               size="sm"
               className="mt-2"
               onClick={() => {
                 setQuery('');
-                updateSearchParams({ q: null, scope: null });
+                updateSearchParams({ q: null });
               }}
             >
               Clear filters
@@ -317,7 +348,12 @@ export function TagsIndexView() {
                   <IconButton
                     size="sm"
                     disabled={actionInProgress}
-                    onClick={() => setGovernanceTag(summary.tag)}
+                    onClick={() => setGovernanceIntent({
+                      sourceTag: summary.tag,
+                      ...(recommendedTargetBySource.get(summary.tag)
+                        ? { suggestedTarget: recommendedTargetBySource.get(summary.tag) }
+                        : {}),
+                    })}
                     aria-label={`Manage ${summary.tag}`}
                     title={actionInProgress ? 'Resolve the current tag action first' : `Manage ${summary.tag}`}
                   >
@@ -328,20 +364,18 @@ export function TagsIndexView() {
             })}
           </ul>
           <p className="mt-3 text-xs tabular-nums text-foreground-tertiary">
-            {visibleTags.length} of {scope === 'review' ? reviewTags.size : summaries.length} tags
+            {visibleTags.length} of {summaries.length} tags
           </p>
         </section>
       )}
 
-      {governanceTag && subjectId && (
+      {governanceIntent && subjectId && (
         <TagGovernanceDialog
-          sourceTag={governanceTag}
-          suggestedTarget={stats.duplicateGroups
-            .find((group) => group.includes(governanceTag))
-            ?.find((tag) => tag !== governanceTag)}
+          sourceTag={governanceIntent.sourceTag}
+          suggestedTarget={governanceIntent.suggestedTarget}
           existingTags={summaries.map((summary) => summary.tag)}
           subjectId={subjectId}
-          onClose={() => setGovernanceTag(null)}
+          onClose={() => setGovernanceIntent(null)}
           onCreated={(action) => {
             setLocalAction(action);
             setActionError(null);

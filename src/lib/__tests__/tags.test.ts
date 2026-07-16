@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildTagReviewQueue,
   filterPagesByTags,
+  filterTagReviewQueue,
   filterTagSummaries,
   findPotentialDuplicateGroups,
   relatedTags,
@@ -84,6 +86,89 @@ describe('标签目录分析', () => {
 
     expect(groups).toHaveLength(1);
     expect(new Set(groups[0])).toEqual(new Set(['Game Design', 'game-design', 'game_design']));
+  });
+});
+
+describe('标签清理队列', () => {
+  it('格式变体优先选择使用页数更多的标签作为合并目标', () => {
+    const queue = buildTagReviewQueue([
+      page('a', ['Game Design']),
+      page('b', ['Game Design']),
+      page('c', ['game-design']),
+      page('d', ['game_design']),
+    ]);
+
+    expect(queue.variantGroups).toHaveLength(1);
+    expect(queue.variantGroups[0].canonical.tag).toBe('Game Design');
+    expect(queue.variantGroups[0].variants.map((item) => item.tag)).toEqual([
+      'game_design',
+      'game-design',
+    ]);
+  });
+
+  it('使用次数相同时优先选择小写 kebab-case 标签', () => {
+    const queue = buildTagReviewQueue([
+      page('a', ['Game Design']),
+      page('b', ['game-design']),
+      page('c', ['game_design']),
+    ]);
+
+    expect(queue.variantGroups[0].canonical.tag).toBe('game-design');
+  });
+
+  it('格式变体不会重复进入单次标签分区', () => {
+    const queue = buildTagReviewQueue([
+      page('a', ['Game Design']),
+      page('b', ['game-design']),
+      page('c', ['standalone']),
+    ]);
+
+    expect(queue.singletonTags.map((item) => item.tag)).toEqual(['standalone']);
+  });
+
+  it('未标记分区排除 meta 页面并按最近更新时间排序', () => {
+    const queue = buildTagReviewQueue([
+      { ...page('old', []), updatedAt: '2026-01-02' },
+      { ...page('new', []), updatedAt: '2026-01-04' },
+      { ...page('index', [META_TAG]), updatedAt: '2026-01-05' },
+    ]);
+
+    expect(queue.untaggedPages.map((item) => item.slug)).toEqual(['new', 'old']);
+  });
+
+  it('问题数按待合并变体、单次标签和未标记页面逐项计算', () => {
+    const queue = buildTagReviewQueue([
+      page('a', ['Game Design']),
+      page('b', ['game-design']),
+      page('c', ['game_design']),
+      page('d', ['standalone']),
+      page('e', []),
+    ]);
+
+    expect(queue.issueCount).toBe(4);
+  });
+
+  it('搜索格式变体任一成员时保留完整分组上下文', () => {
+    const queue = buildTagReviewQueue([
+      page('a', ['Game Design']),
+      page('b', ['game-design']),
+    ]);
+
+    const filtered = filterTagReviewQueue(queue, 'Game Design');
+    expect(filtered.variantGroups[0].canonical.tag).toBe('game-design');
+    expect(filtered.variantGroups[0].variants.map((item) => item.tag)).toEqual(['Game Design']);
+  });
+
+  it('搜索可命中单次标签关联页面文本和未标记页面文本', () => {
+    const queue = buildTagReviewQueue([
+      { ...page('solo-page', ['solo']), title: 'Unique reference' },
+      { ...page('untagged', []), summary: 'Needs classification' },
+    ]);
+
+    expect(filterTagReviewQueue(queue, 'unique').singletonTags.map((item) => item.tag))
+      .toEqual(['solo']);
+    expect(filterTagReviewQueue(queue, 'classification').untaggedPages.map((item) => item.slug))
+      .toEqual(['untagged']);
   });
 });
 
