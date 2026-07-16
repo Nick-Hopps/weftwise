@@ -23,11 +23,11 @@
 | `context-panel-sheet.tsx` | 移动端抽屉版本（off-canvas） |
 | `context-panel-context-tab.tsx` | "上下文"Tab：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
 | `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface`，发问 body 含 subjectId |
-| `settings-dialog.tsx` | 🔀 两栏式 Settings 弹窗容器（`max-w-3xl` + 固定高度）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `appearance`）+ Esc/遮罩关闭；左 `<SettingsNav>` + 右 `<SettingsContent>` |
-| `settings-nav.tsx` | 🆕 左侧分类导航栏（遍历 `SETTINGS_CATEGORIES`，选中高亮 `bg-accent-subtle`/`aria-current`，点击经 `onSelect` 切换） |
-| `settings-content.tsx` | 右内容区：按 `active` 渲染设置 panel，复用 `settings-rows` 原语；Maintenance 支持 `All projects` 或多 Subject 范围并同步刷新状态统计；服务端 `app_settings` 唯一真实源，不写 Zustand |
-| `settings-categories.ts` | 🆕 分类元数据单一来源：`CategoryId` 类型 + `SETTINGS_CATEGORIES`(id/label/icon) + `DEFAULT_CATEGORY`，被 dialog/nav/content 共用避免循环依赖 |
-| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow（行级保存状态） |
+| `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
+| `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
+| `settings-content.tsx` | 按一级入口组合原有设置 section；Automation 同页收纳 Agents / Web search / Maintenance，复用 `settings-rows` 即时保存原语 |
+| `settings-categories.ts` | 一级入口与 section 映射单一来源：`SETTINGS_CATEGORIES` + `SETTINGS_SECTIONS` + `DEFAULT_CATEGORY`，避免导航和内容漂移 |
+| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow；窄屏自动切换为上下布局 |
 
 ### `ui/` — 设计系统
 
@@ -180,6 +180,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Settings 一级入口由 8 项精简为 General / Personalization / Automation / Usage 四组，原模块改为组内 section；About 移到导航底部；弹窗与设置行增加移动端横向导航和上下布局 |
 | 2026-07-16 | Tags Review 接入服务端治理审批：列表行省略号打开 Rename/Merge/Delete 表单，创建预览后在主工作区展示可恢复的 PendingActionCard；批准终态刷新 pages/history/search/graph，重复工作台审批由服务端 action 恢复 |
 | 2026-07-16 | Tags 升级为标签工作台：默认列表取代词云，增加覆盖率/单次标签/格式变体统计、标签与关联页面搜索、三种排序和 Review 视图；详情页支持相关标签组合筛选、AND/OR、页面摘要/时间/其他标签，并将所有筛选状态写入 URL |
 | 2026-07-16 | 重设计 Mermaid 图表：新增浅/深色 `base` 主题、紧凑节点/曲线参数、主节点与边标签层级；主题切换自动重绘；Diagram callout 改为无灰底的上下分隔图解区并压低图注层级 |
