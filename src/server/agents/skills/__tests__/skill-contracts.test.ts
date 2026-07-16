@@ -33,10 +33,10 @@ describe('ingest-writer skill 契约（v6 讲解者）', () => {
   });
 });
 
-describe('ingest-enricher skill 契约（v5 学习脚手架 + 图片生图工具）', () => {
+describe('ingest-enricher skill 契约（v6 学习脚手架 + 可信图片工具）', () => {
   const src = readSkill('ingest-enricher');
-  it('版本抬到 5', () => {
-    expect(versionOf(src)).toBe(5);
+  it('版本抬到 6', () => {
+    expect(versionOf(src)).toBe(6);
   });
   it('移除 intuition / example 两类（已属 writer 正文）', () => {
     expect(src).not.toContain('[!intuition]');
@@ -54,10 +54,17 @@ describe('ingest-enricher skill 契约（v5 学习脚手架 + 图片生图工具
     expect(src).toContain('B["极小多项式 p(z)"]');
     expect(src).toMatch(/行尾/);
   });
-  it('声明图片生图工具并允许按需多次调用', () => {
+  it('声明图片生图工具且页面身份由运行时注入', () => {
     expect(src).toContain('image.generate');
     expect(src).toMatch(/as many times|多次/i);
     expect(src).toContain('Markdown image');
+    expect(src).not.toContain('Provide the current `pageSlug`');
+  });
+  it('视觉主题无位图时必须生成，已有位图不重复，流程关系仍优先 Mermaid', () => {
+    expect(src).toMatch(/spatial|visual appearance/i);
+    expect(src).toMatch(/MUST call `image\.generate` at least once/);
+    expect(src).toMatch(/already contains.*raster image/i);
+    expect(src).toMatch(/flow|relation/i);
   });
 });
 

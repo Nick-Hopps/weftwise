@@ -101,15 +101,15 @@ export interface ToolContext {
   linkEnsure?(input: LinkEnsureInput): Promise<LinkEnsureResult>;
   /** query 侧只读联网检索（Tavily）；工具集只在 web search 已配置时才含 web.search，未配置时不会被调用。 */
   webSearch?(query: string): Promise<Array<{ title: string; url: string; snippet: string }>>;
-  /** ingest enrich 专用生图能力；图片会暂存到当前 changeset。 */
+  /** ingest / re-enrich 的 enricher 专用生图能力；图片会暂存到当前 changeset。 */
   generateImage?(input: ImageGenerateInput): Promise<ImageGenerateOutput>;
 }
 
-/** 从 AgentContext 构造 ingest 侧 ToolContext：读/搜走 overlay（含本 job 暂存页），列举走 pagesRepo。 */
-export function agentToolContext(agentCtx: AgentContext): ToolContext {
+/** 从 AgentContext 构造流水线 ToolContext：读/搜走 overlay，生图仅在传入可信当前页时注入。 */
+export function agentToolContext(agentCtx: AgentContext, currentPageSlug?: string): ToolContext {
   const subjectSlug = agentCtx.subject.slug;
   const evidence = createSubjectEvidenceReader(agentCtx.subject);
-  return {
+  const context: ToolContext = {
     subject: agentCtx.subject,
     async readPage(slug) {
       const res = await agentCtx.overlay.readPage(subjectSlug, slug);
@@ -125,7 +125,9 @@ export function agentToolContext(agentCtx: AgentContext): ToolContext {
       return evidence.listPages(input, options);
     },
     emit: (type, message, data) => agentCtx.emit(type, message, data),
-    generateImage: async (input) => {
+  };
+  if (currentPageSlug) {
+    context.generateImage = async (input) => {
       const { output, asset } = await generateImageAsset(input, subjectSlug, (usage) => {
         agentCtx.budget?.chargeTokens((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0));
       });
@@ -136,12 +138,13 @@ export function agentToolContext(agentCtx: AgentContext): ToolContext {
         contentEncoding: 'base64' as const,
         auxiliary: true as const,
         auxiliaryKind: 'asset' as const,
-        assetFor: input.pageSlug,
+        assetFor: currentPageSlug,
       };
       const existing = agentCtx.pending.entries.findIndex((entry) => entry.path === assetEntry.path);
       if (existing >= 0) agentCtx.pending.entries[existing] = assetEntry;
       else agentCtx.pending.entries.push(assetEntry);
       return output;
-    },
-  };
+    };
+  }
+  return context;
 }

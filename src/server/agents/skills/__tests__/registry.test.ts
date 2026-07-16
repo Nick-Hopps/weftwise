@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { retireBuiltinSkillFiles, upgradeBuiltinSkillFiles } from '../registry';
 import { loadSkillsFromDir } from '../loader';
+import { BUILTIN_UPGRADE_HASHES } from '../builtin-manifest';
 
 const FIXTURE = join(__dirname, 'fixtures', 'ingest-indexer-v1.md');
 
@@ -28,6 +29,12 @@ function sha256(content: string): string {
 }
 
 describe('upgradeBuiltinSkillFiles', () => {
+  it('允许把未修改的 ingest-enricher v5 自动升级到 v6', () => {
+    expect(BUILTIN_UPGRADE_HASHES['ingest-enricher']).toContain(
+      'f44633a47747a8628768182ea951d064906477f54445ace2dfb5488cf903f396',
+    );
+  });
+
   it('只升级 hash 精确匹配的历史内置原版', () => {
     const { vaultDir, skillsDir } = makeVault();
     const examplesDir = mkdtempSync(join(tmpdir(), 'builtin-skill-examples-'));

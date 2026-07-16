@@ -159,7 +159,7 @@ Worker 启动时（`worker-entry.ts`）由 `buildSkillRegistry()` 将 `examples/
 | `builtin/wiki-metadata-patch.ts` | `wiki.metadata.patch` — 只改 title/summary/tags/aliases，正文逐字保留（`sideEffect:'update'`，仅 Curate profile） |
 | `builtin/wiki-link-ensure.ts` | `wiki.link.ensure` — 对 source 页维护唯一一个 link/unlink/retarget，target 只验证不写入（`sideEffect:'update'`，Fix/Curate profile） |
 | `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
-| `builtin/image-generate.ts` | `image.generate` — enrich 专用真实图片工具；通过 `ingest:image` 路由返回 PNG/JPEG/WebP，并把 asset 与页面一起提交 |
+| `builtin/image-generate.ts` | `image.generate` — enrich 专用真实图片工具；页面 slug 由 enricher 运行时可信注入，模型只提供视觉需求；通过显式 Google `ingest:image` 路由返回 PNG/JPEG/WebP，并把 UUID 命名 asset 与页面一起提交 |
 | `builtin/wiki-preview-change.ts` | `wiki.preview_change` — 生成 create/update/patch/delete/reenrich/metadata-patch/link-ensure 审批预览（`sideEffect:'propose'`，仅 `query:propose`）；返回 actionId，不执行 Saga 或入队 |
 | `builtin/wiki-move.ts` | `wiki.move` — 生成当前 Subject 页面 canonical slug/path 迁移审批预览（`sideEffect:'propose'`，仅 `query:propose`）；不直接移动文件或写数据库 |
 
@@ -329,6 +329,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 修复 re-enrich 生图可靠性：`image.generate` 移除模型提供的 ASCII `pageSlug`，改由运行时绑定 Unicode 页面身份；asset 使用 UUID 文件名；非 Google `ingest:image` 路由 fail-fast；enricher v6 对视觉主题无现有位图时明确生图，并允许未修改 v5 自动升级 |
 | 2026-07-16 | 内置 skill 升级加入 SHA-256 白名单：worker 启动时仅自动替换精确匹配历史原版的 vault 副本，用户改版继续保留；`ingest-enricher` v4 原版可安全迁移到当前 v5 |
 | 2026-07-16 | enrich 工具 Phase：新增 `image.generate`（PNG/JPEG/WebP）、asset changeset 与 `/api/assets` 读取接口；`ingest:enricher` 切换组合路径，独立 `ingest:image` 路由默认使用 Gemini 3.1 Flash Image |
 | 2026-07-14 | 页面身份迁移 Phase 3D：registry 增加 `wiki.move`，只进入 `query:propose` 并生成 PendingAction；Query 仍无直接文件、数据库或 git 写权限 |
