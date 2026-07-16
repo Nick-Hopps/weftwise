@@ -143,6 +143,20 @@ describe('validateChangeset', () => {
     ]);
   });
 
+  it('图片资产允许关联规范化的 Unicode 页面 slug', () => {
+    const cs = makeChangeset([{
+      action: 'create',
+      path: 'assets/general/asset-id.jpg',
+      content: 'aW1hZ2U=',
+      contentEncoding: 'base64',
+      auxiliary: true,
+      auxiliaryKind: 'asset',
+      assetFor: '3d图形学基础',
+    }]);
+
+    expect(validateChangeset(cs)).toEqual({ valid: true, errors: [], warnings: [] });
+  });
+
   it('movedFromPath 必须是同 Subject 匹配 delete 的 create marker', () => {
     const valid = makeChangeset([
       {
