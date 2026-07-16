@@ -254,7 +254,7 @@ export function OperationList() {
             {entries.map((entry) => <MobileRow key={entry.id} entry={entry} />)}
           </ul>
 
-          <div className="hidden h-[calc(100vh-270px)] min-h-[480px] max-h-[720px] overflow-hidden border-y border-border-subtle md:grid md:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="hidden border-y border-border-subtle md:grid md:grid-cols-[320px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-r border-border-subtle" aria-label="Operations">
               <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur-sm">
                 <h2 className="text-xs font-semibold text-foreground-secondary">Operations</h2>
