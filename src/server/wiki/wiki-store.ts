@@ -150,14 +150,18 @@ export function legacyScanSlug(entry: ScannedPage): string {
  * Each entry's `path` is relative to the vault root (e.g. `"wiki/general/my-page.md"`).
  * Parent directories are created automatically.
  */
-export function writeVaultFiles(entries: { path: string; content: string }[]): void {
+export function writeVaultFiles(entries: { path: string; content: string; contentEncoding?: 'utf8' | 'base64' }[]): void {
   for (const entry of entries) {
     const fullPath = vaultPath(entry.path);
     const dir = path.dirname(fullPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(fullPath, entry.content, 'utf-8');
+    if (entry.contentEncoding === 'base64') {
+      fs.writeFileSync(fullPath, Buffer.from(entry.content, 'base64'));
+    } else {
+      fs.writeFileSync(fullPath, entry.content, 'utf-8');
+    }
   }
 }
 
@@ -191,6 +195,21 @@ export function deleteVaultFile(relativePath: string): void {
   if (fs.existsSync(fullPath)) {
     fs.unlinkSync(fullPath);
   }
+}
+
+/** Read a generated subject asset without allowing path traversal. */
+export function readVaultAsset(
+  subjectSlug: string,
+  filename: string,
+): { data: Buffer; contentType: string } | null {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(subjectSlug) || !/^[A-Za-z0-9][A-Za-z0-9._-]*\.(?:png|jpe?g|webp)$/i.test(filename)) {
+    return null;
+  }
+  const fullPath = vaultPath('assets', subjectSlug, filename);
+  if (!fs.existsSync(fullPath)) return null;
+  const ext = path.extname(filename).toLowerCase();
+  const contentType = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  return { data: fs.readFileSync(fullPath), contentType };
 }
 
 export { buildWikiPath };
