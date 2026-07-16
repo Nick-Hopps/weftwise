@@ -23,11 +23,11 @@
 | `context-panel-sheet.tsx` | 移动端抽屉版本（off-canvas） |
 | `context-panel-context-tab.tsx` | "上下文"Tab：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
 | `context-panel-chat-tab.tsx` | "对话"Tab：内嵌 `chat-interface`，发问 body 含 subjectId |
-| `settings-dialog.tsx` | 🔀 两栏式 Settings 弹窗容器（`max-w-3xl` + 固定高度）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `appearance`）+ Esc/遮罩关闭；左 `<SettingsNav>` + 右 `<SettingsContent>` |
-| `settings-nav.tsx` | 🆕 左侧分类导航栏（遍历 `SETTINGS_CATEGORIES`，选中高亮 `bg-accent-subtle`/`aria-current`，点击经 `onSelect` 切换） |
-| `settings-content.tsx` | 右内容区：按 `active` 渲染设置 panel，复用 `settings-rows` 原语；Maintenance 支持 `All projects` 或多 Subject 范围并同步刷新状态统计；服务端 `app_settings` 唯一真实源，不写 Zustand |
-| `settings-categories.ts` | 🆕 分类元数据单一来源：`CategoryId` 类型 + `SETTINGS_CATEGORIES`(id/label/icon) + `DEFAULT_CATEGORY`，被 dialog/nav/content 共用避免循环依赖 |
-| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow（行级保存状态） |
+| `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
+| `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
+| `settings-content.tsx` | 按一级入口组合原有设置 section；Automation 同页收纳 Agents / Web search / Maintenance，复用 `settings-rows` 即时保存原语 |
+| `settings-categories.ts` | 一级入口与 section 映射单一来源：`SETTINGS_CATEGORIES` + `SETTINGS_SECTIONS` + `DEFAULT_CATEGORY`，避免导航和内容漂移 |
+| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow；窄屏自动切换为上下布局 |
 
 ### `ui/` — 设计系统
 
@@ -61,7 +61,7 @@
 ### `chat/`
 
 - `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label，cancel 与同步页面写入不误报为新任务
-- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/页面 move/History 回滚/工作流标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；move 明确提示旧链接 alias 兼容，Research start 提醒候选二次审批，cancel 显示终止语义；刷新不会丢卡片，也不会把聊天回复当批准
+- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/页面 move/标签批量治理/History 回滚/工作流标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；受影响页面默认只显示前 8 条并汇总余量；move 明确提示旧链接 alias 兼容，Research start 提醒候选二次审批，cancel 显示终止语义
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
@@ -79,6 +79,7 @@
 - `tags-index-view.tsx` —— 标签目录工作台：聚合当前 Subject 页面元数据，展示覆盖率/单次标签/格式变体统计，支持按标签或关联页面搜索、使用次数/名称/更新时间排序，以及 All/Review 范围切换；状态同步到 URL
 - `tag-pages-view.tsx` —— 标签组合浏览：单标签页面列表扩展为摘要/更新时间/关联标签视图，相关标签可叠加为 `with` 条件并在 `Match all / Match any` 间切换；搜索、排序、组合条件同步到 URL
 - `use-tag-search-params.ts` / `tags-route-fallback.tsx` —— 两个 Tags 路由共用的 URL 状态更新器与 Suspense 加载态
+- `tag-governance-dialog.tsx` / `tag-governance-state.ts` —— Rename/Merge/Delete 意图表单与工作台审批恢复逻辑；表单只请求服务端预览，批准/拒绝复用 PendingActionCard 和通用审批 API
 
 ### `health/`
 
@@ -179,6 +180,8 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Settings 一级入口由 8 项精简为 General / Personalization / Automation / Usage 四组，原模块改为组内 section；About 移到导航底部；弹窗与设置行增加移动端横向导航和上下布局 |
+| 2026-07-16 | Tags Review 接入服务端治理审批：列表行省略号打开 Rename/Merge/Delete 表单，创建预览后在主工作区展示可恢复的 PendingActionCard；批准终态刷新 pages/history/search/graph，重复工作台审批由服务端 action 恢复 |
 | 2026-07-16 | Tags 升级为标签工作台：默认列表取代词云，增加覆盖率/单次标签/格式变体统计、标签与关联页面搜索、三种排序和 Review 视图；详情页支持相关标签组合筛选、AND/OR、页面摘要/时间/其他标签，并将所有筛选状态写入 URL |
 | 2026-07-16 | 重设计 Mermaid 图表：新增浅/深色 `base` 主题、紧凑节点/曲线参数、主节点与边标签层级；主题切换自动重绘；Diagram callout 改为无灰底的上下分隔图解区并压低图注层级 |
 | 2026-07-16 | 整体布局与阅读体验优化：移动导航默认关闭；桌面侧栏/上下文面板改为 264/400px；首页统计与最近页面去卡片化；阅读页收窄至 780px、合并重复 H1、压缩元数据、增加滚动进度并修复窄屏工具提示导致的横向溢出 |

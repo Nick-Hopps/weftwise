@@ -17,6 +17,7 @@ const pageMocks = vi.hoisted(() => ({
   planUpdatePageInSubject: vi.fn(), planPatchPageInSubject: vi.fn(),
   planMetadataPatchInSubject: vi.fn(), planLinkEnsureInSubject: vi.fn(),
   planMovePageInSubject: vi.fn(),
+  planTagBatchInSubject: vi.fn(),
 }));
 vi.mock('../page-write', () => pageMocks);
 const applyMocks = vi.hoisted(() => ({
@@ -93,6 +94,7 @@ beforeEach(() => {
   pageMocks.planMetadataPatchInSubject.mockResolvedValue({ ...pagePlan, operation: 'metadata-patch' });
   pageMocks.planLinkEnsureInSubject.mockResolvedValue({ ...pagePlan, operation: 'link-ensure' });
   pageMocks.planMovePageInSubject.mockResolvedValue({ ...pagePlan, operation: 'move' });
+  pageMocks.planTagBatchInSubject.mockResolvedValue({ ...pagePlan, operation: 'tag-batch' });
   applyMocks.applyPlannedPageOperation.mockResolvedValue({ operationId: 'op-1' });
   historyMocks.planHistoryRevert.mockResolvedValue({
     originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'op-revert' },
@@ -133,6 +135,38 @@ describe('approvePendingAction', () => {
     });
     expect(repoMocks.markApplied).not.toHaveBeenCalled();
     expect(result.status).toBe('applied');
+  });
+
+  it('无 conversation 的 tag-batch 仍校验 hash、重规划并走同一 apply/finalize', async () => {
+    const tagPayload = {
+      action: 'merge', sourceTag: 'old', targetTag: 'canonical',
+      effectiveAt: '2026-07-11T00:00:00.000Z',
+    };
+    const tagRecord = record('pending', {
+      conversationId: null,
+      operation: 'tag-batch',
+      payloadJson: canonicalJson(tagPayload),
+      payloadHash: hashPendingActionPayload({
+        conversationId: null, subjectId: 's1', operation: 'tag-batch', payload: tagPayload,
+      }),
+    });
+    repoMocks.getScoped
+      .mockReturnValueOnce(tagRecord)
+      .mockReturnValueOnce({ ...tagRecord, status: 'applied', operationId: 'op-1' });
+    repoMocks.claimApproval.mockReturnValue({ ...tagRecord, status: 'approved' });
+
+    const result = await approvePendingAction({ id: 'a1', subject, now });
+
+    expect(pageMocks.planTagBatchInSubject).toHaveBeenCalledWith(
+      subject,
+      { action: 'merge', sourceTag: 'old', targetTag: 'canonical' },
+      tagPayload.effectiveAt,
+    );
+    expect(applyMocks.applyPlannedPageOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ operation: 'tag-batch' }),
+    );
+    expect(finalizerMocks.finalizeAppliedPageAction).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ operation: 'tag-batch', status: 'applied' });
   });
 
   it('HEAD 变化时刷新预览并要求重新批准', async () => {

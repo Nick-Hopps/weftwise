@@ -85,7 +85,7 @@
 
 ### `pending-actions-repo.ts`
 
-审批闭环持久化与原子状态流转：记录服务端规范化 payload/hash、预览、TTL 和执行引用。`claimApproval`/`claimExecution`/`rejectPending`/`markApplied`/`markFailed` 均用条件 UPDATE 防并发双消费；worker 每分钟过期 pending、恢复中断的 approved/executing，并清理 30 天前终态记录。
+审批闭环持久化与原子状态流转：记录服务端规范化 payload/hash、预览、TTL 和执行引用。Chat action 带 `conversation_id`，Tags 工作台 `tag-batch` 使用 NULL conversation；`createTagBatchPendingAction` 以单条 INSERT/NOT EXISTS 原子限制每 Subject 一个进行中治理操作。`claimApproval`/`claimExecution`/`rejectPending`/`markApplied`/`markFailed` 均用条件 UPDATE 防并发双消费；worker 每分钟过期 pending、恢复中断的 approved/executing，并清理 30 天前终态记录。
 
 ### `embeddings-repo.ts` 🆕
 
@@ -155,7 +155,7 @@
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
-| `pending_actions` | `id` | `conversation_id`/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面或 History inverse Saga，`job_id` 指向已批准的 workflow；operation CHECK 含 `move/history-revert/workflow-*` |
+| `pending_actions` | `id` | `conversation_id` 可空（Chat 有值，Tags 工作台为空）/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面或 History inverse Saga，`job_id` 指向已批准的 workflow；operation CHECK 含 `tag-batch/move/history-revert/workflow-*` |
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
 | `research_backlog` | `id` | `subject_id` FK CASCADE；`question` + `source`('ask-ai'\|'manual') + `status`('open'\|'researched'\|'dismissed') + `research_job_id`（nullable）；同 subject 内 open 项按归一化 question 去重（`research-backlog-repo.create`） |
@@ -218,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | pending_actions 支持工作台来源：`conversation_id` 改可空、CHECK 增 `tag-batch`，Drizzle 0008 与启动期结构化 PRAGMA 检测均原子重建并保留历史；repo 增 Subject-scoped TagBatch 创建/恢复/在途去重 |
 | 2026-07-16 | `settings-repo` 新增 `maintenanceScope` JSON key（`all` 或非空 Subject ID 集合，旧配置默认 all）；`maturity-repo.listDue/countDue` 支持同口径 Subject 范围过滤 |
 | 2026-07-15 | `research-provenance-repo` 新增 failed child Ingest 原位重试事务：校验 run/approval/candidate/source/job lineage 后同步恢复 jobs、delivery、run，保留 checkpoint 与 attempt history；取消或 verification 后状态 fail-closed |
 | 2026-07-15 | Research finding run 停止创建 verification lint；repo 支持 `verificationJobId=null` 时从 importing 原子物化目标化 postcondition，旧 verifying run 仍可按既有 job ID 完成；已物化验证结果禁止误走导入重试 |

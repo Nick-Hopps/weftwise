@@ -97,13 +97,16 @@ export function SettingsDialog() {
       onClick={(e) => {
         if (e.target === e.currentTarget) close();
       }}
-      className="fixed inset-0 z-command flex items-start justify-center pt-[15vh] bg-overlay/40 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-command flex items-center justify-center bg-overlay/40 p-2 backdrop-blur-sm animate-fade-in sm:items-start sm:p-0 sm:pt-[10vh]"
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-dialog-title"
-        className="flex h-[70vh] max-h-[560px] w-full max-w-3xl mx-4 flex-col bg-surface rounded-lg shadow-lg border border-border overflow-hidden animate-slide-down"
+        className={
+          'flex h-[calc(100dvh-1rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-surface shadow-lg animate-slide-down ' +
+          'sm:mx-4 sm:h-[78vh] sm:max-h-[680px]'
+        }
       >
         <div className="flex items-center justify-between h-12 shrink-0 px-4 border-b border-border">
           <h2 id="settings-dialog-title" className="text-sm font-semibold text-foreground">
@@ -114,7 +117,7 @@ export function SettingsDialog() {
           </IconButton>
         </div>
 
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
           <SettingsNav active={active} onSelect={setActive} />
 
           <SettingsContent

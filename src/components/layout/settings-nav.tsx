@@ -1,13 +1,9 @@
 'use client';
 
-/**
- * SettingsNav —— 两栏式 Settings 的左侧分类导航栏。
- * 纯展示：遍历 SETTINGS_CATEGORIES 渲染按钮列表，选中项高亮，
- * 点击经 onSelect 回传给 SettingsDialog 切换右侧内容。
- */
+/** 四个任务导向入口：桌面为侧栏，移动端为横向分类导航。 */
 
 import { cn } from '@/lib/cn';
-import { SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
+import { APP_VERSION, SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
 
 interface SettingsNavProps {
   active: CategoryId;
@@ -18,33 +14,43 @@ export function SettingsNav({ active, onSelect }: SettingsNavProps) {
   return (
     <nav
       aria-label="Settings categories"
-      className="w-44 shrink-0 overflow-y-auto border-r border-border bg-subtle/40 p-2"
+      className={cn(
+        'flex shrink-0 flex-col border-b border-border bg-subtle/40 px-2 py-1.5',
+        'md:w-48 md:border-b-0 md:border-r md:p-3',
+      )}
     >
-      <ul className="space-y-0.5">
-        {SETTINGS_CATEGORIES.map((cat) => {
-          const Icon = cat.icon;
-          const isActive = cat.id === active;
+      <ul className="flex gap-0.5 overflow-x-auto md:block md:space-y-1 md:overflow-visible">
+        {SETTINGS_CATEGORIES.map((category) => {
+          const Icon = category.icon;
+          const isActive = category.id === active;
           return (
-            <li key={cat.id}>
+            <li key={category.id} className="shrink-0 md:w-full">
               <button
                 type="button"
-                onClick={() => onSelect(cat.id)}
+                onClick={() => onSelect(category.id)}
                 aria-current={isActive ? 'page' : undefined}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm',
-                  'transition-colors duration-fast ease-standard focus-ring',
+                  'group flex min-h-9 items-center gap-2 rounded-md px-2 text-left focus-ring',
+                  'transition-colors duration-fast ease-standard md:w-full md:px-2.5',
                   isActive
-                    ? 'bg-accent-subtle text-accent-strong font-medium'
+                    ? 'bg-accent-subtle text-accent-strong'
                     : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{cat.label}</span>
+                <Icon className="hidden h-4 w-4 shrink-0 md:block" aria-hidden />
+                <span className="block text-sm font-medium">{category.label}</span>
               </button>
             </li>
           );
         })}
       </ul>
+
+      <div className="mt-auto hidden border-t border-border px-2 pt-3 md:block">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-xs font-medium text-foreground-secondary">Agentic Wiki</span>
+          <span className="text-[11px] tabular-nums text-foreground-tertiary">v{APP_VERSION}</span>
+        </div>
+      </div>
     </nav>
   );
 }

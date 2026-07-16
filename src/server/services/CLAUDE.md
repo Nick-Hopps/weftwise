@@ -80,9 +80,9 @@ worker-entry.ts
 - `createAccessedPages()` — 创建 `AccessedPages` 对象（active 页面 `meta/bodies` + 以 `subjectSlug\0slug` 为键的 `crossMeta/crossBodies` + `sourceRefs`）；跨 Subject 同名 slug 不碰撞，来源正文/excerpt 不进入引用上下文。
 - `accessedToContext(subject, accessed)` — 把已访问页转为 `QueryContextPage[]` 供引用生成。
 
-### `pending-action-service.ts` — 对话写入审批状态机
+### `pending-action-service.ts` — 持久化写入审批状态机
 
-创建预览时以 strict schema 规范化并哈希服务端 payload，页面/move/History/workflow 均只生成 plan；批准前不创建或取消 job。批准时原子 claim、复算 hash 与同一 plan，HEAD 变化会刷新 preview 并要求重新批准。页面、move 与 History 仍走 Saga；workflow start 的 job insert + action applied、workflow cancel 的 job 终止 + action applied 分别在同一 SQLite IMMEDIATE transaction 中提交，失败整体回滚。取消提交后再发送 `job:cancelled` 并 best-effort 对账 Research provenance。`pending_actions.operation` CHECK 同步提供 Drizzle 迁移与启动期原子兼容重建，保留历史行并拒绝未知 operation。该能力复用现有 `query` LLM task，不新增模型路由，因此 `llm-config.example.json` 无需更新。
+创建预览时以 strict schema 规范化并哈希服务端 payload，页面/move/History/workflow/TagBatch 均只生成 plan；批准前不创建或取消 job、不写 Vault。Chat action 绑定 conversation，Tags 工作台 action 以 NULL conversation 按 Subject 恢复；TagBatch 使用独立 schema，不扩张 Query 的 `wiki.preview_change` 工具面。批准时原子 claim、复算 hash 与同一 plan，HEAD 变化会刷新 preview 并要求重新批准。页面、move、TagBatch 与 History 仍走 Saga；workflow start 的 job insert + action applied、workflow cancel 的 job 终止 + action applied 分别在同一 SQLite IMMEDIATE transaction 中提交，失败整体回滚。取消提交后再发送 `job:cancelled` 并 best-effort 对账 Research provenance。`pending_actions.operation` CHECK 同步提供 Drizzle 迁移与启动期原子兼容重建，保留历史行并拒绝未知 operation。该能力复用现有 `query` LLM task，不新增模型路由，因此 `llm-config.example.json` 无需更新。
 
 ### `lint-service.ts` — 任务类型 `'lint'`
 
@@ -300,6 +300,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Tags 工作台接入 `tag-batch` PendingAction：独立 strict schema、NULL conversation 的 Subject-scoped 恢复和原子在途去重；批准重算 Vault 标签计划并复用 expectedPreHead/Saga/finalizer，Query 工具 schema 保持不变 |
 | 2026-07-16 | Ask AI 单页 re-enrich 命令增加确定性控制面短路：解析当前页/显式 slug 后直接持久化 workflow PendingAction，复合句、教程、否定或缺目标仍走既有 Query 语义 |
 | 2026-07-16 | Maintenance sweep 接入全局 `maintenanceScope`：worker 读取 `all | subjects` 设置，调度器只从范围内到期页按既有 priority/上限入队，状态 API 与其保持同口径 |
 | 2026-07-16 | 修复 re-enrich 单页三阶段预算预扣误用完整 job 上限：复用 ingest 内容成本估算做启动前预检与每阶段预扣，避免首个 supplement 后稳定伪报 `3M + actual / 3M` |
