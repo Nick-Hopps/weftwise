@@ -34,7 +34,7 @@ function SectionHeading({
   return (
     <header className="mb-2 flex items-end justify-between gap-4">
       <div className="min-w-0">
-        <h2 id={id} className="text-xs font-medium uppercase tracking-wider text-foreground-tertiary">
+        <h2 id={id} className="text-xs font-semibold text-foreground-secondary">
           {title}
         </h2>
         <p className="mt-1 text-xs text-foreground-secondary">{description}</p>
