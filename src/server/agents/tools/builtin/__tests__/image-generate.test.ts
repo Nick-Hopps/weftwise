@@ -59,7 +59,24 @@ describe('image.generate', () => {
     expect(result.output).toMatchObject({ type: 'image', url: expect.stringMatching(/^\/api\/assets\/general\/[a-f0-9-]+\.png$/), alt: 'Geometric intuition' });
     expect(result.asset.path).toMatch(/^assets\/general\/[a-f0-9-]+\.png$/);
     expect(result.asset.content).toBe(Buffer.from(bytes).toString('base64'));
+    expect(result.asset.mediaType).toBe('image/png');
     expect(usage).toHaveBeenCalledWith({ inputTokens: 12, outputTokens: 3 });
+  });
+
+  it('把调用方 abort signal 传给图片模型', async () => {
+    const controller = new AbortController();
+    const bytes = new Uint8Array([1]);
+    mocks.generateText.mockResolvedValue({
+      files: [{ mediaType: 'image/png', base64: 'AQ==', uint8Array: bytes }],
+      usage: {},
+    });
+
+    await generateImageAsset({ prompt: 'x', alt: 'x' }, 'general', undefined, controller.signal);
+
+    const signal = mocks.generateText.mock.calls[0][0].abortSignal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    controller.abort();
+    expect(signal.aborted).toBe(true);
   });
 
   it('未注入 enrich 能力时明确拒绝', async () => {

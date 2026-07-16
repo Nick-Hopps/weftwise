@@ -298,6 +298,7 @@ export function deleteWithContents(
     sqlite.prepare(`DELETE FROM research_runs WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE subject_id = ?)`).run(id);
     sqlite.prepare(`DELETE FROM conversations WHERE subject_id = ?`).run(id);
+    sqlite.prepare(`DELETE FROM page_rendition_assets WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM page_renditions WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM page_maturity WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM page_embeddings WHERE subject_id = ?`).run(id);

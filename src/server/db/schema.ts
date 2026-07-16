@@ -273,9 +273,7 @@ export const userProfiles = sqliteTable('user_profiles', {
   updatedAt: text('updated_at').notNull(),
 });
 
-// 重塑缓存：一页一行，按 (canonical_hash, profile_version) 惰性失效。
-// 故意不挂 subjects FK —— 这是可随时丢弃重建的读侧派生缓存，
-// 由 renditions-repo.deleteBySubject + 命中校验自洽。
+// 重塑版本：每页保存最新一次成功产物；不挂 subjects FK，由 repo 显式级联清理。
 export const pageRenditions = sqliteTable(
   'page_renditions',
   {
@@ -288,6 +286,20 @@ export const pageRenditions = sqliteTable(
     updatedAt: text('updated_at').notNull(),
   },
   (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
+);
+
+// 重塑专属图片不进入 vault；与正文在同一 SQLite 事务内替换。
+export const pageRenditionAssets = sqliteTable(
+  'page_rendition_assets',
+  {
+    id: text('id').primaryKey(),
+    subjectId: text('subject_id').notNull(),
+    slug: text('slug').notNull(),
+    mediaType: text('media_type').notNull(),
+    dataBase64: text('data_base64').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => ({ pageIdx: index('page_rendition_assets_page_idx').on(t.subjectId, t.slug) }),
 );
 
 // 反馈信号（append-only，喂确定性 reducer）。

@@ -1,12 +1,13 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
-import { FileStack, Loader2, Pencil, Sparkles } from 'lucide-react';
+import { FileStack, Loader2, Pencil, RefreshCw, Sparkles, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton, iconButtonVariants } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 
-export type ReshapeState = 'idle' | 'loading' | 'reshaped' | 'unavailable';
+export type ReshapeState = 'idle' | 'loading' | 'refreshing' | 'reshaped' | 'unavailable';
 
 interface PageActionsProps {
   editHref: string;
@@ -78,16 +79,24 @@ interface ReshapeStatusProps {
   state: ReshapeState;
   showOriginal: boolean;
   onToggle: () => void;
+  onRefresh: () => void;
+  onCancel: () => void;
 }
 
 /** 正文上方的细状态行：加载中 / 已重塑（可切原文）/ 不可用。 */
-export function ReshapeStatus({ state, showOriginal, onToggle }: ReshapeStatusProps) {
+export function ReshapeStatus({ state, showOriginal, onToggle, onRefresh, onCancel }: ReshapeStatusProps) {
   return (
     <div className="mb-6 flex items-center gap-2 text-xs text-foreground-tertiary">
-      {state === 'loading' ? (
-        <span className="inline-flex items-center gap-1.5">
-          <Loader2 className="h-3 w-3 animate-spin" /> Reshaping…
-        </span>
+      {state === 'loading' || state === 'refreshing' ? (
+        <>
+          <span className="inline-flex items-center gap-1.5">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {state === 'refreshing' ? 'Refreshing reshape…' : 'Reshaping…'}
+          </span>
+          <Button intent="outline" size="sm" className="ml-auto" onClick={onCancel}>
+            <Square className="h-2.5 w-2.5 fill-current" aria-hidden /> Cancel
+          </Button>
+        </>
       ) : state === 'reshaped' ? (
         <>
           {showOriginal ? (
@@ -97,9 +106,14 @@ export function ReshapeStatus({ state, showOriginal, onToggle }: ReshapeStatusPr
               <Sparkles className="h-3 w-3 text-accent" /> Adapted for you
             </span>
           )}
-          <Button intent="outline" size="sm" className="ml-auto" onClick={onToggle}>
-            {showOriginal ? 'Show reshaped' : 'Show original'}
-          </Button>
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button intent="outline" size="sm" onClick={onRefresh}>
+              <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
+            </Button>
+            <Button intent="outline" size="sm" onClick={onToggle}>
+              {showOriginal ? 'Show reshaped' : 'Show original'}
+            </Button>
+          </div>
         </>
       ) : (
         <span className="inline-flex items-center gap-1.5">

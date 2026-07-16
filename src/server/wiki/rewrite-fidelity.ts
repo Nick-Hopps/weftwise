@@ -1,6 +1,6 @@
 /**
  * 统一保真护栏（T1.4）。
- * 四条"LLM 改写既有正文"路径（ingest merge-update / fix / reshape / re-enrich supplement）
+ * 三条会写回 canonical 的 LLM 改写路径（ingest merge-update / fix / re-enrich supplement）
  * 共用同一套确定性检查体，阈值集中在 FIDELITY_PROFILES，避免各路径各写一份、标准漂移。
  *
  * 检查项（每项由 profile 开关控制）：
@@ -30,7 +30,6 @@ export const FIDELITY_PROFILES = {
   supplement: { minLengthRatio: 0.95, linkRule: 'preserve', preserveHeadings: true, preserveFrontmatter: true },
   'merge-update': { minLengthRatio: 0.85, linkRule: 'preserve', preserveHeadings: true, preserveFrontmatter: false },
   fix: { minLengthRatio: 0.8, linkRule: 'preserve', preserveHeadings: false, preserveFrontmatter: false },
-  reshape: { minLengthRatio: 0.8, linkRule: 'subset', preserveHeadings: false, preserveFrontmatter: true },
 } as const satisfies Record<string, FidelityProfile>;
 
 export type FidelityProfileName = keyof typeof FIDELITY_PROFILES;

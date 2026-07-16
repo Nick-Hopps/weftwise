@@ -26,28 +26,41 @@ const base = {
 };
 
 describe('renditions-repo', () => {
-  it('命中：hash+version 都匹配才返回', async () => {
+  it('持久化最新成功版本，不因 canonical 或画像随后变化而隐藏', async () => {
     const repo = await import('../renditions-repo');
-    repo.upsertRendition(base);
-    expect(repo.getRendition('s1', 'a', 'h1', 1)).toBe('重塑版');
-    expect(repo.getRendition('s1', 'a', 'h2', 1)).toBeNull(); // canonical 变了
-    expect(repo.getRendition('s1', 'a', 'h1', 2)).toBeNull(); // 画像变了
+    repo.replaceRendition({ ...base, assets: [] });
+    expect(repo.getLatestRendition('s1', 'a')).toMatchObject({
+      renderedMd: '重塑版', canonicalHash: 'h1', profileVersion: 1,
+    });
   });
 
-  it('upsert 覆盖（一页一行）', async () => {
+  it('原子替换正文与图片，并删除上一版本图片', async () => {
     const repo = await import('../renditions-repo');
-    repo.upsertRendition(base);
-    repo.upsertRendition({ ...base, canonicalHash: 'h9', profileVersion: 5, renderedMd: '新版' });
-    expect(repo.getRendition('s1', 'a', 'h1', 1)).toBeNull();
-    expect(repo.getRendition('s1', 'a', 'h9', 5)).toBe('新版');
+    repo.replaceRendition({
+      ...base,
+      renderedMd: '旧版 ![](/api/rendition-assets/old)',
+      assets: [{ id: 'old', mediaType: 'image/png', dataBase64: 'b2xk' }],
+    });
+    repo.replaceRendition({
+      ...base,
+      canonicalHash: 'h9',
+      profileVersion: 5,
+      renderedMd: '新版 ![](/api/rendition-assets/new)',
+      assets: [{ id: 'new', mediaType: 'image/webp', dataBase64: 'bmV3' }],
+    });
+
+    expect(repo.getLatestRendition('s1', 'a')?.renderedMd).toContain('新版');
+    expect(repo.getRenditionAsset('old')).toBeNull();
+    expect(repo.getRenditionAsset('new')).toEqual({ mediaType: 'image/webp', dataBase64: 'bmV3' });
   });
 
   it('deleteBySubject 清空该 subject 缓存', async () => {
     const repo = await import('../renditions-repo');
-    repo.upsertRendition(base);
-    repo.upsertRendition({ ...base, subjectId: 's2' });
+    repo.replaceRendition({ ...base, assets: [{ id: 's1-asset', mediaType: 'image/png', dataBase64: 'YQ==' }] });
+    repo.replaceRendition({ ...base, subjectId: 's2', assets: [] });
     repo.deleteBySubject('s1');
-    expect(repo.getRendition('s1', 'a', 'h1', 1)).toBeNull();
-    expect(repo.getRendition('s2', 'a', 'h1', 1)).toBe('重塑版');
+    expect(repo.getLatestRendition('s1', 'a')).toBeNull();
+    expect(repo.getRenditionAsset('s1-asset')).toBeNull();
+    expect(repo.getLatestRendition('s2', 'a')?.renderedMd).toBe('重塑版');
   });
 });
