@@ -9,6 +9,12 @@ export const BUILTIN_SKILLS = {
   'reenrich-supplement': 'reenrich-supplement.md',
 } as const;
 
+export type BuiltinSkillId = keyof typeof BUILTIN_SKILLS;
+
+export const BUILTIN_UPGRADE_HASHES: Partial<Record<BuiltinSkillId, readonly string[]>> = {
+  'ingest-enricher': ['4285ea81232e1bf7b2a1c98671f200e6c4cfa09d6a8876dda676bf56d327a318'],
+};
+
 export const RETIRED_BUILTIN_SKILLS = ['ingest-indexer'] as const;
 
 export type RetiredBuiltinSkillId = (typeof RETIRED_BUILTIN_SKILLS)[number];
