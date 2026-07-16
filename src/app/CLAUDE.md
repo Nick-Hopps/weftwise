@@ -21,8 +21,8 @@
 | `(app)/health/page.tsx` | 🆕 知识库体检工作台：触发 lint（当前 subject / 全量）+ 摘要带 + 类型筛选 + 按严重度分组的紧凑 findings 列表 + 逐条/批量处置（含可折叠的自定义 Research 与页面底部 Research backlog）|
 | `(app)/history/page.tsx` | 🆕 操作时间线：当前 subject 写操作倒序（类型/受影响页/时间戳，仿 /health /tags），单次操作可展开查看 unified diff + 回滚按钮（前向 Saga 还原） |
 | `(app)/wiki/[...slug]/edit/page.tsx` | 🆕 页面在线编辑：`@uiw/react-md-editor` 编辑整文件 markdown，保存走 `PUT /api/pages`（Saga 重索引）后跳回读页 |
-| `(app)/tags/page.tsx` | 🆕 标签索引：列出当前 subject 所有 tag + 页计数（客户端聚合 /api/pages）|
-| `(app)/tags/[tag]/page.tsx` | 🆕 单标签页：列出带该 tag 的页 |
+| `(app)/tags/page.tsx` | 标签工作台：当前 Subject 标签覆盖统计、可搜索/排序目录和只读 Review 范围（单次标签 + 格式变体）|
+| `(app)/tags/[tag]/page.tsx` | 标签组合浏览：页面摘要列表、相关标签叠加、AND/OR、搜索与排序 |
 | `globals.css` | Tailwind + 自定义 CSS 变量（设计 token） |
 
 ## 对外接口 —— `src/app/api/*`
@@ -159,6 +159,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Tags 两路由升级为目录/组合浏览工作台，筛选状态 URL 化并增加 Suspense 加载边界；仍复用 subject-aware `/api/pages`，不新增写接口 |
 | 2026-07-16 | 明确的“重新丰富当前页面 / 重新丰富页面 `<slug>`”由 `/api/query` 确定性创建 workflow PendingAction，不再等待 Query LLM 首次 tool-call；仍须独立批准才入队 |
 | 2026-07-15 | 修正 `GET /api/lint/latest` 处置投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后均直接移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要 |
 | 2026-07-15 | `GET /api/lint/latest` 改为基于处置 postcondition 投影当前快照，fixed finding 直接移除；Health Fix/Tidy/Research 终态不再自动请求 `/api/lint`，显式 verification API 仅保留兼容 |

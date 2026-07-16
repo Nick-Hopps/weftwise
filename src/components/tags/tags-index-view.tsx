@@ -1,68 +1,238 @@
 'use client';
 
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Hash } from 'lucide-react';
+import { AlertTriangle, ArrowUpRight, Hash, Search } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
-import { aggregateTags, tagCloudWeights, shuffleTagsDeterministic } from '@/lib/tags';
+import {
+  filterTagSummaries,
+  sortTagSummaries,
+  summarizeTags,
+  tagStats,
+  type TagSort,
+} from '@/lib/tags';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Segmented } from '@/components/ui/segmented';
+import { Select } from '@/components/ui/select';
 import type { WikiPage } from '@/lib/contracts';
+import { cn } from '@/lib/cn';
+import { useTagSearchParams } from './use-tag-search-params';
+
+type DirectoryScope = 'all' | 'review';
+
+const SCOPE_OPTIONS = [
+  { value: 'all' as const, label: 'All' },
+  { value: 'review' as const, label: 'Review' },
+];
+
+function formatDate(value: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function Stat({ label, value, index }: { label: string; value: number | string; index: number }) {
+  return (
+    <div className={cn(
+      'min-w-0 border-border-subtle',
+      index === 0 && 'border-b border-r pb-3 pr-3 sm:border-b-0 sm:pb-0 sm:pl-0 sm:pr-5',
+      index === 1 && 'border-b pb-3 pl-3 sm:border-b-0 sm:border-r sm:px-5 sm:pb-0',
+      index === 2 && 'border-r pr-3 pt-3 sm:px-5 sm:pt-0',
+      index === 3 && 'pl-3 pt-3 sm:pl-5 sm:pr-0 sm:pt-0',
+    )}>
+      <dt className="truncate text-xs text-foreground-tertiary">{label}</dt>
+      <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">{value}</dd>
+    </div>
+  );
+}
 
 export function TagsIndexView() {
   const apiFetch = useApiFetch();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
+  const { searchParams, updateSearchParams } = useTagSearchParams();
+  const queryParam = searchParams.get('q') ?? '';
+  const sortParam = searchParams.get('sort');
+  const scopeParam = searchParams.get('scope');
+  const sort: TagSort = sortParam === 'name' || sortParam === 'recent' ? sortParam : 'count';
+  const scope: DirectoryScope = scopeParam === 'review' ? 'review' : 'all';
+  const [query, setQuery] = useState(queryParam);
 
-  const { data: pages = [], isLoading } = useQuery({
+  useEffect(() => setQuery(queryParam), [queryParam]);
+
+  const {
+    data: pages = [],
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
     queryKey: ['pages', subjectId],
     queryFn: async () => {
       const res = await apiFetch('/api/pages');
-      if (!res.ok) return [] as WikiPage[];
+      if (!res.ok) throw new Error('Failed to load pages');
       return (await res.json()) as WikiPage[];
     },
     enabled: !!subjectId,
     staleTime: 30_000,
   });
 
-  const tags = shuffleTagsDeterministic(tagCloudWeights(aggregateTags(pages)));
+  const summaries = useMemo(() => summarizeTags(pages), [pages]);
+  const stats = useMemo(() => tagStats(pages, summaries), [pages, summaries]);
+  const reviewTags = useMemo(() => {
+    const tags = new Set(summaries.filter((item) => item.count === 1).map((item) => item.tag));
+    for (const group of stats.duplicateGroups) {
+      for (const tag of group) tags.add(tag);
+    }
+    return tags;
+  }, [stats.duplicateGroups, summaries]);
+  const visibleTags = useMemo(() => {
+    const scoped = scope === 'review'
+      ? summaries.filter((summary) => reviewTags.has(summary.tag))
+      : summaries;
+    return sortTagSummaries(filterTagSummaries(scoped, query), sort);
+  }, [query, reviewTags, scope, sort, summaries]);
+
+  function updateQuery(value: string) {
+    setQuery(value);
+    updateSearchParams({ q: value || null });
+  }
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 w-full space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-foreground flex items-center gap-2">
-          <Hash className="h-5 w-5 text-foreground-tertiary" />
-          Tags
-        </h1>
-        <p className="mt-1 text-sm text-foreground-secondary">
-          Browse pages by tag in this subject.
-        </p>
+    <div className="mx-auto w-full max-w-[1080px] space-y-7 px-5 py-8 sm:px-8 sm:py-10">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
+            <Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />
+            Tags
+          </h1>
+          <p className="mt-1 text-sm text-foreground-secondary">
+            Tag coverage for <span className="font-mono text-foreground">{subjectSlug || 'current subject'}</span>
+          </p>
+        </div>
+        {stats.pageCount > 0 && (
+          <p className="text-xs tabular-nums text-foreground-tertiary">
+            {stats.taggedPageCount}/{stats.pageCount} pages tagged
+          </p>
+        )}
       </header>
 
+      {!isLoading && !isError && summaries.length > 0 && (
+        <dl className="grid grid-cols-2 border-y border-border-subtle py-3 sm:grid-cols-4">
+          <Stat label="Tags" value={stats.tagCount} index={0} />
+          <Stat label="Pages" value={stats.pageCount} index={1} />
+          <Stat label="Single-use" value={stats.singletonCount} index={2} />
+          <Stat label="Format variants" value={stats.duplicateGroups.length} index={3} />
+        </dl>
+      )}
+
+      <div className="sticky top-0 z-10 -mx-2 flex flex-col gap-3 border-y border-border-subtle bg-canvas/95 px-2 py-3 backdrop-blur sm:flex-row sm:items-center">
+        <label className="relative min-w-0 flex-1">
+          <span className="sr-only">Search tags or pages</span>
+          <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-foreground-tertiary" aria-hidden />
+          <Input
+            value={query}
+            onChange={(event) => updateQuery(event.target.value)}
+            placeholder="Search tags or pages…"
+            className="pl-8"
+          />
+        </label>
+        <div className="flex items-center justify-between gap-2 sm:justify-start">
+          <Segmented
+            value={scope}
+            options={SCOPE_OPTIONS}
+            onChange={(value) => updateSearchParams({ scope: value === 'all' ? null : value })}
+            aria-label="Tag directory scope"
+          />
+          <Select
+            value={sort}
+            onChange={(event) => updateSearchParams({
+              sort: event.target.value === 'count' ? null : event.target.value,
+            })}
+            aria-label="Sort tags"
+            className="h-8"
+          >
+            <option value="count">Most used</option>
+            <option value="name">Name</option>
+            <option value="recent">Recently updated</option>
+          </Select>
+        </div>
+      </div>
+
       {!subjectId || isLoading ? (
-        <div className="flex flex-wrap gap-2">
-          {[1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="h-7 w-20 rounded-sm bg-subtle animate-pulse" />
+        <div className="divide-y divide-border-subtle border-y border-border-subtle">
+          {[1, 2, 3, 4, 5].map((item) => (
+            <div key={item} className="h-16 animate-pulse bg-subtle/60" />
           ))}
         </div>
-      ) : tags.length === 0 ? (
-        <p className="text-sm text-foreground-tertiary italic">No tags yet.</p>
+      ) : isError ? (
+        <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">
+          <AlertTriangle className="h-5 w-5 text-warning" aria-hidden />
+          <p className="text-sm text-foreground-secondary">Tags could not be loaded.</p>
+          <Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
+        </div>
+      ) : summaries.length === 0 ? (
+        <p className="py-10 text-center text-sm italic text-foreground-tertiary">No tags yet.</p>
+      ) : visibleTags.length === 0 ? (
+        <div className="py-10 text-center">
+          <p className="text-sm text-foreground-secondary">No tags match this view.</p>
+          {(query || scope === 'review') && (
+            <Button
+              intent="ghost"
+              size="sm"
+              className="mt-2"
+              onClick={() => {
+                setQuery('');
+                updateSearchParams({ q: null, scope: null });
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
+        </div>
       ) : (
-        <ul className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-2 py-4">
-          {tags.map(({ tag, count, weight }) => (
-            <li key={tag}>
-              <Link
-                href={`/tags/${encodeURIComponent(tag)}${subjectSlug ? `?s=${encodeURIComponent(subjectSlug)}` : ''}`}
-                title={`${count} page${count === 1 ? '' : 's'}`}
-                className="text-accent hover:underline whitespace-nowrap leading-tight"
-                style={{
-                  fontSize: `${(0.875 + weight * 1.625).toFixed(3)}rem`,
-                  opacity: 0.45 + weight * 0.55,
-                }}
-              >
-                {tag}
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <section aria-labelledby="tag-directory-heading">
+          <div className="grid grid-cols-[minmax(0,1fr)_4rem] gap-3 border-b border-border-subtle px-2 pb-2 text-xs text-foreground-tertiary sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem]">
+            <h2 id="tag-directory-heading" className="font-normal">Tag</h2>
+            <span className="text-right">Pages</span>
+            <span className="hidden text-right sm:block">Coverage</span>
+            <span className="hidden text-right sm:block">Updated</span>
+          </div>
+          <ul className="divide-y divide-border-subtle border-b border-border-subtle">
+            {visibleTags.map((summary) => {
+              const href = `/tags/${encodeURIComponent(summary.tag)}${subjectSlug ? `?s=${encodeURIComponent(subjectSlug)}` : ''}`;
+              return (
+                <li key={summary.tag} className="group grid min-h-16 grid-cols-[minmax(0,1fr)_4rem] items-center gap-3 px-2 py-2.5 transition-colors hover:bg-subtle sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem]">
+                  <div className="min-w-0">
+                    <Link
+                      href={href}
+                      className="inline-flex max-w-full items-center gap-1.5 text-sm font-medium text-foreground transition-colors group-hover:text-accent-strong focus-ring"
+                    >
+                      <span className="text-foreground-tertiary">#</span>
+                      <span className="truncate">{summary.tag}</span>
+                      <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-0 transition-all group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:opacity-100" aria-hidden />
+                    </Link>
+                    <p className="mt-1 truncate text-xs text-foreground-tertiary">
+                      {summary.pages.slice(0, 3).map((page) => page.title).join(' · ')}
+                    </p>
+                  </div>
+                  <span className="text-right text-sm tabular-nums text-foreground-secondary">{summary.count}</span>
+                  <span className="hidden text-right text-xs tabular-nums text-foreground-tertiary sm:block">
+                    {Math.round(summary.coverage * 100)}%
+                  </span>
+                  <time className="hidden text-right text-xs tabular-nums text-foreground-tertiary sm:block" dateTime={summary.updatedAt ?? undefined}>
+                    {formatDate(summary.updatedAt)}
+                  </time>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-3 text-xs tabular-nums text-foreground-tertiary">
+            {visibleTags.length} of {scope === 'review' ? reviewTags.size : summaries.length} tags
+          </p>
+        </section>
       )}
     </div>
   );
