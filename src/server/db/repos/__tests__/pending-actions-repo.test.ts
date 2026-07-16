@@ -74,6 +74,29 @@ describe('pending-actions-repo', () => {
     expect(repo.listForConversation('c1', 'other')).toEqual([]);
   });
 
+  it('Tags 工作台审批允许空 conversation，并原子限制每 Subject 一个进行中操作', async () => {
+    const { repo, now } = await setup();
+    const input = {
+      conversationId: null,
+      subjectId: 's1',
+      operation: 'tag-batch' as const,
+      payloadJson: '{}',
+      payloadHash: 'tag-hash',
+      previewJson: JSON.stringify(preview),
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: '2026-07-11T00:30:00.000Z',
+    };
+    const first = repo.createTagBatchPendingAction({ ...input, id: 'tag-1' });
+    expect(first).toMatchObject({ id: 'tag-1', conversationId: null, operation: 'tag-batch' });
+    expect(repo.createTagBatchPendingAction({ ...input, id: 'tag-2' })).toBeNull();
+    expect(repo.getActiveTagBatchForSubject('s1')?.id).toBe('tag-1');
+    expect(repo.listTagBatchForSubject('s1')).toHaveLength(1);
+
+    expect(repo.rejectPending('tag-1', 's1', now)).toBe(true);
+    expect(repo.createTagBatchPendingAction({ ...input, id: 'tag-2' })?.id).toBe('tag-2');
+  });
+
   it('批准与执行均为条件抢占且只能成功一次', async () => {
     const { repo, now } = await createPending();
     expect(repo.claimApproval('a1', 's1', now)?.status).toBe('approved');

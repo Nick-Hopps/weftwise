@@ -192,7 +192,6 @@ export const pendingActions = sqliteTable(
   {
     id: text('id').primaryKey(),
     conversationId: text('conversation_id')
-      .notNull()
       .references(() => conversations.id, { onDelete: 'cascade' }),
     subjectId: text('subject_id')
       .notNull()
@@ -220,7 +219,7 @@ export const pendingActions = sqliteTable(
       .on(t.status, t.expiresAt),
     operationCheck: check(
       'pending_actions_operation_check',
-      sql`${t.operation} IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move')`,
+      sql`${t.operation} IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move','tag-batch')`,
     ),
     statusCheck: check(
       'pending_actions_status_check',
