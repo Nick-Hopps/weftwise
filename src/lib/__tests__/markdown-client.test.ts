@@ -127,3 +127,21 @@ describe('renderMarkdown — GFM 表格渲染', () => {
     expect(html).toContain('a | b | c');
   });
 });
+
+describe('renderMarkdown — 正文标题锚点', () => {
+  it('默认不为复用渲染表面注入标题 ID', () => {
+    const html = toHtml(renderMarkdown('## Overview'));
+    expect(html).toContain('<h2>Overview</h2>');
+  });
+
+  it('显式开启后使用与目录一致的唯一标题 ID', () => {
+    const html = toHtml(
+      renderMarkdown('## 核心概念\n\n## 核心概念', undefined, {
+        headingAnchors: true,
+      }),
+    );
+
+    expect(html).toContain('<h2 id="核心概念">核心概念</h2>');
+    expect(html).toContain('<h2 id="核心概念-2">核心概念</h2>');
+  });
+});
