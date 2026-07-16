@@ -7,7 +7,14 @@ const repoMocks = vi.hoisted(() => ({
   ]),
   isMetaPage: vi.fn((p: { tags?: string[] }) => (p.tags ?? []).includes('meta')),
 }));
+const imageMocks = vi.hoisted(() => ({
+  generateImageAsset: vi.fn(async () => ({
+    output: { type: 'image', path: 'assets/general/id.png', url: '/api/assets/general/id.png', alt: '示意图' },
+    asset: { path: 'assets/general/id.png', content: 'aW1hZ2U=' },
+  })),
+}));
 vi.mock('../../../db/repos/pages-repo', () => repoMocks);
+vi.mock('../builtin/image-generate', () => imageMocks);
 
 import { agentToolContext } from '../tool-context';
 import type { AgentContext } from '../../types';
@@ -21,6 +28,8 @@ function fakeAgent(): AgentContext {
         slug === 'b' ? { markdown: '---\ntitle: B Title\n---\nbody-b' } : null),
       search: vi.fn(async () => [{ slug: 'b', title: 'B', summary: 'sb', source: 'store' }]),
     },
+    budget: { chargeTokens: vi.fn() },
+    pending: { entries: [] },
   } as unknown as AgentContext;
 }
 
@@ -47,5 +56,21 @@ describe('agentToolContext', () => {
     const ctx = agentToolContext(fakeAgent());
     expect('agent' in ctx).toBe(false);
     expect(ctx.onAccess).toBeUndefined();
+  });
+
+  it('用运行时 Unicode slug 绑定图片资产，不让模型提供页面身份', async () => {
+    const agent = fakeAgent();
+    const ctx = agentToolContext(agent, '3d图形学基础');
+
+    await expect(ctx.generateImage?.({ prompt: '展示坐标变换', alt: '坐标变换示意图' }))
+      .resolves.toMatchObject({ type: 'image' });
+    expect(agent.pending.entries).toContainEqual(expect.objectContaining({
+      path: 'assets/general/id.png',
+      assetFor: '3d图形学基础',
+    }));
+  });
+
+  it('没有当前页面身份时不注入图片能力', () => {
+    expect(agentToolContext(fakeAgent()).generateImage).toBeUndefined();
   });
 });

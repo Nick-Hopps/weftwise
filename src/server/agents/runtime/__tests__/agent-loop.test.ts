@@ -55,7 +55,7 @@ vi.mock('../../../db/repos/settings-repo', () => ({
   getAgentTaskRouterMode: mocks.getAgentTaskRouterMode,
 }));
 
-import { runAgentLoop, readCacheHitTokens, inputLabel, summarizeGenerationError, repairToolCallArgs, skillTaskKey } from '../agent-loop';
+import { runAgentLoop, readCacheHitTokens, inputLabel, currentPageSlugForSkill, summarizeGenerationError, repairToolCallArgs, skillTaskKey } from '../agent-loop';
 import { BudgetExceededError } from '../budget';
 
 describe('repairToolCallArgs', () => {
@@ -97,6 +97,12 @@ describe('inputLabel', () => {
     expect(inputLabel({ title: 'Only Title' })).toBe('Only Title');
     expect(inputLabel({})).toBeUndefined();
     expect(inputLabel(null)).toBeUndefined();
+  });
+
+  it('只给 enricher 注入当前页面 slug，并保留 Unicode', () => {
+    expect(currentPageSlugForSkill('ingest-enricher', { slug: '3d图形学基础' })).toBe('3d图形学基础');
+    expect(currentPageSlugForSkill('ingest-writer', { slug: '3d图形学基础' })).toBeUndefined();
+    expect(currentPageSlugForSkill('ingest-enricher', { title: '无 slug' })).toBeUndefined();
   });
 });
 

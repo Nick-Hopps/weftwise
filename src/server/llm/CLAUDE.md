@@ -231,6 +231,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | `ingest:image` 增加运行时路由预检：必须显式解析到 Google 图片模型，禁止缺配置时继承默认文本模型 |
 | 2026-07-16 | enrich 新增 `image.generate` 图片工具；独立 `ingest:image` 路由示例指向 `gemini-3.1-flash-image-preview`，通过 image response 返回位图 |
 | 2026-07-15 | `generateStructuredOutput` 增加调用点级 schema 定向重试（最多 2 次、共享总超时），抽出 `generation-error.ts` 统一错误路径摘要；Lint 开启 1 次重试并仅向 job event 写入脱敏后的 `finishReason/detail` |
 | 2026-07-15 | `lint-prompt.ts` 移除“宁可假阳性”指令，改为精确优先；schema 强制返回 targetSlug 与逐页原文 evidence，供服务层真实性过滤 |
