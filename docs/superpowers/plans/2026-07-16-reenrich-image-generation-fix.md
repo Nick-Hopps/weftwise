@@ -38,4 +38,3 @@
 - 运行：`npm run lint`。
 - 运行：`npx tsc --noEmit`。
 - 检查：worktree diff、feature commit、主分支 `--no-ff` merge 与清理。
-
