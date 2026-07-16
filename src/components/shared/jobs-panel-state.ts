@@ -1,5 +1,13 @@
 export type TrackedJobStatus = 'idle' | 'streaming' | 'completed' | 'failed';
 
+export interface TrackedJob {
+  id: string;
+  type: string;
+  label: string;
+  queueStatus: 'running' | 'pending';
+  reconnectKey: number;
+}
+
 interface JobStatusInput {
   id: string;
   queueStatus: 'running' | 'pending';
@@ -52,4 +60,16 @@ export function summarizeJobsPanel(
         ? 'failed'
         : 'completed',
   };
+}
+
+export function recoverUnlistedTrackedJobs(
+  previous: readonly TrackedJob[],
+  activeIds: ReadonlySet<string>,
+  dismissed: ReadonlySet<string>,
+): TrackedJob[] {
+  return previous.flatMap((job) => {
+    if (activeIds.has(job.id) || dismissed.has(job.id)) return [];
+    if (job.queueStatus === 'running') return [job];
+    return [{ ...job, queueStatus: 'running' as const }];
+  });
 }

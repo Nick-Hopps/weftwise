@@ -12,6 +12,7 @@ import type { SkillRegistry, SkillTemplate } from '../types';
 import { loadSkillsFromDir } from './loader';
 import {
   BUILTIN_SKILLS,
+  BUILTIN_UPGRADE_HASHES,
   RETIRED_BUILTIN_HASHES,
   RETIRED_BUILTIN_SKILLS,
 } from './builtin-manifest';
@@ -31,6 +32,46 @@ export interface RetireBuiltinSkillResult {
   archived: string[];
 }
 
+export interface UpgradeBuiltinSkillOptions {
+  vaultDir: string;
+  examplesDir: string;
+  upgradeHashes?: Readonly<Partial<Record<string, readonly string[]>>>;
+}
+
+export interface UpgradeBuiltinSkillResult {
+  upgraded: string[];
+}
+
+function fileSha256(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+export function upgradeBuiltinSkillFiles(
+  options: UpgradeBuiltinSkillOptions,
+): UpgradeBuiltinSkillResult {
+  const skillsDir = join(options.vaultDir, '.llm-wiki', 'skills');
+  const result: UpgradeBuiltinSkillResult = { upgraded: [] };
+  if (!existsSync(skillsDir)) return result;
+
+  const upgradeHashes = options.upgradeHashes ?? BUILTIN_UPGRADE_HASHES;
+  for (const [id, hashes] of Object.entries(upgradeHashes)) {
+    const filename = BUILTIN_SKILLS[id as keyof typeof BUILTIN_SKILLS];
+    if (!filename || !hashes?.length) continue;
+
+    const sourcePath = join(options.examplesDir, filename);
+    const targetPath = join(skillsDir, filename);
+    if (!existsSync(sourcePath) || !existsSync(targetPath)) continue;
+    if (!hashes.includes(fileSha256(targetPath))) continue;
+
+    const temporaryPath = `${targetPath}.upgrade-${process.pid}.tmp`;
+    copyFileSync(sourcePath, temporaryPath);
+    renameSync(temporaryPath, targetPath);
+    result.upgraded.push(id);
+  }
+
+  return result;
+}
+
 /**
  * 处理已经退役的内置 skill：未修改的历史原版删除，用户改版移动到归档目录。
  * loader 另有 ID tombstone，因此即使清理中断，retired skill 也不会重新注册。
@@ -46,8 +87,7 @@ export function retireBuiltinSkillFiles(
     const path = join(skillsDir, `${id}.md`);
     if (!existsSync(path)) continue;
 
-    const content = readFileSync(path);
-    const hash = createHash('sha256').update(content).digest('hex');
+    const hash = fileSha256(path);
     if (RETIRED_BUILTIN_HASHES[id].includes(hash)) {
       unlinkSync(path);
       result.removed.push(id);
@@ -79,6 +119,7 @@ export async function buildSkillRegistry(opts: {
     mkdirSync(skillsDir, { recursive: true });
   }
   retireBuiltinSkillFiles({ vaultDir: opts.vaultDir, onWarning: opts.onWarning });
+  upgradeBuiltinSkillFiles({ vaultDir: opts.vaultDir, examplesDir: opts.examplesDir });
 
   // 只播种 manifest 中仍启用的内置 skill，且永不覆盖用户文件。
   if (existsSync(opts.examplesDir)) {

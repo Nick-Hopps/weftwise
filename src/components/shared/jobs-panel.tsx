@@ -9,18 +9,9 @@ import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { JobDetailDialog } from './job-detail-dialog';
-import { summarizeJobsPanel } from './jobs-panel-state';
+import { summarizeJobsPanel, type TrackedJob } from './jobs-panel-state';
 
-export interface TrackedJob {
-  id: string;
-  type: string;
-  /** 一行可读摘要：文件名 / URL / slug，兜底 job 类型名。 */
-  label: string;
-  /** 轮询到的队列状态：running 才建 SSE（浏览器 SSE 连接数有限）。 */
-  queueStatus: 'running' | 'pending';
-  /** bump 以强制重新订阅（retry 同 id 场景）。 */
-  reconnectKey: number;
-}
+export type { TrackedJob } from './jobs-panel-state';
 
 function jobTypeVerb(type: string): string {
   switch (type) {
