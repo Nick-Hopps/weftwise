@@ -76,8 +76,9 @@
 
 ### `tags/`
 
-- `tags-index-view.tsx` —— 🆕 标签索引（aggregateTags(/api/pages) → tag+count）
-- `tag-pages-view.tsx` —— 🆕 单标签页列表（pagesWithTag）
+- `tags-index-view.tsx` —— 标签目录工作台：聚合当前 Subject 页面元数据，展示覆盖率/单次标签/格式变体统计，支持按标签或关联页面搜索、使用次数/名称/更新时间排序，以及 All/Review 范围切换；状态同步到 URL
+- `tag-pages-view.tsx` —— 标签组合浏览：单标签页面列表扩展为摘要/更新时间/关联标签视图，相关标签可叠加为 `with` 条件并在 `Match all / Match any` 间切换；搜索、排序、组合条件同步到 URL
+- `use-tag-search-params.ts` / `tags-route-fallback.tsx` —— 两个 Tags 路由共用的 URL 状态更新器与 Suspense 加载态
 
 ### `health/`
 
@@ -178,6 +179,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Tags 升级为标签工作台：默认列表取代词云，增加覆盖率/单次标签/格式变体统计、标签与关联页面搜索、三种排序和 Review 视图；详情页支持相关标签组合筛选、AND/OR、页面摘要/时间/其他标签，并将所有筛选状态写入 URL |
 | 2026-07-16 | 重设计 Mermaid 图表：新增浅/深色 `base` 主题、紧凑节点/曲线参数、主节点与边标签层级；主题切换自动重绘；Diagram callout 改为无灰底的上下分隔图解区并压低图注层级 |
 | 2026-07-16 | 整体布局与阅读体验优化：移动导航默认关闭；桌面侧栏/上下文面板改为 264/400px；首页统计与最近页面去卡片化；阅读页收窄至 780px、合并重复 H1、压缩元数据、增加滚动进度并修复窄屏工具提示导致的横向溢出 |
 | 2026-07-16 | 全局任务启动事件携带真实 type/label/queueStatus：顶部 Ingest 胶囊与 dashboard hero 只响应 ingest；re-enrich/research/save-to-wiki 进入 Tasks 面板且先显示 Queued，不再伪装成 ingest 后跳空工作台 |

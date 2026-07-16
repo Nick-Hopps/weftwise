@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  aggregateTags,
-  pagesWithTag,
-  tagCloudWeights,
-  shuffleTagsDeterministic,
+  filterPagesByTags,
+  filterTagSummaries,
+  findPotentialDuplicateGroups,
+  relatedTags,
+  sortTagSummaries,
+  summarizeTags,
+  tagStats,
   META_TAG,
 } from '../tags';
 import type { WikiPage } from '@/lib/contracts';
@@ -22,109 +25,92 @@ function page(slug: string, tags: string[]): WikiPage {
   };
 }
 
-describe('aggregateTags', () => {
-  it('计数并按 count 降序、同 count 字母升序', () => {
+describe('标签目录分析', () => {
+  it('汇总覆盖率、最近更新时间与目录统计', () => {
     const pages = [
-      page('a', ['math', 'algebra']),
-      page('b', ['math']),
-      page('c', ['algebra']),
-      page('d', ['zzz']),
+      { ...page('a', ['math', 'algebra']), updatedAt: '2026-01-02' },
+      { ...page('b', ['math']), updatedAt: '2026-01-03' },
+      page('c', []),
+      page('index', [META_TAG]),
     ];
-    // math:2, algebra:2, zzz:1 → 同 count 字母序 algebra 在 math 前
-    expect(aggregateTags(pages)).toEqual([
-      { tag: 'algebra', count: 2 },
-      { tag: 'math', count: 2 },
-      { tag: 'zzz', count: 1 },
+    const summaries = summarizeTags(pages);
+
+    expect(summaries.map(({ tag, count, coverage, updatedAt }) => ({
+      tag, count, coverage, updatedAt,
+    }))).toEqual([
+      { tag: 'math', count: 2, coverage: 2 / 3, updatedAt: '2026-01-03' },
+      { tag: 'algebra', count: 1, coverage: 1 / 3, updatedAt: '2026-01-02' },
+    ]);
+    expect(tagStats(pages, summaries)).toEqual({
+      pageCount: 3,
+      taggedPageCount: 2,
+      tagCount: 2,
+      singletonCount: 1,
+      duplicateGroups: [],
+    });
+  });
+
+  it('排除带 meta 标签的系统页及 meta 标签本身', () => {
+    const summaries = summarizeTags([
+      page('log', [META_TAG, 'overview']),
+      page('visible', ['overview']),
+    ]);
+
+    expect(summaries.map(({ tag, count }) => ({ tag, count }))).toEqual([
+      { tag: 'overview', count: 1 },
     ]);
   });
 
-  it('排除 meta 标签本身', () => {
-    const pages = [page('a', ['math', META_TAG]), page('b', ['math'])];
-    expect(aggregateTags(pages)).toEqual([{ tag: 'math', count: 1 }]);
+  it('搜索标签名称与关联页面文本，并支持三种排序', () => {
+    const pages = [
+      { ...page('matrix', ['linear-algebra']), title: 'Matrix methods', summary: 'Eigenvalues', updatedAt: '2026-01-02' },
+      { ...page('shader', ['rendering']), title: 'Shader notes', summary: 'GPU', updatedAt: '2026-01-04' },
+      { ...page('pipeline', ['rendering']), title: 'Render pipeline', updatedAt: '2026-01-03' },
+    ];
+    const summaries = summarizeTags(pages);
+
+    expect(filterTagSummaries(summaries, 'eigen').map((item) => item.tag)).toEqual(['linear-algebra']);
+    expect(sortTagSummaries(summaries, 'name').map((item) => item.tag)).toEqual(['linear-algebra', 'rendering']);
+    expect(sortTagSummaries(summaries, 'recent').map((item) => item.tag)).toEqual(['rendering', 'linear-algebra']);
   });
 
-  it('排除带 meta 标签的系统页（按 tags 判定，与 slug 无关）', () => {
-    const pages = [page('log', [META_TAG, 'overview']), page('b', ['overview'])];
-    expect(aggregateTags(pages)).toEqual([{ tag: 'overview', count: 1 }]);
-  });
+  it('识别仅格式不同的潜在重复标签', () => {
+    const groups = findPotentialDuplicateGroups([
+      { tag: 'Game Design' },
+      { tag: 'game-design' },
+      { tag: 'game_design' },
+      { tag: 'shader' },
+    ]);
 
-  it('空输入返回 []', () => {
-    expect(aggregateTags([])).toEqual([]);
+    expect(groups).toHaveLength(1);
+    expect(new Set(groups[0])).toEqual(new Set(['Game Design', 'game-design', 'game_design']));
   });
 });
 
-describe('pagesWithTag', () => {
-  it('返回含该 tag 的内容页', () => {
-    const pages = [page('a', ['math']), page('b', ['algebra']), page('c', ['math', 'algebra'])];
-    expect(pagesWithTag(pages, 'math').map((p) => p.slug)).toEqual(['a', 'c']);
+describe('组合标签浏览', () => {
+  const pages = [
+    { ...page('a', ['rendering', 'shader']), title: 'Alpha', updatedAt: '2026-01-02' },
+    { ...page('b', ['rendering', 'pipeline']), title: 'Beta', summary: 'Shader pipeline', updatedAt: '2026-01-04' },
+    { ...page('c', ['shader']), title: 'Gamma', updatedAt: '2026-01-03' },
+    page('index', [META_TAG, 'rendering']),
+  ];
+
+  it('支持 AND/OR、文本过滤与两种排序，并排除系统页', () => {
+    expect(filterPagesByTags(pages, ['rendering', 'shader'], 'and').map((item) => item.slug)).toEqual(['a']);
+    expect(filterPagesByTags(pages, ['rendering', 'shader'], 'or').map((item) => item.slug)).toEqual(['b', 'c', 'a']);
+    expect(filterPagesByTags(pages, ['rendering'], 'and', 'shader').map((item) => item.slug)).toEqual(['b']);
+    expect(filterPagesByTags(pages, ['shader'], 'and', '', 'title').map((item) => item.slug)).toEqual(['a', 'c']);
   });
 
-  it('排除带 meta 的系统页', () => {
-    const pages = [page('index', [META_TAG, 'math']), page('a', ['math'])];
-    expect(pagesWithTag(pages, 'math').map((p) => p.slug)).toEqual(['a']);
+  it('保持标签原样匹配，不静默合并大小写', () => {
+    expect(filterPagesByTags([page('a', ['Math'])], ['math'])).toEqual([]);
   });
 
-  it('排除带 meta 的系统页（slug 非 index 亦然）', () => {
-    const pages = [page('log', [META_TAG, 'math']), page('a', ['math'])];
-    expect(pagesWithTag(pages, 'math').map((p) => p.slug)).toEqual(['a']);
-  });
-
-  it('区分大小写；未知 tag 返回 []', () => {
-    const pages = [page('a', ['Math'])];
-    expect(pagesWithTag(pages, 'math')).toEqual([]);
-    expect(pagesWithTag(pages, 'nope')).toEqual([]);
-  });
-});
-
-describe('tagCloudWeights', () => {
-  it('空输入返回 []', () => {
-    expect(tagCloudWeights([])).toEqual([]);
-  });
-
-  it('单 tag 或全同 count 时 weight 全为 0.5', () => {
-    expect(tagCloudWeights([{ tag: 'a', count: 3 }])[0].weight).toBe(0.5);
-    const same = tagCloudWeights([
-      { tag: 'a', count: 2 },
-      { tag: 'b', count: 2 },
+  it('按当前结果集计算相关标签', () => {
+    expect(relatedTags(pages, ['rendering'])).toEqual([
+      { tag: 'pipeline', count: 1 },
+      { tag: 'shader', count: 1 },
     ]);
-    expect(same.map((t) => t.weight)).toEqual([0.5, 0.5]);
-  });
-
-  it('min 得 0、max 得 1，中间值经 log 平滑落在 (0,1)', () => {
-    const out = tagCloudWeights([
-      { tag: 'min', count: 1 },
-      { tag: 'mid', count: 10 },
-      { tag: 'max', count: 100 },
-    ]);
-    const byTag = Object.fromEntries(out.map((t) => [t.tag, t.weight]));
-    expect(byTag.min).toBe(0);
-    expect(byTag.max).toBe(1);
-    expect(byTag.mid).toBeCloseTo(0.5, 5); // log 空间正中
-  });
-
-  it('极端偏斜分布下低频 tag 仍有区分度（log 平滑）', () => {
-    const out = tagCloudWeights([
-      { tag: 'a', count: 1 },
-      { tag: 'b', count: 2 },
-      { tag: 'hot', count: 1000 },
-    ]);
-    const byTag = Object.fromEntries(out.map((t) => [t.tag, t.weight]));
-    expect(byTag.b).toBeGreaterThan(0.05); // 线性归一化时 b≈0.001，log 后明显更大
-  });
-});
-
-describe('shuffleTagsDeterministic', () => {
-  it('两次调用结果一致且元素不丢', () => {
-    const input = [{ tag: 'a' }, { tag: 'b' }, { tag: 'c' }, { tag: 'd' }];
-    const once = shuffleTagsDeterministic(input);
-    expect(shuffleTagsDeterministic(input)).toEqual(once);
-    expect([...once].map((t) => t.tag).sort()).toEqual(['a', 'b', 'c', 'd']);
-  });
-
-  it('不修改输入数组', () => {
-    const input = [{ tag: 'b' }, { tag: 'a' }];
-    const snapshot = [...input];
-    shuffleTagsDeterministic(input);
-    expect(input).toEqual(snapshot);
+    expect(relatedTags(pages, ['rendering', 'shader'], 'and')).toEqual([]);
   });
 });
