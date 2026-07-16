@@ -193,16 +193,18 @@ export function Header() {
           {darkMode ? <Sun /> : <Moon />}
         </IconButton>
 
-        <IconButton
-          size="base"
-          onClick={toggleContextPanel}
-          aria-label={contextPanelOpen ? 'Close context panel' : 'Open context panel'}
-          data-tip={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}
-          className={cn('tip tip-b', contextPanelOpen && 'bg-subtle text-foreground')}
-        >
-          <PanelRight />
-          <span className="sr-only">{isWikiRoute ? 'context' : 'chat'}</span>
-        </IconButton>
+        {isWikiRoute && (
+          <IconButton
+            size="base"
+            onClick={toggleContextPanel}
+            aria-label={contextPanelOpen ? 'Close context panel' : 'Open context panel'}
+            data-tip={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}
+            className={cn('tip tip-b', contextPanelOpen && 'bg-subtle text-foreground')}
+          >
+            <PanelRight />
+            <span className="sr-only">context</span>
+          </IconButton>
+        )}
       </div>
     </header>
   );
