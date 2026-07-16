@@ -5,6 +5,7 @@ import { JobsPanel, type TrackedJob } from './jobs-panel';
 import { apiFetch } from '@/lib/api-fetch';
 import type { Job } from '@/lib/contracts';
 import { JOB_STARTED_EVENT, type JobStartedEventDetail } from '@/lib/job-started-event';
+import { recoverUnlistedTrackedJobs } from './jobs-panel-state';
 
 /** 从 job params 提取一行可读摘要（文件名 / URL / slug），兜底 job 类型名。 */
 function jobLabel(job: Pick<Job, 'type' | 'paramsJson'>): string {
@@ -64,11 +65,7 @@ export function GlobalJobTracker() {
             queueStatus: a.queueStatus,
             reconnectKey: prevById.get(a.job.id)?.reconnectKey ?? 0,
           }));
-        // 已离开 running/pending 的行仅在曾建过 SSE（running）时保留，终态展示由行内 SSE 驱动、移除走 onRemove；
-        // pending 行从未建 SSE，若在两次轮询间隙直接走完 pending→终态，静默丢弃防幽灵行永久残留。
-        for (const t of prev) {
-          if (!activeIds.has(t.id) && !dismissed.has(t.id) && t.queueStatus === 'running') next.push(t);
-        }
+        next.push(...recoverUnlistedTrackedJobs(prev, activeIds, dismissed));
         return next;
       });
     } catch {
