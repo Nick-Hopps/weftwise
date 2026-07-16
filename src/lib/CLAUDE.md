@@ -13,6 +13,7 @@
 | `contracts.ts` | **全应用领域类型单一真实源**：Subject/Wiki/Job/Source/Health/Changeset/Conversation，以及 PendingAction 与 Research run/candidate/approval/delivery/provenance 前后端契约 |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
+| `path-display.ts` | 路径展示纯函数：安全解码 URL slug，并优先匹配页面元数据标题 |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
 | `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
 | `tags.ts` | Tags 工作台纯分析：标签摘要/覆盖率/格式变体/组合筛选，以及 `buildTagReviewQueue` / `filterTagReviewQueue` 即时投影格式变体、非重复单次标签与未标记页面；不持久化 Review 状态 |
@@ -142,6 +143,7 @@ src/lib/
 ├── contracts.ts            # 领域类型单一真实源
 ├── cn.ts                   # 类名合并
 ├── slug.ts                 # URL-safe slug
+├── path-display.ts         # 安全解码路径 slug 并解析页面展示标题
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
 ├── tags.ts                 # 标签目录、组合筛选与 Review 清理队列纯分析
@@ -157,6 +159,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 新增 `path-display.ts::displayTitleForSlug`，为面包屑安全解码 URL slug 并兼容页面标题匹配 |
 | 2026-07-16 | `tags.ts` 新增即时 `TagReviewQueue`：格式变体按使用次数、标准 kebab-case、名称稳定选择推荐目标；变体与 singleton 去重，补充未标记页、问题计数和跨分区搜索 |
 | 2026-07-16 | 新增 `job-started-event.ts`：统一 ingest/re-enrich/research/save-to-wiki 的启动事件元数据，禁止全局 tracker 与 Ingest UI 按 jobId 猜类型 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：contracts 新增 `MovePageInput`、PendingAction `move` 与 Changeset `movedFromPath/auxiliary` marker；tool activity 只摘要旧新 slug |

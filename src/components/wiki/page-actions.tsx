@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { FileStack, Loader2, Pencil, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { IconButton, iconButtonVariants } from '@/components/ui/icon-button';
+import { cn } from '@/lib/cn';
 
 export type ReshapeState = 'idle' | 'loading' | 'reshaped' | 'unavailable';
 
@@ -16,7 +18,7 @@ interface PageActionsProps {
 }
 
 /**
- * 阅读页标题行右侧的统一功能动作条：Edit / Sources / Reshape 并排。
+ * 阅读页标题行右侧的统一图标动作条：Edit / Sources / Reshape 并排。
  * Reshape 仅负责触发；触发后的状态与切换交给 <ReshapeStatus> 在正文上方呈现。
  */
 export function PageActions({
@@ -32,43 +34,40 @@ export function PageActions({
   const showReshapeTrigger = reshapeState === 'idle' || reshapeState === 'unavailable';
 
   return (
-    <div className="flex shrink-0 items-center gap-1.5 self-start">
+    <div className="flex shrink-0 items-center gap-1 self-start">
       <Link
         href={editHref}
-        data-tip="Edit this page"
+        data-tip="Edit page"
         aria-label="Edit this page"
-        className="tip tip-b inline-flex h-8 w-8 items-center justify-center gap-1.5 rounded-md border border-border text-sm font-medium text-foreground-secondary transition-colors hover:bg-subtle hover:text-foreground focus-ring sm:w-auto sm:px-2.5"
+        className={cn(iconButtonVariants({ intent: 'outline', size: 'base' }), 'tip tip-b')}
       >
-        <Pencil className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Edit</span>
+        <Pencil aria-hidden />
       </Link>
 
       {sourceCount > 0 && (
-        <Button
+        <IconButton
           intent={splitOn ? 'primary' : 'outline'}
           size="base"
           onClick={onToggleSplit}
-          data-tip="Show the documents this page was written from"
+          data-tip={splitOn ? 'Hide sources' : `Show sources (${sourceCount})`}
           aria-label={splitOn ? 'Hide source documents' : `Show ${sourceCount} source documents`}
-          className="tip tip-b w-8 px-0 sm:w-auto sm:px-3"
+          className="tip tip-b"
         >
-          <FileStack className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">{splitOn ? 'Hide sources' : `Sources (${sourceCount})`}</span>
-        </Button>
+          <FileStack aria-hidden />
+        </IconButton>
       )}
 
       {showReshapeTrigger && (
-        <Button
+        <IconButton
           intent="outline"
           size="base"
           onClick={onRequestReshape}
-          data-tip="Rewrite this page to fit your profile"
+          data-tip="Reshape for your profile"
           aria-label="Reshape this page for your profile"
-          className="tip tip-b w-8 px-0 sm:w-auto sm:px-3"
+          className="tip tip-b"
         >
-          <Sparkles className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Reshape</span>
-        </Button>
+          <Sparkles aria-hidden />
+        </IconButton>
       )}
     </div>
   );
