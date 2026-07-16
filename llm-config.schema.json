@@ -20,7 +20,7 @@
     },
     "tasks": {
       "type": "object",
-      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Known routes include built-in query/lint/merge/split/curate/fix/embedding, Research, Re-enrich, Reshape, and seven ingest stages. A stage entry is optional — without it the stage inherits the defaults route (skill frontmatter may further override). Tool Profile IDs such as query:read are not LLM task routes.",
+      "description": "Per-task route overrides. Unspecified fields inherit from defaults. Known routes include built-in query/lint/merge/split/curate/fix/embedding, Research, Re-enrich, Reshape, and eight ingest stages. A stage entry is optional — without it the stage inherits the defaults route (skill frontmatter may further override). Tool Profile IDs such as query:read are not LLM task routes.",
       "propertyNames": {
         "pattern": "^(query|lint|merge|split|curate|fix|embedding|[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*)$"
       },
@@ -41,6 +41,7 @@
         "ingest:chunk-summarizer": { "$ref": "#/$defs/taskRoute", "description": "Ingest: summarize large source chunks." },
         "ingest:writer": { "$ref": "#/$defs/taskRoute", "description": "Ingest: write or merge page bodies." },
         "ingest:enricher": { "$ref": "#/$defs/taskRoute", "description": "Ingest: add the augmentation layer." },
+        "ingest:image": { "$ref": "#/$defs/taskRoute", "description": "Ingest enrich: generate a raster illustration with the configured image-capable model." },
         "ingest:verifier": { "$ref": "#/$defs/taskRoute", "description": "Ingest: verify generated pages." },
         "ingest:verifier-triage": { "$ref": "#/$defs/taskRoute", "description": "Ingest: select claims that need web verification." },
         "ingest:verifier-apply": { "$ref": "#/$defs/taskRoute", "description": "Ingest: apply evidence-driven verification edits." },

@@ -35,7 +35,7 @@ ingest-service.ts
         │       checkpointAs: 'writer-page'
         │
         ├── step 3: fanout skill 'ingest-enricher' × N pages  (fanout)
-        │     └── 结构化输出（generateObject，无 tools）
+        │     └── 组合输出（generateText + image.generate + finish）
         │       读取 step 2 的页面内容（injectPriorPageAs），叠加 [!type] callout 增益层
         │       callout 类型：intuition / example / quiz / background / diagram / pitfall
         │       ctx.pending 按 path upsert（last-write-wins，覆盖 writer 产出）
@@ -75,7 +75,7 @@ ingest-service.ts
 
 **执行路径分支**（`compile.ts` + `agent-loop.ts`）：
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
-- **无 tools + 有 outputSchema → `generateObject` 路径**：enricher / verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
+- **无 tools + 有 outputSchema → `generateObject` 路径**：verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环；enricher 现为有 `image.generate` 工具的组合路径。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
 - **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造包含 28 个 builtin 的 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
 - **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装 read/search/inspect/source-page-filter/list 与写上下文，`wiki.link.ensure` 只按 source page 判写 scope，跨主题 target 仅作存在性验证。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/diff/patch 及 metadata 值。Query 按意图使用 `query:read` 或 `query:propose`：read 可脱敏读取 active Subject workflow status，propose 才额外获得页面/History/workflow PendingAction 提案能力，仍不含任何 enqueue/destructive 直接执行工具；`fix:links` 只用 `wiki.link.ensure`，`fix:contradiction` 才额外开放 patch/update；Curate 两种 profile 均可在 allowedSet 内使用 link/metadata 窄写；ingest 只使用 planner/writer 只读 profile。
 
@@ -159,6 +159,7 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 | `builtin/wiki-metadata-patch.ts` | `wiki.metadata.patch` — 只改 title/summary/tags/aliases，正文逐字保留（`sideEffect:'update'`，仅 Curate profile） |
 | `builtin/wiki-link-ensure.ts` | `wiki.link.ensure` — 对 source 页维护唯一一个 link/unlink/retarget，target 只验证不写入（`sideEffect:'update'`，Fix/Curate profile） |
 | `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
+| `builtin/image-generate.ts` | `image.generate` — enrich 专用真实图片工具；通过 `ingest:image` 路由返回 PNG/JPEG/WebP，并把 asset 与页面一起提交 |
 | `builtin/wiki-preview-change.ts` | `wiki.preview_change` — 生成 create/update/patch/delete/reenrich/metadata-patch/link-ensure 审批预览（`sideEffect:'propose'`，仅 `query:propose`）；返回 actionId，不执行 Saga 或入队 |
 | `builtin/wiki-move.ts` | `wiki.move` — 生成当前 Subject 页面 canonical slug/path 迁移审批预览（`sideEffect:'propose'`，仅 `query:propose`）；不直接移动文件或写数据库 |
 
@@ -328,6 +329,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | enrich 工具 Phase：新增 `image.generate`（PNG/JPEG/WebP）、asset changeset 与 `/api/assets` 读取接口；`ingest:enricher` 切换组合路径，独立 `ingest:image` 路由默认使用 Gemini 3.1 Flash Image |
 | 2026-07-14 | 页面身份迁移 Phase 3D：registry 增加 `wiki.move`，只进入 `query:propose` 并生成 PendingAction；Query 仍无直接文件、数据库或 git 写权限 |
 | 2026-07-14 | Workflow 控制 Phase 3C：registry 新增 `workflow.status/reenrich.start/research.start/cancel`；status 只读，start/cancel 只生成 PendingAction；`wiki.reenrich` 改为记录弃用日志的审批 alias；Query 仍无直接 enqueue/destructive 工具 |
 | 2026-07-14 | History 工具 Phase 3B：registry 新增 `history.list/diff/revert`；list/diff 只进入 Query 只读面，revert 只进入 `query:propose` 并生成 PendingAction；History diff 在审计输出中脱敏，其他 runner 工具面不变 |

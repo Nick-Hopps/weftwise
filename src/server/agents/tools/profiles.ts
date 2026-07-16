@@ -9,7 +9,8 @@ export type ToolProfileId =
   | 'curate:auto'
   | 'curate:manual'
   | 'ingest:planner'
-  | 'ingest:writer';
+  | 'ingest:writer'
+  | 'ingest:enricher';
 
 export interface ToolProfile {
   id: ToolProfileId;
@@ -123,6 +124,12 @@ const PROFILES: Record<ToolProfileId, ToolProfile> = {
     allowedSideEffects: ['none'],
     requiresApproval: false,
   },
+  'ingest:enricher': {
+    id: 'ingest:enricher',
+    tools: ['image.generate'],
+    allowedSideEffects: ['none'],
+    requiresApproval: false,
+  },
 };
 
 export function resolveToolProfile(
@@ -150,5 +157,7 @@ export function createToolExecutionPolicy(
 }
 
 export function profileForIngestSkill(skillId: string): ToolProfileId {
-  return skillId === 'ingest-planner' ? 'ingest:planner' : 'ingest:writer';
+  if (skillId === 'ingest-planner') return 'ingest:planner';
+  if (skillId === 'ingest-enricher') return 'ingest:enricher';
+  return 'ingest:writer';
 }
