@@ -21,8 +21,15 @@ import { IconButton } from '@/components/ui/icon-button';
 import { Input } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 import { Select } from '@/components/ui/select';
+import {
+  WorkspaceMetric,
+  WorkspacePage,
+  WorkspacePageHeader,
+  WorkspaceState,
+  WorkspaceSummary,
+  WorkspaceToolbar,
+} from '@/components/ui/workspace-page';
 import type { PendingActionView, WikiPage } from '@/lib/contracts';
-import { cn } from '@/lib/cn';
 import { PendingActionCard } from '@/components/chat/pending-action-card';
 import { TagGovernanceDialog } from './tag-governance-dialog';
 import { selectActiveTagAction } from './tag-governance-state';
@@ -36,21 +43,6 @@ function formatDate(value: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function Stat({ label, value, index }: { label: string; value: number | string; index: number }) {
-  return (
-    <div className={cn(
-      'min-w-0 border-border-subtle',
-      index === 0 && 'border-b border-r pb-3 pr-3 sm:border-b-0 sm:pb-0 sm:pl-0 sm:pr-5',
-      index === 1 && 'border-b pb-3 pl-3 sm:border-b-0 sm:border-r sm:px-5 sm:pb-0',
-      index === 2 && 'border-r pr-3 pt-3 sm:px-5 sm:pt-0',
-      index === 3 && 'pl-3 pt-3 sm:pl-5 sm:pr-0 sm:pt-0',
-    )}>
-      <dt className="truncate text-xs text-foreground-tertiary">{label}</dt>
-      <dd className="mt-1 text-lg font-semibold tabular-nums text-foreground">{value}</dd>
-    </div>
-  );
 }
 
 export function TagsIndexView() {
@@ -172,31 +164,21 @@ export function TagsIndexView() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1080px] space-y-7 px-5 py-8 sm:px-8 sm:py-10">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
-            <Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />
-            Tags
-          </h1>
-          <p className="mt-1 text-sm text-foreground-secondary">
-            Tag coverage for <span className="font-mono text-foreground">{subjectSlug || 'current subject'}</span>
-          </p>
-        </div>
-        {stats.pageCount > 0 && (
-          <p className="text-xs tabular-nums text-foreground-tertiary">
-            {stats.taggedPageCount}/{stats.pageCount} pages tagged
-          </p>
-        )}
-      </header>
+    <WorkspacePage>
+      <WorkspacePageHeader
+        icon={<Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
+        title="Tags"
+        description={<>Tag coverage for <span className="text-foreground">{subjectSlug || 'current subject'}</span></>}
+        meta={stats.pageCount > 0 ? `${stats.taggedPageCount}/${stats.pageCount} pages tagged` : undefined}
+      />
 
       {!isLoading && !isError && summaries.length > 0 && (
-        <dl className="grid grid-cols-2 border-y border-border-subtle py-3 sm:grid-cols-4">
-          <Stat label="Tags" value={stats.tagCount} index={0} />
-          <Stat label="Pages" value={stats.pageCount} index={1} />
-          <Stat label="Single-use" value={stats.singletonCount} index={2} />
-          <Stat label="Format variants" value={stats.duplicateGroups.length} index={3} />
-        </dl>
+        <WorkspaceSummary aria-label="Tag summary" className="grid-cols-2 sm:grid-cols-4">
+          <WorkspaceMetric label="Tags" value={stats.tagCount} className="border-b border-r border-border-subtle sm:border-b-0" />
+          <WorkspaceMetric label="Pages" value={stats.pageCount} className="border-b border-border-subtle sm:border-b-0 sm:border-r" />
+          <WorkspaceMetric label="Single-use" value={stats.singletonCount} className="border-r border-border-subtle" />
+          <WorkspaceMetric label="Format variants" value={stats.duplicateGroups.length} />
+        </WorkspaceSummary>
       )}
 
       {currentAction && (
@@ -223,7 +205,7 @@ export function TagsIndexView() {
         </section>
       )}
 
-      <div className="sticky top-0 z-10 -mx-2 flex flex-col gap-3 border-y border-border-subtle bg-canvas/95 px-2 py-3 backdrop-blur sm:flex-row sm:items-center">
+      <WorkspaceToolbar aria-label="Tag directory controls" className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <label className="relative min-w-0 flex-1">
           <span className="sr-only">Search tags or pages</span>
           <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-foreground-tertiary" aria-hidden />
@@ -256,7 +238,7 @@ export function TagsIndexView() {
             </Select>
           )}
         </div>
-      </div>
+      </WorkspaceToolbar>
 
       {!subjectId || isLoading ? (
         <div className="divide-y divide-border-subtle border-y border-border-subtle">
@@ -265,11 +247,13 @@ export function TagsIndexView() {
           ))}
         </div>
       ) : isError ? (
-        <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">
-          <AlertTriangle className="h-5 w-5 text-warning" aria-hidden />
-          <p className="text-sm text-foreground-secondary">Tags could not be loaded.</p>
-          <Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
-        </div>
+        <WorkspaceState
+          role="alert"
+          icon={<AlertTriangle className="h-5 w-5 text-warning" aria-hidden />}
+          title="Tags could not be loaded"
+          description="Retry the request without changing the current filters."
+          action={<Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>}
+        />
       ) : scope === 'review' && visibleReviewQueue.issueCount === 0 && reviewQueue.issueCount > 0 ? (
         <div className="py-10 text-center">
           <p className="text-sm text-foreground-secondary">No review items match this search.</p>
@@ -293,15 +277,19 @@ export function TagsIndexView() {
           })}
         />
       ) : summaries.length === 0 ? (
-        <p className="py-10 text-center text-sm italic text-foreground-tertiary">No tags yet.</p>
+        <WorkspaceState
+          icon={<Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
+          title="No tags yet"
+          description="Tags added to pages in this subject will appear here."
+        />
       ) : visibleTags.length === 0 ? (
-        <div className="py-10 text-center">
-          <p className="text-sm text-foreground-secondary">No tags match this view.</p>
-          {query && (
+        <WorkspaceState
+          title="No tags match this view"
+          description="Adjust the search or clear the active filters."
+          action={query ? (
             <Button
               intent="ghost"
               size="sm"
-              className="mt-2"
               onClick={() => {
                 setQuery('');
                 updateSearchParams({ q: null });
@@ -309,8 +297,8 @@ export function TagsIndexView() {
             >
               Clear filters
             </Button>
-          )}
-        </div>
+          ) : undefined}
+        />
       ) : (
         <section aria-labelledby="tag-directory-heading">
           <div className="grid grid-cols-[minmax(0,1fr)_4rem_2rem] gap-3 border-b border-border-subtle px-2 pb-2 text-xs text-foreground-tertiary sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem_2rem]">
@@ -383,6 +371,6 @@ export function TagsIndexView() {
           }}
         />
       )}
-    </div>
+    </WorkspacePage>
   );
 }
