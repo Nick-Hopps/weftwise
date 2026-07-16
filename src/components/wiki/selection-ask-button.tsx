@@ -20,17 +20,20 @@ export function SelectionAskButton({
 
   if (!selection) return null;
 
-  const { rect } = selection;
-  const flipBelow = rect.top < FLIP_THRESHOLD;
-  const top = flipBelow ? rect.top + rect.height + OFFSET : rect.top - OFFSET;
-  const left = rect.left + rect.width / 2;
+  const anchor = selection.endRect;
+  const flipBelow = anchor.top < FLIP_THRESHOLD;
+  const top = flipBelow ? anchor.top + anchor.height + OFFSET : anchor.top - OFFSET;
+  const left = anchor.left + anchor.width / 2;
 
   return (
     <button
       type="button"
       // 阻止默认避免点击清掉原生选区（文本已在 hook state 里捕获，双保险）。
       onMouseDown={(e) => e.preventDefault()}
-      onClick={() => askAboutSelection({ section: selection.section, text: selection.text })}
+      onClick={() => askAboutSelection(
+        { section: selection.section, text: selection.text },
+        { x: anchor.left + anchor.width, y: anchor.top + anchor.height },
+      )}
       style={{
         position: 'fixed',
         top,

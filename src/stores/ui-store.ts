@@ -3,10 +3,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { selectionRefId } from '@/lib/selection-text';
+import type { AskAiPoint } from '@/lib/ask-ai-floating-panel';
 
 export type ContextPanelTab = 'context' | 'chat';
 
-/** 选中正文文本「追问」时，按钮 → chat 之间传递的引用片段。 */
+/** 选中正文文本「追问」时，按钮 → Ask AI 之间传递的引用片段。 */
 export interface PendingChatReference {
   id: string;
   section: string | null;
@@ -25,9 +26,14 @@ interface UIState {
   sidebarOpen: boolean;
   sidebarWidth: number;
 
-  /** Unified right-side drawer state (merged RightPanel + ChatDrawer + ChatFab). */
+  /** 页面 Context 检查器状态；不再承载 Ask AI。 */
   contextPanelOpen: boolean;
   contextPanelTab: ContextPanelTab;
+
+  /** Ask AI 悬浮工作面的瞬态状态。 */
+  askAiOpen: boolean;
+  askAiAnchor: AskAiPoint | null;
+  askAiPosition: AskAiPoint | null;
 
   commandPaletteOpen: boolean;
   darkMode: boolean;
@@ -53,12 +59,16 @@ interface UIState {
   setSidebarWidth: (width: number) => void;
   resetSidebarWidth: () => void;
 
-  /** Toggle the panel in-place on its current tab. */
+  /** 原位切换 Context 检查器。 */
   toggleContextPanel: () => void;
-  /** Open the panel and (optionally) switch to a specific tab. */
+  /** 打开 Context 检查器；tab 参数仅为旧持久化状态兼容保留。 */
   openContextPanel: (tab?: ContextPanelTab) => void;
   closeContextPanel: () => void;
   setContextPanelTab: (tab: ContextPanelTab) => void;
+
+  openAskAi: (anchor?: AskAiPoint) => void;
+  closeAskAi: () => void;
+  setAskAiPosition: (position: AskAiPoint) => void;
 
   toggleCommandPalette: () => void;
   toggleDarkMode: () => void;
@@ -71,8 +81,11 @@ interface UIState {
   /** 记录某 subject 的上次页面（调用方已用 isRememberablePath 判定）。*/
   rememberPage: (subjectId: string, path: string) => void;
 
-  /** 选中正文文本点「追问」：写入信箱并打开 chat tab。 */
-  askAboutSelection: (payload: { section: string | null; text: string }) => void;
+  /** 选中正文文本点「追问」：写入信箱并打开 Ask AI 悬浮工作面。 */
+  askAboutSelection: (
+    payload: { section: string | null; text: string },
+    anchor?: AskAiPoint,
+  ) => void;
   /** 读出并清空信箱（chat 挂载后消费一次）。 */
   consumePendingChatReference: () => PendingChatReference | null;
 
@@ -188,6 +201,9 @@ export const useUIStore = create<UIState>()(
       sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
       contextPanelOpen: false,
       contextPanelTab: 'context',
+      askAiOpen: false,
+      askAiAnchor: null,
+      askAiPosition: null,
       commandPaletteOpen: false,
       darkMode: false,
       settingsDialogOpen: false,
@@ -211,6 +227,14 @@ export const useUIStore = create<UIState>()(
       closeContextPanel: () => set({ contextPanelOpen: false }),
       setContextPanelTab: (tab) => set({ contextPanelTab: tab }),
 
+      openAskAi: (anchor) =>
+        set({
+          askAiOpen: true,
+          askAiAnchor: anchor ?? null,
+        }),
+      closeAskAi: () => set({ askAiOpen: false, askAiAnchor: null }),
+      setAskAiPosition: (position) => set({ askAiPosition: position }),
+
       toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
       toggleDarkMode: () =>
         set((s) => {
@@ -231,15 +255,15 @@ export const useUIStore = create<UIState>()(
       closeSubjectDialog: () =>
         set((s) => ({ subjectDialog: { ...s.subjectDialog, open: false } })),
 
-      askAboutSelection: (payload) =>
+      askAboutSelection: (payload, anchor) =>
         set({
           pendingChatReference: {
             id: selectionRefId(payload.text),
             section: payload.section,
             text: payload.text,
           },
-          contextPanelOpen: true,
-          contextPanelTab: 'chat',
+          askAiOpen: true,
+          askAiAnchor: anchor ?? null,
         }),
       consumePendingChatReference: () => {
         const current = get().pendingChatReference;
