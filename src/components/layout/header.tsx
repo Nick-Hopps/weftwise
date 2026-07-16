@@ -12,14 +12,11 @@ import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { SubjectSwitcher } from './subject-switcher';
 import { IngestPill } from './ingest-pill';
 import { cn } from '@/lib/cn';
+import { displayTitleForSlug } from '@/lib/path-display';
 
 interface PageLite {
   slug: string;
   title: string;
-}
-
-function titleForSlug(slug: string, pages: PageLite[] | undefined): string {
-  return pages?.find((p) => p.slug === slug)?.title ?? slug;
 }
 
 function Breadcrumb({ pathname }: { pathname: string }) {
@@ -42,7 +39,7 @@ function Breadcrumb({ pathname }: { pathname: string }) {
   } else if (pathname.startsWith('/wiki/')) {
     const slug = pathname.replace(/^\/wiki\//, '');
     segments.push({ label: 'Wiki', href: '/' });
-    segments.push({ label: titleForSlug(slug, pages) });
+    segments.push({ label: displayTitleForSlug(slug, pages) });
   } else {
     segments.push({ label: pathname.replace(/^\/+/, ''), href: pathname });
   }
