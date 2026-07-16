@@ -15,6 +15,7 @@ import type { Code as MdastCode } from 'mdast';
 import type { Plugin } from 'unified';
 import WikiLinkComponent from '@/components/wiki/wiki-link';
 import MermaidDiagram from '@/components/wiki/mermaid-diagram';
+import { remarkArticleHeadings } from '@/lib/article-toc';
 
 // ---------------------------------------------------------------------------
 // Types for custom wikiLink AST node
@@ -286,7 +287,7 @@ const prodRuntime = prod as unknown as {
 export function renderMarkdown(
   content: string,
   titleSlugMap?: Record<string, string>,
-  options?: { math?: boolean },
+  options?: { math?: boolean; headingAnchors?: boolean },
 ): React.ReactElement {
   const enableMath = options?.math ?? false;
   const resolver: SlugResolver | undefined = titleSlugMap
@@ -297,6 +298,7 @@ export function renderMarkdown(
   // 这样 $…$ 先被切成 math 节点，wikilink 扫描器（只处理 [[…]] 文本）碰不到公式内部。
   let remark = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']).use(remarkGfm);
   if (enableMath) remark = remark.use(remarkMath);
+  if (options?.headingAnchors) remark = remark.use(remarkArticleHeadings);
   remark = remark.use(createRemarkCallouts()).use(createRemarkMermaid()).use(createRemarkWikiLinks(resolver));
 
   // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；

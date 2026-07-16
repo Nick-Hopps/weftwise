@@ -675,6 +675,42 @@
   animation: wp-rise 0.42s var(--ease-standard) both;
 }
 
+/* 阅读目录按中央工作区的实际宽度响应，不依赖整个 viewport。 */
+.wiki-reading-container {
+  container: wiki-reader / inline-size;
+}
+.wiki-reading-layout {
+  width: 100%;
+  min-width: 0;
+}
+.wiki-article-toc-rail {
+  display: none;
+}
+
+@container wiki-reader (min-width: 1080px) {
+  .wiki-reading-layout {
+    display: grid;
+    grid-template-columns: minmax(0, var(--reading-max-width)) 220px;
+    column-gap: 40px;
+    width: 100%;
+    max-width: 1040px;
+    margin-inline: auto;
+  }
+  .wiki-reading-body {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .wiki-article-toc-compact {
+    display: none;
+  }
+  .wiki-article-toc-rail {
+    display: block;
+    grid-column: 2;
+    grid-row: 1;
+    padding-top: 48px;
+  }
+}
+
 /* =============================================================================
  * Ingested-source rendered HTML (split reading view, "Sources" pane).
  * ============================================================================= */
