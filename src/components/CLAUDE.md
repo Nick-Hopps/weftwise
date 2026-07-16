@@ -40,6 +40,7 @@
 - `separator.tsx`
 - `tabs.tsx`
 - `switch.tsx` / `segmented.tsx` / `select.tsx`
+- `workspace-page.tsx` —— 知识运维页面共享骨架：统一 1080px 页面宽度、页头、无卡片指标带、sticky 工具栏与空/错状态；只承载视觉结构，不读取 Subject 或业务数据
 
 ### `wiki/` — wiki 页面渲染
 
@@ -76,7 +77,7 @@
 
 ### `tags/`
 
-- `tags-index-view.tsx` —— 标签目录工作台：聚合当前 Subject 页面元数据，展示覆盖率统计，All 支持标签/页面搜索与三种排序；Review 显示待处理数量并切换到解释型清理队列；URL 保存 scope/search/sort，治理意图继续交给既有 PendingAction 审批
+- `tags-index-view.tsx` —— 标签目录工作台：复用 `workspace-page` 的页头/指标带/sticky 工具栏/状态区；聚合当前 Subject 页面元数据，All 支持标签/页面搜索与三种排序；Review 显示待处理数量并切换到解释型清理队列；URL 保存 scope/search/sort，治理意图继续交给既有 PendingAction 审批
 - `tag-review-queue.tsx` —— 无请求的 Review 展示层：按格式变体、非重复单次标签、未标记页面分区；格式变体使用 `Preview merge` 上抛源标签与推荐目标，未标记页面只导航、不复制 metadata 写入能力
 - `tag-pages-view.tsx` —— 标签组合浏览：单标签页面列表扩展为摘要/更新时间/关联标签视图，相关标签可叠加为 `with` 条件并在 `Match all / Match any` 间切换；搜索、排序、组合条件同步到 URL
 - `use-tag-search-params.ts` / `tags-route-fallback.tsx` —— 两个 Tags 路由共用的 URL 状态更新器与 Suspense 加载态
@@ -84,7 +85,7 @@
 
 ### `health/`
 
-- `health-view.tsx` —— 🆕 知识库体检工作台；页头只保留范围与手动重跑，严重级别/近期验证集中为摘要带，类型筛选与批量动作组成 sticky 工具栏；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；Fix/Curate 完成后仅刷新已物化 postcondition 的 Health 快照投影，不再自动入队 lint；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/legacy verifying，终态刷新 pages/lint-latest/active jobs
+- `health-view.tsx` —— 🆕 知识库体检工作台；复用 `workspace-page` 的统一宽度、页头、五项摘要、sticky 工具栏和状态区；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；Fix/Curate 完成后仅刷新已物化 postcondition 的 Health 快照投影，不再自动入队 lint；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/legacy verifying，终态刷新 pages/lint-latest/active jobs
 - `finding-row.tsx` —— 单条 finding 采用稳定的摘要/状态/动作三段布局，长描述限制两行，建议与 plan reason 按需展开；内部 status 映射为用户态文案（如 `awaiting-approval` → `Needs action`）；无 plan 时显示 `Plan unavailable`，不按 finding type 猜测动作；`review-source` 只导航
 - `remediation-ui.ts` —— 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy；恢复 remediation job 只恢复 workflow，不排队修后 lint；Fix 完成摘要只统计 `perFindingOutcomes`，不把 `writes` 解释为 finding 或页面数；同时严格解析 Research job locator/run view，并构造不含 URL 的批准 body
 - `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可操作，持久展示 importing/verifying/terminal 与 child delivery
@@ -98,7 +99,7 @@
 
 ### `history/`
 
-- `operation-list.tsx` —— 操作时间线（rowid DESC）：宽屏两栏（左紧凑记录列表可选中高亮 / 右 DetailPane 摘要+RevertButton+OperationDiff，初始空态提示），md 以下退化为原单列内联展开 Row；数据 query 一份两套渲染
+- `operation-list.tsx` —— 操作时间线（rowid DESC）：复用 `workspace-page` 页头与指标带；宽屏在标准内容区内呈现可独立滚动的 320px 记录栏 + DetailPane，默认选中最新记录；md 以下退化为分隔列表内联展开；数据 query 一份两套渲染
 - `operation-diff.tsx` —— 🆕 单次操作 unified diff 渲染（preHead → postHead）
 - `revert-button.tsx` —— 🆕 回滚按钮 + 确认弹窗（前向 Saga 还原，**同步 POST 无 SSE/job**；确认文案告知覆盖式语义；成功后 invalidate `['history']`/`['pages']` + `router.refresh()`）
 
@@ -164,7 +165,7 @@ React 错误边界，包裹 `(app)/layout.tsx` 主内容。
 src/components/
 ├── providers.tsx
 ├── error-boundary.tsx
-├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs, switch, segmented, select}
+├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs, switch, segmented, select, workspace-page}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
 ├── wiki/         {page-renderer, page-actions, reading-progress, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, selection-ask-button}
 ├── chat/         {chat-interface, conversation-switcher, message-list, save-to-wiki-button}
@@ -181,6 +182,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Health、Tags 与 History 统一为 1080px 知识运维工作区：新增 `workspace-page` 页头/指标带/sticky 工具栏/状态原语；Health 与 Tags 收敛列表边界和状态层级；History 将主从浏览收进标准页面框架并默认选中最新记录，移动端保持行内详情 |
 | 2026-07-16 | Settings 一级入口由 8 项精简为 General / Personalization / Automation / Usage 四组，原模块改为组内 section；About 移到导航底部；弹窗与设置行增加移动端横向导航和上下布局 |
 | 2026-07-16 | Tags Review 升级为解释型清理队列：显示动态待处理数，分开呈现格式变体/非重复单次标签/未标记页面；格式变体可直接打开预填 Merge 的既有治理弹窗，Review 搜索覆盖三个分区，All 目录保持原有排序 |
 | 2026-07-16 | Tags Review 接入服务端治理审批：列表行省略号打开 Rename/Merge/Delete 表单，创建预览后在主工作区展示可恢复的 PendingActionCard；批准终态刷新 pages/history/search/graph，重复工作台审批由服务端 action 恢复 |
