@@ -11,12 +11,11 @@ const ASSET_MAX_BYTES = 8 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 export const ImageGenerateInputSchema = z.object({
-  pageSlug: z.string().regex(/^[a-z0-9][a-z0-9._-]*$/),
   prompt: z.string().trim().min(1).max(4_000),
   alt: z.string().trim().min(1).max(240),
   aspectRatio: z.enum(['1:1', '4:3', '3:4', '16:9', '9:16']).optional(),
   style: z.string().trim().max(240).optional(),
-});
+}).strict();
 
 export const ImageGenerateOutputSchema = z.object({
   type: z.literal('image'),
@@ -40,6 +39,12 @@ export async function generateImageAsset(
   onUsage?: (usage: { inputTokens?: number; outputTokens?: number }) => void,
 ): Promise<{ output: ImageGenerateOutput; asset: { path: string; content: string } }> {
   const route = resolveTask('ingest:image');
+  if (route.provider.provider !== 'google') {
+    throw new Error(
+      `Task "ingest:image" must resolve to a Google image model; got ${route.provider.provider}:${route.model}. ` +
+      'Configure an explicit ingest:image route in llm-config.json.',
+    );
+  }
   const googleOptions = route.providerOptions?.google ?? {};
   const result = await generateText({
     model: getLanguageModel(route),
@@ -72,7 +77,7 @@ export async function generateImageAsset(
   if (file.uint8Array.byteLength > ASSET_MAX_BYTES) throw new Error('image.generate returned an image over 8 MiB');
 
   const extension = extensionForMediaType(file.mediaType);
-  const filename = `${input.pageSlug}-${randomUUID()}.${extension}`;
+  const filename = `${randomUUID()}.${extension}`;
   const path = `assets/${subjectSlug}/${filename}`;
   return {
     output: {
@@ -93,7 +98,7 @@ export const imageGenerateTool: ToolDef<ImageGenerateInput, ImageGenerateOutput>
   outputSchema: ImageGenerateOutputSchema,
   sideEffect: 'none',
   async handler(input, ctx: ToolContext) {
-    if (!ctx.generateImage) throw new Error('image.generate is only available during ingest enrichment');
+    if (!ctx.generateImage) throw new Error('image.generate is only available during page enrichment');
     return ctx.generateImage(input);
   },
 };

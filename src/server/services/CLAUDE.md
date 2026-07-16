@@ -207,7 +207,7 @@ Health 前端刷新时按 subject 读取 active jobs，并可从 queued 或 awai
 
 emit `reenrich:start` 后进入 pipeline（supplement 阶段失败回落时额外 emit `reenrich:supplement-fallback`）；流水线完成后经 `commitPending` 收口提交（不重写 index/log）。**成熟度信号并入正文增长**：`deriveMaturityUpdate` 除原有 callout 增量外，新增 `proseGrowthIncrement(draftContent, finalContent)`（正文增长折算）一并计入 `newIncrement`，防止「多补正文少加 callout」被误判无进展。
 
-需要 `reenrich-supplement v1` / `ingest-enricher v5` / `ingest-verifier v2` / `ingest-verifier-triage v2` / `ingest-verifier-apply v3`（不满足则 fail-fast 提示删除旧 skill 文件重播种；`reenrich-supplement` 是新文件，首次启动自动播种，无需手动删）。
+需要 `reenrich-supplement v1` / `ingest-enricher v6` / `ingest-verifier v2` / `ingest-verifier-triage v2` / `ingest-verifier-apply v3`（不满足则 fail-fast；未修改的内置 `ingest-enricher` v4/v5 会在 worker 启动时安全升级，用户改版继续保留）。
 
 ### `embedding-service.ts` 🆕 — 任务类型 `'embed-index'`
 
@@ -300,6 +300,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | re-enrich 生图可靠性修复：enricher v6 的页面身份改由运行时注入，Unicode slug 可安全关联 asset；视觉主题无现有位图时明确触发生图，已有位图不重复 |
 | 2026-07-16 | enrich 接入 `image.generate` 图片工具；asset 与页面同一 Saga 提交，工具经 `ingest:image` 独立路由调用 Gemini 3.1 Flash Image |
 | 2026-07-16 | Tags 工作台接入 `tag-batch` PendingAction：独立 strict schema、NULL conversation 的 Subject-scoped 恢复和原子在途去重；批准重算 Vault 标签计划并复用 expectedPreHead/Saga/finalizer，Query 工具 schema 保持不变 |
 | 2026-07-16 | Ask AI 单页 re-enrich 命令增加确定性控制面短路：解析当前页/显式 slug 后直接持久化 workflow PendingAction，复合句、教程、否定或缺目标仍走既有 Query 语义 |

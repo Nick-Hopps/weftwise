@@ -52,7 +52,8 @@ export async function runAgentLoop(opts: {
 
   const { model, route } = resolveSkillModel(skill);
   const toolDefs = ctx.toolRegistry.resolve(skill.tools);
-  const toolCtx = agentToolContext(ctx);
+  const currentPageSlug = currentPageSlugForSkill(skill.id, input);
+  const toolCtx = agentToolContext(ctx, currentPageSlug);
   const profile = resolveToolProfile(profileForIngestSkill(skill.id));
   const toolSet = compileToolSet(toolDefs, toolCtx, {
     policy: createToolExecutionPolicy(profile, ctx.subject.id, {
@@ -555,6 +556,11 @@ export function inputLabel(input: unknown): string | undefined {
     if (typeof v === 'string' && v.length > 0) return v;
   }
   return undefined;
+}
+
+/** 图片能力只绑定 enricher 当前 fanout 页；页面身份来自编排输入，不交给模型填写。 */
+export function currentPageSlugForSkill(skillId: string, input: unknown): string | undefined {
+  return skillId === 'ingest-enricher' ? readStringProperty(input, 'slug') : undefined;
 }
 
 /**
