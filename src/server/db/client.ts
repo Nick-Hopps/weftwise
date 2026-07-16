@@ -410,10 +410,10 @@ function migratePendingActions(): void {
   const createTableSql = (table: string) => `
     CREATE TABLE ${table} (
       id TEXT PRIMARY KEY NOT NULL,
-      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
       subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
       operation TEXT NOT NULL
-        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move')),
+        CHECK (operation IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move','tag-batch')),
       payload_json TEXT NOT NULL,
       payload_hash TEXT NOT NULL,
       preview_json TEXT NOT NULL,
@@ -438,6 +438,10 @@ function migratePendingActions(): void {
     `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'pending_actions'`,
   ).get() as { sql: string | null } | undefined;
   const currentSql = definition?.sql?.toLowerCase() ?? '';
+  const conversationIdColumn = sqlite.prepare(`PRAGMA table_info(pending_actions)`).all()
+    .find((column) => (column as { name?: unknown }).name === 'conversation_id') as {
+      notnull?: number;
+    } | undefined;
   if (
     currentSql.includes("'metadata-patch'")
     && currentSql.includes("'link-ensure'")
@@ -446,6 +450,8 @@ function migratePendingActions(): void {
     && currentSql.includes("'workflow-research-start'")
     && currentSql.includes("'workflow-cancel'")
     && currentSql.includes("'move'")
+    && currentSql.includes("'tag-batch'")
+    && conversationIdColumn?.notnull === 0
   ) {
     return;
   }
