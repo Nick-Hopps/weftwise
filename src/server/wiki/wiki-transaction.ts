@@ -26,7 +26,7 @@ import { extractWikiLinks } from './wikilinks';
 import { getRawDb } from '../db/client';
 import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
-import { parseWikiPath } from './page-identity';
+import { isCanonicalPageSlug, parseWikiPath } from './page-identity';
 import { acquireVaultLock } from './vault-mutex';
 import {
   collectPageIdentityMoves,
@@ -111,7 +111,7 @@ export function validateChangeset(
         if (!assetPattern.test(entry.path)) {
           errors.push(`[${entry.path}] Auxiliary asset path is invalid`);
         }
-        if (!entry.assetFor || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(entry.assetFor)) {
+        if (!entry.assetFor || !isCanonicalPageSlug(entry.assetFor)) {
           errors.push(`[${entry.path}] Auxiliary asset must identify a page slug`);
         }
         if (entry.movedFromPath) errors.push(`[${entry.path}] Auxiliary entry cannot carry movedFromPath`);
