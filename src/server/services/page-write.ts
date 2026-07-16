@@ -20,6 +20,7 @@ import {
   planPageMetadataPatch,
   planPageMove,
   planPagePatch,
+  planTagBatch,
   planPageUpdate,
   type PlannedPageOperation,
 } from '../wiki/page-operation-plan';
@@ -33,6 +34,8 @@ import type {
   LinkEnsureResult,
   MetadataPatchInput,
   MetadataPatchResult,
+  TagBatchInput,
+  TagBatchResult,
   Subject,
 } from '@/lib/contracts';
 
@@ -196,6 +199,15 @@ export async function planMetadataPatchInSubject(
 ): Promise<PlannedPageOperation<MetadataPatchResult>> {
   assertMetadataPatchTarget(input.slug);
   return planPageMetadataPatch(crypto.randomUUID(), subject, { ...input, effectiveAt });
+}
+
+/** Tags 工作台只创建批量治理计划，实际 apply 必须由 PendingAction 批准消费。 */
+export async function planTagBatchInSubject(
+  subject: Subject,
+  input: TagBatchInput,
+  effectiveAt: string,
+): Promise<PlannedPageOperation<TagBatchResult>> {
+  return planTagBatch(crypto.randomUUID(), subject, { ...input, effectiveAt });
 }
 
 /**

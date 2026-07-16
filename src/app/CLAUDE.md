@@ -21,7 +21,7 @@
 | `(app)/health/page.tsx` | 🆕 知识库体检工作台：触发 lint（当前 subject / 全量）+ 摘要带 + 类型筛选 + 按严重度分组的紧凑 findings 列表 + 逐条/批量处置（含可折叠的自定义 Research 与页面底部 Research backlog）|
 | `(app)/history/page.tsx` | 🆕 操作时间线：当前 subject 写操作倒序（类型/受影响页/时间戳，仿 /health /tags），单次操作可展开查看 unified diff + 回滚按钮（前向 Saga 还原） |
 | `(app)/wiki/[...slug]/edit/page.tsx` | 🆕 页面在线编辑：`@uiw/react-md-editor` 编辑整文件 markdown，保存走 `PUT /api/pages`（Saga 重索引）后跳回读页 |
-| `(app)/tags/page.tsx` | 标签工作台：当前 Subject 标签覆盖统计、可搜索/排序目录和只读 Review 范围（单次标签 + 格式变体）|
+| `(app)/tags/page.tsx` | 标签工作台：当前 Subject 标签覆盖统计、可搜索/排序目录和 Review 治理（Rename/Merge/Delete 服务端预览审批）|
 | `(app)/tags/[tag]/page.tsx` | 标签组合浏览：页面摘要列表、相关标签叠加、AND/OR、搜索与排序 |
 | `globals.css` | Tailwind + 自定义 CSS 变量（设计 token） |
 
@@ -36,6 +36,7 @@
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，重新规划后执行页面/move/History Saga，或原子 start/cancel workflow job；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
+| `/api/tag-actions` | GET / POST | Tags 工作台审批恢复 / 创建批量治理预览；POST 接受 `{ action:'rename'|'merge'|'delete', sourceTag, targetTag?, subjectId }`，只持久化无 conversation 的 `tag-batch` PendingAction，不直接写 Vault |
 | `/api/lint` | POST | 入队 `lint` 任务；默认 subject-scoped discovery，`{ allSubjects: true }` 显式全量发现；显式 verification body 暂留旧客户端兼容，Health 处置终态不再调用；返回 `jobId + mode` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；有界读取近期 jobs 与关联 Research run 后，直接投影掉 baseline 之后已完成处置验证的 finding，真实 fixed/failed/skipped 结果进入近期摘要，并重算 severity；从未跑过返回完整空快照，All Subjects plans 只读 |
 | `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
@@ -159,6 +160,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Tags Review 增加 Rename/Merge/Delete 治理入口；`/api/tag-actions` 只创建/恢复服务端 PendingAction，批准继续复用通用 approve/reject API，批量写入由单 changeset Saga 原子执行 |
 | 2026-07-16 | Tags 两路由升级为目录/组合浏览工作台，筛选状态 URL 化并增加 Suspense 加载边界；仍复用 subject-aware `/api/pages`，不新增写接口 |
 | 2026-07-16 | 明确的“重新丰富当前页面 / 重新丰富页面 `<slug>`”由 `/api/query` 确定性创建 workflow PendingAction，不再等待 Query LLM 首次 tool-call；仍须独立批准才入队 |
 | 2026-07-15 | 修正 `GET /api/lint/latest` 处置投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后均直接移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要 |

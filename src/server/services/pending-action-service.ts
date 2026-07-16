@@ -3,6 +3,8 @@ import type {
   PendingActionView,
   PreviewChangeInput,
   Subject,
+  TagBatchInput,
+  TagBatchPreviewInput,
   WorkflowPreviewInput,
 } from '@/lib/contracts';
 import * as conversationsRepo from '../db/repos/conversations-repo';
@@ -12,6 +14,7 @@ import {
   canonicalJson,
   hashPendingActionPayload,
   normalizePreviewInput,
+  normalizeTagBatchPreviewInput,
   normalizeWorkflowPreviewInput,
 } from './pending-action-payload';
 import {
@@ -21,6 +24,7 @@ import {
   planMetadataPatchInSubject,
   planMovePageInSubject,
   planPatchPageInSubject,
+  planTagBatchInSubject,
   planUpdatePageInSubject,
 } from './page-write';
 import { planReenrich } from './reenrich-enqueue';
@@ -145,7 +149,7 @@ function recordToView(record: PendingActionRecord): PendingActionView {
 
 async function planPreview(
   subject: Subject,
-  input: PreviewChangeInput,
+  input: PreviewChangeInput | TagBatchPreviewInput,
   effectiveAt: string,
 ): Promise<PendingActionPreview> {
   switch (input.operation) {
@@ -189,30 +193,34 @@ async function planPreview(
         input.payload,
         effectiveAt,
       ));
+    case 'tag-batch':
+      return pagePlanToPreview(await planTagBatchInSubject(
+        subject,
+        input.payload,
+        effectiveAt,
+      ));
     default:
       return assertNever(input);
   }
 }
 
-export async function createPendingActionPreview(input: {
-  conversationId: string;
+async function persistPageActionPreviewRecord(input: {
+  conversationId: string | null;
   subject: Subject;
-  input: PreviewChangeInput;
-  now?: Date;
+  normalized: {
+    operation: PendingActionRecord['operation'];
+    payload: object & { effectiveAt: string };
+  };
+  now: Date;
 }): Promise<PendingActionView> {
-  const conversation = conversationsRepo.getConversation(input.conversationId);
-  if (!conversation || conversation.subjectId !== input.subject.id) {
-    throw new PendingActionError('ACTION_NOT_FOUND', 'Conversation not found.', 404);
-  }
-
-  const now = input.now ?? new Date();
+  const now = input.now;
   const nowIso = now.toISOString();
-  const normalized = normalizePreviewInput(input.input, nowIso);
+  const normalized = input.normalized;
   const planPayload = omitEffectiveAt(normalized.payload);
   const normalizedForPlan = {
     operation: normalized.operation,
     payload: planPayload,
-  } as PreviewChangeInput;
+  } as PreviewChangeInput | TagBatchPreviewInput;
   let preview: PendingActionPreview;
   try {
     preview = await planPreview(input.subject, normalizedForPlan, nowIso);
@@ -231,7 +239,7 @@ export async function createPendingActionPreview(input: {
     payload: normalized.payload,
   });
   const expiresAt = new Date(now.getTime() + PENDING_TTL_MS).toISOString();
-  const record = pendingActionsRepo.createPendingAction({
+  const createInput = {
     conversationId: input.conversationId,
     subjectId: input.subject.id,
     operation: normalized.operation,
@@ -241,8 +249,60 @@ export async function createPendingActionPreview(input: {
     createdAt: nowIso,
     updatedAt: nowIso,
     expiresAt,
-  });
+  };
+  const record = input.conversationId === null
+    ? pendingActionsRepo.createTagBatchPendingAction({
+        ...createInput,
+        conversationId: null,
+        operation: 'tag-batch',
+      })
+    : pendingActionsRepo.createPendingAction({ ...createInput, conversationId: input.conversationId });
+  if (!record) {
+    const active = pendingActionsRepo.getActiveTagBatchForSubject(input.subject.id);
+    throw new PendingActionError(
+      'ACTION_IN_PROGRESS',
+      'Another tag action is already awaiting approval.',
+      409,
+      active ? recordToView(active) : undefined,
+    );
+  }
   return recordToView(record);
+}
+
+export async function createPendingActionPreview(input: {
+  conversationId: string;
+  subject: Subject;
+  input: PreviewChangeInput;
+  now?: Date;
+}): Promise<PendingActionView> {
+  const conversation = conversationsRepo.getConversation(input.conversationId);
+  if (!conversation || conversation.subjectId !== input.subject.id) {
+    throw new PendingActionError('ACTION_NOT_FOUND', 'Conversation not found.', 404);
+  }
+  const now = input.now ?? new Date();
+  const normalized = normalizePreviewInput(input.input, now.toISOString());
+  return persistPageActionPreviewRecord({
+    conversationId: input.conversationId,
+    subject: input.subject,
+    normalized,
+    now,
+  });
+}
+
+/** Tags 工作台创建无 conversation 的持久化审批，后续批准复用统一状态机。 */
+export async function createTagBatchPendingActionPreview(input: {
+  subject: Subject;
+  payload: TagBatchInput;
+  now?: Date;
+}): Promise<PendingActionView> {
+  const now = input.now ?? new Date();
+  const normalized = normalizeTagBatchPreviewInput(input.payload, now.toISOString());
+  return persistPageActionPreviewRecord({
+    conversationId: null,
+    subject: input.subject,
+    normalized,
+    now,
+  });
 }
 
 export async function createPendingHistoryRevertPreview(input: {
@@ -373,6 +433,15 @@ export function listPendingActions(input: {
     .map(recordToView);
 }
 
+export function listTagBatchPendingActions(input: {
+  subject: Subject;
+  now?: Date;
+}): PendingActionView[] {
+  const now = input.now ?? new Date();
+  pendingActionsRepo.expirePending(now.toISOString());
+  return pendingActionsRepo.listTagBatchForSubject(input.subject.id).map(recordToView);
+}
+
 function scopedRecord(id: string, subjectId: string): PendingActionRecord {
   const record = pendingActionsRepo.getScoped(id, subjectId);
   if (!record) throw new PendingActionError('ACTION_NOT_FOUND', 'Action not found.', 404);
@@ -441,6 +510,9 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
       break;
     case 'move':
       pagePlan = await planMovePageInSubject(subject, planPayload as never, effectiveAt);
+      break;
+    case 'tag-batch':
+      pagePlan = await planTagBatchInSubject(subject, planPayload as never, effectiveAt);
       break;
     case 'history-revert': {
       const historyPlan = await planHistoryRevert(subject, String(payload.operationId));

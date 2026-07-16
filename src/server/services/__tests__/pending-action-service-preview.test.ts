@@ -7,8 +7,11 @@ vi.mock('../../db/repos/conversations-repo', () => conversationMocks);
 
 const repoMocks = vi.hoisted(() => ({
   createPendingAction: vi.fn(),
+  createTagBatchPendingAction: vi.fn(),
+  getActiveTagBatchForSubject: vi.fn(),
   expirePending: vi.fn(() => 0),
   listForConversation: vi.fn((): PendingActionRecord[] => []),
+  listTagBatchForSubject: vi.fn((): PendingActionRecord[] => []),
 }));
 vi.mock('../../db/repos/pending-actions-repo', () => repoMocks);
 
@@ -20,6 +23,7 @@ const pagePlanMocks = vi.hoisted(() => ({
   planMetadataPatchInSubject: vi.fn(),
   planLinkEnsureInSubject: vi.fn(),
   planMovePageInSubject: vi.fn(),
+  planTagBatchInSubject: vi.fn(),
 }));
 vi.mock('../page-write', () => pagePlanMocks);
 
@@ -48,7 +52,9 @@ import {
   createPendingActionPreview,
   createPendingHistoryRevertPreview,
   createPendingWorkflowActionPreview,
+  createTagBatchPendingActionPreview,
   listPendingActions,
+  listTagBatchPendingActions,
 } from '../pending-action-service';
 
 const subject: Subject = {
@@ -98,6 +104,20 @@ beforeEach(() => {
       referencesUpdated: 0, sourceLinksMigrated: 0,
     },
   });
+  pagePlanMocks.planTagBatchInSubject.mockResolvedValue({
+    ...pagePreview,
+    summary: '合并标签 old → canonical（2 个页面）',
+    operation: 'tag-batch',
+    changeset: { id: 'cs-tags' },
+    affectedPages: [
+      { slug: 'page-a', action: 'update' },
+      { slug: 'page-b', action: 'update' },
+    ],
+    resultHint: {
+      action: 'merge', sourceTag: 'old', targetTag: 'canonical',
+      updatedPages: ['page-a', 'page-b'],
+    },
+  });
   historyMocks.planHistoryRevert.mockResolvedValue({
     originalOperationId: 'op-old', preHead: 'head-1', changeset: { id: 'cs-history' },
     summary: '回滚历史操作 op-old', affectedPages: pagePreview.affectedPages,
@@ -118,6 +138,16 @@ beforeEach(() => {
   repoMocks.createPendingAction.mockImplementation((input: Record<string, unknown>) => ({
     ...input,
     id: 'a1',
+    status: 'pending',
+    approvedAt: null,
+    appliedAt: null,
+    operationId: null,
+    jobId: null,
+    errorJson: null,
+  }));
+  repoMocks.createTagBatchPendingAction.mockImplementation((input: Record<string, unknown>) => ({
+    ...input,
+    id: 'a-tags',
     status: 'pending',
     approvedAt: null,
     appliedAt: null,
@@ -349,5 +379,69 @@ describe('listPendingActions', () => {
   it('导出稳定错误类型', () => {
     expect(new PendingActionError('ACTION_NOT_FOUND', 'missing', 404))
       .toMatchObject({ code: 'ACTION_NOT_FOUND', httpStatus: 404 });
+  });
+});
+
+describe('Tags 工作台 PendingAction', () => {
+  it('创建无 conversation 的批量预览，批准前不 apply', async () => {
+    const view = await createTagBatchPendingActionPreview({
+      subject,
+      payload: { action: 'merge', sourceTag: ' old ', targetTag: ' canonical ' },
+      now,
+    });
+
+    expect(pagePlanMocks.planTagBatchInSubject).toHaveBeenCalledWith(
+      subject,
+      { action: 'merge', sourceTag: 'old', targetTag: 'canonical' },
+      now.toISOString(),
+    );
+    expect(repoMocks.createTagBatchPendingAction).toHaveBeenCalledWith(expect.objectContaining({
+      conversationId: null,
+      subjectId: 's1',
+      operation: 'tag-batch',
+      payloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    }));
+    expect(view).toMatchObject({
+      conversationId: null, operation: 'tag-batch', status: 'pending',
+      summary: '合并标签 old → canonical（2 个页面）',
+    });
+    expect(operationPlanMocks.applyPlannedPageOperation).not.toHaveBeenCalled();
+  });
+
+  it('刷新恢复只读取当前 Subject 的工作台审批', () => {
+    repoMocks.listTagBatchForSubject.mockReturnValue([{
+      id: 'a-tags', conversationId: null, subjectId: 's1', operation: 'tag-batch',
+      payloadJson: '{}', payloadHash: 'h', previewJson: JSON.stringify(pagePreview),
+      status: 'pending', createdAt: now.toISOString(), updatedAt: now.toISOString(),
+      expiresAt: '2026-07-11T00:30:00.000Z', approvedAt: null, appliedAt: null,
+      operationId: null, jobId: null, errorJson: null,
+    }]);
+
+    expect(listTagBatchPendingActions({ subject, now })[0]).toMatchObject({
+      actionId: 'a-tags', conversationId: null, operation: 'tag-batch',
+    });
+    expect(repoMocks.expirePending).toHaveBeenCalledWith(now.toISOString());
+    expect(repoMocks.listTagBatchForSubject).toHaveBeenCalledWith('s1');
+  });
+
+  it('原子创建冲突时返回已存在的服务端 action', async () => {
+    const existing: PendingActionRecord = {
+      id: 'existing', conversationId: null, subjectId: 's1', operation: 'tag-batch',
+      payloadJson: '{}', payloadHash: 'h', previewJson: JSON.stringify(pagePreview),
+      status: 'pending', createdAt: now.toISOString(), updatedAt: now.toISOString(),
+      expiresAt: '2026-07-11T00:30:00.000Z', approvedAt: null, appliedAt: null,
+      operationId: null, jobId: null, errorJson: null,
+    };
+    repoMocks.createTagBatchPendingAction.mockReturnValueOnce(null);
+    repoMocks.getActiveTagBatchForSubject.mockReturnValueOnce(existing);
+
+    await expect(createTagBatchPendingActionPreview({
+      subject,
+      payload: { action: 'delete', sourceTag: 'old' },
+      now,
+    })).rejects.toMatchObject({
+      code: 'ACTION_IN_PROGRESS',
+      action: { actionId: 'existing', operation: 'tag-batch', status: 'pending' },
+    });
   });
 });

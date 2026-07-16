@@ -56,7 +56,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `split-plan.ts` | `planSplitPages(pages, existingSlugs, sourceSlug)` | 纯函数：把 LLM 拆分页清单整理为可落盘页——`normalizeSlug` 派生唯一 slug（冲突加后缀、排除 sourceSlug）+ 保证恰一 `isPrimary`（④c） |
 | `narrow-write.ts` | `normalizeMetadataPatch / prepareMetadataPatch / buildLinkEnsureEdit` | metadata/link 窄写纯内核：字段规范化、alias 身份冲突、唯一自然锚点、Markdown token 边界、link/unlink/retarget 与跨主题 target 形态校验；零 I/O、零 LLM |
 | `page-ops.ts` | `executePageMerge/Split/Delete/Create/Update/Patch/MetadataPatch/LinkEnsure` + `applyPatchEdits` | 所有页面写入的 direct 执行内核（Saga）；无 emit / 无 embed enqueue，由调用方持有调度。metadata patch 逐字复用正文并把 title relink 放入同一 changeset；link ensure 只把确定性单 edit 委托 patch plan，唯一写对象是 source page |
-| `page-operation-plan.ts` / `unified-diff.ts` | `planPageCreate/Update/Patch/Delete/MetadataPatch/LinkEnsure/Move` + `applyPlannedPageOperation` | direct 与审批共享的 plan/apply 层；move 规划 old delete + new create + backlink/source sidecar 更新；`expectedPreHead` 在 vault mutex 内、任何 fs/DB 写入前核对，避免批准陈旧预览覆盖并发提交 |
+| `page-operation-plan.ts` / `unified-diff.ts` | `planPageCreate/Update/Patch/Delete/MetadataPatch/LinkEnsure/Move/TagBatch` + `applyPlannedPageOperation` | direct 与审批共享的 plan/apply 层；TagBatch 从 Vault frontmatter 读取标签事实，保护 meta 页并把全部页面更新纳入一个 changeset；move 规划 old delete + new create + backlink/source sidecar 更新；`expectedPreHead` 在 vault mutex 内、任何 fs/DB 写入前核对，避免批准陈旧预览覆盖并发提交 |
 | `page-identity-migration.ts` | `collectPageIdentityMoves / migratePageIdentityCaches` | 按 changeset move marker 幂等迁移 page_sources、embedding、maturity、rendition 与 profile signal slug，供 apply/rollback/recovery/History revert 共用 |
 | `curate-plan.ts` | `expandScopeWithNeighbors(seedSlugs, links, subjectId, metaSlugs)` / `createCurateGuard(opts: { seedSet, allowedSet, caps })` | 纯函数：scope 扩展（含邻居）；Guard 强制 allowedSet/seed/meta 边界，并分别限制 merge/split/delete/create/update；metadata/link 窄写共用 `canEditPage` 与独立 update cap |
 | `revert.ts` | `buildRevertEntries(entries, fileAtPreHead, currentExists)` | 纯函数：给定原 Changeset entries + git preHead 文件快照 + 当前页面存在状态，构造 inverse changeset 条目（preHead 无→delete / 有+当前存在→update 旧内容 / 有+当前不存在→create 旧内容），供 History API 与 `services/history-tools.ts` 共用（⑥ / Phase 3B） |
@@ -142,6 +142,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 新增 `planTagBatch`：Rename 要求新标签未使用、Merge 要求目标已存在、Delete 只移除标签；精确匹配原始大小写、跳过 meta 页、正文保持不变，全部受影响页在单 changeset 中预览/批准/apply |
 | 2026-07-14 | Wiki 解析边界：frontmatter 补齐 emoji/fenced code/CRLF 语义往返测试；`TitleResolver` 接收目标 Subject，indexer 与页面操作按 Subject 隔离同名 title，跨 Subject 标题正确解析到 canonical slug |
 | 2026-07-14 | 页面身份迁移 Phase 3D：新增 move plan、alias 解析、当前 Subject backlink 与 source sidecar 同 commit 更新；Saga 按 marker 迁移 slug 派生缓存并重建索引，rollback/recovery/History revert 支持反向身份迁移 |
 | 2026-07-14 | History 工具 Phase 3B：既有 `history.ts/revert.ts` 纯函数由共享 `services/history-tools.ts` 复用；回滚预览以当前 HEAD 生成 inverse diff，批准 apply 使用 `expectedPreHead` 与 vault mutex 拒绝陈旧计划 |
