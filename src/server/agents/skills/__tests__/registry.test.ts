@@ -10,7 +10,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { retireBuiltinSkillFiles } from '../registry';
+import { createHash } from 'node:crypto';
+import { retireBuiltinSkillFiles, upgradeBuiltinSkillFiles } from '../registry';
 import { loadSkillsFromDir } from '../loader';
 
 const FIXTURE = join(__dirname, 'fixtures', 'ingest-indexer-v1.md');
@@ -21,6 +22,47 @@ function makeVault() {
   mkdirSync(skillsDir, { recursive: true });
   return { vaultDir, skillsDir };
 }
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+describe('upgradeBuiltinSkillFiles', () => {
+  it('只升级 hash 精确匹配的历史内置原版', () => {
+    const { vaultDir, skillsDir } = makeVault();
+    const examplesDir = mkdtempSync(join(tmpdir(), 'builtin-skill-examples-'));
+    const oldBuiltin = 'historical builtin\n';
+    const currentBuiltin = 'current builtin\n';
+    writeFileSync(join(skillsDir, 'ingest-enricher.md'), oldBuiltin);
+    writeFileSync(join(examplesDir, 'ingest-enricher.md'), currentBuiltin);
+
+    const result = upgradeBuiltinSkillFiles({
+      vaultDir,
+      examplesDir,
+      upgradeHashes: { 'ingest-enricher': [sha256(oldBuiltin)] },
+    });
+
+    expect(result).toEqual({ upgraded: ['ingest-enricher'] });
+    expect(readFileSync(join(skillsDir, 'ingest-enricher.md'), 'utf8')).toBe(currentBuiltin);
+  });
+
+  it('不覆盖 hash 未命中的用户改版', () => {
+    const { vaultDir, skillsDir } = makeVault();
+    const examplesDir = mkdtempSync(join(tmpdir(), 'builtin-skill-examples-'));
+    const userEdited = 'historical builtin\n用户修改\n';
+    writeFileSync(join(skillsDir, 'ingest-enricher.md'), userEdited);
+    writeFileSync(join(examplesDir, 'ingest-enricher.md'), 'current builtin\n');
+
+    const result = upgradeBuiltinSkillFiles({
+      vaultDir,
+      examplesDir,
+      upgradeHashes: { 'ingest-enricher': [sha256('historical builtin\n')] },
+    });
+
+    expect(result).toEqual({ upgraded: [] });
+    expect(readFileSync(join(skillsDir, 'ingest-enricher.md'), 'utf8')).toBe(userEdited);
+  });
+});
 
 describe('retireBuiltinSkillFiles', () => {
   it('删除 hash 匹配历史模板的 retired 原版', () => {

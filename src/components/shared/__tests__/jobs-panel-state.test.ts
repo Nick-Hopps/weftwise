@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeJobsPanel } from '../jobs-panel-state';
+import { recoverUnlistedTrackedJobs, summarizeJobsPanel } from '../jobs-panel-state';
 
 const jobs = [
   { id: 'running', queueStatus: 'running' as const },
@@ -37,5 +37,25 @@ describe('summarizeJobsPanel', () => {
       running: 'completed',
       pending: 'failed',
     }).collapsedStatus).toBe('failed');
+  });
+});
+
+describe('recoverUnlistedTrackedJobs', () => {
+  it('把未列出的 queued 行切换为 SSE 终态恢复', () => {
+    const previous = [
+      { id: 'running', type: 'ingest', label: 'a.md', queueStatus: 'running' as const, reconnectKey: 0 },
+      { id: 'fast-failure', type: 're-enrich', label: 'page-a', queueStatus: 'pending' as const, reconnectKey: 0 },
+      { id: 'still-active', type: 're-enrich', label: 'page-b', queueStatus: 'pending' as const, reconnectKey: 0 },
+      { id: 'dismissed', type: 're-enrich', label: 'page-c', queueStatus: 'pending' as const, reconnectKey: 0 },
+    ];
+
+    expect(recoverUnlistedTrackedJobs(
+      previous,
+      new Set(['still-active']),
+      new Set(['dismissed']),
+    )).toEqual([
+      previous[0],
+      { ...previous[1], queueStatus: 'running' },
+    ]);
   });
 });
