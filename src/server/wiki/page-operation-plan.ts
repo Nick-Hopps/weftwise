@@ -9,6 +9,8 @@ import type {
   MetadataPatchInput,
   MetadataPatchResult,
   Subject,
+  TagBatchInput,
+  TagBatchResult,
   TitleResolver,
   WikiDocument,
   WikiFrontmatter,
@@ -49,7 +51,7 @@ export interface PagePlanMeta {
 export interface PlannedPageOperation<
   ResultHint extends object = Record<string, unknown>,
 > {
-  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch' | 'link-ensure' | 'move';
+  operation: 'create' | 'update' | 'patch' | 'delete' | 'metadata-patch' | 'link-ensure' | 'move' | 'tag-batch';
   preHead: string;
   changeset: Changeset;
   summary: string;
@@ -60,6 +62,27 @@ export interface PlannedPageOperation<
 }
 
 type BeforeSnapshotByPath = ReadonlyMap<string, string | null>;
+
+/** 精确替换或删除一个标签，保留其他标签的原始顺序，并避免合并后重复。 */
+export function rewritePageTags(
+  tags: readonly string[],
+  sourceTag: string,
+  targetTag?: string,
+): string[] {
+  const targetAlreadyExists = targetTag ? tags.includes(targetTag) : false;
+  let insertedTarget = false;
+  const next: string[] = [];
+  for (const tag of tags) {
+    if (tag !== sourceTag) {
+      next.push(tag);
+      continue;
+    }
+    if (!targetTag || targetAlreadyExists || insertedTarget) continue;
+    next.push(targetTag);
+    insertedTarget = true;
+  }
+  return next;
+}
 
 function buildDiffEntries(
   entries: ChangesetEntry[],
@@ -496,6 +519,85 @@ export async function planPageMetadataPatch(
       updatedSlug: input.slug,
       referencesUpdated,
       changedFields: prepared.changedFields,
+    },
+  });
+}
+
+/**
+ * 规划 Subject 内的标签批量治理。Vault frontmatter 是标签事实源，所有页面在同一
+ * changeset 中更新；rename 要求目标尚不存在，merge 要求目标已存在。
+ */
+export async function planTagBatch(
+  jobId: string,
+  subject: Subject,
+  input: TagBatchInput & PagePlanMeta,
+): Promise<PlannedPageOperation<TagBatchResult>> {
+  const sourceTag = input.sourceTag.trim();
+  const targetTag = input.targetTag?.trim();
+  if (!sourceTag) throw new Error('Source tag is required.');
+  if (sourceTag === 'meta' || targetTag === 'meta') {
+    throw new Error('The protected meta tag cannot be changed.');
+  }
+  if (input.action !== 'delete' && !targetTag) {
+    throw new Error('Target tag is required for rename and merge.');
+  }
+  if (input.action === 'delete' && targetTag) {
+    throw new Error('Delete does not accept a target tag.');
+  }
+  if (targetTag === sourceTag) throw new Error('Target tag must differ from source tag.');
+
+  const scanned = scanWikiPages(subject.slug)
+    .map((page) => ({ ...page, parsed: parseFrontmatter(page.content) }))
+    .filter((page) => !page.parsed.data.tags.includes('meta'));
+  const affected = scanned.filter((page) => page.parsed.data.tags.includes(sourceTag));
+  if (affected.length === 0) throw new Error(`Tag "${sourceTag}" is not used in this subject.`);
+
+  const targetExists = Boolean(targetTag) && scanned.some(
+    (page) => page.parsed.data.tags.includes(targetTag!),
+  );
+  if (input.action === 'rename' && targetExists) {
+    throw new Error(`Tag "${targetTag}" already exists; use merge instead.`);
+  }
+  if (input.action === 'merge' && !targetExists) {
+    throw new Error(`Target tag "${targetTag}" does not exist; use rename instead.`);
+  }
+
+  const mutationEpoch = captureSubjectMutationEpoch(subject.id);
+  const preHead = await getVaultHead();
+  const entries: ChangesetEntry[] = [];
+  const beforeByPath = new Map<string, string | null>();
+  const updatedPages: string[] = [];
+  for (const page of affected) {
+    const nextTags = rewritePageTags(page.parsed.data.tags, sourceTag, targetTag);
+    entries.push({
+      action: 'update',
+      path: page.relativePath,
+      content: serializeFrontmatter({
+        ...page.parsed.data,
+        tags: nextTags,
+        updated: input.effectiveAt,
+      }, page.parsed.body),
+    });
+    beforeByPath.set(page.relativePath, page.content);
+    updatedPages.push(page.slug);
+  }
+
+  const verb = input.action === 'rename'
+    ? `重命名标签 ${sourceTag} → ${targetTag}`
+    : input.action === 'merge'
+      ? `合并标签 ${sourceTag} → ${targetTag}`
+      : `删除标签 ${sourceTag}`;
+  return finishPlan({
+    operation: 'tag-batch',
+    preHead,
+    changeset: createChangeset(jobId, subject, entries, mutationEpoch),
+    beforeByPath,
+    summary: `${verb}（${updatedPages.length} 个页面）`,
+    resultHint: {
+      action: input.action,
+      sourceTag,
+      ...(targetTag ? { targetTag } : {}),
+      updatedPages,
     },
   });
 }
