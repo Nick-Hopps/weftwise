@@ -99,7 +99,7 @@
 
 ### `history/`
 
-- `operation-list.tsx` —— 操作时间线（rowid DESC）：复用 `workspace-page` 页头与指标带；宽屏在标准内容区内呈现可独立滚动的 320px 记录栏 + DetailPane，默认选中最新记录；md 以下退化为分隔列表内联展开；数据 query 一份两套渲染
+- `operation-list.tsx` —— 操作时间线（rowid DESC）：复用 `workspace-page` 页头与指标带；宽屏在标准内容区内呈现 320px 记录栏 + DetailPane，内容高度随记录自然展开，默认选中最新记录；md 以下退化为分隔列表内联展开；数据 query 一份两套渲染
 - `operation-diff.tsx` —— 🆕 单次操作 unified diff 渲染（preHead → postHead）
 - `revert-button.tsx` —— 🆕 回滚按钮 + 确认弹窗（前向 Saga 还原，**同步 POST 无 SSE/job**；确认文案告知覆盖式语义；成功后 invalidate `['history']`/`['pages']` + `router.refresh()`）
 
