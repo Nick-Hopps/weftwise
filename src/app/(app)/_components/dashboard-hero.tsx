@@ -32,7 +32,7 @@ function useGreeting() {
 }
 
 export function DashboardHero({ pageCount, compact = false }: DashboardHeroProps) {
-  const openContextPanel = useUIStore((s) => s.openContextPanel);
+  const openAskAi = useUIStore((s) => s.openAskAi);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const greeting = useGreeting();
 
@@ -57,7 +57,7 @@ export function DashboardHero({ pageCount, compact = false }: DashboardHeroProps
           <Button
             intent="primary"
             size="base"
-            onClick={() => openContextPanel('chat')}
+            onClick={() => openAskAi()}
           >
             <Sparkles className="h-3.5 w-3.5" />
             <span>Ask your Wiki</span>
@@ -89,7 +89,7 @@ export function DashboardHero({ pageCount, compact = false }: DashboardHeroProps
         <Button
           intent="primary"
           size="lg"
-          onClick={() => openContextPanel('chat')}
+          onClick={() => openAskAi()}
         >
           <Sparkles className="h-4 w-4" />
           <span>Ask your Wiki</span>

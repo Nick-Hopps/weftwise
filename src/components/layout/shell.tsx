@@ -1,17 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { useUIStore, CONTEXT_PANEL_WIDTH } from '@/stores/ui-store';
 import { Header } from './header';
 import { Sidebar } from './sidebar';
 import { ContextPanel } from './context-panel';
+import { AskAiFloatingPanel } from './ask-ai-floating-panel';
 
 interface ShellProps {
   children: React.ReactNode;
 }
 
 export function Shell({ children }: ShellProps) {
-  const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar, contextPanelOpen } =
+  const pathname = usePathname();
+  const isWikiRoute = pathname?.startsWith('/wiki/') ?? false;
+  const {
+    sidebarOpen,
+    sidebarWidth,
+    setSidebarWidth,
+    toggleSidebar,
+    contextPanelOpen,
+    openAskAi,
+  } =
     useUIStore();
 
   // Apply panel width only post-hydration to avoid SSR/client mismatch.
@@ -47,6 +58,17 @@ export function Shell({ children }: ShellProps) {
     },
     [setSidebarWidth],
   );
+
+  const handleMainDoubleClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (window.innerWidth < 1024) return;
+    const target = event.target as Element | null;
+    if (!target) return;
+    if (target.closest(
+      'a,button,input,textarea,select,label,summary,pre,code,p,span,strong,em,time,dt,dd,h1,h2,h3,h4,h5,h6,li,blockquote,table,td,th,[contenteditable="true"],[data-ask-ai-ignore]',
+    )) return;
+    window.getSelection()?.removeAllRanges();
+    openAskAi({ x: event.clientX, y: event.clientY });
+  }, [openAskAi]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-canvas">
@@ -91,12 +113,13 @@ export function Shell({ children }: ShellProps) {
         <main
           id="main-content"
           className="relative flex-1 overflow-y-auto overscroll-contain bg-surface"
+          onDoubleClick={handleMainDoubleClick}
         >
           {children}
         </main>
 
         {/* Context Panel — desktop docked, fixed width */}
-        {contextPanelOpen && (
+        {contextPanelOpen && isWikiRoute && (
           <div
             className="hidden shrink-0 overflow-hidden motion-safe:animate-slide-left lg:flex"
             style={{ width: CONTEXT_PANEL_WIDTH }}
@@ -105,6 +128,8 @@ export function Shell({ children }: ShellProps) {
           </div>
         )}
       </div>
+
+      <AskAiFloatingPanel />
     </div>
   );
 }

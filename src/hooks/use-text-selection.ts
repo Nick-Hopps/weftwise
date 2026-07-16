@@ -19,6 +19,8 @@ export interface SelectionInfo {
   text: string;
   section: string | null;
   rect: SelectionRect;
+  /** 选区的视觉末端，用作 Ask AI 面板锚点。 */
+  endRect: SelectionRect;
 }
 
 /**
@@ -63,6 +65,10 @@ export function useTextSelection(
       const section = findNearestHeadingText(
         startEl as unknown as HeadingScanNode | null,
       );
+      const clientRects = Array.from(range.getClientRects()).filter(
+        (item) => item.width > 0 || item.height > 0,
+      );
+      const endDomRect = clientRects[clientRects.length - 1] ?? domRect;
       setSelection({
         text: truncateForContext(norm),
         section,
@@ -71,6 +77,12 @@ export function useTextSelection(
           left: domRect.left,
           width: domRect.width,
           height: domRect.height,
+        },
+        endRect: {
+          top: endDomRect.top,
+          left: endDomRect.left,
+          width: endDomRect.width,
+          height: endDomRect.height,
         },
       });
     };

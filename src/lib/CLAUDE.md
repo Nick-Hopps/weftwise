@@ -18,6 +18,7 @@
 | `tags.ts` | Tags 工作台纯分析：标签摘要/覆盖率/格式变体/组合筛选，以及 `buildTagReviewQueue` / `filterTagReviewQueue` 即时投影格式变体、非重复单次标签与未标记页面；不持久化 Review 状态 |
 | `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
+| `ask-ai-floating-panel.ts` | Ask AI 悬浮工作面纯逻辑：锚点定位、视口安全区约束、移动 Sheet 下滑关闭阈值 |
 | `subject-nav.ts` | 🆕 subject 切换的可记忆路径判定与 query 拼接：`isRememberablePath`（`/wiki/*` / `/sources/*` 判定）/ `withSubjectParam`（`?s=<subject-slug>` 拼接） + 单测 |
 | `job-started-event.ts` | 客户端后台任务启动事件契约：必须携带 `jobId/type/label/queueStatus`；PendingAction workflow 映射真实 job 类型，ingest 专属 UI 用 `isIngestJobStarted` 过滤 |
 | `error-format.ts` | 🆕 `describeErrorMessage(error)`：AI SDK `RetryError` 最后一次尝试自身 message 为空时，补上 `.lastError` 的 message/cause，避免真实原因丢失；`server/jobs/worker.ts` 与 `server/db/repos/jobs-repo.ts::failJob` 共用 |

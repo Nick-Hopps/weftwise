@@ -89,7 +89,7 @@ export function Header() {
     darkMode,
     contextPanelOpen,
     toggleContextPanel,
-    openContextPanel,
+    openAskAi,
   } = useUIStore();
 
   const isWikiRoute = pathname.startsWith('/wiki/');
@@ -175,7 +175,7 @@ export function Header() {
 
         <IconButton
           size="base"
-          onClick={() => openContextPanel('chat')}
+          onClick={() => openAskAi()}
           aria-label="Ask your wiki (⌘J)"
           data-tip="Ask your wiki"
           className="tip tip-b text-accent hover:text-accent-hover"
