@@ -41,30 +41,25 @@ function DarkModeInitializer() {
   return null;
 }
 
-// Global ⌘J / Ctrl+J — toggles the ContextPanel chat tab. Formerly lived in
-// GlobalChatDrawer; moved here so the hotkey survives after that component was
-// merged into ContextPanel.
+// 全局 ⌘J / Ctrl+J：切换 Ask AI 悬浮工作面。
 function GlobalHotkeys() {
-  const toggleContextPanel = useUIStore((s) => s.toggleContextPanel);
-  const setContextPanelTab = useUIStore((s) => s.setContextPanelTab);
-  const openContextPanel = useUIStore((s) => s.openContextPanel);
+  const openAskAi = useUIStore((s) => s.openAskAi);
+  const closeAskAi = useUIStore((s) => s.closeAskAi);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault();
-        const { contextPanelOpen, contextPanelTab } = useUIStore.getState();
-        if (contextPanelOpen && contextPanelTab === 'chat') {
-          toggleContextPanel();
+        if (useUIStore.getState().askAiOpen) {
+          closeAskAi();
         } else {
-          openContextPanel('chat');
-          setContextPanelTab('chat');
+          openAskAi();
         }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [toggleContextPanel, setContextPanelTab, openContextPanel]);
+  }, [closeAskAi, openAskAi]);
 
   return null;
 }
