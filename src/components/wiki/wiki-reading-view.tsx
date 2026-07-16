@@ -60,7 +60,6 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showOriginal, setShowOriginal] = useState(false);
-  const [lensRequested, setLensRequested] = useState(false);
 
   const canSplit = sourceCount > 0;
   const showSplit = split && canSplit;
@@ -86,7 +85,6 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   useEffect(() => {
     setDocs(null);
     setError(null);
-    setLensRequested(false);
     setShowOriginal(false);
   }, [slug]);
 
@@ -116,24 +114,15 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSplit, docs, slug]);
 
-  // 读时透镜：默认显示原文(canonical)，由用户点按钮（lensRequested）手动触发重塑。
-  // 未触发前 enabled=false → 不发请求、不调 LLM。
-  const lens = useLens(props.subjectSlug, slug, lensRequested);
+  const lens = useLens(props.subjectSlug, slug);
   const reshaped = lens.data?.renderedMd;
-  // 重塑可用 = 已生成且非 canonical/fallback 回退（这两态服务端回显的就是原文）。
-  const reshapeUsable =
-    reshaped != null && lens.data?.source !== 'canonical' && lens.data?.source !== 'fallback';
-  const usingReshaped = lensRequested && reshapeUsable && !showOriginal;
+  const reshapeUsable = reshaped != null && lens.data?.source !== 'canonical';
+  const usingReshaped = reshapeUsable && !showOriginal;
   const displayContent = usingReshaped ? reshaped : props.content;
 
-  // reshape 四态：未触发 / 加载中 / 已重塑可用 / 已触发但不可用（canonical|fallback|error）。
-  const reshapeState: ReshapeState = !lensRequested
-    ? 'idle'
-    : lens.isLoading
-      ? 'loading'
-      : reshapeUsable
-        ? 'reshaped'
-        : 'unavailable';
+  const reshapeState: ReshapeState = lens.state === 'ready'
+    ? 'reshaped'
+    : lens.state;
 
   const actions = (
     <PageActions
@@ -144,7 +133,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
       reshapeState={reshapeState}
       onRequestReshape={() => {
         setShowOriginal(false);
-        setLensRequested(true);
+        void lens.request();
       }}
     />
   );
@@ -155,6 +144,8 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
         state={reshapeState}
         showOriginal={showOriginal}
         onToggle={() => setShowOriginal((v) => !v)}
+        onRefresh={() => void lens.refresh()}
+        onCancel={lens.cancel}
       />
     );
 

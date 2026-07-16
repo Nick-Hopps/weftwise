@@ -38,6 +38,8 @@ function seedSubjectData(sqlite: BetterSqlite3.Database, subjectId: string) {
     .run(subjectId, 'page-a', 0, null, 1, now, 'active', 0, now);
   sqlite.prepare(`INSERT INTO page_renditions (subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at) VALUES (?,?,?,?,?,?,?)`)
     .run(subjectId, 'page-a', 'ch', 1, 'md', null, now);
+  sqlite.prepare(`INSERT INTO page_rendition_assets (id, subject_id, slug, media_type, data_base64, created_at) VALUES (?,?,?,?,?,?)`)
+    .run(`rendition-asset-${subjectId}`, subjectId, 'page-a', 'image/png', 'AQ==', now);
   sqlite.prepare(`INSERT INTO profile_signals (user_id, type, subject_id, slug, created_at) VALUES (?,?,?,?,?)`)
     .run('local', 'too-hard', subjectId, 'page-a', now);
   sqlite.prepare(`INSERT INTO conversations (id, subject_id, title, created_at, updated_at) VALUES (?,?,?,?,?)`)
@@ -58,7 +60,7 @@ function seedSubjectData(sqlite: BetterSqlite3.Database, subjectId: string) {
 
 const SUBJECT_TABLES = [
   'pages', 'sources', 'page_sources', 'page_aliases', 'wiki_links',
-  'page_embeddings', 'page_maturity', 'page_renditions', 'profile_signals',
+  'page_embeddings', 'page_maturity', 'page_renditions', 'page_rendition_assets', 'profile_signals',
   'conversations', 'operations', 'jobs', 'pages_fts', 'research_backlog',
 ];
 

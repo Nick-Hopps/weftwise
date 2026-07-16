@@ -1,7 +1,12 @@
 import type { Subject } from '@/lib/contracts';
-import { streamTextResponse } from '@/server/llm/provider-registry';
+import { tool } from 'ai';
+import { streamTextResponse, streamTextWithTools } from '@/server/llm/provider-registry';
 import { getWikiLanguage } from '@/server/db/repos/settings-repo';
-import { checkRewriteFidelity, FIDELITY_PROFILES } from '@/server/wiki/rewrite-fidelity';
+import {
+  generateImageAsset,
+  ImageGenerateInputSchema,
+  type ImageGenerateInput,
+} from '@/server/agents/tools/builtin/image-generate';
 import type { StylePrefs } from '@/server/profile/style';
 import {
   RESHAPE_PAGE_SYSTEM_PROMPT,
@@ -20,7 +25,13 @@ function ctxFor(subject: Subject): PromptContext {
   };
 }
 
-/** 用 streamTextResponse 收全文成字符串（本服务对外是 JSON 响应，不流式）。 */
+export interface ReshapeAsset {
+  id: string;
+  mediaType: string;
+  dataBase64: string;
+}
+
+/** 用文本流收全文成字符串（本服务对外是 JSON 响应，不流式）。 */
 async function collect(
   task: 'reshape:page' | 'reshape:section',
   system: string,
@@ -33,31 +44,49 @@ async function collect(
   return out.trim();
 }
 
-/**
- * 整页重塑：生成 → 保真护栏（wikilink 子集）。失败则点名重写一次；
- * 二次仍失败回落 canonical（fallback=true，调用方不缓存、直显原文）。
- */
+function assetIdFromPath(path: string): string {
+  const filename = path.split('/').at(-1) ?? '';
+  return filename.replace(/\.[^.]+$/, '');
+}
+
+/** 整页自由重塑；图片先暂存在返回值，由路由与 Markdown 一起原子持久化。 */
 export async function reshapePageBody(input: {
   subject: Subject;
   body: string;
   profile: ProfileLite;
   abortSignal?: AbortSignal;
-}): Promise<{ body: string; fallback: boolean; model: string | null }> {
+}): Promise<{ body: string; model: string | null; assets: ReshapeAsset[] }> {
   const ctx = ctxFor(input.subject);
-  const baseUser = buildReshapePageUserPrompt(input.body, input.profile, ctx);
-
-  let out = await collect('reshape:page', RESHAPE_PAGE_SYSTEM_PROMPT, baseUser, input.abortSignal);
-  if (!checkRewriteFidelity(input.body, out, FIDELITY_PROFILES.reshape).ok) {
-    const retryUser = `${baseUser}\n\n=== CORRECTION ===\nYour previous attempt invented wikilinks not present in the canonical body, or shrank the body too much. Do NOT introduce any new [[link]]; only use links that already exist. Keep the body substantial.`;
-    out = await collect('reshape:page', RESHAPE_PAGE_SYSTEM_PROMPT, retryUser, input.abortSignal);
-    if (!checkRewriteFidelity(input.body, out, FIDELITY_PROFILES.reshape).ok) {
-      return { body: input.body, fallback: true, model: null };
-    }
-  }
-  return { body: out, fallback: false, model: null };
+  const user = buildReshapePageUserPrompt(input.body, input.profile, ctx);
+  const assets: ReshapeAsset[] = [];
+  const imageGenerate = tool({
+    description: 'Generate one explanatory image and return the URL to embed in the reshaped Markdown.',
+    inputSchema: ImageGenerateInputSchema,
+    execute: async (imageInput: ImageGenerateInput) => {
+      const generated = await generateImageAsset(
+        imageInput,
+        input.subject.slug,
+        undefined,
+        input.abortSignal,
+      );
+      const id = assetIdFromPath(generated.asset.path);
+      assets.push({ id, mediaType: generated.asset.mediaType, dataBase64: generated.asset.content });
+      return { ...generated.output, path: id, url: `/api/rendition-assets/${id}` };
+    },
+  });
+  const response = streamTextWithTools('reshape:page', {
+    system: RESHAPE_PAGE_SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: user }],
+    tools: { image_generate: imageGenerate },
+    maxSteps: 4,
+    abortSignal: input.abortSignal,
+  });
+  let body = '';
+  for await (const chunk of response.textStream) body += chunk;
+  return { body: body.trim(), model: null, assets };
 }
 
-/** 段级重塑：单块改写 + 同款保真护栏；失败回落原块。 */
+/** 段级自由重塑。 */
 export async function reshapeSection(input: {
   subject: Subject;
   block: string;
@@ -68,8 +97,5 @@ export async function reshapeSection(input: {
   const ctx = ctxFor(input.subject);
   const user = buildReshapeSectionUserPrompt(input.block, input.direction, input.profile, ctx, input.context);
   const out = await collect('reshape:section', RESHAPE_SECTION_SYSTEM_PROMPT, user);
-  if (!checkRewriteFidelity(input.block, out, FIDELITY_PROFILES.reshape).ok) {
-    return { block: input.block, fallback: true };
-  }
   return { block: out, fallback: false };
 }

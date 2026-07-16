@@ -46,7 +46,7 @@
 ### `wiki/` — wiki 页面渲染
 
 - `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）；标题行 `actions` 插槽（透传给 FrontmatterDisplay）+ `headerExtra` 插槽（渲染在 frontmatter 之后、正文之前，复用 article reading 宽度）
-- `page-actions.tsx` —— 🆕 阅读页标题行右侧统一图标动作条 `PageActions`（Edit / Sources toggle / Reshape，tooltip 解释功能）+ `ReshapeStatus`（正文上方细状态行：Reshaping… / Adapted for you＋Show original 切换 / Couldn't reshape）；纯展示，状态由 `wiki-reading-view` 持有并下传
+- `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `mermaid-diagram.tsx` / `mermaid-theme.ts` —— Mermaid 客户端渲染与主题配置；使用紧凑 flowchart 参数、浅/深色 palette，并监听根节点主题变化重绘 SVG；Diagram callout 的无卡片图解样式位于 `globals.css`
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
@@ -184,6 +184,7 @@ src/components/
 | 日期 | 变更 |
 |------|------|
 | 2026-07-16 | Wiki 阅读页面包屑安全解码中文 slug，并将 Edit / Sources / Reshape 收敛为带 tooltip 的纯图标按钮 |
+| 2026-07-17 | 阅读页 Reshape 状态扩为 loading/refreshing/ready：保存版可随时查看，Refresh 保留旧内容直至原子替换，生成与刷新均可 Cancel |
 | 2026-07-16 | Tasks 面板恢复 queued 快速终态：pending 行仍不提前占用 SSE；若下一次 active 轮询发现任务已离开 pending/running，则转入 SSE 回放并保留 completed/failed 终态与错误详情，不再静默消失 |
 | 2026-07-16 | Ask AI 从 Context 固定侧栏迁为召唤式工作面：桌面正文空白双击/Header/⌘J 打开 fixed 悬浮面板并支持安全区拖动；正文选区以末端锚点携带引用；移动端退化为 Bottom Sheet 并支持下滑关闭；Context 面板收敛为纯页面检查器。 |
 | 2026-07-16 | Health、Tags 与 History 统一为 1080px 知识运维工作区：新增 `workspace-page` 页头/指标带/sticky 工具栏/状态原语；Health 与 Tags 收敛列表边界和状态层级；History 将主从浏览收进标准页面框架并默认选中最新记录，移动端保持行内详情 |
