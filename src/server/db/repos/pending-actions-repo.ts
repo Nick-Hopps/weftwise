@@ -3,7 +3,7 @@ import type { PendingActionOperation, PendingActionStatus } from '@/lib/contract
 
 export interface PendingActionRecord {
   id: string;
-  conversationId: string;
+  conversationId: string | null;
   subjectId: string;
   operation: PendingActionOperation;
   payloadJson: string;
@@ -22,7 +22,7 @@ export interface PendingActionRecord {
 
 interface RawPendingAction {
   id: string;
-  conversation_id: string;
+  conversation_id: string | null;
   subject_id: string;
   operation: PendingActionOperation;
   payload_json: string;
@@ -41,7 +41,7 @@ interface RawPendingAction {
 
 export interface CreatePendingActionInput {
   id?: string;
-  conversationId: string;
+  conversationId: string | null;
   subjectId: string;
   operation: PendingActionOperation;
   payloadJson: string;
@@ -101,6 +101,35 @@ export function createPendingAction(input: CreatePendingActionInput): PendingAct
   return getScoped(id, input.subjectId)!;
 }
 
+/** 同一 Subject 同时最多一个 Tags 工作台审批；单 SQL 避免并发重复创建。 */
+export function createTagBatchPendingAction(
+  input: CreatePendingActionInput & { conversationId: null; operation: 'tag-batch' },
+): PendingActionRecord | null {
+  const id = input.id ?? crypto.randomUUID();
+  const result = getRawDb().prepare(
+    `INSERT INTO pending_actions (
+       id, conversation_id, subject_id, operation, payload_json, payload_hash,
+       preview_json, status, created_at, updated_at, expires_at
+     ) SELECT ?, NULL, ?, 'tag-batch', ?, ?, ?, 'pending', ?, ?, ?
+     WHERE NOT EXISTS (
+       SELECT 1 FROM pending_actions
+       WHERE conversation_id IS NULL AND subject_id = ? AND operation = 'tag-batch'
+         AND status IN ('pending','approved','executing')
+     )`,
+  ).run(
+    id,
+    input.subjectId,
+    input.payloadJson,
+    input.payloadHash,
+    input.previewJson,
+    input.createdAt,
+    input.updatedAt,
+    input.expiresAt,
+    input.subjectId,
+  );
+  return result.changes === 1 ? getScoped(id, input.subjectId) : null;
+}
+
 export function getScoped(id: string, subjectId: string): PendingActionRecord | null {
   const row = getRawDb().prepare(
     `SELECT ${SELECT_COLUMNS} FROM pending_actions WHERE id = ? AND subject_id = ?`,
@@ -118,6 +147,26 @@ export function listForConversation(
      ORDER BY created_at DESC, rowid DESC`,
   ).all(conversationId, subjectId) as RawPendingAction[];
   return rows.map(mapRow);
+}
+
+/** Tags 工作台审批不依赖聊天会话，按 Subject 返回最近记录供刷新恢复。 */
+export function listTagBatchForSubject(subjectId: string): PendingActionRecord[] {
+  const rows = getRawDb().prepare(
+    `SELECT ${SELECT_COLUMNS} FROM pending_actions
+     WHERE conversation_id IS NULL AND subject_id = ? AND operation = 'tag-batch'
+     ORDER BY created_at DESC, rowid DESC LIMIT 20`,
+  ).all(subjectId) as RawPendingAction[];
+  return rows.map(mapRow);
+}
+
+export function getActiveTagBatchForSubject(subjectId: string): PendingActionRecord | null {
+  const row = getRawDb().prepare(
+    `SELECT ${SELECT_COLUMNS} FROM pending_actions
+     WHERE conversation_id IS NULL AND subject_id = ? AND operation = 'tag-batch'
+       AND status IN ('pending','approved','executing')
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+  ).get(subjectId) as RawPendingAction | undefined;
+  return row ? mapRow(row) : null;
 }
 
 export function listRecoverable(): PendingActionRecord[] {

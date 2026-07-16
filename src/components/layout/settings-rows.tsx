@@ -31,14 +31,19 @@ interface SettingRowProps {
 
 export function SettingRow({ label, description, children, className }: SettingRowProps) {
   return (
-    <div className={cn('flex items-center justify-between gap-4', className)}>
+    <div
+      className={cn(
+        'flex flex-col items-stretch justify-between gap-2 sm:flex-row sm:items-center sm:gap-5',
+        className,
+      )}
+    >
       <div className="min-w-0">
         <div className="text-sm font-medium text-foreground">{label}</div>
         {description && (
           <div className="text-xs text-foreground-tertiary mt-0.5">{description}</div>
         )}
       </div>
-      <div className="shrink-0">{children}</div>
+      <div className="max-w-full shrink-0 self-start sm:self-auto">{children}</div>
     </div>
   );
 }

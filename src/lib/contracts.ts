@@ -802,7 +802,20 @@ export type PendingActionOperation =
   | 'workflow-reenrich-start'
   | 'workflow-research-start'
   | 'workflow-cancel'
-  | 'move';
+  | 'move'
+  | 'tag-batch';
+
+export type TagBatchAction = 'rename' | 'merge' | 'delete';
+
+export interface TagBatchInput {
+  action: TagBatchAction;
+  sourceTag: string;
+  targetTag?: string;
+}
+
+export interface TagBatchResult extends TagBatchInput {
+  updatedPages: string[];
+}
 
 export type PendingActionStatus =
   | 'pending'
@@ -832,6 +845,8 @@ export type PreviewChangeInput =
   | { operation: 'link-ensure'; payload: LinkEnsureInput }
   | { operation: 'move'; payload: MovePageInput };
 
+export type TagBatchPreviewInput = { operation: 'tag-batch'; payload: TagBatchInput };
+
 export interface MovePageInput {
   slug: string;
   newSlug: string;
@@ -856,7 +871,7 @@ export interface PendingActionPreview {
 
 export interface PendingActionView extends PendingActionPreview {
   actionId: string;
-  conversationId: string;
+  conversationId: string | null;
   operation: PendingActionOperation;
   status: PendingActionStatus;
   expiresAt: string;
