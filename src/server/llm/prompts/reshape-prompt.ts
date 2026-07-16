@@ -2,19 +2,23 @@ import { renderLanguageDirective } from './prompt-context';
 import type { PromptContext } from './prompt-context';
 import type { StylePrefs } from '@/server/profile/style';
 
-export const RESHAPE_PAGE_SYSTEM_PROMPT = `You reshape an existing wiki page for one specific reader. This is PRESENTATION ONLY.
+export const RESHAPE_PAGE_SYSTEM_PROMPT = `Create a new personalized reading edition of an existing wiki page for one specific reader.
 
-HARD RULES (never violate):
-- Do NOT add, remove, or change any FACT. Same claims, same numbers, same conclusions.
-- Do NOT introduce any new [[wikilink]]. You may keep or drop existing ones, but never invent or alter a link target.
-- Any analogy, worked example, or prerequisite primer you ADD for the reader MUST be wrapped in a callout: \`> [!example]\` or \`> [!note]\`. Plain factual statements must stay outside callouts.
-- Output ONLY the reshaped markdown body — no frontmatter, no preamble, no "here is".
-- Preserve markdown structure (headings, lists, code blocks, math) where it still serves the reader.
+The canonical page is source material, not a template you must preserve. Freely rewrite, reorganize, remove, merge, split, expand, or compress its prose and sections whenever that better fits the reader profile. You may change the narrative order, headings, examples, analogies, level of detail, and Markdown structure. Do not merely copy the original and append explanations or callouts: transform the existing explanation itself.
 
-GOAL: match the reader's background and style preferences so the page is as easy to internalize as possible for THEM — neither over-explaining what they already know nor under-explaining what they don't.`;
+Use your general knowledge when it helps teach the topic clearly. The result is a separate, persisted reading edition and is never written back to the canonical wiki page.
 
-export const RESHAPE_SECTION_SYSTEM_PROMPT = `You reshape ONE block of a wiki page for one reader. PRESENTATION ONLY.
-Same hard rules as page reshaping: no fact changes, no new wikilinks, added scaffolding wrapped in \`> [!example]\`/\`> [!note]\`, output only the reshaped block markdown.`;
+VISUAL EXPLANATIONS:
+- When a diagram or illustration would materially improve understanding, call the \`image_generate\` tool.
+- After the tool returns, embed its URL at the most relevant location using Markdown image syntax: \`![descriptive alt](returned-url)\`.
+- Do not generate decorative images or call the tool when prose, code, math, Mermaid, or a table explains the idea better.
+
+OUTPUT RULES:
+- Return ONLY the complete reshaped Markdown body: no YAML frontmatter, preamble, commentary, or fenced wrapper.
+- Produce a coherent standalone page, not notes about how you would reshape it.
+- Match the requested output language and the reader's background, reading level, verbosity, example density, and formality.`;
+
+export const RESHAPE_SECTION_SYSTEM_PROMPT = `Rewrite ONE block of a wiki page for one reader. Freely simplify, deepen, reorganize, expand, or compress the block to fit the reader profile. Return only the complete reshaped block Markdown.`;
 
 function renderProfile(profile: { backgroundSummary: string; stylePrefs: StylePrefs }): string {
   const s = profile.stylePrefs;

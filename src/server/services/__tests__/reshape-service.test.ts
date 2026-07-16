@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const streamMock = vi.fn();
+const mocks = vi.hoisted(() => ({ stream: vi.fn(), generateImage: vi.fn() }));
 vi.mock('@/server/llm/provider-registry', () => ({
-  streamTextResponse: (...args: unknown[]) => streamMock(...args),
+  streamTextWithTools: (...args: unknown[]) => mocks.stream(...args),
+  streamTextResponse: (...args: unknown[]) => mocks.stream(...args),
 }));
+vi.mock('@/server/agents/tools/builtin/image-generate', async (loadOriginal) => {
+  const original = await loadOriginal<typeof import('@/server/agents/tools/builtin/image-generate')>();
+  return { ...original, generateImageAsset: (...args: unknown[]) => mocks.generateImage(...args) };
+});
 vi.mock('@/server/db/repos/settings-repo', () => ({ getWikiLanguage: () => 'Chinese' }));
 
 // streamTextResponse 返回一个带 textStream 的对象
@@ -29,36 +34,49 @@ const profile = {
   stylePrefs: { readingLevel: 'intermediate', verbosity: 'balanced', exampleDensity: 'some', formality: 'neutral' },
 } as never;
 
-beforeEach(() => streamMock.mockReset());
+beforeEach(() => {
+  mocks.stream.mockReset();
+  mocks.generateImage.mockReset();
+});
 
 describe('reshapePageBody', () => {
-  it('保真通过 → 返回重塑正文，fallback=false', async () => {
-    streamMock.mockReturnValueOnce(fakeStream('重塑：见 [[Alpha]]'));
+  it('直接返回模型自由重塑的正文', async () => {
+    mocks.stream.mockReturnValueOnce(fakeStream('重塑：见 [[Alpha]]'));
     const { reshapePageBody } = await import('../reshape-service');
     const r = await reshapePageBody({ subject, body: '原文 [[Alpha]]', profile });
-    expect(r.fallback).toBe(false);
     expect(r.body).toContain('重塑');
-    expect(streamMock).toHaveBeenCalledTimes(1);
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
-  it('首次臆造链接 → 重写一次；第二次干净 → 通过', async () => {
-    streamMock
-      .mockReturnValueOnce(fakeStream('[[Alpha]] 还有臆造 [[Ghost]]'))
-      .mockReturnValueOnce(fakeStream('干净 [[Alpha]]'));
+  it('接受大幅缩写与新链接，不再触发保真重试或回落', async () => {
+    mocks.stream.mockReturnValueOnce(fakeStream('短版 [[NewConcept]]'));
     const { reshapePageBody } = await import('../reshape-service');
-    const r = await reshapePageBody({ subject, body: '原文 [[Alpha]]', profile });
-    expect(streamMock).toHaveBeenCalledTimes(2);
-    expect(r.fallback).toBe(false);
-    expect(r.body).toContain('干净');
+    const r = await reshapePageBody({ subject, body: '很长的原文内容'.repeat(100), profile });
+    expect(r.body).toBe('短版 [[NewConcept]]');
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
   });
 
-  it('两次都臆造 → 回落 canonical，fallback=true', async () => {
-    streamMock
-      .mockReturnValueOnce(fakeStream('[[Ghost1]]'))
-      .mockReturnValueOnce(fakeStream('[[Ghost2]]'));
+  it('图片工具返回 rendition URL，并把二进制暂存到结果', async () => {
+    const signal = new AbortController().signal;
+    mocks.generateImage.mockResolvedValue({
+      output: { type: 'image', path: 'assets/general/image-1.png', url: '/api/assets/general/image-1.png', alt: '图解' },
+      asset: { path: 'assets/general/image-1.png', content: 'AQID', mediaType: 'image/png' },
+    });
+    mocks.stream.mockImplementationOnce((_task, options) => {
+      const imageTool = options.tools.image_generate;
+      return {
+        textStream: (async function* () {
+          const image = await imageTool.execute({ prompt: '画图', alt: '图解' });
+          yield `![图解](${image.url})`;
+        })(),
+      };
+    });
+
     const { reshapePageBody } = await import('../reshape-service');
-    const r = await reshapePageBody({ subject, body: '原文 [[Alpha]]', profile });
-    expect(r.fallback).toBe(true);
-    expect(r.body).toBe('原文 [[Alpha]]');
+    const result = await reshapePageBody({ subject, body: '原文', profile, abortSignal: signal });
+
+    expect(result.body).toBe('![图解](/api/rendition-assets/image-1)');
+    expect(result.assets).toEqual([{ id: 'image-1', mediaType: 'image/png', dataBase64: 'AQID' }]);
+    expect(mocks.generateImage).toHaveBeenCalledWith(expect.anything(), 'general', undefined, signal);
   });
 });

@@ -547,6 +547,22 @@ function migratePageRenditions(): void {
   `);
 }
 
+function migratePageRenditionAssets(): void {
+  const sqlite = rawSqlite!;
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS page_rendition_assets (
+      id TEXT PRIMARY KEY,
+      subject_id TEXT NOT NULL,
+      slug TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      data_base64 TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS page_rendition_assets_page_idx
+      ON page_rendition_assets(subject_id, slug);
+  `);
+}
+
 function migrateProfileSignals(): void {
   const sqlite = rawSqlite!;
   if (tableExists('profile_signals')) return;
@@ -893,6 +909,7 @@ function ensureTables() {
       migratePageMaturity();
       migrateUserProfiles();
       migratePageRenditions();
+      migratePageRenditionAssets();
       migrateProfileSignals();
       migrateResearchBacklog();
       migrateResearchProvenance();
