@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type {
   PendingActionOperation,
   PreviewChangeInput,
+  TagBatchInput,
+  TagBatchPreviewInput,
   WorkflowPreviewInput,
 } from '@/lib/contracts';
 import { normalizeMetadataPatch } from '@/server/wiki/narrow-write';
@@ -29,6 +31,33 @@ const LinkEnsurePayloadSchema = z.object({
   displayText: z.string().optional(),
   mode: z.enum(['link', 'unlink', 'retarget']),
 }).strict();
+export const TagBatchPayloadSchema = z.object({
+  action: z.enum(['rename', 'merge', 'delete']),
+  sourceTag: TrimmedTextSchema.max(128),
+  targetTag: TrimmedTextSchema.max(128).optional(),
+}).strict().superRefine((payload, ctx) => {
+  if (payload.action !== 'delete' && !payload.targetTag) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['targetTag'],
+      message: 'targetTag is required for rename and merge',
+    });
+  }
+  if (payload.action === 'delete' && payload.targetTag) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['targetTag'],
+      message: 'targetTag is not allowed for delete',
+    });
+  }
+  if (payload.targetTag === payload.sourceTag) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['targetTag'],
+      message: 'targetTag must differ from sourceTag',
+    });
+  }
+});
 
 export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   z.object({
@@ -138,7 +167,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function hashPendingActionPayload(input: {
-  conversationId: string;
+  conversationId: string | null;
   subjectId: string;
   operation: PendingActionOperation;
   payload: unknown;
@@ -156,6 +185,18 @@ export function normalizePreviewInput(
     operation: parsed.operation,
     payload: { ...parsed.payload, effectiveAt: timestamp },
   } as NormalizedPreviewInput;
+}
+
+export function normalizeTagBatchPreviewInput(
+  input: TagBatchInput,
+  effectiveAt: string,
+): TagBatchPreviewInput & { payload: TagBatchInput & { effectiveAt: string } } {
+  const payload = TagBatchPayloadSchema.parse(input);
+  const timestamp = z.string().datetime().parse(effectiveAt);
+  return {
+    operation: 'tag-batch',
+    payload: { ...payload, effectiveAt: timestamp },
+  };
 }
 
 export function normalizeWorkflowPreviewInput(

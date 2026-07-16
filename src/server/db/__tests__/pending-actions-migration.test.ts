@@ -109,11 +109,20 @@ describe('pending_actions CHECK 启动迁移', () => {
       ['a6', 'workflow-research-start'],
       ['a7', 'workflow-cancel'],
       ['a8', 'move'],
+      ['a9', 'tag-batch'],
     ] as const) {
       expect(() => insert.run(id, operation, now(), now(), expires())).not.toThrow();
     }
-    expect(() => insert.run('a9', 'unknown-operation', now(), now(), expires()))
+    expect(() => insert.run('a10', 'unknown-operation', now(), now(), expires()))
       .toThrow(/CHECK constraint failed/);
+    expect(sqlite.prepare(`PRAGMA table_info(pending_actions)`).all())
+      .toContainEqual(expect.objectContaining({ name: 'conversation_id', notnull: 0 }));
+    expect(() => sqlite.prepare(`
+      INSERT INTO pending_actions (
+        id, conversation_id, subject_id, operation, payload_json, payload_hash,
+        preview_json, status, created_at, updated_at, expires_at
+      ) VALUES ('workspace-action', NULL, 's1', 'tag-batch', '{}', 'hash', '{}', 'pending', ?, ?, ?)
+    `).run(now(), now(), expires())).not.toThrow();
   });
 
   it('copy 违反新 CHECK 时整个重建回滚，旧表和历史行保持不变', async () => {

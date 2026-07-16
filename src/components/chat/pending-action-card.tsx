@@ -9,6 +9,7 @@ export interface PendingActionCardProps {
   busy: boolean;
   onApprove(actionId: string): void;
   onReject(actionId: string): void;
+  affectedPageLimit?: number;
 }
 
 const STATUS_LABELS: Record<PendingActionView['status'], string> = {
@@ -41,13 +42,18 @@ export function PendingActionCard({
   busy,
   onApprove,
   onReject,
+  affectedPageLimit = 8,
 }: PendingActionCardProps) {
   const titleId = `pending-action-${action.actionId}`;
   const isPending = action.status === 'pending';
+  const shownPages = action.affectedPages.slice(0, affectedPageLimit);
+  const hiddenPageCount = action.affectedPages.length - shownPages.length;
   const title = action.operation === 'history-revert'
     ? 'Proposed history revert'
     : action.operation === 'move'
       ? 'Proposed page move'
+    : action.operation === 'tag-batch'
+      ? 'Proposed tag change'
     : action.kind === 'workflow'
       ? 'Proposed workflow action'
       : 'Proposed wiki change';
@@ -69,12 +75,15 @@ export function PendingActionCard({
 
       {action.affectedPages.length > 0 && (
         <ul className="mt-2 space-y-1 text-xs text-foreground-secondary">
-          {action.affectedPages.map((page) => (
+          {shownPages.map((page) => (
             <li key={`${page.action}:${page.slug}`}>
               <span className="font-medium uppercase">{page.action}</span>{' '}
               <code>{page.slug}</code>
             </li>
           ))}
+          {hiddenPageCount > 0 && (
+            <li className="text-foreground-tertiary">+{hiddenPageCount} more pages</li>
+          )}
         </ul>
       )}
 
