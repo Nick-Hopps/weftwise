@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Inter, JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import { Inter, JetBrains_Mono, LXGW_WenKai_TC, Space_Grotesk } from 'next/font/google';
 import './globals.css';
 import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
@@ -16,6 +16,13 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ['latin'],
   variable: '--font-jetbrains-mono',
   display: 'swap',
+});
+
+const lxgwWenKai = LXGW_WenKai_TC({
+  weight: ['400', '700'],
+  variable: '--font-lxgw-wenkai',
+  display: 'swap',
+  preload: false,
 });
 
 // Display face — used for the brand wordmark only (kept off body/prose).
@@ -40,7 +47,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}
+      className={`${inter.variable} ${jetbrainsMono.variable} ${lxgwWenKai.variable} ${spaceGrotesk.variable}`}
       data-color-mode="light"
     >
       <head>

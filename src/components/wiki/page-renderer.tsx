@@ -30,7 +30,7 @@ interface PageRendererProps {
 
 // 阅读排版以 16px / 28px 为正文基线，标题、段落和列表共享稳定节奏。
 const proseClassName = `
-  font-sans text-[16px] leading-7 text-prose-body
+  font-prose text-[16px] leading-7 text-prose-body
   [&>h1:first-child]:hidden
   [&>h1]:mb-5 [&>h1]:mt-12 [&>h1]:font-display [&>h1]:text-[28px] [&>h1]:font-semibold [&>h1]:leading-9 [&>h1]:tracking-normal [&>h1]:text-prose-heading
   [&>h2]:mb-3 [&>h2]:mt-10 [&>h2]:text-[22px] [&>h2]:font-semibold [&>h2]:leading-8 [&>h2]:tracking-normal [&>h2]:text-prose-heading
