@@ -26,6 +26,18 @@ export interface RelatedTag {
   count: number;
 }
 
+export interface TagVariantReviewGroup {
+  canonical: TagSummary;
+  variants: TagSummary[];
+}
+
+export interface TagReviewQueue {
+  variantGroups: TagVariantReviewGroup[];
+  singletonTags: TagSummary[];
+  untaggedPages: WikiPage[];
+  issueCount: number;
+}
+
 function isMetaPage(page: WikiPage): boolean {
   return (page.tags ?? []).includes(META_TAG);
 }
@@ -96,6 +108,80 @@ export function tagStats(pages: WikiPage[], summaries = summarizeTags(pages)): T
     singletonCount: summaries.filter((summary) => summary.count === 1).length,
     duplicateGroups: findPotentialDuplicateGroups(summaries),
   };
+}
+
+function compareCanonicalCandidate(a: TagSummary, b: TagSummary): number {
+  const countOrder = b.count - a.count;
+  if (countOrder !== 0) return countOrder;
+
+  const aIsCanonical = a.tag === normalizeTagForComparison(a.tag);
+  const bIsCanonical = b.tag === normalizeTagForComparison(b.tag);
+  if (aIsCanonical !== bIsCanonical) return aIsCanonical ? -1 : 1;
+  return a.tag.localeCompare(b.tag);
+}
+
+function pageMatchesQuery(page: WikiPage, query: string): boolean {
+  return page.title.toLocaleLowerCase().includes(query)
+    || page.slug.toLocaleLowerCase().includes(query)
+    || (page.summary ?? '').toLocaleLowerCase().includes(query);
+}
+
+/** 把即时标签统计投影为无需持久化状态的清理队列。 */
+export function buildTagReviewQueue(
+  pages: WikiPage[],
+  summaries = summarizeTags(pages),
+): TagReviewQueue {
+  const summariesByTag = new Map(summaries.map((summary) => [summary.tag, summary]));
+  const variantTags = new Set<string>();
+  const variantGroups = findPotentialDuplicateGroups(summaries).map((group) => {
+    const candidates = group
+      .map((tag) => summariesByTag.get(tag))
+      .filter((summary): summary is TagSummary => Boolean(summary))
+      .sort(compareCanonicalCandidate);
+    const canonical = candidates[0];
+    for (const candidate of candidates) variantTags.add(candidate.tag);
+    return {
+      canonical,
+      variants: candidates.slice(1).sort((a, b) => a.tag.localeCompare(b.tag)),
+    };
+  }).filter((group): group is TagVariantReviewGroup => Boolean(group.canonical));
+
+  const singletonTags = summaries
+    .filter((summary) => summary.count === 1 && !variantTags.has(summary.tag))
+    .sort((a, b) => a.tag.localeCompare(b.tag));
+  const untaggedPages = contentPages(pages)
+    .filter((page) => (page.tags ?? []).filter((tag) => tag !== META_TAG).length === 0)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.title.localeCompare(b.title));
+  const issueCount = variantGroups.reduce((count, group) => count + group.variants.length, 0)
+    + singletonTags.length
+    + untaggedPages.length;
+
+  return { variantGroups, singletonTags, untaggedPages, issueCount };
+}
+
+/** 搜索三个 Review 分区；命中任一格式变体时保留完整分组上下文。 */
+export function filterTagReviewQueue(queue: TagReviewQueue, query: string): TagReviewQueue {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return queue;
+
+  const variantGroups = queue.variantGroups.filter((group) =>
+    [group.canonical, ...group.variants].some((summary) =>
+      summary.tag.toLocaleLowerCase().includes(normalizedQuery)
+      || summary.pages.some((page) => pageMatchesQuery(page, normalizedQuery)),
+    ),
+  );
+  const singletonTags = queue.singletonTags.filter((summary) =>
+    summary.tag.toLocaleLowerCase().includes(normalizedQuery)
+    || summary.pages.some((page) => pageMatchesQuery(page, normalizedQuery)),
+  );
+  const untaggedPages = queue.untaggedPages.filter((page) =>
+    pageMatchesQuery(page, normalizedQuery),
+  );
+  const issueCount = variantGroups.reduce((count, group) => count + group.variants.length, 0)
+    + singletonTags.length
+    + untaggedPages.length;
+
+  return { variantGroups, singletonTags, untaggedPages, issueCount };
 }
 
 export function filterTagSummaries(summaries: TagSummary[], query: string): TagSummary[] {

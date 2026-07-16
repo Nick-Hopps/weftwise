@@ -15,6 +15,7 @@
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
 | `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
+| `tags.ts` | Tags 工作台纯分析：标签摘要/覆盖率/格式变体/组合筛选，以及 `buildTagReviewQueue` / `filterTagReviewQueue` 即时投影格式变体、非重复单次标签与未标记页面；不持久化 Review 状态 |
 | `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `subject-nav.ts` | 🆕 subject 切换的可记忆路径判定与 query 拼接：`isRememberablePath`（`/wiki/*` / `/sources/*` 判定）/ `withSubjectParam`（`?s=<subject-slug>` 拼接） + 单测 |
@@ -142,6 +143,7 @@ src/lib/
 ├── slug.ts                 # URL-safe slug
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
+├── tags.ts                 # 标签目录、组合筛选与 Review 清理队列纯分析
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
 ├── tool-activity.ts        # 工具活动展示与参数脱敏（含 metadata ✏️ / link 🔗，只显示 slug/字段名/mode，不泄露值或锚点）
 ├── job-started-event.ts    # 客户端后台任务启动事件的真实 type/label/queueStatus 契约
@@ -154,6 +156,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | `tags.ts` 新增即时 `TagReviewQueue`：格式变体按使用次数、标准 kebab-case、名称稳定选择推荐目标；变体与 singleton 去重，补充未标记页、问题计数和跨分区搜索 |
 | 2026-07-16 | 新增 `job-started-event.ts`：统一 ingest/re-enrich/research/save-to-wiki 的启动事件元数据，禁止全局 tracker 与 Ingest UI 按 jobId 猜类型 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：contracts 新增 `MovePageInput`、PendingAction `move` 与 Changeset `movedFromPath/auxiliary` marker；tool activity 只摘要旧新 slug |
 | 2026-07-14 | Workflow 控制 Phase 3C：contracts 新增脱敏 workflow status 与三类 preview 输入/operation；tool activity 新增 status/start/cancel 安全摘要，旧 `wiki.reenrich` 改 Planning 语义 |
