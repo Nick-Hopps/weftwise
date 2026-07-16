@@ -37,7 +37,8 @@ export async function generateImageAsset(
   input: ImageGenerateInput,
   subjectSlug: string,
   onUsage?: (usage: { inputTokens?: number; outputTokens?: number }) => void,
-): Promise<{ output: ImageGenerateOutput; asset: { path: string; content: string } }> {
+  abortSignal?: AbortSignal,
+): Promise<{ output: ImageGenerateOutput; asset: { path: string; content: string; mediaType: string } }> {
   const route = resolveTask('ingest:image');
   if (route.provider.provider !== 'google') {
     throw new Error(
@@ -58,7 +59,9 @@ export async function generateImageAsset(
     maxOutputTokens: route.maxTokens,
     temperature: route.temperature,
     maxRetries: route.maxRetries,
-    abortSignal: AbortSignal.timeout(route.timeoutMs ?? 8 * 60 * 1000),
+    abortSignal: abortSignal
+      ? AbortSignal.any([abortSignal, AbortSignal.timeout(route.timeoutMs ?? 8 * 60 * 1000)])
+      : AbortSignal.timeout(route.timeoutMs ?? 8 * 60 * 1000),
     providerOptions: {
       ...route.providerOptions,
       google: { ...googleOptions, responseModalities: ['IMAGE'] },
@@ -86,7 +89,7 @@ export async function generateImageAsset(
       url: `/api/assets/${subjectSlug}/${filename}`,
       alt: input.alt,
     },
-    asset: { path, content: file.base64 },
+    asset: { path, content: file.base64, mediaType: file.mediaType },
   };
 }
 

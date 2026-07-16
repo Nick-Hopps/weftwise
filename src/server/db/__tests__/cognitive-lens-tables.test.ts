@@ -17,7 +17,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-it('ensureTables 建出三张认知透镜表', async () => {
+it('ensureTables 建出认知透镜表与持久化图片表', async () => {
   const { getRawDb } = await import('../client');
   const db = getRawDb();
   const names = (
@@ -25,5 +25,6 @@ it('ensureTables 建出三张认知透镜表', async () => {
   ).map((r) => r.name);
   expect(names).toContain('user_profiles');
   expect(names).toContain('page_renditions');
+  expect(names).toContain('page_rendition_assets');
   expect(names).toContain('profile_signals');
 });
