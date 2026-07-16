@@ -106,8 +106,8 @@
 
 ### `shared/`
 
-- `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），托管 `JobsPanel`
-- `jobs-panel.tsx` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）：仅 running 行才建 SSE 连接，pending 行不建连接；终态行支持单条关闭或一键清理，折叠态按处理中/全部成功/包含失败显示对应图标
+- `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），queued 行离开 active 列表时切入 SSE 终态恢复，托管 `JobsPanel`
+- `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态，终态行支持单条关闭或一键清理，折叠态按处理中/全部成功/包含失败显示对应图标
 - `progress-toast.tsx` —— SSE 进度条 toast 组件（保留，但不再被 `global-job-tracker` 挂载，供 `JobsPanel` 内部行复用）
 
 > Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
@@ -183,6 +183,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | Tasks 面板恢复 queued 快速终态：pending 行仍不提前占用 SSE；若下一次 active 轮询发现任务已离开 pending/running，则转入 SSE 回放并保留 completed/failed 终态与错误详情，不再静默消失 |
 | 2026-07-16 | Ask AI 从 Context 固定侧栏迁为召唤式工作面：桌面正文空白双击/Header/⌘J 打开 fixed 悬浮面板并支持安全区拖动；正文选区以末端锚点携带引用；移动端退化为 Bottom Sheet 并支持下滑关闭；Context 面板收敛为纯页面检查器。 |
 | 2026-07-16 | Health、Tags 与 History 统一为 1080px 知识运维工作区：新增 `workspace-page` 页头/指标带/sticky 工具栏/状态原语；Health 与 Tags 收敛列表边界和状态层级；History 将主从浏览收进标准页面框架并默认选中最新记录，移动端保持行内详情 |
 | 2026-07-16 | Settings 一级入口由 8 项精简为 General / Personalization / Automation / Usage 四组，原模块改为组内 section；About 移到导航底部；弹窗与设置行增加移动端横向导航和上下布局 |

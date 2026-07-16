@@ -97,7 +97,7 @@ await runPipeline(job.id, subject, parsedSources, promptCtx);
 
 agent-loop 的实例化发生在 `orchestrator.ts` 内部，每个 skill step 独享一个 loop 实例，共享同一个 `BudgetTracker`。
 
-Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examples/skills/` 下的内置 skill YAML 复制到 `vault/.llm-wiki/skills/`，**已存在的文件不会覆盖**（用户自定义安全）。
+Worker 启动时（`worker-entry.ts`）由 `buildSkillRegistry()` 将 `examples/skills/` 下的内置 skill YAML 播种到 `vault/.llm-wiki/skills/`。缺失文件直接复制；已存在文件默认不覆盖，只有完整 SHA-256 命中 manifest 中历史原版白名单时才原子升级，用户改版始终保留。
 
 ---
 
@@ -123,10 +123,10 @@ Worker 启动时（`worker-entry.ts`）会调用 `seedSkillFiles()`，将 `examp
 
 | 文件 | 职责 |
 |------|------|
-| `builtin-manifest.ts` | 当前内置 skill 文件清单 + retired ID/历史 SHA-256；worker 启动时原版残留删除、用户改版归档，loader 对 retired ID 永久 tombstone |
+| `builtin-manifest.ts` | 当前内置 skill 文件清单 + 可升级/retired 历史 SHA-256；worker 启动时只自动升级精确匹配的旧原版，retired 原版删除、用户改版归档，loader 对 retired ID 永久 tombstone |
 | `schema.ts` | `SkillFrontmatterSchema`（zod，`.strict()`）：定义 skill YAML frontmatter 合法结构（id / name / description / version / tools / canDispatch / model? / outputSchema? / budget?；system prompt 是 markdown 正文，非 frontmatter 字段）|
 | `loader.ts` | `loadSkillsFromDir(dir)` — 解析 vault skill，并在读取前跳过 retired ID |
-| `registry.ts` | `buildSkillRegistry` 按 manifest 播种、不覆盖用户文件；`retireBuiltinSkillFiles` 对 retired 文件执行 hash 删除或改版归档；内存 registry 供 agent-loop 查 skill |
+| `registry.ts` | `buildSkillRegistry` 按 manifest 播种；`upgradeBuiltinSkillFiles` 原子升级 hash 匹配的历史原版，`retireBuiltinSkillFiles` 对 retired 文件执行 hash 删除或改版归档；内存 registry 供 agent-loop 查 skill |
 
 ### `tools/`
 
@@ -280,7 +280,7 @@ src/server/agents/
 │   ├── commit-pending.ts           # service-level 暂存提交入口（非模型工具）
 │   └── __tests__/
 ├── skills/
-│   ├── builtin-manifest.ts         # 当前内置清单 + retired ID/历史 hash tombstone
+│   ├── builtin-manifest.ts         # 当前内置清单 + 可升级/retired 历史 hash
 │   ├── schema.ts                   # SkillSchema (zod)
 │   ├── loader.ts                   # loadSkill + seedSkillFiles
 │   ├── registry.ts                 # SkillRegistry
@@ -329,6 +329,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | 内置 skill 升级加入 SHA-256 白名单：worker 启动时仅自动替换精确匹配历史原版的 vault 副本，用户改版继续保留；`ingest-enricher` v4 原版可安全迁移到当前 v5 |
 | 2026-07-16 | enrich 工具 Phase：新增 `image.generate`（PNG/JPEG/WebP）、asset changeset 与 `/api/assets` 读取接口；`ingest:enricher` 切换组合路径，独立 `ingest:image` 路由默认使用 Gemini 3.1 Flash Image |
 | 2026-07-14 | 页面身份迁移 Phase 3D：registry 增加 `wiki.move`，只进入 `query:propose` 并生成 PendingAction；Query 仍无直接文件、数据库或 git 写权限 |
 | 2026-07-14 | Workflow 控制 Phase 3C：registry 新增 `workflow.status/reenrich.start/research.start/cancel`；status 只读，start/cancel 只生成 PendingAction；`wiki.reenrich` 改为记录弃用日志的审批 alias；Query 仍无直接 enqueue/destructive 工具 |
