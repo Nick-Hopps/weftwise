@@ -61,6 +61,7 @@
 | `/api/pages/[...slug]` | GET | 读取单个页面（含 frontmatter、body、backlinks）；404 时返回 `otherSubjects: [{subjectId, slug, title}]` 提示；响应含整文件 raw 字段（供编辑器加载）|
 | `/api/pages/[...slug]` | DELETE | 删除单个页面；DRY 复用 `services/page-write.ts::validateDeleteTarget`（守卫：`general`/`index`/`log` meta 页禁删，404 不存在）+ `executePageDelete`（Saga 事务 + embed 回填 enqueue）；响应附 `brokenBacklinks: number`（原来指向被删页的同-subject 链接数，供调用方提示用户清理）|
 | `/api/pages/[...slug]` | PUT | 改整文件 markdown（Saga 重索引）。若 frontmatter 标题变化且 `refreshReferences`(默认 true)，同事务把本 subject 内以旧标题书写的 `[[Old Title]]` 引用重写为新标题（排除自引用页），返回 `referencesUpdated` 计数；slug/URL/文件不动 |
+| `/api/assets/[...path]` | GET | 读取 enrich 生成的 subject-scoped PNG/JPEG/WebP 图片；只允许 `assets/<subject>/<filename>` 安全路径 |
 | `/api/search` | GET | FTS5 全文搜索（`?q=...&subjectId=...`） |
 | `/api/graph` | GET | 返回图视图需要的节点 + 边数据（`?subjectId=...`） |
 | `/api/conversations` | GET | 🆕 列出当前 subject 会话（`updated_at DESC, rowid DESC`）|

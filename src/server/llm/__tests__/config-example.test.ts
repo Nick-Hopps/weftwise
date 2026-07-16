@@ -34,7 +34,7 @@ describe('llm-config.example.json', () => {
     const expected = [
       'query', 'lint', 'merge', 'split', 'curate', 'fix', 'embedding',
       'research:queries', 'research:triage',
-      'ingest:planner', 'ingest:chunk-summarizer', 'ingest:writer', 'ingest:enricher',
+      'ingest:planner', 'ingest:chunk-summarizer', 'ingest:writer', 'ingest:enricher', 'ingest:image',
       'ingest:verifier', 'ingest:verifier-triage', 'ingest:verifier-apply',
       'reenrich:supplement', 'reshape:page', 'reshape:section',
     ];
@@ -51,5 +51,6 @@ describe('llm-config.example.json', () => {
     expect(jsonSchemaText).toContain('"effort"');
     expect(jsonSchemaText).toContain('"research:queries"');
     expect(jsonSchemaText).toContain('"reshape:section"');
+    expect(jsonSchemaText).toContain('"ingest:image"');
   });
 });

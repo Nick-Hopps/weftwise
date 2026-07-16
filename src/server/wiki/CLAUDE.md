@@ -44,7 +44,7 @@ operations.status = 'applied'                   ← 释放 lock
 | 文件 | 导出 | 用途 |
 |------|------|------|
 | `wiki-transaction.ts` | `createChangeset(jobId, subject, entries) / validateChangeset / applyChangeset / rollbackChangeset` | Saga 状态机主控；`Changeset` 含 `subjectId/subjectSlug` |
-| `wiki-store.ts` | `readPageBySlug(subjectSlug, slug) / readPageInSubject / readRawSource / writeVaultFiles / deleteVaultFile / scanWikiPages(subjectSlug?)` | 纯文件系统封装；vault/wiki/<subject>/ |
+| `wiki-store.ts` | `readPageBySlug(subjectSlug, slug) / readPageInSubject / readRawSource / readVaultAsset / writeVaultFiles / deleteVaultFile / scanWikiPages(subjectSlug?)` | 纯文件系统封装；vault/wiki/<subject>/ 与 vault/assets/<subject>/ |
 | `markdown.ts` | `parseWikiDocument / serializeWikiDocument`、类型 `WikiDocument` | 组合 frontmatter + wikilinks，透传 currentSubjectSlug |
 | `frontmatter.ts` | `parseFrontmatter / serializeFrontmatter / validateFrontmatter`、类型 `WikiFrontmatter` | gray-matter 封装 |
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
@@ -152,6 +152,7 @@ src/server/wiki/
 | 2026-04-22 | 初始化 |
 | 2026-04-25 | Subject：Saga 全链路注入 subjectId / `[[subject:page]]` 语法 / 跨主题校验 / commit message `[subject:<slug>]` 前缀 |
 | 2026-06-22 | 新增 `relink.ts::rewriteBacklinkText`（改标题→重写同-subject backlink 文本）；接入 `PUT /api/pages` 同事务联动（④a）|
+| 2026-07-16 | enrich 图片资产：`ChangesetEntry` 支持 base64 asset，`wiki-transaction` 校验并与页面同一 Saga 写入，`wiki-store.readVaultAsset` 供 `/api/assets` subject-scoped 读取 |
 | 2026-06-22 | `relink.ts` 增 `repointLinksToPage`（按解析后 target slug 匹配，覆盖 title/slug-form），供 `merge-service` 合并时把指向被删页的引用重链到存活页（④b）|
 | 2026-06-22 | 新增 `split-plan.ts::planSplitPages`（拆分页 slug 派生 + 兜底恰一主页）；`split-service` 拆分时复用 `repointLinksToPage` 把指向被删页的引用重指主页（④c）|
 | 2026-06-22 | 新增 `revert.ts::buildRevertEntries`（回滚 inverse 条目纯函数）+ `history.ts::buildHistoryEntries`（operations 行+git 时间合成时间线条目）；供 ⑥ 版本历史/回滚 |

@@ -29,6 +29,7 @@
 | 阶段 | `ingest:chunk-summarizer` | ingest：大文件分片摘要（map 阶段） |
 | 阶段 | `ingest:writer` | ingest：写/并入页面正文（fanout 阶段） |
 | 阶段 | `ingest:enricher` | ingest：叠加 callout 增益层 |
+| 阶段 | `ingest:image` | ingest enrich：使用 image-capable 模型生成 PNG/JPEG/WebP |
 | 阶段 | `ingest:verifier` | ingest：参数化自检（联网核查降级回落） |
 | 阶段 | `ingest:verifier-triage` | ingest：联网核查 triage（挑存疑断言+query） |
 | 阶段 | `ingest:verifier-apply` | ingest：联网核查 apply（证据驱动改 callout） |
@@ -36,7 +37,7 @@
 | 阶段 | `reshape:page` | Cognitive Lens：整页读侧重塑 |
 | 阶段 | `reshape:section` | Cognitive Lens：段落读侧重塑 |
 
-> **没有 `ingest` 这个整体 task**——multi-agent 重构后流水线按 `ingest:<stage>` 逐阶段路由（由 `agent-loop::skillTaskKey(skill.id)` 把 skill id `ingest-<stage>` 的首个连字符换冒号派生；id/文件名仍用连字符，冒号只在路由 key）。`<pipeline>:<stage>` 是**开放命名空间**（schema 正则 `^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$`），上表 7 个 ingest 阶段是 `examples/skills/` 的种子 skill。每个阶段的 task 配置**可选**：缺省则继承 `defaults`，skill frontmatter 可再覆盖（合并序 `defaults < tasks['<pipeline>:<stage>'] < frontmatter`）。`llm-config.example.json` 把 7 个阶段全列出作参考，并演示按阶段分层路由（机械阶段如 summarizer / triage 走便宜模型，重推理阶段走强模型）。
+> **没有 `ingest` 这个整体 task**——multi-agent 重构后流水线按 `ingest:<stage>` 逐阶段路由（由 `agent-loop::skillTaskKey(skill.id)` 把 skill id `ingest-<stage>` 的首个连字符换冒号派生；id/文件名仍用连字符，冒号只在路由 key）。`<pipeline>:<stage>` 是**开放命名空间**（schema 正则 `^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$`），上表 8 个 ingest 阶段是 `examples/skills/` 与 enrich 生图工具使用的路由。每个阶段的 task 配置**可选**：缺省则继承 `defaults`，skill frontmatter 可再覆盖（合并序 `defaults < tasks['<pipeline>:<stage>'] < frontmatter`）。`llm-config.example.json` 把 8 个阶段全列出作参考，并演示按阶段分层路由（机械阶段如 summarizer / triage 走便宜模型，重推理阶段走强模型）。
 
 ## 入口与启动
 
@@ -230,6 +231,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | enrich 新增 `image.generate` 图片工具；独立 `ingest:image` 路由示例指向 `gemini-3.1-flash-image-preview`，通过 image response 返回位图 |
 | 2026-07-15 | `generateStructuredOutput` 增加调用点级 schema 定向重试（最多 2 次、共享总超时），抽出 `generation-error.ts` 统一错误路径摘要；Lint 开启 1 次重试并仅向 job event 写入脱敏后的 `finishReason/detail` |
 | 2026-07-15 | `lint-prompt.ts` 移除“宁可假阳性”指令，改为精确优先；schema 强制返回 targetSlug 与逐页原文 evidence，供服务层真实性过滤 |
 | 2026-07-14 | 页面身份迁移 Phase 3D：Query prompt 增加 `wiki_move` 的 canonical slug、仅改路径与独立批准纪律；继续复用 `query` task，`llm-config.example.json` 不变 |

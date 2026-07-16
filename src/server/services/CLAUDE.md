@@ -32,7 +32,7 @@ worker-entry.ts
 
 1. **`ingest-planner`**（sequence）：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。
 2. **`ingest-writer`**（fanout × N pages）：对每个 plan 条目生成忠实层散文（与源文忠实对应的 markdown 正文，不含 callout）与 frontmatter。`checkpointAs: 'writer-page'`。
-3. **`ingest-enricher`**（fanout × N pages）：读取 writer 产出（injectPriorPageAs），叠加 `[!type]` callout 增益层（intuition / example / quiz / background / diagram / pitfall 六类）。**结构化输出（`generateObject`），无 tools**。`checkpointAs: 'enricher-page'`。
+3. **`ingest-enricher`**（fanout × N pages）：读取 writer 产出（injectPriorPageAs），叠加 `[!type]` callout 增益层（intuition / example / quiz / background / diagram / pitfall 六类）。**组合输出（`generateText` + `image.generate` + `finish`）**；生图返回 PNG/JPEG/WebP asset，与页面同一 Saga 提交。`checkpointAs: 'enricher-page'`。
 4. **verify（`kind:'verify'` step → `agents/runtime/verify-page.ts::runPageVerification`，fanout × N pages）**：读取 enricher 产出（injectPriorPageAs:'content'），**P3 确定性两段式联网核查**——triage（`ingest-verifier-triage` 挑存疑 callout 断言+query）→ 编排层 Tavily 搜索（去重+上限3+`Promise.allSettled`）→ apply（`ingest-verifier-apply` 证据驱动改 callout）。全程 `generateObject` 无 tools。降级：未配置/triage 空/零证据 → 既有 `ingest-verifier`(v2) 自检 或 passthrough。被引用 URL 经编排层确定性追加进页 frontmatter `sources` + 累积进 `ctx.citedSources`。`checkpointAs: 'verifier-page'`。搜索后端配置在全局设置（`settings-repo::getWebSearchConfig`），未配置时整段退化为 P2 自检。
 
 **finalize（`finalizeIngest`，service 层，非 agent）**：
@@ -207,7 +207,7 @@ Health 前端刷新时按 subject 读取 active jobs，并可从 queued 或 awai
 
 emit `reenrich:start` 后进入 pipeline（supplement 阶段失败回落时额外 emit `reenrich:supplement-fallback`）；流水线完成后经 `commitPending` 收口提交（不重写 index/log）。**成熟度信号并入正文增长**：`deriveMaturityUpdate` 除原有 callout 增量外，新增 `proseGrowthIncrement(draftContent, finalContent)`（正文增长折算）一并计入 `newIncrement`，防止「多补正文少加 callout」被误判无进展。
 
-需要 `reenrich-supplement v1` / `ingest-enricher v4` / `ingest-verifier v2` / `ingest-verifier-triage v2` / `ingest-verifier-apply v3`（不满足则 fail-fast 提示删除旧 skill 文件重播种；`reenrich-supplement` 是新文件，首次启动自动播种，无需手动删）。
+需要 `reenrich-supplement v1` / `ingest-enricher v5` / `ingest-verifier v2` / `ingest-verifier-triage v2` / `ingest-verifier-apply v3`（不满足则 fail-fast 提示删除旧 skill 文件重播种；`reenrich-supplement` 是新文件，首次启动自动播种，无需手动删）。
 
 ### `embedding-service.ts` 🆕 — 任务类型 `'embed-index'`
 
@@ -300,6 +300,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-16 | enrich 接入 `image.generate` 图片工具；asset 与页面同一 Saga 提交，工具经 `ingest:image` 独立路由调用 Gemini 3.1 Flash Image |
 | 2026-07-16 | Tags 工作台接入 `tag-batch` PendingAction：独立 strict schema、NULL conversation 的 Subject-scoped 恢复和原子在途去重；批准重算 Vault 标签计划并复用 expectedPreHead/Saga/finalizer，Query 工具 schema 保持不变 |
 | 2026-07-16 | Ask AI 单页 re-enrich 命令增加确定性控制面短路：解析当前页/显式 slug 后直接持久化 workflow PendingAction，复合句、教程、否定或缺目标仍走既有 Query 语义 |
 | 2026-07-16 | Maintenance sweep 接入全局 `maintenanceScope`：worker 读取 `all | subjects` 设置，调度器只从范围内到期页按既有 priority/上限入队，状态 API 与其保持同口径 |

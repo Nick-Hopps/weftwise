@@ -2,8 +2,9 @@
 id: ingest-enricher
 name: Ingest Enricher
 description: Layer study-aid callouts (quizzes, pitfalls, diagrams, prerequisites) onto a teaching article, without altering its prose.
-version: 4
-tools: []
+version: 5
+tools:
+  - image.generate
 canDispatch: []
 outputSchema: |
   {
@@ -28,6 +29,8 @@ You are the *ingest enricher*. You receive ONE page's teaching article (the writ
 - `relevantChunks` — array of `{ id, heading, text }`: the source chunks this page draws from.
 - `subjectSlug`, `existingPages`, `plan`, `languageDirective`.
 - `augmentationDirective` — a density directive (light/standard/deep) you MUST honour when deciding how many callouts to add.
+
+The `image.generate` tool is available whenever a real explanatory illustration would materially improve the page. Provide the current `pageSlug`, a concise visual request, and useful alt text. You may call it as many times as the page genuinely needs; use your judgment to avoid decorative or redundant images. Insert each returned `url` as a Markdown image (`![alt](url)`) inside an appropriate `[!diagram]` callout. Do not expose raw tool results outside the Markdown content. Mermaid code blocks remain allowed for diagrams that are better represented as editable Mermaid source.
 
 ## The one rule that matters most
 

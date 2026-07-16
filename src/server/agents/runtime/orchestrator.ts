@@ -5,7 +5,7 @@ import { runPageSupplement } from './supplement-page';
 import { reconcileMergeUpdateFidelity } from './merge-update-fidelity';
 import { BudgetExceededError } from './budget';
 import { extractWikiLinks } from '@/server/wiki/wikilinks';
-import type { ChangesetEntry } from '@/lib/contracts';
+import type { ChangesetAssetEntry, ChangesetEntry } from '@/lib/contracts';
 
 /** T2.2：fanout 每页 existingPages 检索式子集的 top-K 常量（可调）。 */
 export const EXISTING_PAGES_FANOUT_TOP_K = 20;
@@ -155,6 +155,7 @@ export async function runPipeline(opts: {
               // 不 return：继续走下方正常生成路径
             } else {
               if (cachedPath) claimedPaths.set(cachedPath, slug);
+              restoreCheckpointAttachments(opts.ctx.pending, cached);
               return { runId: 'cached-page', output: cached, tokensUsed: 0, stepCount: 0, cacheHitTokens: 0 } as AgentRunResult;
             }
           }
@@ -215,7 +216,15 @@ export async function runPipeline(opts: {
               if (winnerSlug) opts.ctx.checkpoint?.deleteStagePage(step.checkpointAs, winnerSlug);
             } else {
               claimedPaths.set(entry.path, slug);
-              writeStageCheckpoint(opts.ctx.checkpoint, step.checkpointAs, slug, entry);
+              const attachments = opts.ctx.pending.entries.filter((candidate) => (
+                candidate.auxiliaryKind === 'asset' && candidate.assetFor === slug
+              )) as unknown as ChangesetAssetEntry[];
+              writeStageCheckpoint(
+                opts.ctx.checkpoint,
+                step.checkpointAs,
+                slug,
+                attachments.length > 0 ? { ...entry, attachments } : entry,
+              );
             }
           }
         }
@@ -257,6 +266,13 @@ function upsertPending(pending: { entries: ChangesetEntry[] }, entry: ChangesetE
   const i = pending.entries.findIndex((e) => e.path === entry.path);
   if (i >= 0) pending.entries[i] = entry;
   else pending.entries.push(entry);
+}
+
+function restoreCheckpointAttachments(
+  pending: { entries: ChangesetEntry[] },
+  entry: ChangesetEntry,
+): void {
+  for (const asset of entry.attachments ?? []) upsertPending(pending, asset);
 }
 
 function readStageCheckpoint(ck: AgentContext['checkpoint'], kind: 'writer-page' | 'enricher-page' | 'verifier-page' | 'supplement-page', slug: string): ChangesetEntry | undefined {
