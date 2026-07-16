@@ -22,10 +22,16 @@ function action(actionId: string, status: PendingActionView['status'] = 'pending
 }
 
 describe('pending action 客户端状态', () => {
-  it('按 actionId 原位替换状态，不产生重复卡片', () => {
+  it('审批应用后移除原卡片', () => {
     const pending = action('a1');
     const applied = { ...pending, status: 'applied' as const };
-    expect(upsertPendingAction([pending], applied)).toEqual([applied]);
+    expect(upsertPendingAction([pending], applied)).toEqual([]);
+  });
+
+  it('审批拒绝后移除原卡片', () => {
+    const pending = action('a1');
+    const rejected = { ...pending, status: 'rejected' as const };
+    expect(upsertPendingAction([pending], rejected)).toEqual([]);
   });
 
   it('新 action 追加到末尾，保持服务端既有顺序', () => {
@@ -34,10 +40,10 @@ describe('pending action 客户端状态', () => {
     expect(upsertPendingAction([first], second)).toEqual([first, second]);
   });
 
-  it('会话恢复整体替换列表并去除重复 actionId，保留首次出现顺序', () => {
+  it('会话恢复忽略已结束审批，并去除重复 actionId', () => {
     const first = action('a1');
     const firstApplied = { ...first, status: 'applied' as const };
     const second = action('a2');
-    expect(replacePendingActions([first, second, firstApplied])).toEqual([firstApplied, second]);
+    expect(replacePendingActions([first, second, firstApplied])).toEqual([second]);
   });
 });
