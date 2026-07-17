@@ -41,7 +41,7 @@ export async function generateMetadata({ params, searchParams }: WikiPageProps):
   const canonicalSlug = pagesRepo.resolvePageAlias(subject.id, slug) ?? slug;
   const page = pagesRepo.getPageBySlug(subject.id, canonicalSlug);
 
-  if (!page) return { title: 'Page Not Found — Agentic Wiki' };
+  if (!page) return { title: 'Page Not Found' };
 
   return {
     title: `${page.title} — ${subject.name}`,

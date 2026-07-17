@@ -34,8 +34,12 @@ const spaceGrotesk = Space_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: 'LLM Wiki',
-  description: 'LLM-powered personal knowledge management wiki',
+  title: {
+    default: 'weftwise 织识',
+    template: '%s · weftwise',
+  },
+  description:
+    'weftwise (织识) — LLM agents weave everything you read into a living, cross-linked personal wiki. Knowledge, woven.',
 };
 
 export default function RootLayout({
