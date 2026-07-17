@@ -6,7 +6,9 @@ import { IconButton } from '@/components/ui/icon-button';
 import { ContextPanelChatTab } from './context-panel-chat-tab';
 import { useUIStore } from '@/stores/ui-store';
 import {
+  centerAskAiPosition,
   clampAskAiPosition,
+  positionAskAiAtTrigger,
   positionAskAiFromAnchor,
   shouldDismissAskAiSheet,
   type AskAiPoint,
@@ -31,7 +33,9 @@ function useMatchesMobile(): boolean {
 export function AskAiFloatingPanel() {
   const open = useUIStore((state) => state.askAiOpen);
   const anchor = useUIStore((state) => state.askAiAnchor);
+  const anchorMode = useUIStore((state) => state.askAiAnchorMode);
   const position = useUIStore((state) => state.askAiPosition);
+  const invocationId = useUIStore((state) => state.askAiInvocationId);
   const close = useUIStore((state) => state.closeAskAi);
   const setPosition = useUIStore((state) => state.setAskAiPosition);
   const isMobile = useMatchesMobile();
@@ -74,19 +78,17 @@ export function AskAiFloatingPanel() {
       const viewport = { width: window.innerWidth, height: window.innerHeight };
       const currentPosition = useUIStore.getState().askAiPosition;
       const nextPosition = anchor
-        ? positionAskAiFromAnchor(anchor, panelSize, viewport)
+        ? anchorMode === 'selection'
+          ? positionAskAiFromAnchor(anchor, panelSize, viewport)
+          : positionAskAiAtTrigger(anchor, panelSize, viewport)
         : currentPosition
           ? clampAskAiPosition(currentPosition, panelSize, viewport)
-          : clampAskAiPosition(
-              { x: viewport.width - panelSize.width - 16, y: 72 },
-              panelSize,
-              viewport,
-            );
+          : centerAskAiPosition(panelSize, viewport);
       setPosition(nextPosition);
       panel?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [anchor, isMobile, open, setPosition]);
+  }, [anchor, anchorMode, isMobile, open, setPosition]);
 
   useEffect(() => {
     if (!open || !isMobile) return;
@@ -239,7 +241,7 @@ export function AskAiFloatingPanel() {
         </header>
 
         <div className="min-h-0 flex-1">
-          <ContextPanelChatTab />
+          <ContextPanelChatTab key={invocationId} />
         </div>
       </section>
     </div>

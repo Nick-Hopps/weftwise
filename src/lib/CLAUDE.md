@@ -18,6 +18,7 @@
 | `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
 | `tags.ts` | Tags 工作台纯分析：标签摘要/覆盖率/格式变体/组合筛选，以及 `buildTagReviewQueue` / `filterTagReviewQueue` 即时投影格式变体、非重复单次标签与未标记页面；不持久化 Review 状态 |
 | `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
+| `chat-reference.ts` | Ask AI 用户消息引用纯函数：把本轮 Passage 绑定到当前 Subject/page，过滤空摘录并限制最多 40 条，供即时消息展示与 API 持久化共用 |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `search-snippet.ts` | 搜索片段纯函数：只解析 FTS 生成的受控 `<mark>` 对，返回普通/高亮文本段供 React 安全渲染；其他 HTML 与损坏标记保持普通文本 |
 | `ask-ai-floating-panel.ts` | Ask AI 悬浮工作面纯逻辑：锚点定位、视口安全区约束、移动 Sheet 下滑关闭阈值 |
@@ -43,6 +44,7 @@ Source         { id, subjectId, filename, contentHash, parsedAt, metadataJson }
 IngestResult   { pagesCreated: string[], pagesUpdated: string[],
                  linksAdded: number, commitSha: string }
 WikiCitation  { pageSlug, excerpt, subjectSlug? }
+UserMessageReference { pageSlug, pageTitle?, subjectSlug, section, excerpt }
 QueryResult    { answer, citations: WikiCitation[], savedAsPage }
 LintFinding    { type, severity, pageSlug, description, suggestedFix }
 EnrichedLintFinding { ...LintFinding, id, subjectId, subjectSlug }
@@ -60,7 +62,7 @@ HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
 HistoryListInput/Result { slug?, limit? } / { entries }
 HistoryDiffInput/Result { operationId } / { operationId, status, affectedPages, diff }
 Conversation   { id, subjectId, title, createdAt, updatedAt }
-ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: WikiCitation[]|null, createdAt }
+ConversationMessage { id, conversationId, role: 'user'|'assistant', content, references: UserMessageReference[]|null, citations: WikiCitation[]|null, createdAt }
 MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
 LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
 PendingActionOperation = 'create'|'update'|'patch'|'delete'|'move'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'|'workflow-reenrich-start'|'workflow-research-start'|'workflow-image-insert-start'|'workflow-cancel'
@@ -151,6 +153,7 @@ src/lib/
 ├── api-fetch.ts            # 客户端 fetch 封装
 ├── markdown-client.ts      # 客户端 markdown 渲染
 ├── tags.ts                 # 标签目录、组合筛选与 Review 清理队列纯分析
+├── chat-reference.ts       # Ask AI 用户消息 Passage → Subject/page 引用
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
 ├── tool-activity.ts        # 工具活动展示与参数脱敏（含 metadata ✏️ / link 🔗，只显示 slug/字段名/mode，不泄露值或锚点）
 ├── job-started-event.ts    # 客户端后台任务启动事件的真实 type/label/queueStatus 契约
@@ -163,6 +166,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | contracts 新增 `UserMessageReference`（含可选页面标题快照）与 `ConversationMessage.references`；`chat-reference.ts` 统一把发送 Passage 绑定到当前 Subject/page，供用户消息即时展示和持久化恢复 |
 | 2026-07-17 | contracts 新增结构化选区、持久化 Markdown 块锚点、图片请求、`workflow-image-insert-start` 与 `image-insert` job；job-started event 保留真实图片任务类型 |
 | 2026-07-16 | 新增 `path-display.ts::displayTitleForSlug`，为面包屑安全解码 URL slug 并兼容页面标题匹配 |
 | 2026-07-16 | `tags.ts` 新增即时 `TagReviewQueue`：格式变体按使用次数、标准 kebab-case、名称稳定选择推荐目标；变体与 singleton 去重，补充未标记页、问题计数和跨分区搜索 |

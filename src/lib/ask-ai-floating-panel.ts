@@ -26,6 +26,33 @@ export function clampAskAiPosition(
   };
 }
 
+/** 桌面空白处双击：触发点就是候选左上角，仅在越界时收回安全区。 */
+export function positionAskAiAtTrigger(
+  trigger: AskAiPoint,
+  panel: AskAiSize,
+  viewport: AskAiSize,
+  margin = ASK_AI_SAFE_MARGIN,
+): AskAiPoint {
+  return clampAskAiPosition(trigger, panel, viewport, margin);
+}
+
+/** 无锚点且没有历史位置时，按面板实际尺寸在安全区内居中。 */
+export function centerAskAiPosition(
+  panel: AskAiSize,
+  viewport: AskAiSize,
+  margin = ASK_AI_SAFE_MARGIN,
+): AskAiPoint {
+  return clampAskAiPosition(
+    {
+      x: (viewport.width - panel.width) / 2,
+      y: (viewport.height - panel.height) / 2,
+    },
+    panel,
+    viewport,
+    margin,
+  );
+}
+
 export function positionAskAiFromAnchor(
   anchor: AskAiPoint,
   panel: AskAiSize,

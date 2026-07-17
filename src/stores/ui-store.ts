@@ -7,6 +7,7 @@ import type { AskAiPoint } from '@/lib/ask-ai-floating-panel';
 import type { SelectionAnchorInput } from '@/lib/contracts';
 
 export type ContextPanelTab = 'context' | 'chat';
+export type AskAiAnchorMode = 'trigger' | 'selection';
 
 /** 选中正文文本「追问」时，按钮 → Ask AI 之间传递的引用片段。 */
 export interface PendingChatReference {
@@ -35,7 +36,10 @@ interface UIState {
   /** Ask AI 悬浮工作面的瞬态状态。 */
   askAiOpen: boolean;
   askAiAnchor: AskAiPoint | null;
+  askAiAnchorMode: AskAiAnchorMode | null;
   askAiPosition: AskAiPoint | null;
+  /** 每次外部触发递增，使未持久化的新会话也有明确实例边界。 */
+  askAiInvocationId: number;
 
   commandPaletteOpen: boolean;
   darkMode: boolean;
@@ -205,7 +209,9 @@ export const useUIStore = create<UIState>()(
       contextPanelTab: 'context',
       askAiOpen: false,
       askAiAnchor: null,
+      askAiAnchorMode: null,
       askAiPosition: null,
+      askAiInvocationId: 0,
       commandPaletteOpen: false,
       darkMode: false,
       settingsDialogOpen: false,
@@ -230,11 +236,19 @@ export const useUIStore = create<UIState>()(
       setContextPanelTab: (tab) => set({ contextPanelTab: tab }),
 
       openAskAi: (anchor) =>
-        set({
+        set((state) => ({
           askAiOpen: true,
           askAiAnchor: anchor ?? null,
-        }),
-      closeAskAi: () => set({ askAiOpen: false, askAiAnchor: null }),
+          askAiAnchorMode: anchor ? 'trigger' : null,
+          askAiInvocationId: state.askAiInvocationId + 1,
+          currentConversationId: null,
+          pendingChatReference: null,
+        })),
+      closeAskAi: () => set({
+        askAiOpen: false,
+        askAiAnchor: null,
+        askAiAnchorMode: null,
+      }),
       setAskAiPosition: (position) => set({ askAiPosition: position }),
 
       toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
@@ -258,7 +272,7 @@ export const useUIStore = create<UIState>()(
         set((s) => ({ subjectDialog: { ...s.subjectDialog, open: false } })),
 
       askAboutSelection: (payload, anchor) =>
-        set({
+        set((state) => ({
           pendingChatReference: {
             id: selectionRefId(payload.text),
             section: payload.section,
@@ -267,7 +281,10 @@ export const useUIStore = create<UIState>()(
           },
           askAiOpen: true,
           askAiAnchor: anchor ?? null,
-        }),
+          askAiAnchorMode: anchor ? 'selection' : null,
+          askAiInvocationId: state.askAiInvocationId + 1,
+          currentConversationId: null,
+        })),
       consumePendingChatReference: () => {
         const current = get().pendingChatReference;
         if (current) set({ pendingChatReference: null });

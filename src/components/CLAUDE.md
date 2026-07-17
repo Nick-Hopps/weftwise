@@ -22,7 +22,7 @@
 | `context-panel.tsx` | 右侧页面 Context 检查器（backlinks / frontmatter / mini-graph） |
 | `context-panel-sheet.tsx` | Context 的移动端右侧抽屉版本 |
 | `context-panel-context-tab.tsx` | Context 内容：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
-| `ask-ai-floating-panel.tsx` | Ask AI 响应式容器：桌面 fixed 悬浮拖动，移动端 Bottom Sheet 下滑关闭 |
+| `ask-ai-floating-panel.tsx` | Ask AI 响应式容器：桌面 fixed 悬浮拖动；空白双击坐标作为候选左上角，选区保留附近定位，无锚点时复用末位置或居中；触发代次重建聊天实例；移动端 Bottom Sheet 下滑关闭 |
 | `context-panel-chat-tab.tsx` | Ask AI 工作面内容：会话切换 + 内嵌 `chat-interface`，发问 body 含 subjectId |
 | `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
 | `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
@@ -63,11 +63,12 @@
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；选区引用场景同时发送带 Passage 的 `question` 与未拼接的 `userQuestion`，供服务端统一结构化分类；客户端不再用自然语言正则识别重置/确认，而是消费 `reset-confirmation` SSE 并在 pending 状态下发送 `intentContext:'reset-confirmation'`，只有 pending + confirm 才调用 `/api/reset`；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；选区引用场景同时发送带 Passage 的 `question`、未拼接的 `userQuestion` 与有界 `messageReferences`，供服务端统一分类并持久化用户引用；会话加载按 role 恢复 user references / assistant citations；客户端不再用自然语言正则识别重置/确认，而是消费 `reset-confirmation` SSE 并在 pending 状态下发送 `intentContext:'reset-confirmation'`，只有 pending + confirm 才调用 `/api/reset`；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label
 - `reset-confirmation-state.ts` —— Chat 重置确认纯状态机：`idle/pending` + `requested/confirm/cancel/unclear` 转换；孤立 confirm 不产生 `shouldReset`，并集中派生 reset intent context
 - `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/move/标签治理/History/工作流/选区配图）与 actionId 原位替换；配图卡显示完整 Markdown 块、prompt、alt、比例/风格，`applied` 只表示后台任务已启动；受影响页面默认只显示前 8 条
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
-- `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
+- `chat-message.ts` —— Chat 内存消息纯契约与 role-aware 映射：新发送用户消息保留 references，历史 `ConversationMessage` 分别恢复 user references / assistant citations
+- `message-list.tsx` —— 消息流渲染；用户消息正文上方最多展示一个可点击的“页面标题 · 章节/短摘要”胶囊，章节缺失时摘录截断到 36 字符，不展开完整选中文字；Assistant 的 `MessageCitations` 继续使用可折叠 Sources（>3 默认折叠、≤3 默认展开）；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
 
 ### `search/`
@@ -171,7 +172,7 @@ src/components/
 ├── ui/           {button, icon-button, input, panel, tag, kbd, separator, tabs, switch, segmented, select, workspace-page}
 ├── layout/       {shell, header, sidebar, subject-switcher, context-panel*, ask-ai-floating-panel, settings-dialog, settings-nav, settings-content, settings-categories, settings-rows}
 ├── wiki/         {page-renderer, page-actions, reading-progress, wiki-link, wiki-page-elsewhere, frontmatter-display, page-skeleton, page-editor, md-editor, tag-link, retitle-notice, selection-ask-button}
-├── chat/         {chat-interface, reset-confirmation-state, conversation-switcher, message-list, save-to-wiki-button}
+├── chat/         {chat-interface, chat-message, reset-confirmation-state, conversation-switcher, message-list, save-to-wiki-button}
 ├── search/       {command-palette}
 ├── subjects/     {subject-dialog, augmentation-field, subjects-api}
 ├── tags/         {tags-index-view, tag-review-queue, tag-pages-view, tag-governance-dialog, tag-governance-state}
@@ -185,6 +186,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Ask AI 外部触发新增代次边界，每次打开进入新空白会话；双击点直接作为候选左上角，Header 等无锚点入口首次居中、其后复用末位置；用户消息引用在发送与历史恢复后显示单个“页面标题 · 章节/短摘要”胶囊，不展开完整选中文字 |
 | 2026-07-17 | 标志 v2 小尺寸优化：`shared/weftwise-mark.tsx` 织纹改「三经 + 正弦波纬」（幅 6/周期 20/笔画 3.6，穿 1 压 2 穿 3）——直纬在 16-24px 读作四竖一横，波形自身即传达编织；favicon/apple-icon/OG/docs/brand SVG 同步重生成 |
 | 2026-07-17 | Chat 删除 Wiki 重置与 yes/no 正则；普通消息统一交给 `/api/query` 结构化分类，重置确认通过专用 SSE + 纯状态机接线，仅 pending + confirm 执行现有 `/api/reset` |
 | 2026-07-17 | Wiki Graph 可读性优化：`cose` 提高边长/斥力、降低重力并将标签尺寸纳入碰撞布局；标签层级增强、普通边降噪；初始布局完成后按最终边界显式 fit，持续模拟默认静止且仅在拖拽后加热；全屏按真实画布 fit 并在退出时恢复紧凑 zoom/pan。spec/plan 见 `docs/{specs,plans}/2026-07-17-wiki-graph-readability.md` |
