@@ -22,6 +22,28 @@ export interface JobsPanelSummary {
   collapsedStatus: 'processing' | 'completed' | 'failed';
 }
 
+export function jobTypeVerb(type: string): string {
+  switch (type) {
+    case 'ingest': return 'Ingesting';
+    case 'lint': return 'Linting';
+    case 'curate': return 'Curating';
+    case 'fix': return 'Fixing';
+    case 're-enrich': return 'Enriching';
+    case 'embed-index': return 'Indexing';
+    case 'research': return 'Researching';
+    case 'research-import': return 'Importing research';
+    case 'image-insert': return 'Illustrating';
+    default: return 'Processing';
+  }
+}
+
+export function shouldRefreshPageForCompletedJob(
+  type: string,
+  status: TrackedJobStatus,
+): boolean {
+  return type === 'image-insert' && status === 'completed';
+}
+
 export function summarizeJobsPanel(
   jobs: JobStatusInput[],
   statuses: Readonly<Partial<Record<string, TrackedJobStatus>>>,
