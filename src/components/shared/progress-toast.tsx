@@ -7,6 +7,8 @@ import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { JobDetailDialog } from './job-detail-dialog';
 import { jobActivityTitle } from '@/lib/tool-activity';
+import { latestToolName, stripLegacyToolActivityIcon } from '@/lib/tool-activity';
+import { ToolActivityIcon } from './tool-activity-icon';
 
 interface ProgressToastProps {
   jobId: string | null;
@@ -71,6 +73,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
 
   const jobType = jobActivityTitle(events);
   const files = extractFiles(events);
+  const latestTool = latestToolName(events);
   const isFinished = status === 'completed' || status === 'failed';
   const wasCancelled = events.some((e) => e.type === 'job:cancelled');
 
@@ -154,7 +157,12 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
 
           <div className="px-3 py-3 space-y-2">
             {latestMessage && (
-              <p className="text-xs text-foreground-secondary line-clamp-2">{latestMessage}</p>
+              <p className="flex items-start gap-1.5 text-xs text-foreground-secondary">
+                {latestTool && <ToolActivityIcon tool={latestTool} className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                <span className="line-clamp-2">
+                  {latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage}
+                </span>
+              </p>
             )}
 
             {progressValue !== null ? (

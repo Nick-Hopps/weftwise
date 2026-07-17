@@ -579,7 +579,23 @@
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   color: rgb(var(--color-fg-secondary));
+  padding-left: 22px;
 }
+.callout[data-callout] { position: relative; }
+.callout-icon {
+  position: absolute;
+  top: 15px;
+  left: 18px;
+  display: inline-flex;
+  color: rgb(var(--color-fg-secondary));
+}
+.callout-icon > svg { width: 15px; height: 15px; stroke-width: 1.8; }
+.callout-intuition > .callout-icon { color: #b45309; }
+.callout-example > .callout-icon   { color: #0369a1; }
+.callout-quiz > .callout-icon      { color: rgb(var(--brand-warp)); }
+.callout-background > .callout-icon { color: #475569; }
+.callout-diagram > .callout-icon   { color: #0f766e; }
+.callout-pitfall > .callout-icon   { color: #be123c; }
 .callout-intuition::before { color: #b45309; }
 .callout-example::before   { color: #0369a1; }
 .callout-quiz::before      { color: rgb(var(--brand-warp)); }
@@ -603,12 +619,17 @@
 .callout.callout-diagram::before {
   display: none;
 }
+.callout-diagram > .callout-icon {
+  top: 21px;
+  left: 0;
+}
 .callout-diagram > p:first-child {
   margin: 0 0 10px !important;
   color: rgb(var(--color-fg-secondary));
   font-size: 13px;
   font-weight: 500;
   line-height: 20px;
+  padding-left: 24px;
 }
 .callout-diagram > p:last-child:not(:first-child) {
   margin: 12px 0 0 !important;
