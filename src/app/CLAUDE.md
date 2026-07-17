@@ -161,6 +161,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 全站主题色切换 weftwise 双色语法：`globals.css` BASE 层 violet 家族 → weft（纬线朱=动作，UI 主档 `#CC3F27` 白字 4.87:1）+ warp（经线靛=连接）两家族；accent/focus/selection/input-focus → weft，新增 `--color-link(-hover)` → warp，graph 节点 → warp、active → weft；danger 移向绯红 `#DB374F` 拉开色相；亮 canvas 贴品牌纸 `#F6F5F2`，暗色底面/边框整体带品牌蓝调（canvas `#131315`）；暗色主按钮前景改深墨。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |
 | 2026-07-17 | 品牌落地 weftwise（织识）：根 layout metadata 改 `title: {default:'weftwise 织识', template:'%s · weftwise'}` + 品牌 description；新增 `icon.svg`（自适应 favicon）、`apple-icon.png`、`opengraph-image.png(+alt)`；ingest 与 wiki not-found 标题去手写后缀交给 template；`globals.css` BASE 层新增 `--brand-warp`/`--brand-weft` token（`.dark` 覆盖）。plan 见 docs/plans/2026-07-17-brand-weftwise.md |
 | 2026-07-16 | Tags Review 增加 Rename/Merge/Delete 治理入口；`/api/tag-actions` 只创建/恢复服务端 PendingAction，批准继续复用通用 approve/reject API，批量写入由单 changeset Saga 原子执行 |
 | 2026-07-16 | Tags 两路由升级为目录/组合浏览工作台，筛选状态 URL 化并增加 Suspense 加载边界；仍复用 subject-aware `/api/pages`，不新增写接口 |
