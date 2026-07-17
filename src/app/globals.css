@@ -21,6 +21,10 @@
   --base-violet-600:  79  78 211;   /* #4F4ED3 */
   --base-violet-700:  63  62 184;   /* #3F3EB8 */
 
+  /* ─── BASE · Brand mark (weftwise 织纹：经线靛 / 纬线朱) ─────────────────── */
+  --brand-warp:  62  74 109;   /* #3E4A6D */
+  --brand-weft: 217  72  47;   /* #D9482F */
+
   /* ─── BASE · Neutral (warm gray) ────────────────────────────────────────── */
   --base-neutral-0:   255 255 255;
   --base-neutral-50:  250 250 250;
@@ -174,6 +178,9 @@
 
 /* Dark theme ------------------------------------------------------------------ */
 .dark {
+  --brand-warp: 147 163 207;   /* #93A3CF */
+  --brand-weft: 255 107  77;   /* #FF6B4D */
+
   --color-bg-canvas:   var(--base-neutral-950);
   --color-bg-surface:   26  26  26;
   --color-bg-subtle:    34  34  34;

@@ -11,6 +11,7 @@ import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { SubjectSwitcher } from './subject-switcher';
 import { IngestPill } from './ingest-pill';
+import { WeftwiseMark } from '@/components/shared/weftwise-mark';
 import { cn } from '@/lib/cn';
 import { displayTitleForSlug } from '@/lib/path-display';
 
@@ -108,30 +109,15 @@ export function Header() {
 
         <Link
           href="/"
-          aria-label="Agentic Wiki — home"
+          aria-label="weftwise — home"
           className="flex items-center gap-2 rounded-sm px-1 focus-ring"
         >
-          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-accent text-accent-fg shadow-xs">
-            {/* Network glyph — a linked "vault" mark with an accent-cored hub node */}
-            <svg width="24" height="24" viewBox="0 0 40 40" fill="none" aria-hidden>
-              <path
-                d="M9 13 L13.5 27 L20 16 L26.5 27 L31 13"
-                stroke="currentColor"
-                strokeWidth="2.4"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity="0.9"
-              />
-              <circle cx="9" cy="13" r="2.8" fill="currentColor" />
-              <circle cx="13.5" cy="27" r="2.8" fill="currentColor" />
-              <circle cx="26.5" cy="27" r="2.8" fill="currentColor" />
-              <circle cx="31" cy="13" r="2.8" fill="currentColor" />
-              <circle cx="20" cy="16" r="3.9" fill="currentColor" />
-              <circle cx="20" cy="16" r="1.7" className="fill-accent" />
-            </svg>
-          </span>
+          <WeftwiseMark size={26} />
           <span className="hidden font-display text-[16px] font-semibold tracking-normal text-foreground sm:inline">
-            Agentic Wiki
+            weftwise
+          </span>
+          <span lang="zh-Hans" className="hidden text-[11px] tracking-[0.18em] text-foreground-tertiary lg:inline">
+            织识
           </span>
         </Link>
 

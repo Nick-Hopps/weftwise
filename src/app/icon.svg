@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <style>
+    .w{stroke:#3E4A6D}.f{stroke:#D9482F}.fd{fill:#D9482F}
+    @media (prefers-color-scheme:dark){.w{stroke:#93A3CF}.f{stroke:#FF6B4D}.fd{fill:#FF6B4D}}
+  </style>
+  <g stroke-width="3.2" stroke-linecap="round" fill="none">
+    <line class="w" x1="13" y1="9" x2="13" y2="39"/>
+    <line class="w" x1="21" y1="9" x2="21" y2="39"/>
+    <line class="w" x1="29" y1="9" x2="29" y2="39"/>
+    <line class="w" x1="37" y1="9" x2="37" y2="39"/>
+    <line class="f" x1="7" y1="24" x2="42" y2="24"/>
+    <line class="w" x1="13" y1="19" x2="13" y2="29"/>
+    <line class="w" x1="29" y1="19" x2="29" y2="29"/>
+  </g>
+  <circle class="fd" cx="45.6" cy="24" r="1.9"/>
+</svg>

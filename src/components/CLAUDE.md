@@ -184,6 +184,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 品牌落地 weftwise（织识）：新增 `shared/weftwise-mark.tsx`（织纹标志，走 `--brand-warp`/`--brand-weft` token 自动亮暗）；Header 换 weftwise lockup（Space Grotesk wordmark + 「织识」lg 起显示），替换旧网络图形与 "Agentic Wiki"；Settings About 两处文案改 `weftwise 织识`。plan 见 docs/plans/2026-07-17-brand-weftwise.md |
 | 2026-07-16 | Wiki 阅读页面包屑安全解码中文 slug，并将 Edit / Sources / Reshape 收敛为带 tooltip 的纯图标按钮 |
 | 2026-07-17 | Wiki 正文增加自适应固定目录：宽内容区常驻右侧章节轨道，窄内容区使用粘性入口；普通阅读与 Sources 分栏共享当前章节跟踪和稳定标题锚点 |
 | 2026-07-17 | 阅读页 Reshape 状态扩为 loading/refreshing/ready：保存版可随时查看，Refresh 保留旧内容直至原子替换，生成与刷新均可 Cancel |
