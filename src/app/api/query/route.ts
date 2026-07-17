@@ -13,7 +13,11 @@ import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
-import { isImageInsertIntent, resolveDirectReenrichSlug, resolveQueryMode } from '@/server/services/query-intent';
+import {
+  classifyQueryIntent,
+  queryModeForIntent,
+  resolveDirectReenrichTarget,
+} from '@/server/services/query-intent';
 import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
 import type { WikiCitation } from '@/lib/contracts';
 
@@ -21,6 +25,8 @@ export const runtime = 'nodejs';
 
 const QueryBodySchema = z.object({
   question: z.string().min(1).optional(),
+  userQuestion: z.string().trim().min(1).max(10_000).optional(),
+  intentContext: z.literal('reset-confirmation').optional(),
   conversationId: z.string().optional(),
   saveAsPage: z.boolean().optional(),
   pageTitle: z.string().optional(),
@@ -69,7 +75,16 @@ export async function POST(request: NextRequest) {
   if (resolution.error) return resolution.error;
   const { subject } = resolution;
 
-  const { question, saveAsPage, pageTitle, answer, citations, pageSlug, selection } = parsed.data;
+  const {
+    question,
+    userQuestion,
+    saveAsPage,
+    pageTitle,
+    answer,
+    citations,
+    pageSlug,
+    selection,
+  } = parsed.data;
 
   // Save-only mode: enqueue save-to-wiki job
   if (saveAsPage && pageTitle && pageTitle.trim().length > 0 && answer) {
@@ -123,6 +138,7 @@ export async function POST(request: NextRequest) {
   // Default: streaming SSE mode
   const encoder = new TextEncoder();
   const trimmedQuestion = question.trim();
+  const intentQuestion = userQuestion?.trim() || trimmedQuestion;
 
   const MAX_HISTORY_MESSAGES = 8;
 
@@ -134,11 +150,11 @@ export async function POST(request: NextRequest) {
     activeConversationId =
       existing && existing.subjectId === subject.id
         ? existing.id
-        : conversationsRepo.createConversation(subject.id, deriveConversationTitle(trimmedQuestion)).id;
+        : conversationsRepo.createConversation(subject.id, deriveConversationTitle(intentQuestion)).id;
   } else {
     activeConversationId = conversationsRepo.createConversation(
       subject.id,
-      deriveConversationTitle(trimmedQuestion),
+      deriveConversationTitle(intentQuestion),
     ).id;
   }
 
@@ -146,8 +162,6 @@ export async function POST(request: NextRequest) {
     .listMessages(activeConversationId)
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
-  const directReenrichSlug = resolveDirectReenrichSlug(trimmedQuestion, pageSlug);
-
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
@@ -169,7 +183,7 @@ export async function POST(request: NextRequest) {
         cits: WikiCitation[],
       ) => {
         try {
-          conversationsRepo.appendMessage(activeConversationId, 'user', trimmedQuestion, null);
+          conversationsRepo.appendMessage(activeConversationId, 'user', intentQuestion, null);
           conversationsRepo.appendMessage(
             activeConversationId,
             'assistant',
@@ -186,7 +200,43 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        if (selection?.sourceKind === 'reshape' && isImageInsertIntent(trimmedQuestion)) {
+        const intent = await classifyQueryIntent(intentQuestion, {
+          phase: parsed.data.intentContext ?? 'request',
+          hasSelection: selection !== undefined,
+          hasCurrentPage: pageSlug !== undefined,
+        });
+        if (request.signal.aborted) return;
+
+        if (parsed.data.intentContext === 'reset-confirmation') {
+          const decision = intent.intent === 'reset-confirm'
+            ? 'confirm'
+            : intent.intent === 'reset-cancel'
+              ? 'cancel'
+              : 'unclear';
+          const answer = decision === 'confirm'
+            ? '已确认重置请求，正在执行…'
+            : decision === 'cancel'
+              ? '好的，已取消重置，wiki 保持不变。'
+              : '我没太确定你的意思。请明确确认执行重置，或取消重置。';
+          emit('reset-confirmation', { decision });
+          emit('answer-delta', { delta: answer });
+          emit('citations', { citations: [] });
+          persistTurn(answer, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          return;
+        }
+
+        if (intent.intent === 'reset-request') {
+          const answer = '你确定要重置当前 Wiki 吗？这会清空当前 Subject 的所有页面、数据源和任务记录，且无法恢复。请明确确认执行，或取消。';
+          emit('reset-confirmation', { decision: 'requested' });
+          emit('answer-delta', { delta: answer });
+          emit('citations', { citations: [] });
+          persistTurn(answer, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          return;
+        }
+
+        if (selection?.sourceKind === 'reshape' && intent.intent === 'image-insert') {
           const answer = '当前选区来自 Reshape 内容。请切换至 Original 后重新选择正文，再发起配图插入。';
           emit('answer-delta', { delta: answer });
           emit('citations', { citations: [] });
@@ -194,6 +244,7 @@ export async function POST(request: NextRequest) {
           emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           return;
         }
+        const directReenrichSlug = resolveDirectReenrichTarget(intent, pageSlug);
         // 明确的 re-enrich 是控制面命令，不需要让 Query LLM 再做一次工具选择。
         // 直接生成审批预览可避免模型首个 tool-call 最长等待 route timeout。
         if (directReenrichSlug) {
@@ -215,9 +266,9 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const mode = resolveQueryMode(trimmedQuestion, {
-          hasCanonicalSelection: selection?.sourceKind === 'canonical',
-        });
+        const imageInsertEnabled =
+          selection?.sourceKind === 'canonical' && intent.intent === 'image-insert';
+        const mode = imageInsertEnabled ? 'propose' : queryModeForIntent(intent);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,
           subject,
@@ -225,6 +276,7 @@ export async function POST(request: NextRequest) {
           currentPageSlug: pageSlug,
           conversationId: activeConversationId,
           mode,
+          imageInsertEnabled,
           onPendingAction: (action) => emit('pending-action', action),
           selection,
           abortSignal: request.signal,
@@ -257,7 +309,7 @@ export async function POST(request: NextRequest) {
         emit('citations', { citations });
         persistTurn(fullAnswer, citations);
         emit('done', { subjectId: subject.id, conversationId: activeConversationId });
-        assessCoverageInBackground(subject, trimmedQuestion, fullAnswer);
+        assessCoverageInBackground(subject, intentQuestion, fullAnswer);
       } catch (error) {
         if (!request.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error);

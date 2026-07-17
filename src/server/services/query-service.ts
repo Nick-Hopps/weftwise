@@ -26,7 +26,7 @@ import {
   resolveToolProfile,
 } from '@/server/agents/tools/profiles';
 import {
-  QUERY_AGENTIC_SYSTEM_PROMPT,
+  buildQueryAgenticSystemPrompt,
   buildAgenticUserContent,
   CoverageSchema,
   COVERAGE_SYSTEM_PROMPT,
@@ -54,9 +54,15 @@ export const NO_QUERY_CONTEXT_ANSWER =
   'No relevant content was found in this subject to answer the question. Try ingesting more sources, switching subjects, or rephrasing your query.';
 
 /** query 工具集：`web.search` 仅在联网检索已配置时注入——未配置时模型完全看不到该工具。导出供单测直接校验。 */
-export function resolveQueryTools(mode: QueryMode = 'read') {
+export function resolveQueryTools(
+  mode: QueryMode = 'read',
+  options: { imageInsertEnabled?: boolean } = {},
+) {
   const profile = resolveToolProfile(mode === 'propose' ? 'query:propose' : 'query:read', { webSearchConfigured: isWebSearchConfigured() });
-  return createBuiltinToolRegistry().resolve([...profile.tools]);
+  const toolNames = profile.tools.filter((name) =>
+    name !== 'wiki.image.insert' || options.imageInsertEnabled === true
+  );
+  return createBuiltinToolRegistry().resolve([...toolNames]);
 }
 
 interface QueryCompileOptions {
@@ -65,6 +71,7 @@ interface QueryCompileOptions {
   onPendingAction?: (action: PendingActionView) => void;
   currentPageSlug?: string;
   selection?: SelectionAnchorInput;
+  imageInsertEnabled?: boolean;
 }
 
 function compileQueryTools(
@@ -76,7 +83,8 @@ function compileQueryTools(
   const profile = resolveToolProfile(mode === 'propose' ? 'query:propose' : 'query:read', {
     webSearchConfigured: isWebSearchConfigured(),
   });
-  return compileToolSet(resolveQueryTools(mode), buildQueryToolContext(subject, accessed, {
+  const imageInsertEnabled = mode === 'propose' && options.imageInsertEnabled === true;
+  return compileToolSet(resolveQueryTools(mode, { imageInsertEnabled }), buildQueryToolContext(subject, accessed, {
     conversationId: options.conversationId,
     onPendingAction: options.onPendingAction,
     currentPageSlug: options.currentPageSlug,
@@ -155,14 +163,17 @@ export function streamAgenticQuery(opts: {
   conversationId?: string;
   onPendingAction?: (action: PendingActionView) => void;
   selection?: SelectionAnchorInput;
+  imageInsertEnabled?: boolean;
 }): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
   const accessed = createAccessedPages();
+  const imageInsertEnabled = opts.mode === 'propose' && opts.imageInsertEnabled === true;
   const tools = compileQueryTools(opts.subject, accessed, {
     mode: opts.mode,
     conversationId: opts.conversationId,
     onPendingAction: opts.onPendingAction,
     currentPageSlug: opts.currentPageSlug,
     selection: opts.selection,
+    imageInsertEnabled,
   });
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),
@@ -176,7 +187,10 @@ export function streamAgenticQuery(opts: {
     { role: 'user', content: userContent },
   ];
   const stream = streamTextWithTools('query', {
-    system: QUERY_AGENTIC_SYSTEM_PROMPT,
+    system: buildQueryAgenticSystemPrompt({
+      mode: opts.mode ?? 'read',
+      imageInsertEnabled,
+    }),
     messages,
     tools,
     maxSteps: QUERY_MAX_STEPS,
@@ -199,7 +213,7 @@ export async function runQuery(
   const userContent = buildAgenticUserContent(question, promptCtx, { currentPageSlug });
 
   const { text } = await generateTextWithTools('query', {
-    system: QUERY_AGENTIC_SYSTEM_PROMPT,
+    system: buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false }),
     messages: [{ role: 'user', content: userContent }],
     tools,
     maxSteps: QUERY_MAX_STEPS,

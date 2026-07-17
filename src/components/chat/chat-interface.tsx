@@ -9,6 +9,12 @@ import { MessageList } from './message-list';
 import { SaveToWikiButton } from './save-to-wiki-button';
 import { PendingActionCard } from './pending-action-card';
 import { replacePendingActions, upsertPendingAction } from './pending-action-state';
+import {
+  applyResetConfirmationDecision,
+  resetIntentContext,
+  type ResetConfirmationDecision,
+  type ResetConfirmationState,
+} from './reset-confirmation-state';
 import { apiFetch, useApiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
@@ -63,41 +69,6 @@ function parsePassages(content: string, title: string): Passage[] {
   }
   flush();
   return out.slice(0, 40);
-}
-
-type PendingResetConfirmation = { kind: 'reset' } | null;
-
-const RESET_INTENT_PATTERNS: RegExp[] = [
-  /重置.*(当前)?.*(wiki|知识库|数据|内容|页面)/i,
-  /清空.*(当前)?.*(wiki|知识库|数据|内容|页面)/i,
-  /(把|将).*(wiki|知识库).*(清|重置|清空|清除|删除)/i,
-  /(reset|wipe|clear|erase)\s+(the\s+)?(wiki|knowledge\s*base|everything|all)/i,
-  /(start|begin)\s+over\s+(the\s+)?(wiki|knowledge\s*base)?/i,
-];
-
-function detectResetIntent(text: string): boolean {
-  const normalized = text.trim();
-  if (!normalized) return false;
-  return RESET_INTENT_PATTERNS.some((p) => p.test(normalized));
-}
-
-function detectConfirmation(text: string): 'yes' | 'no' | 'unclear' {
-  const normalized = text.trim().toLowerCase();
-  if (!normalized) return 'unclear';
-
-  if (/^(是|对|确认|确定|好|好的|是的|同意|继续|执行|没错|请继续)[!！。.?？]?$/.test(normalized)) {
-    return 'yes';
-  }
-  if (/^(y|yes|yep|yeah|confirm|ok|okay|do it|proceed|go ahead)[!.?]?$/.test(normalized)) {
-    return 'yes';
-  }
-  if (/^(否|不|不要|取消|放弃|别|停|算了|先不|再想想)[!！。.?？]?$/.test(normalized)) {
-    return 'no';
-  }
-  if (/^(n|no|nope|cancel|abort|stop|nevermind|never mind)[!.?]?$/.test(normalized)) {
-    return 'no';
-  }
-  return 'unclear';
 }
 
 interface SSEEvent {
@@ -233,8 +204,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [pendingResetConfirmation, setPendingResetConfirmation] =
-    useState<PendingResetConfirmation>(null);
+  const [resetConfirmationState, setResetConfirmationState] =
+    useState<ResetConfirmationState>('idle');
   const [pendingActions, setPendingActions] = useState<PendingActionView[]>([]);
   const [busyActionId, setBusyActionId] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -253,6 +224,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       currentConversationId === loadedConversationIdRef.current
       && ctxSubjectId === loadedSubjectIdRef.current
     ) return; // 自身 done 设置/未变，跳过重拉
+    setResetConfirmationState('idle');
     if (!currentConversationId) {
       setMessages([]);
       setPendingActions([]);
@@ -315,7 +287,6 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
 
   const performReset = useCallback(async () => {
     setIsLoading(true);
-    setMessages((prev) => [...prev, { role: 'assistant', content: '正在重置 wiki…' }]);
     try {
       // Chat reset is always subject-scoped. If the bootstrap hasn't resolved
       // a subject yet we MUST refuse — sending an empty body to /api/reset
@@ -404,44 +375,6 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     setInput('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
 
-    if (pendingResetConfirmation?.kind === 'reset') {
-      setMessages((prev) => [...prev, { role: 'user', content: question }]);
-      const decision = detectConfirmation(question);
-      if (decision === 'yes') {
-        setPendingResetConfirmation(null);
-        await performReset();
-        return;
-      }
-      if (decision === 'no') {
-        setPendingResetConfirmation(null);
-        setMessages((prev) => [...prev, { role: 'assistant', content: '好的，已取消重置，wiki 保持不变。' }]);
-        return;
-      }
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            '我没太确定你的意思。请回复 **“是”** 执行重置，或 **“否”** 取消（重置会清空所有页面和数据源，无法恢复）。',
-        },
-      ]);
-      return;
-    }
-
-    if (detectResetIntent(question)) {
-      setMessages((prev) => [...prev, { role: 'user', content: question }]);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            '⚠️ 你确定要 **重置当前 wiki** 吗？\n\n这会 **清空所有页面、数据源和任务记录**，且 **无法恢复**。\n\n请回复 **“是”** 确认执行，或 **“否”** 取消。',
-        },
-      ]);
-      setPendingResetConfirmation({ kind: 'reset' });
-      return;
-    }
-
     // Pinned passages travel as extra context to the model, then clear.
     const sentRefs = refs;
     setRefs([]);
@@ -458,7 +391,12 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
 
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
-      const queryBody: Record<string, unknown> = { question: backendQuestion };
+      const queryBody: Record<string, unknown> = {
+        question: backendQuestion,
+        userQuestion: question,
+      };
+      const intentContext = resetIntentContext(resetConfirmationState);
+      if (intentContext) queryBody.intentContext = intentContext;
       const structuredSelection = sentRefs.find((ref) => ref.selection)?.selection;
       if (structuredSelection) queryBody.selection = structuredSelection;
       if (currentPageSlug) queryBody.pageSlug = currentPageSlug;
@@ -485,6 +423,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       const decoder = new TextDecoder();
       const parser = createSSEParser();
       let fullContent = '';
+      let shouldResetAfterStream = false;
 
       try {
         while (true) {
@@ -509,6 +448,14 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               setPendingActions((current) =>
                 upsertPendingAction(current, data as PendingActionView),
               );
+            } else if (event === 'reset-confirmation') {
+              const decision = (data as { decision: ResetConfirmationDecision }).decision;
+              const transition = applyResetConfirmationDecision(
+                resetConfirmationState,
+                decision,
+              );
+              setResetConfirmationState(transition.state);
+              shouldResetAfterStream = transition.shouldReset;
             } else if (event === 'error') {
               const message = (data as { error?: unknown }).error;
               const detail = typeof message === 'string' ? message : 'Query failed';
@@ -534,6 +481,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
         reader.releaseLock();
         readerRef.current = null;
       }
+      if (shouldResetAfterStream) await performReset();
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         setMessages((prev) => {
@@ -548,7 +496,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, pendingResetConfirmation, performReset, currentPageSlug, refs, pageContent, setCurrentConversation, queryClient]);
+  }, [input, isLoading, resetConfirmationState, performReset, currentPageSlug, refs, pageContent, setCurrentConversation, queryClient]);
 
   // Abort any in-flight SSE stream when the component unmounts to avoid
   // leaking work and stale setState calls after the panel closes.
@@ -577,7 +525,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const handleClear = () => {
     if (isLoading) handleStop();
     setMessages([]);
-    setPendingResetConfirmation(null);
+    setResetConfirmationState('idle');
   };
 
   const containerClass =

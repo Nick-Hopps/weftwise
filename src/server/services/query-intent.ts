@@ -1,85 +1,98 @@
+import { generateStructuredOutput } from '@/server/llm/provider-registry';
+import {
+  buildQueryIntentUserPrompt,
+  QUERY_INTENT_SYSTEM_PROMPT,
+  QueryIntentSchema,
+  type QueryIntentClassification,
+  type QueryIntentContext,
+} from '@/server/llm/prompts/query-prompt';
+
 export type QueryMode = 'read' | 'propose';
+export type { QueryIntentClassification, QueryIntentContext };
 
-const CURRENT_PAGE_REFS = new Set([
-  '',
-  '当前页面',
-  '当前页',
-  '这个页面',
-  '这个页',
-  '本页面',
-  '本页',
-  'current page',
-  'this page',
-]);
+const TARGET_NONE = { reference: 'none' as const, slug: null };
 
-const EXPLANATORY_OR_NEGATED = [
-  /(?:如何|怎么|怎样|能否|(?:你)?能|可以.{0,8}吗|不要|别|假设|如果).{0,40}(?:创建|新建|更新|修改|编辑|删除|移除|丰富|回滚|恢复|启动|开始|研究|取消|终止|移动|重命名|改.{0,8}slug)/i,
-  /\b(?:how\s+(?:do|can|to)|can\s+you|do\s+not|don't|what\s+(?:would|happens?)\s+if|if\s+i)\b/i,
-];
-
-const WRITE_ACTION = /(?:创建|新建|更新|修改|编辑|局部修改|删除|移除|重新丰富|再丰富|移动|重命名|改.{0,8}slug|slug.{0,8}(?:改|重命名)|create|update|edit|patch|delete|remove|re-?enrich|move|rename.{0,32}slug)/i;
-const WIKI_TARGET = /(?:wiki|知识库|页面|页|page)/i;
-const HISTORY_REVERT = /(?:(?:回滚|恢复).{0,24}(?:历史|版本|操作)|(?:历史|版本|操作).{0,24}(?:回滚|恢复)|\brevert\b.{0,24}\b(?:wiki|history|operation|version)\b)/i;
-const WORKFLOW_ACTION = /(?:(?:开始|启动).{0,24}(?:研究|research|重新丰富|再丰富)|(?:取消|终止).{0,24}(?:任务|工作流|job)|\bstart\s+(?:a\s+)?research\b|\bcancel\s+(?:the\s+)?(?:job|workflow)\b)/i;
-const IMAGE_INSERT_EXPLANATORY = [
-  /(?:如何|怎么|怎样|能否|(?:你)?能|可以.{0,8}吗|不要|别|假设|如果).{0,40}(?:配图|插图|图片|图像|示意图)/i,
-  /\b(?:how\s+(?:do|can|to)|can\s+you|do\s+not|don't|what\s+(?:would|happens?)\s+if|if\s+i)\b.{0,60}\b(?:image|illustration|diagram)\b/i,
-];
-const IMAGE_INSERT_ACTION = [
-  /(?:生成|画|绘制|添加|插入|放置).{0,40}(?:配图|插图|图片|图像|示意图).{0,60}(?:下方|下面|后面|之后|正文|文章|页面|这段|选中)/i,
-  /(?:在|给).{0,30}(?:这段|选中|正文|文章|页面).{0,40}(?:生成|画|绘制|添加|插入|放置).{0,30}(?:配图|插图|图片|图像|示意图)/i,
-  /\b(?:generate|create|draw|add|insert|place)\b.{0,50}\b(?:image|illustration|diagram)\b.{0,60}\b(?:below|after|under|into|selection|passage|article|page)\b/i,
-];
-
-export function isImageInsertIntent(question: string): boolean {
-  const normalized = question.trim();
-  if (!normalized || IMAGE_INSERT_EXPLANATORY.some((pattern) => pattern.test(normalized))) return false;
-  return IMAGE_INSERT_ACTION.some((pattern) => pattern.test(normalized));
+function fallbackFor(context: QueryIntentContext): QueryIntentClassification {
+  return {
+    intent: context.phase === 'reset-confirmation' ? 'reset-unclear' : 'read',
+    targetPage: TARGET_NONE,
+  };
 }
 
-/**
- * 只决定 Query 是否能看到无写入副作用的 preview 工具；真正授权仍由 actionId 审批承担。
- */
-export function resolveQueryMode(
-  question: string,
-  options: { hasCanonicalSelection?: boolean } = {},
-): QueryMode {
-  const normalized = question.trim();
-  if (!normalized) return 'read';
-  if (EXPLANATORY_OR_NEGATED.some((pattern) => pattern.test(normalized))) return 'read';
-  if (HISTORY_REVERT.test(normalized)) return 'propose';
-  if (WORKFLOW_ACTION.test(normalized)) return 'propose';
-  if (options.hasCanonicalSelection && isImageInsertIntent(normalized)) return 'propose';
-  return WRITE_ACTION.test(normalized) && WIKI_TARGET.test(normalized) ? 'propose' : 'read';
+function narrowToContext(
+  result: QueryIntentClassification,
+  context: QueryIntentContext,
+): QueryIntentClassification {
+  if (context.phase === 'reset-confirmation') {
+    return ['reset-confirm', 'reset-cancel', 'reset-unclear'].includes(result.intent)
+      ? { ...result, targetPage: TARGET_NONE }
+      : fallbackFor(context);
+  }
+
+  if (['reset-confirm', 'reset-cancel', 'reset-unclear'].includes(result.intent)) {
+    return fallbackFor(context);
+  }
+  if (result.intent === 'image-insert' && !context.hasSelection) {
+    return fallbackFor(context);
+  }
+  if (result.intent !== 'direct-reenrich') {
+    return { ...result, targetPage: TARGET_NONE };
+  }
+
+  const target = result.targetPage;
+  if (target.reference === 'current-page') {
+    return { ...result, targetPage: { reference: 'current-page', slug: null } };
+  }
+  if (target.reference === 'slug' && target.slug?.trim()) {
+    return {
+      ...result,
+      targetPage: { reference: 'slug', slug: target.slug.trim() },
+    };
+  }
+  return { ...result, targetPage: TARGET_NONE };
 }
 
-/**
- * 解析无需 LLM 决策的单页 re-enrich 控制命令。
- * 只接受整句明确命令；教程、否定、复合请求继续走普通 Query 语义。
- */
-export function resolveDirectReenrichSlug(
+export async function classifyQueryIntent(
   question: string,
+  context: QueryIntentContext,
+  options: { generate?: typeof generateStructuredOutput } = {},
+): Promise<QueryIntentClassification> {
+  const generate = options.generate ?? generateStructuredOutput;
+  try {
+    const result = await generate(
+      'query',
+      QueryIntentSchema,
+      QUERY_INTENT_SYSTEM_PROMPT,
+      buildQueryIntentUserPrompt(question, context),
+      {},
+      { schemaRetries: 1 },
+    );
+    return narrowToContext(result, context);
+  } catch (error) {
+    console.warn(
+      '[query-intent] structured classification failed; using conservative fallback',
+      error instanceof Error ? error.message : String(error),
+    );
+    return fallbackFor(context);
+  }
+}
+
+export function queryModeForIntent(intent: QueryIntentClassification): QueryMode {
+  return intent.intent === 'propose' || intent.intent === 'direct-reenrich'
+    ? 'propose'
+    : 'read';
+}
+
+export function resolveDirectReenrichTarget(
+  intent: QueryIntentClassification,
   currentPageSlug?: string,
 ): string | null {
-  const normalized = question.trim();
-  if (!normalized || resolveQueryMode(normalized) !== 'propose') return null;
-
-  const chinese = normalized.match(
-    /^(?:请)?(?:重新丰富|再丰富)(?:一下)?(?:(?:wiki|知识库))?(?:页面|页)?(?:\s*[：:]\s*|\s+)?(.*?)[。！!]?$/i,
-  );
-  const english = normalized.match(
-    /^(?:please\s+)?re-?enrich(?:\s+the)?(?:\s+wiki)?(?:\s+page)?(?:\s*:\s*|\s+)?(.*?)[.!]?$/i,
-  );
-  const rawTarget = (chinese?.[1] ?? english?.[1]);
-  if (rawTarget === undefined) return null;
-
-  const target = rawTarget
-    .trim()
-    .replace(/^[`'"“”]+|[`'"“”]+$/g, '')
-    .trim();
-  if (/(?:并且?|然后|同时|以及|，|,|;|；|\band\b)/i.test(target)) return null;
-  if (CURRENT_PAGE_REFS.has(target.toLowerCase())) {
+  if (intent.intent !== 'direct-reenrich') return null;
+  if (intent.targetPage.reference === 'current-page') {
     return currentPageSlug?.trim() || null;
   }
-  return target || currentPageSlug?.trim() || null;
+  if (intent.targetPage.reference === 'slug') {
+    return intent.targetPage.slug?.trim() || null;
+  }
+  return null;
 }
