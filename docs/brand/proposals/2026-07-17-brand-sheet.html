@@ -1,0 +1,326 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body>
+<title>weftwise · 品牌定稿 v1</title>
+<style>
+  :root {
+    --paper: #F6F5F2;
+    --ink: #1D1C1A;
+    --ink-2: #6E6A63;
+    --ink-3: #9A968E;
+    --hairline: #E2DFD8;
+    --plate-light-bg: #FFFFFF;
+    --plate-light-border: #E7E4DD;
+    --plate-light-ink: #201F1C;
+    --plate-light-sub: #8A867E;
+    --plate-dark-bg: #17171B;
+    --plate-dark-border: #26262C;
+    --plate-dark-ink: #ECEAE4;
+    --plate-dark-sub: #7E7C84;
+    --table-row: #FBFAF8;
+    --chip-bg: #EFEDE8;
+    --ok: #2F7D5B;
+    --warn: #B4552D;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131315; --ink: #E6E4DF; --ink-2: #98948C; --ink-3: #6B6862;
+      --hairline: #2A2A2E; --table-row: #18181B; --chip-bg: #1E1E22;
+      --ok: #5CBD92; --warn: #E08A5E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131315; --ink: #E6E4DF; --ink-2: #98948C; --ink-3: #6B6862;
+    --hairline: #2A2A2E; --table-row: #18181B; --chip-bg: #1E1E22;
+    --ok: #5CBD92; --warn: #E08A5E;
+  }
+  :root[data-theme="light"] {
+    --paper: #F6F5F2; --ink: #1D1C1A; --ink-2: #6E6A63; --ink-3: #9A968E;
+    --hairline: #E2DFD8; --table-row: #FBFAF8; --chip-bg: #EFEDE8;
+    --ok: #2F7D5B; --warn: #B4552D;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 56px 28px 96px; }
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-2);
+  }
+  .wm { font-family: "Avenir Next", Futura, -apple-system, sans-serif; font-weight: 600; letter-spacing: -0.01em; }
+
+  header.masthead { border-bottom: 1px solid var(--ink); padding-bottom: 34px; }
+  .masthead-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 40px; }
+  h1 { font-size: clamp(26px, 4.4vw, 38px); font-weight: 650; letter-spacing: -0.015em; line-height: 1.25; text-wrap: balance; margin: 0 0 18px; }
+  .lede { max-width: 62ch; color: var(--ink-2); margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  section { padding: 46px 0 50px; border-bottom: 1px solid var(--hairline); }
+  h2 { font-size: 21px; font-weight: 650; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sec-sub { color: var(--ink-3); font-size: 13px; margin: 0 0 24px; }
+
+  /* hero lockup */
+  .hero-plates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px) { .hero-plates { grid-template-columns: 1fr; } }
+  .plate { border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 44px 20px; }
+  .plate-light { background: var(--plate-light-bg); border: 1px solid var(--plate-light-border); }
+  .plate-dark { background: var(--plate-dark-bg); border: 1px solid var(--plate-dark-border); }
+  .lockup { display: flex; align-items: center; gap: 13px; }
+  .lockup .wm { font-size: 33px; line-height: 1; }
+  .plate-light .wm { color: var(--plate-light-ink); }
+  .plate-dark .wm { color: var(--plate-dark-ink); }
+  .lock-cn { font-size: 13px; letter-spacing: 0.14em; }
+  .plate-light .lock-cn { color: var(--plate-light-sub); }
+  .plate-dark .lock-cn { color: var(--plate-dark-sub); }
+  .hero-tag { text-align: center; margin-top: 22px; }
+  .hero-tag .en { font-weight: 600; font-size: 16px; }
+  .hero-tag .zh { color: var(--ink-2); font-size: 14px; margin-top: 2px; }
+
+  /* two-col spec rows */
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 34px; }
+  @media (max-width: 720px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+  .kv { margin: 0; }
+  .kv dt { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
+  .kv dd { margin: 0 0 16px; }
+  .kv dd strong { font-weight: 600; }
+  .morph { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .morph .m { display: inline-flex; align-items: baseline; gap: 7px; background: var(--chip-bg); border-radius: 5px; padding: 4px 12px; }
+  .morph .m b { font-weight: 650; font-size: 15px; }
+  .morph .m span { font-size: 12px; color: var(--ink-2); }
+  .morph .op { color: var(--ink-3); font-size: 14px; }
+
+  /* palette */
+  .tokens { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .token { border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; }
+  .token .strip { height: 52px; display: flex; }
+  .token .strip i { flex: 1; }
+  .token .meta { padding: 10px 14px; }
+  .token .meta b { font-size: 13.5px; font-weight: 600; display: block; }
+  .token .meta code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--ink-2); letter-spacing: 0.04em; }
+
+  /* mark anatomy + sizes */
+  .anatomy { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; }
+  .anatomy .fig { background: var(--plate-light-bg); border: 1px solid var(--plate-light-border); border-radius: 6px; padding: 22px; }
+  .anatomy ul { margin: 0; padding-left: 20px; color: var(--ink-2); max-width: 52ch; }
+  .anatomy li { margin-bottom: 6px; }
+  .anatomy li strong { color: var(--ink); font-weight: 600; }
+  .sizes { display: flex; align-items: flex-end; gap: 22px; margin-top: 20px; }
+  .sizes figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .sizes figcaption { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9.5px; color: var(--ink-3); letter-spacing: 0.08em; }
+
+  /* verification table */
+  .table-scroller { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 13.5px; }
+  th { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--hairline); }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  tbody tr:nth-child(odd) td { background: var(--table-row); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.ok { color: var(--ok); font-weight: 600; }
+  td.warn { color: var(--warn); font-weight: 600; }
+  td.tmuted { color: var(--ink-2); }
+  td code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+
+  /* checklist */
+  .todo { list-style: none; margin: 0; padding: 0; max-width: 66ch; }
+  .todo li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px dashed var(--hairline); color: var(--ink-2); }
+  .todo li:last-child { border-bottom: none; }
+  .todo .box { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink-3); flex-shrink: 0; }
+  .todo li strong { color: var(--ink); font-weight: 600; }
+  .todo li code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; background: var(--chip-bg); border-radius: 4px; padding: 1px 6px; }
+
+  .footnote { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--hairline); color: var(--ink-3); font-size: 12.5px; max-width: 70ch; line-height: 1.8; }
+  section:last-of-type { border-bottom: none; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="masthead-top">
+      <span class="mono">weftwise — Brand Sheet · V1 定稿</span>
+      <span class="mono">Agentic Wiki · 2026-07-17</span>
+    </div>
+    <h1>weftwise（织识）</h1>
+    <p class="lede"><strong>weft</strong>（纬线·织）＋ <strong>wise</strong>（智·识）——纺织业实词「沿纬向」，也是「织识」的逐字英译。产品每读一份资料，就把一根新纬线织进既有的知识经线。命名经三轮敲定：七方向 → weft 方向 → 织识铸词；Nick 在知悉同名隐身期实体存在的前提下确认沿用。</p>
+  </header>
+
+  <!-- hero -->
+  <section>
+    <div class="hero-plates">
+      <div class="plate plate-light">
+        <span data-logo="light:120"></span>
+        <div class="lockup"><span data-logo="light:26"></span><span class="wm">weftwise</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="plate plate-dark">
+        <span data-logo="dark:120"></span>
+        <div class="lockup"><span data-logo="dark:26"></span><span class="wm">weftwise</span><span class="lock-cn">织识</span></div>
+      </div>
+    </div>
+    <div class="hero-tag">
+      <div class="en">“Knowledge, woven.”</div>
+      <div class="zh">让读过的一切，织成一张布。</div>
+    </div>
+  </section>
+
+  <!-- name spec -->
+  <section>
+    <h2>名字</h2>
+    <p class="sec-sub">The Name</p>
+    <div class="grid2">
+      <dl class="kv">
+        <dt>构成</dt>
+        <dd>
+          <div class="morph">
+            <span class="m"><b>weft</b><span>纬线 · 织</span></span>
+            <span class="op">＋</span>
+            <span class="m"><b>wise</b><span>智 · 识</span></span>
+          </div>
+        </dd>
+        <dt>读音</dt>
+        <dd>/ˈwɛft.waɪz/ ，重音在 weft；全小写书写：<strong>weftwise</strong></dd>
+        <dt>中文名</dt>
+        <dd><strong>织识</strong>（与「知识」谐音；正式场合可并用「weftwise 织识」）</dd>
+      </dl>
+      <dl class="kv">
+        <dt>词源故事</dt>
+        <dd>纺织业用 weftwise 表示<strong>「沿纬线方向」</strong>（与 warpwise 相对）：经线是绷紧的既有结构，纬线沿纬向一根根织入，布才成为布。知识库的每次 ingest，正是一次「沿纬向」的织入。</dd>
+        <dt>标语</dt>
+        <dd>“Knowledge, woven.” ／ 让读过的一切，织成一张布。</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- mark -->
+  <section>
+    <h2>标志</h2>
+    <p class="sec-sub">The Mark · 织纹</p>
+    <div class="anatomy">
+      <div class="fig"><span data-logo="light:150"></span></div>
+      <ul>
+        <li><strong>三根经线（靛）</strong>：既有的知识结构，安静、绷直。</li>
+        <li><strong>一根波形纬线（朱）</strong>：正被织入的新知识——正弦波（幅 6 / 周期 20 / 笔画 3.6）穿第 1、3 根经线之下、压第 2 根之上；<strong>波形本身在小尺寸下传达「编织」</strong>，大尺寸再靠层级断口表达穿压。织纹节奏不得改、不得改色、不得加投影或斜置。</li>
+        <li><strong>右端的点</strong>：针眼——线还没织完，下一份资料永远在路上。</li>
+        <li>最小使用尺寸 <strong>16px</strong>；小于 24px 时只用 mark，不带 wordmark。<span style="color:var(--ink-3)">（v2 · 2026-07-17：直纬在 16-24px 读作「四竖一横」，改为波形纬）</span></li>
+      </ul>
+    </div>
+    <div class="sizes">
+      <figure><span data-logo="light:16"></span><figcaption>16</figcaption></figure>
+      <figure><span data-logo="light:24"></span><figcaption>24</figcaption></figure>
+      <figure><span data-logo="light:48"></span><figcaption>48</figcaption></figure>
+      <figure><span data-logo="light:96"></span><figcaption>96</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- palette -->
+  <section>
+    <h2>色板</h2>
+    <p class="sec-sub">Palette · 每个 token 上为浅色版、下为深色版</p>
+    <div class="tokens">
+      <div class="token">
+        <div class="strip"><i style="background:#3E4A6D"></i><i style="background:#93A3CF"></i></div>
+        <div class="meta"><b>warp 经线靛</b><code>#3E4A6D · #93A3CF</code></div>
+      </div>
+      <div class="token">
+        <div class="strip"><i style="background:#D9482F"></i><i style="background:#FF6B4D"></i></div>
+        <div class="meta"><b>weft 纬线朱</b><code>#D9482F · #FF6B4D</code></div>
+      </div>
+      <div class="token">
+        <div class="strip"><i style="background:#F6F5F2"></i><i style="background:#131315"></i></div>
+        <div class="meta"><b>paper 纸</b><code>#F6F5F2 · #131315</code></div>
+      </div>
+      <div class="token">
+        <div class="strip"><i style="background:#1D1C1A"></i><i style="background:#E6E4DF"></i></div>
+        <div class="meta"><b>ink 墨</b><code>#1D1C1A · #E6E4DF</code></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- type -->
+  <section>
+    <h2>字体</h2>
+    <p class="sec-sub">Typography</p>
+    <div class="grid2">
+      <dl class="kv">
+        <dt>Wordmark</dt>
+        <dd>现以 <strong>Avenir Next Demi Bold</strong>（macOS 系统字体）小写示意；需跨平台嵌入时建议换 OFL 开源字体 <strong>Manrope</strong> 或 <strong>Figtree</strong>（600），再导出正式矢量并微调 ft 字距。</dd>
+      </dl>
+      <dl class="kv">
+        <dt>界面与中文</dt>
+        <dd>界面沿用系统栈；中文正文 <strong>PingFang SC</strong>，需要嵌入时用思源黑体。「织识」在 lockup 中字号约为 wordmark 的 55%，用次级墨色。</dd>
+      </dl>
+    </div>
+  </section>
+
+  <!-- verification -->
+  <section>
+    <h2>核验记录</h2>
+    <p class="sec-sub">Verification · 2026-07-17 实测（RDAP / GitHub API / npm registry / Web 检索）</p>
+    <div class="table-scroller">
+      <table>
+        <thead>
+          <tr><th>项目</th><th>状态</th><th>详情</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>weftwise.wiki / .ai / .io / .dev</code></td><td class="ok">可注册</td><td class="tmuted">RDAP 404（.wiki 经 Identity Digital 权威源复核）</td></tr>
+          <tr><td><code>npm: weftwise</code></td><td class="ok">可用</td><td class="tmuted">registry E404</td></tr>
+          <tr><td><code>weftwise.com</code></td><td class="warn">已注册</td><td class="tmuted">2014-10 注册，2026-05-21 有变更记录，无站点内容</td></tr>
+          <tr><td><code>weftwise.app</code></td><td class="warn">已注册</td><td class="tmuted">2026-05-11 注册，Squarespace「Coming Soon」占位</td></tr>
+          <tr><td><code>github.com/weftwise</code></td><td class="warn">已占用</td><td class="tmuted">Organization "Weftwise"，2025-12-24 创建，0 公开仓库</td></tr>
+          <tr><td>公开网络</td><td class="ok">零结果</td><td class="tmuted">引号精确检索无任何 "weftwise" 品牌内容（对方仍隐身）</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="color:var(--ink-2); max-width:66ch; margin:18px 0 0">结论：存在一家 2025-12 起持续布局的同名隐身期实体（GitHub org → .app 域名 → 占位页）。<strong>Nick 知悉后确认沿用 weftwise</strong>，以下防御清单需尽快执行以固化先占资产。</p>
+  </section>
+
+  <!-- todo -->
+  <section>
+    <h2>防御与落地清单</h2>
+    <p class="sec-sub">Next Steps</p>
+    <ul class="todo">
+      <li><span class="box">[ ]</span><span><strong>立即注册域名</strong>：<code>weftwise.wiki</code>（主推，贴产品）＋ <code>weftwise.ai</code>；预算允许再拿 <code>.io</code> / <code>.dev</code></span></li>
+      <li><span class="box">[ ]</span><span><strong>占位 handle</strong>：npm <code>weftwise</code>、X / 小红书 / 即刻 等社交位</span></li>
+      <li><span class="box">[ ]</span><span><strong>商标检索</strong>：若有商用计划，CNIPA 必查，USPTO / EUIPO 视市场；formal search 建议走代理</span></li>
+      <li><span class="box">[ ]</span><span><strong>App 落地</strong>：<code>src/app/icon.svg</code>（自适应 favicon 已产出）、<code>opengraph-image.png</code>、layout metadata 标题改 「weftwise 织识」、Header 换 lockup、README 品牌段</span></li>
+      <li><span class="box">[ ]</span><span><strong>Wordmark 定稿</strong>：选定 OFL 字体后导出矢量 lockup（横排 / 纵排 / 无字三款）</span></li>
+    </ul>
+    <p class="footnote">资产包 weftwise-brand-v1.zip 内含：标志 SVG（浅/深）、自适应 favicon（icon.svg，内嵌 prefers-color-scheme）、OG 分享图（1200×630）与使用说明。命名过程存档：Round 01 七方向提案 / Round 02 织识铸词六案（见会话内 Artifact）。</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  var PAL = {
+    light: { a: '#3E4A6D', b: '#D9482F' },
+    dark:  { a: '#93A3CF', b: '#FF6B4D' }
+  };
+  var mark = function (c) {
+    var warp = [14, 24, 34].map(function (x) {
+      return '<line x1="' + x + '" y1="11" x2="' + x + '" y2="37" stroke="' + c.a + '" stroke-width="3.6" stroke-linecap="round"/>';
+    }).join('');
+    var over = [14, 34].map(function (x) {
+      return '<line x1="' + x + '" y1="17.5" x2="' + x + '" y2="30.5" stroke="' + c.a + '" stroke-width="3.6" stroke-linecap="round"/>';
+    }).join('');
+    return warp
+      + '<path d="M5.6 18.6 C6.7 18.2 7.9 18 9 18 C12.64 18 15.36 30 19 30 C22.64 30 25.36 18 29 18 C32.64 18 35.36 30 39 30 C40.8 30 42.7 28 44 25.8" stroke="' + c.b + '" stroke-width="3.6" stroke-linecap="round" fill="none"/>'
+      + '<circle cx="45.8" cy="23.4" r="2.1" fill="' + c.b + '"/>'
+      + over;
+  };
+  document.querySelectorAll('[data-logo]').forEach(function (el) {
+    var parts = el.getAttribute('data-logo').split(':');
+    var pal = PAL[parts[0]], size = parseInt(parts[1] || '30', 10);
+    if (!pal) { return; }
+    el.innerHTML = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block">' + mark(pal) + '</svg>';
+  });
+})();
+</script>
+
+</body>
+</html>

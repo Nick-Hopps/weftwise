@@ -1,0 +1,631 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body>
+<title>Agentic Wiki · 品牌方向提案</title>
+<style>
+  :root {
+    --paper: #F6F5F2;
+    --ink: #1D1C1A;
+    --ink-2: #6E6A63;
+    --ink-3: #9A968E;
+    --hairline: #E2DFD8;
+    --plate-light-bg: #FFFFFF;
+    --plate-light-border: #E7E4DD;
+    --plate-light-ink: #201F1C;
+    --plate-light-sub: #8A867E;
+    --plate-dark-bg: #17171B;
+    --plate-dark-border: #26262C;
+    --plate-dark-ink: #ECEAE4;
+    --plate-dark-sub: #7E7C84;
+    --table-row: #FBFAF8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131315;
+      --ink: #E6E4DF;
+      --ink-2: #98948C;
+      --ink-3: #6B6862;
+      --hairline: #2A2A2E;
+      --table-row: #18181B;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131315;
+    --ink: #E6E4DF;
+    --ink-2: #98948C;
+    --ink-3: #6B6862;
+    --hairline: #2A2A2E;
+    --table-row: #18181B;
+  }
+  :root[data-theme="light"] {
+    --paper: #F6F5F2;
+    --ink: #1D1C1A;
+    --ink-2: #6E6A63;
+    --ink-3: #9A968E;
+    --hairline: #E2DFD8;
+    --table-row: #FBFAF8;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 56px 28px 96px; }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  /* ---------- header ---------- */
+  header.masthead { border-bottom: 1px solid var(--ink); padding-bottom: 28px; }
+  .masthead-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 40px; }
+  h1 {
+    font-size: clamp(26px, 4.4vw, 38px);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  .lede { max-width: 62ch; color: var(--ink-2); margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+  .criteria { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 26px; }
+  .criteria span::before { content: "·"; margin-right: 8px; color: var(--ink-3); }
+
+  /* ---------- card ---------- */
+  section.card { padding: 52px 0 56px; border-bottom: 1px solid var(--hairline); }
+  .card-head {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    margin-bottom: 26px;
+  }
+  .idx {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px; color: var(--ink-3); letter-spacing: 0.1em;
+  }
+  .card-head .name { font-size: 33px; line-height: 1.1; margin: 0; font-weight: 600; }
+  .card-head .cn { font-size: 21px; font-weight: 600; }
+  .card-head .meta { color: var(--ink-3); font-size: 13px; }
+
+  .card-body {
+    display: grid;
+    grid-template-columns: minmax(0, 13fr) minmax(0, 11fr);
+    gap: 34px;
+  }
+  @media (max-width: 760px) { .card-body { grid-template-columns: minmax(0, 1fr); } }
+
+  /* plates */
+  .plates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: start; }
+  @media (max-width: 430px) { .plates { grid-template-columns: 1fr; } }
+  .plate {
+    border-radius: 6px;
+    padding: 26px 18px 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
+  }
+  .plate-light { background: var(--plate-light-bg); border: 1px solid var(--plate-light-border); }
+  .plate-dark { background: var(--plate-dark-bg); border: 1px solid var(--plate-dark-border); }
+  .mark-big { display: flex; justify-content: center; }
+  .lockup { display: flex; align-items: center; gap: 9px; }
+  .lockup .wm { font-size: 19px; line-height: 1; }
+  .plate-light .wm { color: var(--plate-light-ink); }
+  .plate-dark .wm { color: var(--plate-dark-ink); }
+  .lock-cn { font-size: 11px; letter-spacing: 0.12em; }
+  .plate-light .lock-cn { color: var(--plate-light-sub); }
+  .plate-dark .lock-cn { color: var(--plate-dark-sub); }
+  .ladder {
+    width: 100%;
+    display: flex; justify-content: center; align-items: flex-end; gap: 20px;
+    padding-top: 14px; margin-top: 2px;
+  }
+  .plate-light .ladder { border-top: 1px solid #F0EDE6; }
+  .plate-dark .ladder { border-top: 1px solid #232329; }
+  .ladder figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .ladder figcaption { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9px; letter-spacing: 0.08em; }
+  .plate-light .ladder figcaption { color: var(--plate-light-sub); }
+  .plate-dark .ladder figcaption { color: var(--plate-dark-sub); }
+
+  /* spec column */
+  .spec { max-width: 58ch; }
+  .tagline { font-size: 15px; font-weight: 600; margin: 2px 0 14px; }
+  .tagline .en { display: block; letter-spacing: 0.01em; }
+  .tagline .zh { display: block; color: var(--ink-2); font-weight: 500; margin-top: 2px; }
+  .why { margin: 0 0 18px; color: var(--ink-2); }
+  .why strong { color: var(--ink); font-weight: 600; }
+  .spec-label { display: block; margin-bottom: 8px; }
+  .palette { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; }
+  .swatch { display: flex; align-items: center; gap: 7px; }
+  .swatch i {
+    width: 15px; height: 15px; border-radius: 3px; display: inline-block;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+  }
+  .swatch code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--ink-2); letter-spacing: 0.04em; }
+  .risk { font-size: 12.5px; line-height: 1.7; color: var(--ink-3); margin: 0; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+  .risk b { color: var(--ink-2); font-weight: 600; }
+
+  /* wordmark faces */
+  .wm-weft     { font-family: "Avenir Next", Futura, -apple-system, sans-serif; font-weight: 600; letter-spacing: -0.01em; }
+  .wm-banyan   { font-family: Palatino, "Palatino Linotype", Georgia, serif; font-weight: 600; letter-spacing: 0.005em; }
+  .wm-asterism { font-family: Optima, "Avenir Next", Candara, sans-serif; font-weight: 550; letter-spacing: 0.2em; text-transform: uppercase; }
+  .wm-muninn   { font-family: Futura, "Avenir Next", "Trebuchet MS", sans-serif; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
+  .wm-atoll    { font-family: ui-rounded, "Arial Rounded MT Bold", "Avenir Next", sans-serif; font-weight: 700; letter-spacing: 0.015em; }
+  .wm-clew     { font-family: Baskerville, "Times New Roman", Georgia, serif; font-weight: 600; letter-spacing: 0.03em; }
+  .wm-trellis  { font-family: Seravek, "Gill Sans", "Avenir Next", sans-serif; font-weight: 600; letter-spacing: 0.02em; }
+
+  /* ---------- summary ---------- */
+  .summary { padding-top: 56px; }
+  .summary h2 { font-size: 22px; font-weight: 650; margin: 0 0 20px; letter-spacing: -0.01em; }
+  .table-scroller { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13.5px; }
+  th {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500; text-align: left;
+    padding: 12px 16px; border-bottom: 1px solid var(--hairline);
+  }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  tbody tr:nth-child(odd) td { background: var(--table-row); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.tnum { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--ink-3); }
+  td .tn { font-weight: 600; white-space: nowrap; }
+  td.tmuted { color: var(--ink-2); }
+
+  .verdict { margin-top: 44px; border-left: 2px solid var(--ink); padding: 4px 0 4px 22px; }
+  .verdict p { margin: 0 0 12px; max-width: 62ch; }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict .pick { font-weight: 650; }
+  .footnote { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--hairline); color: var(--ink-3); font-size: 12.5px; max-width: 70ch; line-height: 1.8; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="masthead-top">
+      <span class="mono">Naming &amp; Marks — Proposal 01</span>
+      <span class="mono">Agentic Wiki · 2026-07-17</span>
+    </div>
+    <h1>七个名字，七种气质<br>—— Agentic Wiki 品牌方向提案</h1>
+    <p class="lede">这个产品做的事：LLM 代理把你读到的一切，增量地<strong>编织</strong>成一个持续保鲜、相互链接的个人知识网络——知识不是被检索的碎片，而是<strong>复利生长</strong>的活物，且始终有<strong>代理在值守打理</strong>。以下七个方向即从这三个产品事实出发，各取一条隐喻矿脉。</p>
+    <div class="criteria mono">
+      <span>短而可念</span>
+      <span>隐喻贴产品，不贴概念</span>
+      <span>中文名须独立成立</span>
+      <span>16px 下标志仍可读</span>
+    </div>
+  </header>
+
+  <!-- ============ 01 weft ============ -->
+  <section class="card" id="weft">
+    <div class="card-head">
+      <span class="idx">01</span>
+      <h2 class="name wm-weft">weft</h2>
+      <span class="cn">织识</span>
+      <span class="meta">/wɛft/ · 织物的纬线</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="weft:light:108"></div>
+          <div class="lockup"><span data-logo="weft:light:24"></span><span class="wm wm-weft">weft</span><span class="lock-cn">织识</span></div>
+          <div class="ladder">
+            <figure><span data-logo="weft:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="weft:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="weft:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="weft:dark:108"></div>
+          <div class="lockup"><span data-logo="weft:dark:24"></span><span class="wm wm-weft">weft</span><span class="lock-cn">织识</span></div>
+          <div class="ladder">
+            <figure><span data-logo="weft:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="weft:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="weft:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“Knowledge, woven.”</span><span class="zh">让读过的一切，织成一张布。</span></p>
+        <p class="why">织机上，纵向绷紧的经线（warp）是既有结构，横向穿引的<strong>纬线（weft）</strong>把新纱织进整幅布。这正是 ingest 的动作：每读一份资料，就是引一根新纬线穿过既有知识，交叉点即 wikilink。名字只有四个字母，动作感极强；中文<strong>「织识」与「知识」谐音</strong>，一次命名，两层含义。标志：安静的经线之间，一根鲜亮的纬线正被引入，右上翘起的线头表示织造从未停止。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#3E4A6D"></i><code>#3E4A6D 经线靛</code></span>
+          <span class="swatch"><i style="background:#D9482F"></i><code>#D9482F 纬线朱</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · 约 2015 年曾有同名物流数据公司 Weft；知识工具领域暂无知名占用。四字母 .com 基本无望，可考虑 weft.app / weft.wiki。口头拼写需带一句 “weft, as in warp and weft”。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 Banyan ============ -->
+  <section class="card" id="banyan">
+    <div class="card-head">
+      <span class="idx">02</span>
+      <h2 class="name wm-banyan">Banyan</h2>
+      <span class="cn">榕</span>
+      <span class="meta">/ˈbænjən/ · 榕树</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="banyan:light:108"></div>
+          <div class="lockup"><span data-logo="banyan:light:24"></span><span class="wm wm-banyan">Banyan</span><span class="lock-cn">榕</span></div>
+          <div class="ladder">
+            <figure><span data-logo="banyan:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="banyan:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="banyan:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="banyan:dark:108"></div>
+          <div class="lockup"><span data-logo="banyan:dark:24"></span><span class="wm wm-banyan">Banyan</span><span class="lock-cn">榕</span></div>
+          <div class="ladder">
+            <figure><span data-logo="banyan:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="banyan:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="banyan:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“One mind, a forest.”</span><span class="zh">独木成林。</span></p>
+        <p class="why">榕树的气根垂落，触地即成新干，一棵树自己长成一片林——<strong>「独木成林」</strong>四个字就是这个产品的全部愿景：一个人的阅读，复利生长为一整片知识森林。树冠的圆点与连线让标志同时读作<strong>「树」与「知识图谱」</strong>；金色的细根，是刚刚落地生根的新页面。中文名单字「榕」即可成牌，安静有力。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#2F7D5B"></i><code>#2F7D5B 榕冠绿</code></span>
+          <span class="swatch"><i style="background:#57524A"></i><code>#57524A 树干褐</code></span>
+          <span class="swatch"><i style="background:#C9962E"></i><code>#C9962E 新根金</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · Banyan Security（2024 年被收购）、90 年代的 Banyan Systems 等先例较多；属常用词，商标需按类别检索。发音全球无障碍是其优势。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 Asterism ============ -->
+  <section class="card" id="asterism">
+    <div class="card-head">
+      <span class="idx">03</span>
+      <h2 class="name wm-asterism" style="font-size:27px">Asterism</h2>
+      <span class="cn">星丛</span>
+      <span class="meta">/ˈæstərɪzəm/ · 星群；排版符号 ⁂</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="asterism:light:108"></div>
+          <div class="lockup"><span data-logo="asterism:light:24"></span><span class="wm wm-asterism" style="font-size:15px">Asterism</span><span class="lock-cn">星丛</span></div>
+          <div class="ladder">
+            <figure><span data-logo="asterism:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="asterism:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="asterism:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="asterism:dark:108"></div>
+          <div class="lockup"><span data-logo="asterism:dark:24"></span><span class="wm wm-asterism" style="font-size:15px">Asterism</span><span class="lock-cn">星丛</span></div>
+          <div class="ladder">
+            <figure><span data-logo="asterism:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="asterism:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="asterism:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“Ideas, constellated.”</span><span class="zh">想法，连成星丛。</span></p>
+        <p class="why">一词双关。天文学里，asterism 是<strong>未被正式册封的星座</strong>——如同你的笔记在图谱里自发连成的图案；排版史里，<strong>⁂ 正是名为 asterism 的古书分节符</strong>，三颗星与产品的三联布局（The Triad）暗合。标志即 ⁂ 的精修：一颗金色主星与两颗随行星，以发丝线连成最小的星座。中文「星丛」借本雅明 Konstellation 的通译，书卷气质。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#514AA8"></i><code>#514AA8 夜青莲</code></span>
+          <span class="swatch"><i style="background:#D99A2B"></i><code>#D99A2B 主星金</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · 有独立书籍发行商 Asterism Books（领域相邻，需重点核验）；另有字体厂商零星使用。三音节对中文用户偏长，但 ⁂ 是几乎无人认领的现成图形资产。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 Muninn ============ -->
+  <section class="card" id="muninn">
+    <div class="card-head">
+      <span class="idx">04</span>
+      <h2 class="name wm-muninn" style="font-size:27px">Muninn</h2>
+      <span class="cn">墨鸦</span>
+      <span class="meta">/ˈmuːnɪn/ · 奥丁的记忆之鸦</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="muninn:light:108"></div>
+          <div class="lockup"><span data-logo="muninn:light:24"></span><span class="wm wm-muninn" style="font-size:15px">Muninn</span><span class="lock-cn">墨鸦</span></div>
+          <div class="ladder">
+            <figure><span data-logo="muninn:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="muninn:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="muninn:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="muninn:dark:108"></div>
+          <div class="lockup"><span data-logo="muninn:dark:24"></span><span class="wm wm-muninn" style="font-size:15px">Muninn</span><span class="lock-cn">墨鸦</span></div>
+          <div class="ladder">
+            <figure><span data-logo="muninn:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="muninn:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="muninn:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“Flies out to read. Returns with memory.”</span><span class="zh">飞出去读，衔回来记。</span></p>
+        <p class="why">北欧神话中奥丁的双鸦之一，名字即古诺斯语的<strong>「记忆」</strong>。它每日飞遍世界，归来落在肩头，把见闻低语给主人——正是 agent 的工作循环：飞出去读，衔回来记。《诗体埃达》里奥丁说，比起思维之鸦 Huginn，他<strong>更怕失去的是 Muninn</strong>——记忆比思考珍贵。标志：几何化的鸦首，喙尖衔着一粒发光的知识节点。中文「墨鸦」，墨即书写。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#23222A"></i><code>#23222A 鸦羽墨</code></span>
+          <span class="swatch"><i style="background:#E89A2E"></i><code>#E89A2E 记忆珀</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · 运维监控工具 Munin（单 n）在基础设施圈知名，拼写有别但发音相同；北欧神话名在游戏领域使用频繁。天然适配暗色审美，非英语用户读音需一次教学。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 atoll ============ -->
+  <section class="card" id="atoll">
+    <div class="card-head">
+      <span class="idx">05</span>
+      <h2 class="name wm-atoll">atoll</h2>
+      <span class="cn">环礁</span>
+      <span class="meta">/ˈætɒl/ · 珊瑚环礁</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="atoll:light:108"></div>
+          <div class="lockup"><span data-logo="atoll:light:24"></span><span class="wm wm-atoll">atoll</span><span class="lock-cn">环礁</span></div>
+          <div class="ladder">
+            <figure><span data-logo="atoll:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="atoll:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="atoll:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="atoll:dark:108"></div>
+          <div class="lockup"><span data-logo="atoll:dark:24"></span><span class="wm wm-atoll">atoll</span><span class="lock-cn">环礁</span></div>
+          <div class="ladder">
+            <figure><span data-logo="atoll:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="atoll:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="atoll:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“Calm, built grain by grain.”</span><span class="zh">一粒一粒，长出你的岛。</span></p>
+        <p class="why">环礁由亿万珊瑚虫一粒一粒分泌堆积而成——正如你的知识库由一次次 ingest <strong>沉积长成</strong>。礁环围出一片平静的潟湖：信息的汪洋之外，你自己的一片静水。环上的圆点既是岛屿也是<strong>图谱节点</strong>，珊瑚色那颗是最新长出的一块；缺口是航道——它始终向新的来源敞开。七个名字里情绪价值最高的一个：对抗信息过载的「平静感」。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#0E7D85"></i><code>#0E7D85 潟湖青</code></span>
+          <span class="swatch"><i style="background:#E8604C"></i><code>#E8604C 新礁珊瑚</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · 电信网络规划软件 Atoll（Forsk 出品）在通信行业知名；消费软件领域基本空白。小写 wordmark 更亲和，双 l 结尾在中文语境读音需注意（阿托尔）。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 06 Clew ============ -->
+  <section class="card" id="clew">
+    <div class="card-head">
+      <span class="idx">06</span>
+      <h2 class="name wm-clew">Clew</h2>
+      <span class="cn">线索</span>
+      <span class="meta">/kluː/ · 古英语「线团」，clue 的词源</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="clew:light:108"></div>
+          <div class="lockup"><span data-logo="clew:light:24"></span><span class="wm wm-clew">Clew</span><span class="lock-cn">线索</span></div>
+          <div class="ladder">
+            <figure><span data-logo="clew:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="clew:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="clew:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="clew:dark:108"></div>
+          <div class="lockup"><span data-logo="clew:dark:24"></span><span class="wm wm-clew">Clew</span><span class="lock-cn">线索</span></div>
+          <div class="ladder">
+            <figure><span data-logo="clew:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="clew:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="clew:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“Follow the thread.”</span><span class="zh">顺着线，走出信息迷宫。</span></p>
+        <p class="why">古英语里的<strong>「线团」</strong>。忒修斯正是靠阿里阿德涅的线团走出迷宫——这个词后来演变成了 clue；而中文的<strong>「线索」恰好是同一个双关</strong>，一根线，一条破案的索。产品做的事，就是把散落的阅读缠绕成一个随时可以顺藤摸瓜的线团。标志：缠好的线球引出一根线，末端的圆点，是它带你抵达的那一页。单色即成立，气质最文学。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#BE4530"></i><code>#BE4530 茜草红</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · 与 clue 同音，口头传播必须附拼写；词汇冷僻是双刃剑——独占性极好，但需要教育。现存冲突极少。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 07 Trellis ============ -->
+  <section class="card" id="trellis">
+    <div class="card-head">
+      <span class="idx">07</span>
+      <h2 class="name wm-trellis">Trellis</h2>
+      <span class="cn">格致</span>
+      <span class="meta">/ˈtrɛlɪs/ · 供藤蔓攀缘的棚架</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light">
+          <div class="mark-big" data-logo="trellis:light:108"></div>
+          <div class="lockup"><span data-logo="trellis:light:24"></span><span class="wm wm-trellis">Trellis</span><span class="lock-cn">格致</span></div>
+          <div class="ladder">
+            <figure><span data-logo="trellis:light:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="trellis:light:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="trellis:light:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+        <div class="plate plate-dark">
+          <div class="mark-big" data-logo="trellis:dark:108"></div>
+          <div class="lockup"><span data-logo="trellis:dark:24"></span><span class="wm wm-trellis">Trellis</span><span class="lock-cn">格致</span></div>
+          <div class="ladder">
+            <figure><span data-logo="trellis:dark:16"></span><figcaption>16</figcaption></figure>
+            <figure><span data-logo="trellis:dark:24"></span><figcaption>24</figcaption></figure>
+            <figure><span data-logo="trellis:dark:48"></span><figcaption>48</figcaption></figure>
+          </div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="tagline"><span class="en">“Structure for living knowledge.”</span><span class="zh">格物致知，知识有架可攀。</span></p>
+        <p class="why">棚架自己不生长，却决定生长的形状——产品的 schema、约定与校验就是那副棚架，<strong>agent 是园丁，知识是藤</strong>。标志：严整的斜格之间，一根不安分的藤蔓攀缘而上，在交叉点结出节点，金色一颗是新芽。中文名<strong>「格致」</strong>取自「格物致知」，而「格」恰是棚架的网格；晚清曾以「格致」翻译 science，底蕴最深的一个中文名。</p>
+        <span class="mono spec-label">主色板（浅底版）</span>
+        <div class="palette">
+          <span class="swatch"><i style="background:#70707A"></i><code>#70707A 架格灰</code></span>
+          <span class="swatch"><i style="background:#4A8A4F"></i><code>#4A8A4F 藤蔓绿</code></span>
+          <span class="swatch"><i style="background:#C9962E"></i><code>#C9962E 新芽金</code></span>
+        </div>
+        <p class="risk"><b>风险</b> · 同名者较多（法律数据、留学信贷、电商服务等，均为 B2B 异领域）；辨识度中等，靠「格致」的中文纵深扳回一局。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ summary ============ -->
+  <section class="summary">
+    <h2>横向对比</h2>
+    <div class="table-scroller">
+      <table>
+        <thead>
+          <tr><th>No.</th><th>名称</th><th>中文名</th><th>气质</th><th>核心隐喻</th><th>主要风险</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="tnum">01</td><td><span class="tn wm-weft">weft</span></td><td>织识</td><td class="tmuted">克制 · 手艺 · 工程师的诗意</td><td class="tmuted">每次 ingest 是引一根纬线</td><td class="tmuted">四字母域名难求</td></tr>
+          <tr><td class="tnum">02</td><td><span class="tn wm-banyan">Banyan</span></td><td>榕</td><td class="tmuted">大器 · 生命力 · 东方亲缘</td><td class="tmuted">气根落地，独木成林</td><td class="tmuted">同名先例较多</td></tr>
+          <tr><td class="tnum">03</td><td><span class="tn wm-asterism">Asterism</span></td><td>星丛</td><td class="tmuted">书卷 · 古典 · 星空</td><td class="tmuted">笔记连成星群；⁂ 分节符</td><td class="tmuted">Asterism Books 领域相邻</td></tr>
+          <tr><td class="tnum">04</td><td><span class="tn wm-muninn">Muninn</span></td><td>墨鸦</td><td class="tmuted">神话 · 锐利 · 暗色系</td><td class="tmuted">记忆之鸦飞出又归来</td><td class="tmuted">Munin 监控工具同音</td></tr>
+          <tr><td class="tnum">05</td><td><span class="tn wm-atoll">atoll</span></td><td>环礁</td><td class="tmuted">平静 · 治愈 · 海洋</td><td class="tmuted">珊瑚粒粒沉积成岛</td><td class="tmuted">电信业同名软件</td></tr>
+          <tr><td class="tnum">06</td><td><span class="tn wm-clew">Clew</span></td><td>线索</td><td class="tmuted">文学 · 机巧 · 探案</td><td class="tmuted">走出迷宫的线团（clue 词源）</td><td class="tmuted">冷僻词需教育</td></tr>
+          <tr><td class="tnum">07</td><td><span class="tn wm-trellis">Trellis</span></td><td>格致</td><td class="tmuted">理性 · 园艺 · 结构主义</td><td class="tmuted">棚架给活物以形状</td><td class="tmuted">B2B 同名较多</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="verdict">
+      <p class="pick">我的推荐：首选 weft（织识），次选 Banyan（榕）。</p>
+      <p><strong>weft</strong> 最短、动作最准——产品的每一次 ingest 在隐喻里都严丝合缝地对应「引一根纬线」，而「织识 / 知识」的谐音是中文命名里可遇不可求的礼物，标志在 16px 下依然清晰。<strong>Banyan</strong> 则愿景感最强，「独木成林」一句顶一段品牌故事，适合想把产品做大做长线的心态。若偏爱书卷气与学术气质，选 <strong>Asterism</strong>——⁂ 是一枚几乎无人认领的现成图形资产。</p>
+    </div>
+
+    <p class="footnote">定稿前须知：页内风险注记来自模型知识（截至 2026-01），未做实时检索；选定 1–2 个方向后应完成域名 / 商标 / 应用商店重名核验。本页 wordmark 以 macOS 系统字体示意（Avenir Next · Palatino · Optima · Futura · Baskerville · Seravek），定稿需以授权字体精修；标志本体为原创矢量，可直接导出使用。</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  var svgWrap = function (size, inner) {
+    return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block">' + inner + '</svg>';
+  };
+
+  var PALETTES = {
+    weft:     { light: { a: '#3E4A6D', b: '#D9482F' },                dark: { a: '#93A3CF', b: '#FF6B4D' } },
+    banyan:   { light: { a: '#2F7D5B', b: '#57524A', c: '#C9962E' },  dark: { a: '#5CBD92', b: '#A89F91', c: '#E2B65C' } },
+    asterism: { light: { a: '#514AA8', b: '#D99A2B' },                dark: { a: '#A29BEC', b: '#E7B457' } },
+    muninn:   { light: { a: '#23222A', b: '#E89A2E', bg: '#FFFFFF' }, dark: { a: '#EAE8F0', b: '#F2AC44', bg: '#17171B' } },
+    atoll:    { light: { a: '#0E7D85', b: '#E8604C' },                dark: { a: '#52C4CB', b: '#FF7E66' } },
+    clew:     { light: { a: '#BE4530' },                              dark: { a: '#E86A4F' } },
+    trellis:  { light: { a: '#70707A', b: '#4A8A4F', c: '#C9962E' },  dark: { a: '#87878F', b: '#6FBF74', c: '#E0B45A' } }
+  };
+
+  var MARKS = {
+    weft: function (c) {
+      var warp = [13, 21, 29, 37].map(function (x) {
+        return '<line x1="' + x + '" y1="9" x2="' + x + '" y2="39" stroke="' + c.a + '" stroke-width="3" stroke-linecap="round"/>';
+      }).join('');
+      var over = [13, 29].map(function (x) {
+        return '<line x1="' + x + '" y1="19" x2="' + x + '" y2="29" stroke="' + c.a + '" stroke-width="3" stroke-linecap="round"/>';
+      }).join('');
+      return warp
+        + '<line x1="7" y1="24" x2="42" y2="24" stroke="' + c.b + '" stroke-width="3" stroke-linecap="round"/>'
+        + '<circle cx="45.6" cy="24" r="1.9" fill="' + c.b + '"/>'
+        + over;
+    },
+    banyan: function (c) {
+      return '<line x1="9" y1="39" x2="39" y2="39" stroke="' + c.b + '" stroke-width="2.4" stroke-linecap="round"/>'
+        + '<line x1="23" y1="19" x2="23" y2="38.6" stroke="' + c.b + '" stroke-width="3" stroke-linecap="round"/>'
+        + '<line x1="14.5" y1="19.2" x2="14.5" y2="38.6" stroke="' + c.b + '" stroke-width="2.2" stroke-linecap="round"/>'
+        + '<line x1="32" y1="19.6" x2="32" y2="38.6" stroke="' + c.b + '" stroke-width="2.2" stroke-linecap="round"/>'
+        + '<line x1="27.5" y1="20.5" x2="27.5" y2="31" stroke="' + c.c + '" stroke-width="2" stroke-linecap="round"/>'
+        + '<circle cx="23" cy="13" r="6.8" fill="' + c.a + '"/>'
+        + '<circle cx="32" cy="15.5" r="4.6" fill="' + c.a + '"/>'
+        + '<circle cx="14.5" cy="15.5" r="4.2" fill="' + c.a + '"/>';
+    },
+    asterism: function (c) {
+      var star = function (x, y, r, col) {
+        return [0, 60, 120].map(function (a) {
+          return '<line x1="' + (x - r) + '" y1="' + y + '" x2="' + (x + r) + '" y2="' + y + '" stroke="' + col + '" stroke-width="2.4" stroke-linecap="round" transform="rotate(' + a + ' ' + x + ' ' + y + ')"/>';
+        }).join('');
+      };
+      return '<path d="M24 13 L14.5 31 L33.5 31 Z" stroke="' + c.a + '" stroke-width="1" opacity="0.35"/>'
+        + star(24, 13, 7, c.b)
+        + star(14.5, 31, 5, c.a)
+        + star(33.5, 31, 5, c.a);
+    },
+    muninn: function (c) {
+      return '<path d="M9.8 26 C10.2 16.5 17.5 11.3 24.5 12 C30 12.6 33.5 15.6 35.5 18.8 L45 21.8 L36 24 C34.8 31.2 29.6 35.6 22.8 35.6 C15.4 35.6 9.4 31.6 9.8 26 Z" fill="' + c.a + '"/>'
+        + '<circle cx="24" cy="19" r="2" fill="' + c.bg + '"/>'
+        + '<circle cx="43" cy="14.8" r="2.8" fill="' + c.b + '"/>'
+        + '<circle cx="43" cy="14.8" r="4.6" stroke="' + c.b + '" stroke-width="1" opacity="0.4"/>';
+    },
+    atoll: function (c) {
+      var R = 13.2, cx = 24, cy = 24;
+      var angs = [78, 113, 148, 183, 218, 253, 288, 323, 356];
+      var rads = [2.5, 3.3, 1.9, 2.9, 1.8, 2.7, 2.1, 2.6, 2.8];
+      var dots = '';
+      angs.forEach(function (a, i) {
+        var t = a * Math.PI / 180;
+        var x = (cx + R * Math.cos(t)).toFixed(1);
+        var y = (cy - R * Math.sin(t)).toFixed(1);
+        dots += '<circle cx="' + x + '" cy="' + y + '" r="' + rads[i] + '" fill="' + (i === 8 ? c.b : c.a) + '"/>';
+      });
+      return '<circle cx="24" cy="24" r="' + R + '" stroke="' + c.a + '" stroke-width="1.1" opacity="0.28"/>'
+        + dots
+        + '<circle cx="24" cy="24" r="2.4" fill="' + c.a + '"/>';
+    },
+    clew: function (c) {
+      return '<path d="M27.7 23.9 A9.6 9.6 0 1 1 24.5 20.1" stroke="' + c.a + '" stroke-width="2.4" stroke-linecap="round"/>'
+        + '<g stroke="' + c.a + '" stroke-width="1.7" stroke-linecap="round">'
+        + '<path d="M12.4 22.6 Q19 26.2 25.6 22.2"/>'
+        + '<path d="M11.6 27.4 Q19 31 26.4 26.8"/>'
+        + '<path d="M13 32.2 Q19 35.4 25 31.6"/>'
+        + '<path d="M16.2 19.4 Q14.4 27 17.4 35.4"/>'
+        + '<path d="M22.6 19.6 Q21.4 26 23.4 33.8"/></g>'
+        + '<path d="M24.5 20.1 C29 15.5 32.5 14.4 37 14.2" stroke="' + c.a + '" stroke-width="2.2" stroke-linecap="round"/>'
+        + '<circle cx="41" cy="14" r="2.6" stroke="' + c.a + '" stroke-width="2"/>';
+    },
+    trellis: function (c) {
+      return '<g stroke="' + c.a + '" stroke-width="2.2" stroke-linecap="round" opacity="0.9">'
+        + '<line x1="12" y1="28" x2="28" y2="12"/><line x1="12" y1="36" x2="36" y2="12"/><line x1="20" y1="36" x2="36" y2="20"/>'
+        + '<line x1="20" y1="12" x2="36" y2="28"/><line x1="12" y1="12" x2="36" y2="36"/><line x1="12" y1="20" x2="28" y2="36"/></g>'
+        + '<path d="M13 42 C16.5 38.5 16 32.5 20 28 C23 24.6 25 23 28 20 C30.5 17.4 32.5 15 33.5 12.5" stroke="' + c.b + '" stroke-width="2.7" stroke-linecap="round"/>'
+        + '<circle cx="20" cy="28" r="2.4" fill="' + c.b + '"/>'
+        + '<circle cx="28" cy="20" r="2.6" fill="' + c.c + '"/>';
+    }
+  };
+
+  document.querySelectorAll('[data-logo]').forEach(function (el) {
+    var parts = el.getAttribute('data-logo').split(':');
+    var brand = parts[0], variant = parts[1], size = parseInt(parts[2] || '108', 10);
+    var fn = MARKS[brand], pal = PALETTES[brand] && PALETTES[brand][variant];
+    if (fn && pal) { el.innerHTML = svgWrap(size, fn(pal)); }
+  });
+})();
+</script>
+
+</body>
+</html>
