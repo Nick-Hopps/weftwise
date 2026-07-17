@@ -1,6 +1,6 @@
 # Ask AI 选区意图 LLM 分类设计
 
-**日期：** 2026-07-17  
+**日期：** 2026-07-17
 **状态：** 已确认，待实现
 
 ## 一、背景与问题
@@ -114,4 +114,3 @@ type SelectionIntent = 'image-insert' | 'other';
 4. Reshape 配图请求仍不调用主 Query。
 5. 分类失败时主 Query 使用 read profile。
 6. read prompt 不出现 `wiki_image_insert`，实际工具与提示词一致。
-

@@ -63,7 +63,7 @@
 
 ### `chat/`
 
-- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label，cancel 与同步页面写入不误报为新任务
+- `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；选区引用场景同时发送带 Passage 的 `question` 与未拼接的 `userQuestion`，供服务端 LLM 只按用户原话分类意图；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label，cancel 与同步页面写入不误报为新任务
 - `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/move/标签治理/History/工作流/选区配图）与 actionId 原位替换；配图卡显示完整 Markdown 块、prompt、alt、比例/风格，`applied` 只表示后台任务已启动；受影响页面默认只显示前 8 条
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
@@ -186,6 +186,7 @@ src/components/
 |------|------|
 | 2026-07-17 | 全站主题色切换 weftwise：`wiki-link.tsx` 正文 wikilink 改挂新 `link` 色族（warp 经线靛，hover 加深）；`page-renderer.tsx` callout-quiz 边框与图标改 `--brand-warp`；`mermaid-theme.ts` secondary 家族 violet → warp、暗色底对齐新暗面；tailwind 新增 `link` 色族映射；mermaid 测试基准色同步。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |
 | 2026-07-17 | Ask AI 选区信箱贯通 canonical/reshape 与顶层块 offset；配图审批卡展示视觉请求详情，`image-insert` 任务显示 Illustrating，成功终态全局刷新阅读页 |
+| 2026-07-17 | Chat 发问新增 `userQuestion` 原始输入，与包含 Passage 的 `question` 分离，避免选区正文干扰服务端 LLM 意图分类 |
 | 2026-07-17 | 品牌落地 weftwise（织识）：新增 `shared/weftwise-mark.tsx`（织纹标志，走 `--brand-warp`/`--brand-weft` token 自动亮暗）；Header 换 weftwise lockup（Space Grotesk wordmark + 「织识」lg 起显示），替换旧网络图形与 "Agentic Wiki"；Settings About 两处文案改 `weftwise 织识`。plan 见 docs/plans/2026-07-17-brand-weftwise.md |
 | 2026-07-16 | Wiki 阅读页面包屑安全解码中文 slug，并将 Edit / Sources / Reshape 收敛为带 tooltip 的纯图标按钮 |
 | 2026-07-17 | Wiki 正文增加自适应固定目录：宽内容区常驻右侧章节轨道，窄内容区使用粘性入口；普通阅读与 Sources 分栏共享当前章节跟踪和稳定标题锚点 |
