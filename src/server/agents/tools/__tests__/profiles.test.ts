@@ -40,10 +40,11 @@ describe('resolveToolProfile', () => {
       'workflow.cancel',
       'wiki.reenrich',
       'wiki.move',
+      'wiki.image.insert',
     ]);
     for (const writeTool of [
       'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete',
-      'wiki.metadata.patch', 'wiki.link.ensure',
+      'wiki.metadata.patch', 'wiki.link.ensure', 'image.generate',
     ]) {
       expect(propose).not.toContain(writeTool);
     }
@@ -156,6 +157,18 @@ describe('resolveToolProfile', () => {
       'ingest:enricher',
     ] as const) {
       expect(resolveToolProfile(profileId).tools).not.toContain('wiki.move');
+    }
+  });
+
+  it('wiki.image.insert 只属于 Query propose，真实 image.generate 仍只属于 enricher', () => {
+    expect(resolveToolProfile('query:read').tools).not.toContain('wiki.image.insert');
+    expect(resolveToolProfile('query:propose').tools).toContain('wiki.image.insert');
+    expect(resolveToolProfile('query:propose').tools).not.toContain('image.generate');
+    for (const profileId of [
+      'fix:links', 'fix:contradiction', 'curate:auto', 'curate:manual',
+      'ingest:planner', 'ingest:writer', 'ingest:enricher',
+    ] as const) {
+      expect(resolveToolProfile(profileId).tools).not.toContain('wiki.image.insert');
     }
   });
 

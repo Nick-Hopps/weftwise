@@ -1,7 +1,9 @@
 import type {
+  ImageGenerateInput,
   PendingActionPreview,
   PendingActionView,
   PreviewChangeInput,
+  SelectionAnchorInput,
   Subject,
   TagBatchInput,
   TagBatchPreviewInput,
@@ -45,8 +47,10 @@ import {
 } from './history-tools';
 import {
   planWorkflowCancel,
+  planWorkflowImageInsert,
   planWorkflowReenrich,
   planWorkflowResearch,
+  prepareWorkflowImageInsert,
   reportWorkflowCancellation,
 } from './workflow-tools';
 export { recoverPendingActions, maintainPendingActions } from './pending-action-maintenance';
@@ -362,6 +366,8 @@ async function planWorkflowPreview(
       return planWorkflowReenrich(subject, input.payload.slug);
     case 'workflow-research-start':
       return planWorkflowResearch(subject, input.payload.topic);
+    case 'workflow-image-insert-start':
+      return planWorkflowImageInsert(subject, input.payload);
     case 'workflow-cancel':
       return planWorkflowCancel(subject, input.payload.jobId);
     default:
@@ -413,6 +419,57 @@ export async function createPendingWorkflowActionPreview(input: {
     createdAt: nowIso,
     updatedAt: nowIso,
     expiresAt,
+  });
+  return recordToView(record);
+}
+
+/** Query 专用：page/selection 由请求上下文绑定，模型只能提供图片描述参数。 */
+export async function createPendingImageInsertActionPreview(input: {
+  conversationId: string;
+  subject: Subject;
+  pageSlug: string;
+  selection: SelectionAnchorInput;
+  request: ImageGenerateInput;
+  now?: Date;
+}): Promise<PendingActionView> {
+  const conversation = conversationsRepo.getConversation(input.conversationId);
+  if (!conversation || conversation.subjectId !== input.subject.id) {
+    throw new PendingActionError('ACTION_NOT_FOUND', 'Conversation not found.', 404);
+  }
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  let prepared: Awaited<ReturnType<typeof prepareWorkflowImageInsert>>;
+  try {
+    prepared = await prepareWorkflowImageInsert(
+      input.subject,
+      input.pageSlug,
+      input.selection,
+      input.request,
+    );
+  } catch (error) {
+    throw new PendingActionError(
+      'ACTION_PLAN_INVALID',
+      error instanceof Error ? error.message : 'Unable to plan this image insertion.',
+      409,
+    );
+  }
+  const normalized = normalizeWorkflowPreviewInput(prepared.input, nowIso);
+  const payloadHash = hashPendingActionPayload({
+    conversationId: input.conversationId,
+    subjectId: input.subject.id,
+    operation: normalized.operation,
+    payload: normalized.payload,
+  });
+  const record = pendingActionsRepo.createPendingAction({
+    conversationId: input.conversationId,
+    subjectId: input.subject.id,
+    operation: normalized.operation,
+    payloadJson: canonicalJson(normalized.payload),
+    payloadHash,
+    previewJson: JSON.stringify(prepared.preview),
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    expiresAt: new Date(now.getTime() + PENDING_TTL_MS).toISOString(),
   });
   return recordToView(record);
 }
@@ -526,6 +583,7 @@ async function replanRecord(record: PendingActionRecord, subject: Subject): Prom
     }
     case 'workflow-reenrich-start':
     case 'workflow-research-start':
+    case 'workflow-image-insert-start':
     case 'workflow-cancel': {
       const workflowInput = {
         operation: record.operation,
@@ -720,6 +778,20 @@ export async function approvePendingAction(input: {
             params: {
               topic: replanned.workflowInput.payload.topic,
               subjectId: input.subject.id,
+            },
+            nowIso,
+          });
+          break;
+        case 'workflow-image-insert-start':
+          finalizeWorkflowStartAction({
+            actionId: input.id,
+            subjectId: input.subject.id,
+            type: 'image-insert',
+            params: {
+              subjectId: input.subject.id,
+              slug: replanned.workflowInput.payload.slug,
+              anchor: replanned.workflowInput.payload.anchor,
+              request: replanned.workflowInput.payload.request,
             },
             nowIso,
           });

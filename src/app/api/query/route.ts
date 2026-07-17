@@ -13,7 +13,7 @@ import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
-import { resolveDirectReenrichSlug, resolveQueryMode } from '@/server/services/query-intent';
+import { isImageInsertIntent, resolveDirectReenrichSlug, resolveQueryMode } from '@/server/services/query-intent';
 import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
 import type { WikiCitation } from '@/lib/contracts';
 
@@ -33,6 +33,15 @@ const QueryBodySchema = z.object({
   pageSlug: z.string().trim().min(1).optional(),
   subjectId: z.string().optional(),
   subjectSlug: z.string().optional(),
+  selection: z.object({
+    sourceKind: z.enum(['canonical', 'reshape']),
+    quote: z.string().trim().min(1).max(4_001),
+    section: z.string().trim().max(500).nullable(),
+    blockStart: z.number().int().nonnegative(),
+    blockEnd: z.number().int().positive(),
+  }).strict().refine((selection) => selection.blockEnd > selection.blockStart, {
+    message: 'selection blockEnd must be greater than blockStart',
+  }).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -60,7 +69,7 @@ export async function POST(request: NextRequest) {
   if (resolution.error) return resolution.error;
   const { subject } = resolution;
 
-  const { question, saveAsPage, pageTitle, answer, citations, pageSlug } = parsed.data;
+  const { question, saveAsPage, pageTitle, answer, citations, pageSlug, selection } = parsed.data;
 
   // Save-only mode: enqueue save-to-wiki job
   if (saveAsPage && pageTitle && pageTitle.trim().length > 0 && answer) {
@@ -177,6 +186,14 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
+        if (selection?.sourceKind === 'reshape' && isImageInsertIntent(trimmedQuestion)) {
+          const answer = '当前选区来自 Reshape 内容。请切换至 Original 后重新选择正文，再发起配图插入。';
+          emit('answer-delta', { delta: answer });
+          emit('citations', { citations: [] });
+          persistTurn(answer, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          return;
+        }
         // 明确的 re-enrich 是控制面命令，不需要让 Query LLM 再做一次工具选择。
         // 直接生成审批预览可避免模型首个 tool-call 最长等待 route timeout。
         if (directReenrichSlug) {
@@ -198,7 +215,9 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const mode = resolveQueryMode(trimmedQuestion);
+        const mode = resolveQueryMode(trimmedQuestion, {
+          hasCanonicalSelection: selection?.sourceKind === 'canonical',
+        });
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,
           subject,
@@ -207,6 +226,7 @@ export async function POST(request: NextRequest) {
           conversationId: activeConversationId,
           mode,
           onPendingAction: (action) => emit('pending-action', action),
+          selection,
           abortSignal: request.signal,
         });
 

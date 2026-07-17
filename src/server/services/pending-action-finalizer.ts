@@ -70,7 +70,7 @@ export function finalizeAppliedHistoryRevertAction(input: {
 export function finalizeWorkflowStartAction(input: {
   actionId: string;
   subjectId: string;
-  type: 're-enrich' | 'research';
+  type: 're-enrich' | 'research' | 'image-insert';
   params: Record<string, unknown>;
   nowIso: string;
 }): Job {

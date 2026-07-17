@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveDirectReenrichSlug, resolveQueryMode } from '../query-intent';
+import { isImageInsertIntent, resolveDirectReenrichSlug, resolveQueryMode } from '../query-intent';
 
 describe('resolveQueryMode', () => {
   it.each([
@@ -52,6 +52,22 @@ describe('resolveQueryMode', () => {
     '总结一下量子计算',
   ])('教程、能力、否定和普通问答保持 read：%s', (question) => {
     expect(resolveQueryMode(question)).toBe('read');
+  });
+
+  it('只有携带选区的明确配图插入命令进入 propose', () => {
+    const question = '帮我在这段内容下方生成一张配图，方便理解文章内容';
+    expect(isImageInsertIntent(question)).toBe(true);
+    expect(resolveQueryMode(question)).toBe('read');
+    expect(resolveQueryMode(question, { hasCanonicalSelection: true })).toBe('propose');
+  });
+
+  it.each([
+    '如何生成一张配图？',
+    '不要在这段内容下方插入图片',
+    '你能给文章配图吗？',
+    '解释一下这张图片',
+  ])('选区上的教程、否定、能力询问或普通图片问题仍为 read：%s', (question) => {
+    expect(resolveQueryMode(question, { hasCanonicalSelection: true })).toBe('read');
   });
 });
 

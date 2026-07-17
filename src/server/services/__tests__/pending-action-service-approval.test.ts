@@ -35,6 +35,7 @@ const workflowMocks = vi.hoisted(() => ({
   planWorkflowReenrich: vi.fn(),
   planWorkflowResearch: vi.fn(),
   planWorkflowCancel: vi.fn(),
+  planWorkflowImageInsert: vi.fn(),
   reportWorkflowCancellation: vi.fn(),
 }));
 vi.mock('../workflow-tools', () => workflowMocks);
@@ -111,6 +112,17 @@ beforeEach(() => {
   });
   workflowMocks.planWorkflowCancel.mockResolvedValue({
     ...preview, kind: 'workflow', summary: '取消 research 任务 job-1', affectedPages: [], diff: null,
+  });
+  workflowMocks.planWorkflowImageInsert.mockResolvedValue({
+    ...preview,
+    kind: 'workflow',
+    summary: '为 page-a 生成选区配图',
+    diff: null,
+    imageInsert: {
+      selection: 'Selected paragraph.',
+      prompt: 'Explain visually',
+      alt: 'Explanation diagram',
+    },
   });
   finalizerMocks.finalizeWorkflowStartAction.mockReturnValue({ id: 'job-1' });
   finalizerMocks.finalizeWorkflowCancelAction.mockReturnValue({ id: 'job-1' });
@@ -283,6 +295,57 @@ describe('approvePendingAction', () => {
     expect(finalizerMocks.finalizeWorkflowStartAction).toHaveBeenCalledWith({
       actionId: 'a1', subjectId: 's1', type: 'research',
       params: { topic: 'SQLite', subjectId: 's1' }, nowIso: now.toISOString(),
+    });
+    expect(result.jobId).toBe('job-1');
+  });
+
+  it('选区配图批准时重新验证锚点，并原子启动 image-insert job', async () => {
+    const workflowPayload = {
+      slug: 'page-a',
+      anchor: {
+        start: 10, end: 29, markdown: 'Selected paragraph.', prefix: '# Title\n\n', suffix: '',
+        quote: 'Selected paragraph.', section: 'Context',
+      },
+      request: { prompt: 'Explain visually', alt: 'Explanation diagram', aspectRatio: '16:9' },
+      effectiveAt: payload.effectiveAt,
+    };
+    const workflowPreview = {
+      ...preview,
+      kind: 'workflow' as const,
+      summary: '为 page-a 生成选区配图',
+      diff: null,
+      imageInsert: {
+        selection: 'Selected paragraph.', prompt: 'Explain visually', alt: 'Explanation diagram',
+        aspectRatio: '16:9',
+      },
+    };
+    const pending = record('pending', {
+      operation: 'workflow-image-insert-start',
+      payloadJson: canonicalJson(workflowPayload),
+      payloadHash: hashPendingActionPayload({
+        conversationId: 'c1', subjectId: 's1',
+        operation: 'workflow-image-insert-start', payload: workflowPayload,
+      }),
+      previewJson: JSON.stringify(workflowPreview),
+    });
+    repoMocks.getScoped.mockReturnValueOnce(pending).mockReturnValueOnce({
+      ...pending, status: 'applied', jobId: 'job-1', appliedAt: now.toISOString(),
+    });
+    repoMocks.claimApproval.mockReturnValue({ ...pending, status: 'approved' });
+    workflowMocks.planWorkflowImageInsert.mockResolvedValue(workflowPreview);
+
+    const result = await approvePendingAction({ id: 'a1', subject, now });
+
+    expect(workflowMocks.planWorkflowImageInsert).toHaveBeenCalledWith(subject, {
+      slug: 'page-a', anchor: workflowPayload.anchor, request: workflowPayload.request,
+    });
+    expect(finalizerMocks.finalizeWorkflowStartAction).toHaveBeenCalledWith({
+      actionId: 'a1', subjectId: 's1', type: 'image-insert',
+      params: {
+        subjectId: 's1', slug: 'page-a',
+        anchor: workflowPayload.anchor, request: workflowPayload.request,
+      },
+      nowIso: now.toISOString(),
     });
     expect(result.jobId).toBe('job-1');
   });

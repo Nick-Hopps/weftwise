@@ -16,12 +16,13 @@ import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
 import { dispatchJobStarted, jobStartedDetailForAction } from '@/lib/job-started-event';
 import type { ChatMessage, Citation } from './message-list';
-import type { ConversationMessage, PendingActionView } from '@/lib/contracts';
+import type { ConversationMessage, PendingActionView, SelectionAnchorInput } from '@/lib/contracts';
 
 interface Passage {
   id: string;
   section: string;
   text: string;
+  selection?: SelectionAnchorInput;
 }
 
 /** Split a page's markdown into referenceable passages, tagged by section. */
@@ -213,11 +214,19 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     if (!pendingChatReference) return;
     const ref = consumePendingChatReference();
     if (!ref) return;
-    setRefs((prev) =>
-      prev.some((x) => x.id === ref.id)
-        ? prev
-        : [...prev, { id: ref.id, section: ref.section ?? 'Selection', text: ref.text }],
-    );
+    setRefs((prev) => {
+      const withoutAnchoredSelection = ref.selection
+        ? prev.filter((item) => !item.selection)
+        : prev;
+      return withoutAnchoredSelection.some((x) => x.id === ref.id)
+        ? withoutAnchoredSelection
+        : [...withoutAnchoredSelection, {
+            id: ref.id,
+            section: ref.section ?? 'Selection',
+            text: ref.text,
+            selection: ref.selection,
+          }];
+    });
     requestAnimationFrame(() => textareaRef.current?.focus());
   }, [variant, pendingChatReference, consumePendingChatReference]);
 
@@ -450,6 +459,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
       const queryBody: Record<string, unknown> = { question: backendQuestion };
+      const structuredSelection = sentRefs.find((ref) => ref.selection)?.selection;
+      if (structuredSelection) queryBody.selection = structuredSelection;
       if (currentPageSlug) queryBody.pageSlug = currentPageSlug;
       if (subjectId) queryBody.subjectId = subjectId;
       const conversationId = useUIStore.getState().currentConversationId;

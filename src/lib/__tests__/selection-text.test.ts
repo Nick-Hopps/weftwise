@@ -5,7 +5,9 @@ import {
   truncateForContext,
   selectionRefId,
   findNearestHeadingText,
+  findSelectionBlockRange,
   type HeadingScanNode,
+  type SelectionBlockScanNode,
 } from '@/lib/selection-text';
 
 /** 构造一个最小假节点，便于在 node 环境下测试标题扫描。 */
@@ -84,5 +86,55 @@ describe('findNearestHeadingText', () => {
   });
   it('returns null for a null start node', () => {
     expect(findNearestHeadingText(null)).toBeNull();
+  });
+});
+
+function blockNode(
+  attrs: Record<string, string> = {},
+  parentElement: SelectionBlockScanNode | null = null,
+): SelectionBlockScanNode {
+  return {
+    parentElement,
+    getAttribute: (name) => attrs[name] ?? null,
+  };
+}
+
+describe('findSelectionBlockRange', () => {
+  it('从 Range 两端向上找到顶层块，并合并为完整连续范围', () => {
+    const startBlock = blockNode({
+      'data-md-block-start': '10',
+      'data-md-block-end': '24',
+    });
+    const endBlock = blockNode({
+      'data-md-block-start': '30',
+      'data-md-block-end': '48',
+    });
+
+    expect(findSelectionBlockRange(
+      blockNode({}, startBlock),
+      blockNode({}, endBlock),
+    )).toEqual({ blockStart: 10, blockEnd: 48 });
+  });
+
+  it('同一块选区返回该块完整范围', () => {
+    const block = blockNode({
+      'data-md-block-start': '4',
+      'data-md-block-end': '19',
+    });
+    expect(findSelectionBlockRange(blockNode({}, block), blockNode({}, block)))
+      .toEqual({ blockStart: 4, blockEnd: 19 });
+  });
+
+  it('缺少块属性或首尾倒置时 fail closed', () => {
+    const valid = blockNode({
+      'data-md-block-start': '20',
+      'data-md-block-end': '30',
+    });
+    const earlier = blockNode({
+      'data-md-block-start': '2',
+      'data-md-block-end': '10',
+    });
+    expect(findSelectionBlockRange(blockNode(), valid)).toBeNull();
+    expect(findSelectionBlockRange(valid, earlier)).toBeNull();
   });
 });

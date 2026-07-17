@@ -9,13 +9,14 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import type { PendingActionView, Subject } from '@/lib/contracts';
+import type { PendingActionView, SelectionAnchorInput, Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
 import {
   createPendingActionPreview,
   createPendingHistoryRevertPreview,
+  createPendingImageInsertActionPreview,
   createPendingWorkflowActionPreview,
 } from './pending-action-service';
 import { listHistory, readHistoryDiff } from './history-tools';
@@ -83,6 +84,8 @@ export function crossSubjectPageKey(subjectSlug: string, slug: string): string {
 export interface QueryToolContextOptions {
   conversationId?: string;
   onPendingAction?: (action: PendingActionView) => void;
+  currentPageSlug?: string;
+  selection?: SelectionAnchorInput;
 }
 
 /**
@@ -127,6 +130,17 @@ export function buildQueryToolContext(
           subject,
           input: { operation: 'workflow-cancel', payload: { jobId } },
         }),
+        ...(options.currentPageSlug && options.selection
+          ? {
+              previewImageInsert: (request) => createPendingImageInsertActionPreview({
+                conversationId: options.conversationId!,
+                subject,
+                pageSlug: options.currentPageSlug!,
+                selection: options.selection!,
+                request,
+              }),
+            }
+          : {}),
         onPendingAction: options.onPendingAction,
       }
     : {};

@@ -180,7 +180,10 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
           <div ref={articleRef} className="wiki-reading-container min-w-0 lg:overflow-y-auto">
             <ReadingProgress containerRef={articleRef} useContainerScroll />
             {article}
-            <SelectionAskButton containerRef={articleRef} />
+            <SelectionAskButton
+              containerRef={articleRef}
+              sourceKind={usingReshaped ? 'reshape' : 'canonical'}
+            />
           </div>
           <div className="min-w-0 border-t border-border bg-canvas lg:border-l lg:border-t-0 lg:min-h-0 lg:overflow-hidden">
             <SourcesPane docs={docs} loading={loading} error={error} />
@@ -194,7 +197,10 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     <div ref={articleRef} className="wiki-reading-container flex min-h-full flex-col">
       <ReadingProgress containerRef={articleRef} />
       {article}
-      <SelectionAskButton containerRef={articleRef} />
+      <SelectionAskButton
+        containerRef={articleRef}
+        sourceKind={usingReshaped ? 'reshape' : 'canonical'}
+      />
     </div>
   );
 }

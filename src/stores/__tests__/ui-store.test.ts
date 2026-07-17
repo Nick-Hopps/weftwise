@@ -27,7 +27,17 @@ describe('ui-store pendingChatReference mailbox', () => {
 
   it('askAboutSelection writes a derived ref and opens Ask AI at the selection', () => {
     useUIStore.getState().askAboutSelection(
-      { section: 'Intro', text: 'hello world' },
+      {
+        section: 'Intro',
+        text: 'hello world',
+        selection: {
+          sourceKind: 'canonical',
+          quote: 'hello world',
+          section: 'Intro',
+          blockStart: 12,
+          blockEnd: 42,
+        },
+      },
       { x: 320, y: 240 },
     );
     const s = useUIStore.getState();
@@ -35,6 +45,13 @@ describe('ui-store pendingChatReference mailbox', () => {
       id: expect.stringMatching(/^sel-/),
       section: 'Intro',
       text: 'hello world',
+      selection: {
+        sourceKind: 'canonical',
+        quote: 'hello world',
+        section: 'Intro',
+        blockStart: 12,
+        blockEnd: 42,
+      },
     });
     expect(s.askAiOpen).toBe(true);
     expect(s.askAiAnchor).toEqual({ x: 320, y: 240 });

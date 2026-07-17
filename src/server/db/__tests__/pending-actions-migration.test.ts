@@ -110,10 +110,11 @@ describe('pending_actions CHECK 启动迁移', () => {
       ['a7', 'workflow-cancel'],
       ['a8', 'move'],
       ['a9', 'tag-batch'],
+      ['a10', 'workflow-image-insert-start'],
     ] as const) {
       expect(() => insert.run(id, operation, now(), now(), expires())).not.toThrow();
     }
-    expect(() => insert.run('a10', 'unknown-operation', now(), now(), expires()))
+    expect(() => insert.run('a11', 'unknown-operation', now(), now(), expires()))
       .toThrow(/CHECK constraint failed/);
     expect(sqlite.prepare(`PRAGMA table_info(pending_actions)`).all())
       .toContainEqual(expect.objectContaining({ name: 'conversation_id', notnull: 0 }));

@@ -8,6 +8,7 @@ const mockReadPage = vi.fn();
 const mockCreatePendingActionPreview = vi.fn();
 const mockCreatePendingHistoryRevertPreview = vi.fn();
 const mockCreatePendingWorkflowActionPreview = vi.fn();
+const mockCreatePendingImageInsertActionPreview = vi.fn();
 const mockReadWorkflowStatus = vi.fn();
 const mockListHistory = vi.fn();
 const mockReadHistoryDiff = vi.fn();
@@ -35,6 +36,8 @@ vi.mock('../pending-action-service', () => ({
   createPendingHistoryRevertPreview: (...a: unknown[]) => mockCreatePendingHistoryRevertPreview(...a),
   createPendingWorkflowActionPreview: (...a: unknown[]) =>
     mockCreatePendingWorkflowActionPreview(...a),
+  createPendingImageInsertActionPreview: (...a: unknown[]) =>
+    mockCreatePendingImageInsertActionPreview(...a),
 }));
 vi.mock('../history-tools', () => ({
   listHistory: (...a: unknown[]) => mockListHistory(...a),
@@ -104,6 +107,7 @@ beforeEach(() => {
   mockCreatePendingActionPreview.mockReset();
   mockCreatePendingHistoryRevertPreview.mockReset();
   mockCreatePendingWorkflowActionPreview.mockReset();
+  mockCreatePendingImageInsertActionPreview.mockReset();
   mockReadWorkflowStatus.mockReset();
   mockListHistory.mockReset();
   mockReadHistoryDiff.mockReset();
@@ -369,6 +373,33 @@ describe('buildQueryToolContext - 审批预览能力面', () => {
     expect(mockCreatePendingWorkflowActionPreview).toHaveBeenNthCalledWith(3, {
       conversationId: 'conversation-1', subject: SUBJECT,
       input: { operation: 'workflow-cancel', payload: { jobId: 'job-1' } },
+    });
+  });
+
+  it('选区配图提案由运行时绑定当前页与 canonical selection', async () => {
+    const action = { actionId: 'image-action-1' };
+    const selection = {
+      sourceKind: 'canonical' as const,
+      quote: 'Selected paragraph.',
+      section: 'Context',
+      blockStart: 10,
+      blockEnd: 29,
+    };
+    const request = { prompt: 'Explain visually', alt: 'Explanation diagram' };
+    mockCreatePendingImageInsertActionPreview.mockResolvedValue(action);
+    const ctx = buildQueryToolContext(SUBJECT, createAccessedPages(), {
+      conversationId: 'conversation-1',
+      currentPageSlug: 'page-a',
+      selection,
+    });
+
+    await expect(ctx.previewImageInsert?.(request)).resolves.toBe(action);
+    expect(mockCreatePendingImageInsertActionPreview).toHaveBeenCalledWith({
+      conversationId: 'conversation-1',
+      subject: SUBJECT,
+      pageSlug: 'page-a',
+      selection,
+      request,
     });
   });
 });

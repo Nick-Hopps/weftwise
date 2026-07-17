@@ -38,6 +38,7 @@ import './services/reenrich-service';
 import './services/fix-service';
 import './services/research-service';
 import './services/research-import-service';
+import './services/image-insert-service';
 
 const log = createLogger('worker');
 

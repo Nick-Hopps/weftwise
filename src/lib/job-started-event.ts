@@ -34,6 +34,14 @@ export function jobStartedDetailForAction(
       queueStatus: 'pending',
     };
   }
+  if (action.operation === 'workflow-image-insert-start') {
+    return {
+      jobId: action.jobId,
+      type: 'image-insert',
+      label: action.affectedPages[0]?.slug ?? 'page',
+      queueStatus: 'pending',
+    };
+  }
   return null;
 }
 

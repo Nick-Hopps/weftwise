@@ -264,7 +264,7 @@ export interface PageListResult {
 
 export interface Job {
   id: string;
-  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research' | 'research-import';
+  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research' | 'research-import' | 'image-insert';
   status: 'pending' | 'running' | 'completed' | 'failed';
   paramsJson: string;
   resultJson: string | null;
@@ -809,6 +809,42 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export type SelectionSourceKind = 'canonical' | 'reshape';
+
+/** 阅读页选区绑定的顶层 Markdown 块范围；page/subject 由当前请求上下文注入。 */
+export interface SelectionAnchorInput {
+  sourceKind: SelectionSourceKind;
+  quote: string;
+  section: string | null;
+  blockStart: number;
+  blockEnd: number;
+}
+
+export const ImageGenerateInputSchema = z.object({
+  prompt: z.string().trim().min(1).max(4_000),
+  alt: z.string().trim().min(1).max(240),
+  aspectRatio: z.enum(['1:1', '4:3', '3:4', '16:9', '9:16']).optional(),
+  style: z.string().trim().max(240).optional(),
+}).strict();
+
+export type ImageGenerateInput = z.infer<typeof ImageGenerateInputSchema>;
+
+export const PersistedMarkdownBlockAnchorSchema = z.object({
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+  markdown: z.string().min(1),
+  prefix: z.string(),
+  suffix: z.string(),
+  quote: z.string().trim().min(1),
+  section: z.string().trim().min(1).nullable(),
+}).strict().refine((anchor) => anchor.end > anchor.start, {
+  message: 'anchor end must be after start',
+  path: ['end'],
+});
+
+/** 审批与后台任务持久化的 canonical Markdown 块锚点。 */
+export type PersistedMarkdownBlockAnchor = z.infer<typeof PersistedMarkdownBlockAnchorSchema>;
+
 export type PendingActionOperation =
   | 'create'
   | 'update'
@@ -820,6 +856,7 @@ export type PendingActionOperation =
   | 'history-revert'
   | 'workflow-reenrich-start'
   | 'workflow-research-start'
+  | 'workflow-image-insert-start'
   | 'workflow-cancel'
   | 'move'
   | 'tag-batch';
@@ -874,6 +911,14 @@ export interface MovePageInput {
 export type WorkflowPreviewInput =
   | { operation: 'workflow-reenrich-start'; payload: { slug: string } }
   | { operation: 'workflow-research-start'; payload: { topic: string } }
+  | {
+      operation: 'workflow-image-insert-start';
+      payload: {
+        slug: string;
+        anchor: PersistedMarkdownBlockAnchor;
+        request: ImageGenerateInput;
+      };
+    }
   | { operation: 'workflow-cancel'; payload: { jobId: string } };
 
 export interface PendingActionPreview {
@@ -886,6 +931,13 @@ export interface PendingActionPreview {
   }>;
   diff: string | null;
   warnings: string[];
+  imageInsert?: {
+    selection: string;
+    prompt: string;
+    alt: string;
+    aspectRatio?: string;
+    style?: string;
+  };
 }
 
 export interface PendingActionView extends PendingActionPreview {

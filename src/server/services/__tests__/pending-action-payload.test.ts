@@ -4,9 +4,66 @@ import {
   hashPendingActionPayload,
   normalizePreviewInput,
   normalizeTagBatchPreviewInput,
+  normalizeWorkflowPreviewInput,
 } from '../pending-action-payload';
 
 describe('pending-action payload', () => {
+  it('选区配图 workflow payload 严格规范化图片请求与持久化块锚点', () => {
+    const effectiveAt = '2026-07-17T00:00:00.000Z';
+    const normalized = normalizeWorkflowPreviewInput({
+      operation: 'workflow-image-insert-start',
+      payload: {
+        slug: ' page-a ',
+        anchor: {
+          start: 10,
+          end: 30,
+          markdown: 'Selected paragraph.',
+          prefix: '# Title\n\n',
+          suffix: '\n\nNext paragraph.',
+          quote: ' selected paragraph ',
+          section: ' Context ',
+        },
+        request: {
+          prompt: ' explain the mechanism visually ',
+          alt: ' mechanism diagram ',
+          aspectRatio: '16:9',
+          style: ' editorial diagram ',
+        },
+      },
+    } as never, effectiveAt);
+
+    expect(normalized).toEqual({
+      operation: 'workflow-image-insert-start',
+      payload: {
+        slug: 'page-a',
+        anchor: {
+          start: 10,
+          end: 30,
+          markdown: 'Selected paragraph.',
+          prefix: '# Title\n\n',
+          suffix: '\n\nNext paragraph.',
+          quote: 'selected paragraph',
+          section: 'Context',
+        },
+        request: {
+          prompt: 'explain the mechanism visually',
+          alt: 'mechanism diagram',
+          aspectRatio: '16:9',
+          style: 'editorial diagram',
+        },
+        effectiveAt,
+      },
+    });
+    expect(() => normalizeWorkflowPreviewInput({
+      operation: 'workflow-image-insert-start',
+      payload: {
+        slug: 'page-a',
+        anchor: normalized.payload.anchor,
+        request: { prompt: 'x', alt: 'y', slug: 'model-controlled' },
+      },
+    } as never, effectiveAt)).toThrow();
+  });
+
   it('对象 key 顺序不影响 canonical JSON 与 hash', () => {
     expect(canonicalJson({ b: 2, a: { d: 4, c: 3 } }))
       .toBe('{"a":{"c":3,"d":4},"b":2}');

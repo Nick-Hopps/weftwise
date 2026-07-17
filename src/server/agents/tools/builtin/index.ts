@@ -29,6 +29,7 @@ import { workflowResearchStartTool } from './workflow-research-start';
 import { workflowCancelTool } from './workflow-cancel';
 import { wikiMoveTool } from './wiki-move';
 import { imageGenerateTool } from './image-generate';
+import { wikiImageInsertTool } from './wiki-image-insert';
 
 /** 进程无关：worker 与 Next.js（query 流式）两进程各自构造（ToolDef 无状态纯对象）。 */
 export function createBuiltinToolRegistry(): ToolRegistry {
@@ -62,5 +63,6 @@ export function createBuiltinToolRegistry(): ToolRegistry {
   r.register(wikiMetadataPatchTool as ToolDef);
   r.register(wikiLinkEnsureTool as ToolDef);
   r.register(imageGenerateTool as ToolDef);
+  r.register(wikiImageInsertTool as ToolDef);
   return r;
 }
