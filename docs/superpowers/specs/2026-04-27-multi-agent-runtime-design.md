@@ -8,7 +8,7 @@
 
 ## 1. Goal
 
-Add an in-process multi-agent runtime to agentic-wiki that:
+Add an in-process multi-agent runtime to weftwise that:
 
 - Lets a single job orchestrate **multiple LLM agents** (planner / writer / reviewer-style pipelines) instead of today's one-shot `generateStructuredOutput` call.
 - Lets agents call **tools**, including external **MCP servers** (as MCP **client**) and reusable **skills** (markdown-defined sub-agent templates).

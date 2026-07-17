@@ -447,7 +447,7 @@ npx vitest run src/server/agents/skills/__tests__/registry.test.ts src/server/ag
 
 ```bash
 npx vitest run src/server/agents/skills/__tests__/registry.test.ts src/server/agents/skills/__tests__/loader.test.ts src/server/agents/skills/__tests__/examples-roundtrip.test.ts
-npx tsx -e "import { retireBuiltinSkillFiles } from './src/server/agents/skills/registry.ts'; const result = await retireBuiltinSkillFiles({ vaultDir: '/Users/nickhopps/Documents/playground/agentic-wiki/data/vault' }); console.log(JSON.stringify(result));"
+npx tsx -e "import { retireBuiltinSkillFiles } from './src/server/agents/skills/registry.ts'; const result = await retireBuiltinSkillFiles({ vaultDir: '/Users/nickhopps/Documents/playground/weftwise/data/vault' }); console.log(JSON.stringify(result));"
 ./node_modules/.bin/tsc --noEmit
 ```
 

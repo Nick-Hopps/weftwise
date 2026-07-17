@@ -1,7 +1,7 @@
-# Fix → Tool-loop 改造设计（Agentic Wiki Tools Spec 3）
+# Fix → Tool-loop 改造设计（weftwise Tools Spec 3）
 
 > **状态**：设计已批准，待写实现计划。
-> **前置**：Spec 1（对话 create/delete 工具）✅、Spec 2（curate→tool-loop）✅ 均已并入 main。本 spec 是「Agentic Wiki Tools」三阶段的收官。
+> **前置**：Spec 1（对话 create/delete 工具）✅、Spec 2（curate→tool-loop）✅ 均已并入 main。本 spec 是「weftwise Tools」三阶段的收官。
 
 ## 一、背景与目标
 

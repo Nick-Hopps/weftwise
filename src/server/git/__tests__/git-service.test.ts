@@ -52,6 +52,8 @@ describe('parseGitLog', () => {
     await ensureVaultRepo();
     const exclude = readFileSync(join(vaultDir, '.git', 'info', 'exclude'), 'utf-8');
     expect(exclude.split(/\r?\n/)).toContain('.llm-wiki/maintenance/');
+    expect(readFileSync(join(vaultDir, '.llm-wiki', 'README.md'), 'utf-8'))
+      .toContain('Initialized by weftwise.');
 
     const maintenanceDir = join(vaultDir, '.llm-wiki', 'maintenance', 'pending');
     mkdirSync(maintenanceDir, { recursive: true });

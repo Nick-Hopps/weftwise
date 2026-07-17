@@ -4,6 +4,7 @@ import {
   deriveUrlFilename,
   fetchUrlSource,
   MAX_URL_BYTES,
+  URL_FETCH_USER_AGENT,
   type UrlRequestTransport,
 } from '../url-fetcher';
 
@@ -34,6 +35,12 @@ function fakeTransport(opts: {
 }
 
 const publicResolver = async () => [{ address: '93.184.216.34', family: 4 as const }];
+
+describe('URL_FETCH_USER_AGENT', () => {
+  it('使用 weftwise 作为对外抓取标识', () => {
+    expect(URL_FETCH_USER_AGENT).toBe('weftwise/1.0');
+  });
+});
 
 describe('extensionForContentType', () => {
   it('按 content-type 分派扩展名', () => {

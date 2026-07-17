@@ -17,7 +17,7 @@
 - 每次写工具调用 = 一个独立 git commit（内核各自 commit）；pre-pass 另算一个 commit。
 - 坏链铁律：`executePageUpdate` 在 `!valid`（跨主题坏链 errors）**或**留下同主题 `Unresolved wikilink:` 警告时一律抛错、不落盘。
 - TS 路径别名 `@/*` → `src/*`。验证以 `npx tsc --noEmit` + `npx vitest run` 为准（IDE 诊断不可靠）。
-- 全部命令在 worktree 根目录 `/Users/nickhopps/Documents/playground/agentic-wiki/.claude/worktrees/feat+fix-tool-loop` 下执行。
+- 全部命令在 worktree 根目录 `/Users/nickhopps/Documents/playground/weftwise/.claude/worktrees/feat+fix-tool-loop` 下执行。
 
 ---
 
@@ -1038,7 +1038,7 @@ Run: `npx vitest run`（Expected: 全部通过；用例数 = 改造前总数 −
 - `tool-activity.ts` 行补 `wiki_update` 映射 ✏️。
 - changelog 追加：`| 2026-06-30 | \`tool-activity.ts\` 补 \`wiki_update\`(✏️) 映射，供 fix tool-loop 工具活动展示 |`
 
-根 `CLAUDE.md` changelog 追加一行：`| 2026-06-30 | Fix 改造为 tool-loop（Agentic Wiki Tools Spec 3，初始化收官）| \`fix\` 阶段2 由逐页结构化输出改为自驱 tool-loop：新增通用 \`executePageUpdate\` 内核 + \`wiki.update\` 工具 + \`ToolContext.updatePage?\`；\`runFixJob\` 保留确定性 frontmatter pre-pass（1 commit），阶段2 走 \`generateTextWithTools('fix')\`，模型自驱 \`wiki.read/search/list\` + \`wiki.update/create\` 修复；\`createFixGuard\`（写 cap + 保护页 META_PAGE_SLUGS）+ 忠实度护栏（bodyShrankTooMuch）+ 内核坏链/残链拒绝三重把守；可同时改两页和解 contradiction。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-fix-tool-loop* |`
+根 `CLAUDE.md` changelog 追加一行：`| 2026-06-30 | Fix 改造为 tool-loop（weftwise Tools Spec 3，初始化收官）| \`fix\` 阶段2 由逐页结构化输出改为自驱 tool-loop：新增通用 \`executePageUpdate\` 内核 + \`wiki.update\` 工具 + \`ToolContext.updatePage?\`；\`runFixJob\` 保留确定性 frontmatter pre-pass（1 commit），阶段2 走 \`generateTextWithTools('fix')\`，模型自驱 \`wiki.read/search/list\` + \`wiki.update/create\` 修复；\`createFixGuard\`（写 cap + 保护页 META_PAGE_SLUGS）+ 忠实度护栏（bodyShrankTooMuch）+ 内核坏链/残链拒绝三重把守；可同时改两页和解 contradiction。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-fix-tool-loop* |`
 
 - [ ] **Step 6: 提交**
 
@@ -1051,4 +1051,4 @@ git commit -m "refactor(fix): 退休 fix 逐页结构化输出死代码（FixPag
 
 ## 附：执行注意（worktree 写入纪律）
 
-- 本计划在 worktree `/Users/nickhopps/Documents/playground/agentic-wiki/.claude/worktrees/feat+fix-tool-loop` 内执行；所有 Read/Edit/Write **必须用该 worktree 的绝对路径或在该目录下的相对路径**，切勿用主仓库路径（历史上发生过写入泄漏到主仓库）。每个任务提交后 `git -C <主仓库> status` 复查未被污染、`git ls-files node_modules` 应为空。
+- 本计划在 worktree `/Users/nickhopps/Documents/playground/weftwise/.claude/worktrees/feat+fix-tool-loop` 内执行；所有 Read/Edit/Write **必须用该 worktree 的绝对路径或在该目录下的相对路径**，切勿用主仓库路径（历史上发生过写入泄漏到主仓库）。每个任务提交后 `git -C <主仓库> status` 复查未被污染、`git ls-files node_modules` 应为空。

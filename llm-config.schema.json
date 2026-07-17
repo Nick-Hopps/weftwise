@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./llm-config.schema.json",
-  "title": "Agentic Wiki LLM Config",
+  "title": "weftwise LLM Config",
   "description": "Configuration for multi-model LLM routing. Each task can use a different provider and model. Route entries support the JSON-serializable subset of Vercel AI SDK CallSettings plus providerOptions and app-level timeoutMs.",
   "type": "object",
   "additionalProperties": false,
