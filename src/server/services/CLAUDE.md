@@ -56,8 +56,8 @@ worker-entry.ts
 - `streamAgenticQuery(opts)` — 流式 agentic 问答：
   1. 调 `createAccessedPages()` 创建访问页收集器；
   2. 每轮先由 `classifyQueryIntent(question, context)` 通过 `query` 结构化 LLM 一次分类 `read/propose/direct-reenrich/image-insert/reset-*` 和页面目标；服务端按可信当前页、选区与 reset phase 收窄结果，普通失败回退 read、确认失败回退 unclear；
-  3. read/propose 都有只读 evidence、History list/diff 与 `workflow.status`，只有 propose 额外获得页面/move/History/workflow PendingAction 工具；`wiki.image.insert` 还需 `imageInsertEnabled` 才进入真实 ToolSet，再由必传 `ToolExecutionPolicy` 编译；
-  4. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；system prompt 按真实 mode/配图能力构造，不描述未下发工具；
+  3. `read` 只有只读 evidence、History list/diff 与 `workflow.status`；`propose` 额外获得页面/move/History/workflow PendingAction 工具；`image-insert` 只在只读面上增加 `wiki.image.insert`，不携带通用提案工具；三者均由必传 `ToolExecutionPolicy` 编译；
+  4. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；system prompt 只按真实 mode 构造，不描述未下发工具；
   5. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
 - `query-intent::resolveDirectReenrichTarget(intent, currentPageSlug?)` — 只消费结构化分类器返回的 `current-page/slug` 目标，不再解析自然语言；`/api/query` 命中后直接创建 workflow PendingAction，不运行主 Query 工具循环或 coverage。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
@@ -70,7 +70,7 @@ worker-entry.ts
 - `extractCitationsFromAnswer(answer, accessed, subjectSlug)`（`citation-extract.ts`，纯函数）：`extractWikiLinks` 解析答案全文 → 复合页面身份与 `accessed.bodies/crossBodies` 求交集（过滤幻觉链接、错误 Subject 和未读页）→ 按 `subjectSlug + slug` 去重；`pickExcerpt(anchorText, pageBody)` 用词重叠打分在页面正文按句界切出 1-3 句，**恒为页面原文字面子串**；跨主题 citation 额外携带 `subjectSlug`；
 - 流式分支（`streamAgenticQuery` + `/api/query`）与 `runQuery` 均在**流结束后**同步调用此解析，聊天 UI 正文内联 `[[slug]]` 由前端渲染层直接渲染成 wikilink，不再需要模型额外产出 citations 数组；
 - coverage 判定与引用解析解耦，改为**流后异步 fire-and-forget 小调用**：`assessCoverageInBackground(subject, question, answer)` 只喂问题+答案（不喂 accessed 上下文），走 `CoverageSchema`/`COVERAGE_SYSTEM_PROMPT`/`buildCoverageUserPrompt`（`query-prompt.ts`）判定 `coverageSufficient`；`false` 时经 `recordCoverageGap` best-effort 写入 `research-backlog-repo.create`（source='ask-ai'；`try/catch` 包裹，写入失败/异常只 `console.error` 不影响已返回的问答响应，也不阻塞响应本身）；`done` 事件不再携带 `coverageSufficient`（T3.2 引入时曾同步携带，现已异步化）；
-- `resolveQueryTools(mode, { imageInsertEnabled })` — `query:read` 包含当前 Subject 证据工具、跨 Subject 三工具、`history.list/diff`、`workflow.status` 与可选 `web.search`；`query:propose` 额外开放页面、`wiki.move`、History/workflow PendingAction 工具和一个版本的 `wiki.reenrich` alias；`wiki.image.insert` 还需 LLM 分类确认。所有 preview 仍严格绑定 active Subject；
+- `resolveQueryTools(mode)` — `read` 包含当前 Subject 证据工具、跨 Subject 三工具、`history.list/diff`、`workflow.status` 与可选 `web.search`；`propose` 额外开放页面、`wiki.move`、History/workflow PendingAction 工具和一个版本的 `wiki.reenrich` alias；`image-insert` 只增加经 LLM 分类确认的 `wiki.image.insert`，复用 `query:propose` policy 但不携带其他 propose ToolDef。所有 preview 仍严格绑定 active Subject；
 - 任务 `save-to-wiki`：同时支持 `params.subjectId`（来自 body）与 `job.subjectId`（来自 enqueue）；`saveQueryAsPage` 只组装 answer + `## References` 正文和 `query-answer` tag，再调用 `page-write::createPageInSubject(..., { jobId })`，与 `wiki.create` 共用唯一 slug、create plan/apply、Saga 和 embedding 回填。页面 citation 只保留为正文 wikilink，frontmatter `sources` 继续专用于 raw source ID（本路径为空）。若 worker 在 commit 后、job complete 前重试，则按该 job 的 applied operation 恢复唯一 canonical create slug、核对页面仍存在并补 enqueue embedding，不创建后缀重复页。
 
 `NO_QUERY_CONTEXT_ANSWER` 常量 —— 工具循环完成后仍没有可用答案时的兜底回答，coverage 判定可据此写入 backlog。
@@ -306,9 +306,10 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Query mode 增加独立 `image-insert` 工具面并删除 `imageInsertEnabled` 平行开关；配图请求不再携带 `wiki.preview_change`，避免 provider 因其顶层 union schema 拒绝工具注册 |
 | 2026-07-17 | `query-intent` 收口为统一结构化分类器：普通写入、直接 Re-enrich、选区配图和重置共用一次 `query` schema 调用；删除意图正则，增加 request/reset-confirmation 上下文收窄与保守失败回退 |
 | 2026-07-17 | Ask AI canonical 选区新增 `wiki.image.insert` 提案、`workflow-image-insert-start` 审批与 `image-insert` worker；完整块锚点重定位、stable HEAD、取消 rollback、页面/资产同 Changeset 与 applied operation 恢复均已覆盖 |
-| 2026-07-17 | 选区配图最初从正则迁移为结构化 LLM 二分类；现已并入 `classifyQueryIntent` 统一契约，route 仍结合可信 canonical selection 决定 `imageInsertEnabled`，普通 propose 不携带配图工具 |
+| 2026-07-17 | 选区配图最初从正则迁移为结构化 LLM 二分类；现已并入 `classifyQueryIntent` 统一契约，route 结合可信 canonical selection 选择独立 `image-insert` mode，普通 propose 不携带配图工具 |
 | 2026-07-16 | re-enrich 生图可靠性修复：enricher v6 的页面身份改由运行时注入，Unicode slug 可安全关联 asset；视觉主题无现有位图时明确触发生图，已有位图不重复 |
 | 2026-07-16 | enrich 接入 `image.generate` 图片工具；asset 与页面同一 Saga 提交，工具经 `ingest:image` 独立路由调用 Gemini 3.1 Flash Image |
 | 2026-07-16 | Tags 工作台接入 `tag-batch` PendingAction：独立 strict schema、NULL conversation 的 Subject-scoped 恢复和原子在途去重；批准重算 Vault 标签计划并复用 expectedPreHead/Saga/finalizer，Query 工具 schema 保持不变 |

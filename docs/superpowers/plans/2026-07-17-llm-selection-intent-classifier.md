@@ -95,9 +95,46 @@ git commit -m "docs: 同步选区 LLM 意图分类架构说明"
 
 ## Task 4：合并与清理
 
+以下命令是原始分类功能的历史计划，已由对应并行开发完成。后续 schema 修复分支不得重复执行这些命令。
+
 ```bash
 git checkout main
 git merge --no-ff feat/llm-query-intent -m "merge: 合并 feat/llm-query-intent：使用 LLM 识别选区配图意图"
 git worktree remove .worktrees/llm-query-intent
 git branch -d feat/llm-query-intent
 ```
+
+## Task 5：隔离选区配图工具 schema
+
+**分支：** `feat/image-insert-tool-schema`
+**Worktree：** `.worktrees/llm-query-intent-fix`
+
+**涉及文件：**
+
+- `src/server/services/query-intent.ts`
+- `src/server/services/query-service.ts`
+- `src/app/api/query/route.ts`
+- `src/server/llm/prompts/query-prompt.ts`
+- 对应 Query intent、route、service、prompt 测试
+
+步骤：
+
+1. 先写失败测试，复现配图意图仍进入通用 propose ToolSet，并验证 `wiki.preview_change` 被错误携带。
+2. 新增独立 `image-insert` Query mode，只编译只读工具与 `wiki.image.insert`。
+3. 删除 `imageInsertEnabled` 平行开关，由 mode 统一派生 ToolSet、policy 与 prompt。
+4. 对配图 ToolSet 中每个工具执行 AI SDK JSON Schema 转换，断言根节点为 `type: "object"`。
+5. 更新架构文档并完成定向、类型、全量测试、lint 与 build 验证。
+
+验证：
+
+```bash
+npx vitest run src/server/services/__tests__/query-intent.test.ts src/server/services/__tests__/resolve-query-tools.test.ts src/server/services/__tests__/query-service-agentic.test.ts src/app/api/query/__tests__/route.test.ts src/server/llm/prompts/__tests__/query-prompt.test.ts
+npx tsc --noEmit
+npm test -- --run
+npm run lint
+npm run build
+git diff --check
+git diff -- llm-config.example.json
+```
+
+提交后保留特性分支与 worktree，由 Nick 根据并行开发状态决定何时回合；本任务不主动 merge 或 cleanup。

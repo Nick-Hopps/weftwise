@@ -239,13 +239,12 @@ const QUERY_IMAGE_INSERT_CAPABILITY_PROMPT = `
 - For this explicit illustration request, read the current page first, derive one grounded educational visual prompt and accessible alt text, then call \`wiki_image_insert\` exactly once. Never invent a page slug or placement. Explain that the image will only be generated and inserted after the user clicks Approve.`;
 
 export function buildQueryAgenticSystemPrompt(options: {
-  mode: 'read' | 'propose';
-  imageInsertEnabled: boolean;
+  mode: 'read' | 'propose' | 'image-insert';
 }): string {
   const proposeTools = options.mode === 'propose' ? `\n${QUERY_PROPOSE_TOOL_PROMPT}` : '';
-  const imageTool = options.imageInsertEnabled ? `\n${QUERY_IMAGE_INSERT_TOOL_PROMPT}` : '';
+  const imageTool = options.mode === 'image-insert' ? `\n${QUERY_IMAGE_INSERT_TOOL_PROMPT}` : '';
   const proposeCapabilities = options.mode === 'propose' ? QUERY_PROPOSE_CAPABILITY_PROMPT : '';
-  const imageCapability = options.imageInsertEnabled ? QUERY_IMAGE_INSERT_CAPABILITY_PROMPT : '';
+  const imageCapability = options.mode === 'image-insert' ? QUERY_IMAGE_INSERT_CAPABILITY_PROMPT : '';
 
   return `You are a knowledgeable assistant with access to a personal wiki, scoped to a single subject (workspace).
 
