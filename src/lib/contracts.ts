@@ -829,16 +829,21 @@ export const ImageGenerateInputSchema = z.object({
 
 export type ImageGenerateInput = z.infer<typeof ImageGenerateInputSchema>;
 
+export const PersistedMarkdownBlockAnchorSchema = z.object({
+  start: z.number().int().nonnegative(),
+  end: z.number().int().positive(),
+  markdown: z.string().min(1),
+  prefix: z.string(),
+  suffix: z.string(),
+  quote: z.string().trim().min(1),
+  section: z.string().trim().min(1).nullable(),
+}).strict().refine((anchor) => anchor.end > anchor.start, {
+  message: 'anchor end must be after start',
+  path: ['end'],
+});
+
 /** 审批与后台任务持久化的 canonical Markdown 块锚点。 */
-export interface PersistedMarkdownBlockAnchor {
-  start: number;
-  end: number;
-  markdown: string;
-  prefix: string;
-  suffix: string;
-  quote: string;
-  section: string | null;
-}
+export type PersistedMarkdownBlockAnchor = z.infer<typeof PersistedMarkdownBlockAnchorSchema>;
 
 export type PendingActionOperation =
   | 'create'
