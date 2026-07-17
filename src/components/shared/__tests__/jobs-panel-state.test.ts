@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { recoverUnlistedTrackedJobs, summarizeJobsPanel } from '../jobs-panel-state';
+import {
+  jobTypeVerb,
+  recoverUnlistedTrackedJobs,
+  shouldRefreshPageForCompletedJob,
+  summarizeJobsPanel,
+} from '../jobs-panel-state';
 
 const jobs = [
   { id: 'running', queueStatus: 'running' as const },
@@ -57,5 +62,14 @@ describe('recoverUnlistedTrackedJobs', () => {
       previous[0],
       { ...previous[1], queueStatus: 'running' },
     ]);
+  });
+});
+
+describe('image-insert presentation', () => {
+  it('Tasks 使用 Illustrating，并只在该 job 成功完成时刷新页面', () => {
+    expect(jobTypeVerb('image-insert')).toBe('Illustrating');
+    expect(shouldRefreshPageForCompletedJob('image-insert', 'completed')).toBe(true);
+    expect(shouldRefreshPageForCompletedJob('image-insert', 'failed')).toBe(false);
+    expect(shouldRefreshPageForCompletedJob('research', 'completed')).toBe(false);
   });
 });

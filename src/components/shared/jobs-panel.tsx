@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronRight, Loader2, ListTodo, Square, Trash2, X } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
@@ -9,32 +10,14 @@ import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { JobDetailDialog } from './job-detail-dialog';
-import { summarizeJobsPanel, type TrackedJob } from './jobs-panel-state';
+import {
+  jobTypeVerb,
+  shouldRefreshPageForCompletedJob,
+  summarizeJobsPanel,
+  type TrackedJob,
+} from './jobs-panel-state';
 
 export type { TrackedJob } from './jobs-panel-state';
-
-function jobTypeVerb(type: string): string {
-  switch (type) {
-    case 'ingest':
-      return 'Ingesting';
-    case 'lint':
-      return 'Linting';
-    case 'curate':
-      return 'Curating';
-    case 'fix':
-      return 'Fixing';
-    case 're-enrich':
-      return 'Enriching';
-    case 'embed-index':
-      return 'Indexing';
-    case 'research':
-      return 'Researching';
-    case 'research-import':
-      return 'Importing research';
-    default:
-      return 'Processing';
-  }
-}
 
 function RowStatusIcon({ status, queueStatus }: { status: string; queueStatus: string }) {
   if (status === 'completed') return <Check className="h-3.5 w-3.5 text-success" />;
@@ -60,6 +43,8 @@ function JobRow({
   const [detailOpen, setDetailOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const refreshedCompletion = useRef(false);
 
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
@@ -71,10 +56,20 @@ function JobRow({
 
   // 任一 job 完成 → 失效列表缓存（保持旧 GlobalJobTracker 语义）
   useEffect(() => {
-    if (!isCompleted) return;
+    if (!isCompleted) {
+      refreshedCompletion.current = false;
+      return;
+    }
     queryClient.invalidateQueries({ queryKey: ['pages'] });
     queryClient.invalidateQueries({ queryKey: ['page-detail'] });
-  }, [isCompleted, queryClient]);
+    if (
+      shouldRefreshPageForCompletedJob(job.type, status)
+      && !refreshedCompletion.current
+    ) {
+      refreshedCompletion.current = true;
+      router.refresh();
+    }
+  }, [isCompleted, job.type, queryClient, router, status]);
 
   const handleCancel = async () => {
     if (cancelling) return;

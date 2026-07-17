@@ -46,6 +46,17 @@ describe('jobStartedDetailForAction', () => {
     });
   });
 
+  it('选区配图 workflow 映射为 image-insert 与目标页面 slug', () => {
+    expect(jobStartedDetailForAction(action('workflow-image-insert-start', {
+      affectedPages: [{ slug: 'page-a', action: 'update' }],
+    }))).toEqual({
+      jobId: 'job-1',
+      type: 'image-insert',
+      label: 'page-a',
+      queueStatus: 'pending',
+    });
+  });
+
   it('取消、同步页面变更或无 jobId 时不广播新任务', () => {
     expect(jobStartedDetailForAction(action('workflow-cancel'))).toBeNull();
     expect(jobStartedDetailForAction(action('update', { kind: 'page-change' }))).toBeNull();
