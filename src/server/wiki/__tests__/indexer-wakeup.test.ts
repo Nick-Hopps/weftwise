@@ -5,16 +5,20 @@ import { join } from 'node:path';
 
 let dir: string;
 let prevDb: string | undefined;
+let prevVault: string | undefined;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'indexer-wakeup-'));
   prevDb = process.env.DATABASE_PATH;
+  prevVault = process.env.VAULT_PATH;
   process.env.DATABASE_PATH = join(dir, 'wiki.db');
+  process.env.VAULT_PATH = join(dir, 'vault');
   vi.resetModules();
 });
 
 afterEach(() => {
   process.env.DATABASE_PATH = prevDb;
+  process.env.VAULT_PATH = prevVault;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -60,5 +64,28 @@ describe('collectNeighborSlugs', () => {
       .map((x) => x.slug)
       .sort();
     expect(n).toEqual(['b']); // 去重，B 只出现一次
+  });
+});
+
+describe('indexTouchedPages 删除路径', () => {
+  it('页面文件消失时同步删除持久化 rendition 与图片', async () => {
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const renditionsRepo = await import('@/server/db/repos/renditions-repo');
+    const { indexTouchedPages } = await import('@/server/wiki/indexer');
+    const subjectId = subjectsRepo.create({ slug: 's-delete', name: 'S' }).id;
+    renditionsRepo.replaceRendition({
+      subjectId,
+      slug: 'reused',
+      canonicalHash: 'old',
+      profileVersion: 1,
+      renderedMd: '旧重塑版',
+      model: null,
+      assets: [{ id: 'old-image', mediaType: 'image/png', dataBase64: 'YQ==' }],
+    });
+
+    indexTouchedPages(subjectId, ['reused']);
+
+    expect(renditionsRepo.getLatestRendition(subjectId, 'reused')).toBeNull();
+    expect(renditionsRepo.getRenditionAsset('old-image')).toBeNull();
   });
 });

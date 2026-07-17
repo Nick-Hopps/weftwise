@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { FileStack, Loader2, Pencil, RefreshCw, Sparkles, Square } from 'lucide-react';
+import { AlertTriangle, FileStack, Loader2, Pencil, RefreshCw, Sparkles, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton, iconButtonVariants } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
@@ -78,13 +78,14 @@ interface ReshapeStatusProps {
   /** 调用方保证传入时 state !== 'idle'。 */
   state: ReshapeState;
   showOriginal: boolean;
+  stale: boolean;
   onToggle: () => void;
   onRefresh: () => void;
   onCancel: () => void;
 }
 
 /** 正文上方的细状态行：加载中 / 已重塑（可切原文）/ 不可用。 */
-export function ReshapeStatus({ state, showOriginal, onToggle, onRefresh, onCancel }: ReshapeStatusProps) {
+export function ReshapeStatus({ state, showOriginal, stale, onToggle, onRefresh, onCancel }: ReshapeStatusProps) {
   return (
     <div className="mb-6 flex items-center gap-2 text-xs text-foreground-tertiary">
       {state === 'loading' || state === 'refreshing' ? (
@@ -104,6 +105,11 @@ export function ReshapeStatus({ state, showOriginal, onToggle, onRefresh, onCanc
           ) : (
             <span className="inline-flex items-center gap-1.5">
               <Sparkles className="h-3 w-3 text-accent" /> Adapted for you
+            </span>
+          )}
+          {stale && (
+            <span className="inline-flex items-center gap-1 text-warning">
+              <AlertTriangle className="h-3 w-3" aria-hidden /> Update available
             </span>
           )}
           <div className="ml-auto flex items-center gap-1.5">

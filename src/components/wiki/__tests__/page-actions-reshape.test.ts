@@ -5,10 +5,15 @@ import { ReshapeStatus } from '../page-actions';
 
 Object.assign(globalThis, { React });
 
-function render(state: 'loading' | 'refreshing' | 'reshaped', showOriginal = false): string {
+function render(
+  state: 'loading' | 'refreshing' | 'reshaped',
+  showOriginal = false,
+  stale = false,
+): string {
   return renderToStaticMarkup(React.createElement(ReshapeStatus, {
     state,
     showOriginal,
+    stale,
     onToggle: vi.fn(),
     onRefresh: vi.fn(),
     onCancel: vi.fn(),
@@ -27,5 +32,11 @@ describe('ReshapeStatus', () => {
     expect(reshaped).toContain('Refresh');
     expect(reshaped).toContain('Show original');
     expect(render('reshaped', true)).toContain('Show reshaped');
+  });
+
+  it('过期版本显示更新提示，新鲜版本保持安静', () => {
+    expect(render('reshaped', false, true)).toContain('Update available');
+    expect(render('reshaped', false, false)).not.toContain('Update available');
+    expect(render('reshaped', true, true)).toContain('Update available');
   });
 });

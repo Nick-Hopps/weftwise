@@ -79,4 +79,38 @@ describe('reshapePageBody', () => {
     expect(result.assets).toEqual([{ id: 'image-1', mediaType: 'image/png', dataBase64: 'AQID' }]);
     expect(mocks.generateImage).toHaveBeenCalledWith(expect.anything(), 'general', undefined, signal);
   });
+
+  it('最终正文为空时判定生成失败', async () => {
+    mocks.stream.mockReturnValueOnce(fakeStream('   '));
+    const { reshapePageBody } = await import('../reshape-service');
+
+    await expect(reshapePageBody({ subject, body: '原文', profile }))
+      .rejects.toThrow(/empty Markdown/i);
+  });
+
+  it('只返回最终 Markdown 实际引用的本次图片', async () => {
+    mocks.generateImage.mockResolvedValue({
+      output: { type: 'image', path: 'assets/general/unused.png', url: '/api/assets/general/unused.png', alt: '未使用' },
+      asset: { path: 'assets/general/unused.png', content: 'AQID', mediaType: 'image/png' },
+    });
+    mocks.stream.mockImplementationOnce((_task, options) => ({
+      textStream: (async function* () {
+        await options.tools.image_generate.execute({ prompt: '画图', alt: '未使用' });
+        yield '最终正文没有使用图片。';
+      })(),
+    }));
+    const { reshapePageBody } = await import('../reshape-service');
+
+    const result = await reshapePageBody({ subject, body: '原文', profile });
+
+    expect(result.assets).toEqual([]);
+  });
+
+  it('拒绝引用本次请求未生成的 rendition 图片', async () => {
+    mocks.stream.mockReturnValueOnce(fakeStream('![未知](/api/rendition-assets/not-generated)'));
+    const { reshapePageBody } = await import('../reshape-service');
+
+    await expect(reshapePageBody({ subject, body: '原文', profile }))
+      .rejects.toThrow(/unknown rendition asset/i);
+  });
 });
