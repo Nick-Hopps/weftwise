@@ -17,15 +17,17 @@ export interface LayoutPreset {
   nodeRepulsion: number;
   gravity: number;
   padding: number;
+  nodeDimensionsIncludeLabels: boolean;
 }
 
 // Single layout preset — fullscreen no longer re-runs cose; it just reuses
 // the compact positions and adjusts zoom, so a second preset would be dead code.
 export const LAYOUT_COMPACT: LayoutPreset = {
-  idealEdgeLength: 90,
-  nodeRepulsion: 6000,
-  gravity: 0.3,
-  padding: 20,
+  idealEdgeLength: 140,
+  nodeRepulsion: 12_000,
+  gravity: 0.2,
+  padding: 36,
+  nodeDimensionsIncludeLabels: true,
 };
 
 /** 用户是否偏好减少动效（SSR 安全）。 */

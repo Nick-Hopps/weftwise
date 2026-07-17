@@ -19,7 +19,7 @@ import { startForceSimulation, type SimulationHandle } from './force-simulation'
 
 interface WikiGraphData {
   nodes: Array<{ id: string; label: string; linkCount: number }>;
-  edges: Array<{ source: string; target: string }>;
+  edges: Array<{ source: string; target: string; weight: number }>;
 }
 
 export interface GraphStats {
@@ -79,7 +79,12 @@ export function useWikiGraph(
           ...data.edges
             .filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target))
             .map((e, idx) => ({
-              data: { id: `e-${idx}`, source: e.source, target: e.target },
+              data: {
+                id: `e-${idx}`,
+                source: e.source,
+                target: e.target,
+                weight: e.weight,
+              },
             })),
         ];
 
@@ -129,10 +134,15 @@ export function useWikiGraph(
           numIter: 800,
           fit: true,
           padding: preset.padding,
+          nodeDimensionsIncludeLabels: preset.nodeDimensionsIncludeLabels,
         } as cytoscape.LayoutOptions);
 
         layout.one('layoutstop', () => {
           if (cancelled) return;
+          // Re-fit against the final label-aware bounds. cose's internal fit
+          // can retain a stale pan when a narrow, initially off-screen host is
+          // laid out; the same explicit fit used by the toolbar is stable.
+          cy.fit(cy.elements(), preset.padding);
           simRef.current = startForceSimulation(cy, {
             repulsion: preset.nodeRepulsion / 2.5,
             idealEdgeLen: preset.idealEdgeLength,
