@@ -79,7 +79,7 @@
 - `getConversation(id): Conversation | null` —— 取单条（不限 subject，由路由校验）
 - `renameConversation(id, title): void` —— 改标题 + touch `updated_at`
 - `deleteConversation(id): void` —— 级联删 messages
-- `appendMessage(conversationId, role, content, citationsJson): ConversationMessage` —— 新增消息
+- `appendMessage(conversationId, role, content, evidenceJson): ConversationMessage` —— 新增消息；`messages.citations_json` 作为兼容的角色相关证据容器，user 反序列化到 `references`，assistant 反序列化到 `citations`
 - `listMessages(conversationId): ConversationMessage[]` —— 按 `created_at, rowid ASC` 排序
 - `touchConversation(id): void` —— 更新 `updated_at = now`（新消息到达时置顶）
 
@@ -154,7 +154,7 @@
 | `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back / reverted`；🆕 GC：`pruneOldOperations` 每 subject 只保留最近 500 条终态行（`pending` 永不删），挂在 worker 低频 sweep（无时间戳列，退化为单条件数量保留，见 operations-repo.ts 注释） |
 | `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
-| `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable) |
+| `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable，role=user 时保存用户正文引用，role=assistant 时保存回答 citations) |
 | `pending_actions` | `id` | `conversation_id` 可空（Chat 有值，Tags 工作台为空）/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面或 History inverse Saga，`job_id` 指向已批准的 workflow；operation CHECK 含 `tag-batch/move/history-revert/workflow-*` |
 | `page_embeddings` | `(subject_id, slug)` 复合 PK | model + content_hash + dim + vector BLOB + updated_at；FK subject_id CASCADE |
 | `page_maturity` | `(subject_id, slug)` 复合 PK | passes + last_enriched + interval_hours + next_due_at + state (active/graduated) + priority；FK subject_id CASCADE |
@@ -218,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | conversations repo 将既有 `messages.citations_json` 明确为 role-aware 消息证据容器：用户消息恢复到 `references`，Assistant 消息继续恢复到 `citations`；旧 NULL/Assistant JSON 无迁移兼容 |
 | 2026-07-17 | `pending_actions.operation` CHECK 加入 `workflow-image-insert-start`；Drizzle `0010` 与启动期原子重建均保留旧行/索引并继续拒绝未知 operation |
 | 2026-07-16 | pending_actions 支持工作台来源：`conversation_id` 改可空、CHECK 增 `tag-batch`，Drizzle 0008 与启动期结构化 PRAGMA 检测均原子重建并保留历史；repo 增 Subject-scoped TagBatch 创建/恢复/在途去重 |
 | 2026-07-16 | `settings-repo` 新增 `maintenanceScope` JSON key（`all` 或非空 Subject ID 集合，旧配置默认 all）；`maturity-repo.listDue/countDue` 支持同口径 Subject 范围过滤 |

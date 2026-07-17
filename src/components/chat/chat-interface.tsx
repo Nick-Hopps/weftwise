@@ -6,6 +6,10 @@ import { ArrowUp, Check, StopCircle, TextQuote, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import { MessageList } from './message-list';
+import {
+  chatMessageFromConversation,
+  createOutgoingUserMessage,
+} from './chat-message';
 import { SaveToWikiButton } from './save-to-wiki-button';
 import { PendingActionCard } from './pending-action-card';
 import { replacePendingActions, upsertPendingAction } from './pending-action-state';
@@ -21,7 +25,8 @@ import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
 import { dispatchJobStarted, jobStartedDetailForAction } from '@/lib/job-started-event';
-import type { ChatMessage, Citation } from './message-list';
+import { buildUserMessageReferences } from '@/lib/chat-reference';
+import type { ChatMessage, Citation } from './chat-message';
 import type { ConversationMessage, PendingActionView, SelectionAnchorInput } from '@/lib/contracts';
 
 interface Passage {
@@ -143,7 +148,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   }, [pathname]);
 
   // Referenceable passages from the open page (context-panel chat only).
-  const { id: ctxSubjectId } = useCurrentSubject();
+  const { id: ctxSubjectId, slug: ctxSubjectSlug } = useCurrentSubject();
   const canReference = variant === 'embedded' && !!currentPageSlug;
   const { data: pageContent } = useQuery({
     queryKey: ['page-detail', ctxSubjectId, currentPageSlug],
@@ -251,13 +256,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
           ? await actionsResponse.json() as { actions: PendingActionView[] }
           : { actions: [] };
         if (controller.signal.aborted) return;
-        setMessages(
-          messagesData.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-            citations: m.citations ?? [],
-          })),
-        );
+        setMessages(messagesData.messages.map(chatMessageFromConversation));
         setPendingActions(replacePendingActions(actionsData.actions));
         loadedConversationIdRef.current = currentConversationId;
         loadedSubjectIdRef.current = ctxSubjectId ?? null;
@@ -383,9 +382,16 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
           .map((r) => `> [${r.section}] ${r.text}`)
           .join('\n')}\n\nQuestion: ${question}`
       : question;
+    const userReferences = currentPageSlug
+      ? buildUserMessageReferences(sentRefs, {
+          pageSlug: currentPageSlug,
+          pageTitle: pageContent?.title ?? currentPageSlug,
+          subjectSlug: ctxSubjectSlug,
+        })
+      : [];
 
     setIsLoading(true);
-    setMessages((prev) => [...prev, { role: 'user', content: question }]);
+    setMessages((prev) => [...prev, createOutgoingUserMessage(question, userReferences)]);
     setMessages((prev) => [...prev, { role: 'assistant', content: '', citations: [] }]);
     abortRef.current = new AbortController();
 
@@ -395,6 +401,12 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
         question: backendQuestion,
         userQuestion: question,
       };
+      if (userReferences.length > 0) {
+        queryBody.messageReferences = userReferences.map(({ section, excerpt }) => ({
+          section,
+          excerpt,
+        }));
+      }
       const intentContext = resetIntentContext(resetConfirmationState);
       if (intentContext) queryBody.intentContext = intentContext;
       const structuredSelection = sentRefs.find((ref) => ref.selection)?.selection;
@@ -496,7 +508,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     } finally {
       setIsLoading(false);
     }
-  }, [input, isLoading, resetConfirmationState, performReset, currentPageSlug, refs, pageContent, setCurrentConversation, queryClient]);
+  }, [input, isLoading, resetConfirmationState, performReset, currentPageSlug, ctxSubjectSlug, refs, pageContent, setCurrentConversation, queryClient]);
 
   // Abort any in-flight SSE stream when the component unmounts to avoid
   // leaking work and stale setState calls after the panel closes.

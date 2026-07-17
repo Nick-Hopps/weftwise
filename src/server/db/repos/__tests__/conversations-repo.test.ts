@@ -59,15 +59,23 @@ describe('conversations-repo', () => {
     }
   });
 
-  it('appendMessage + listMessages（ASC，citations 反序列化）', async () => {
+  it('appendMessage + listMessages（ASC，按 role 恢复 references/citations）', async () => {
     const repo = await setup();
     const c = repo.createConversation('s1', 'A');
-    repo.appendMessage(c.id, 'user', '问题', null);
+    const references = [{
+      pageSlug: 'source-page',
+      subjectSlug: 'sub-a',
+      section: '原理',
+      excerpt: '引用原文',
+    }];
+    repo.appendMessage(c.id, 'user', '问题', JSON.stringify(references));
     repo.appendMessage(c.id, 'assistant', '答案', JSON.stringify([{ pageSlug: 'p', excerpt: 'e' }]));
     const msgs = repo.listMessages(c.id);
     expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(msgs[0].citations).toBeNull();
+    expect(msgs[0].references).toEqual(references);
     expect(msgs[1].citations).toEqual([{ pageSlug: 'p', excerpt: 'e' }]);
+    expect(msgs[1].references).toBeNull();
   });
 
   it('renameConversation 改标题', async () => {

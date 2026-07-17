@@ -11,6 +11,7 @@ import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
+import * as pagesRepo from '@/server/db/repos/pages-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
 import {
@@ -19,7 +20,8 @@ import {
   resolveDirectReenrichTarget,
 } from '@/server/services/query-intent';
 import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
-import type { WikiCitation } from '@/lib/contracts';
+import { MAX_USER_MESSAGE_REFERENCES } from '@/lib/chat-reference';
+import type { UserMessageReference, WikiCitation } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
@@ -36,6 +38,10 @@ const QueryBodySchema = z.object({
     excerpt: z.string(),
     subjectSlug: z.string().optional(),
   })).optional(),
+  messageReferences: z.array(z.object({
+    section: z.string().trim().max(500).nullable(),
+    excerpt: z.string().trim().min(1).max(4_001),
+  }).strict()).max(MAX_USER_MESSAGE_REFERENCES).optional(),
   pageSlug: z.string().trim().min(1).optional(),
   subjectId: z.string().optional(),
   subjectSlug: z.string().optional(),
@@ -82,6 +88,7 @@ export async function POST(request: NextRequest) {
     pageTitle,
     answer,
     citations,
+    messageReferences: requestedMessageReferences,
     pageSlug,
     selection,
   } = parsed.data;
@@ -135,6 +142,26 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (requestedMessageReferences?.length && !pageSlug) {
+    return NextResponse.json(
+      { error: 'pageSlug is required when messageReferences are provided' },
+      { status: 400 },
+    );
+  }
+
+  const referencePageTitle = pageSlug && requestedMessageReferences?.length
+    ? pagesRepo.getPageBySlug(subject.id, pageSlug)?.title
+    : undefined;
+  const messageReferences: UserMessageReference[] = pageSlug
+    ? (requestedMessageReferences ?? []).map((reference) => ({
+        pageSlug,
+        ...(referencePageTitle ? { pageTitle: referencePageTitle } : {}),
+        subjectSlug: subject.slug,
+        section: reference.section,
+        excerpt: reference.excerpt,
+      }))
+    : [];
+
   // Default: streaming SSE mode
   const encoder = new TextEncoder();
   const trimmedQuestion = question.trim();
@@ -183,7 +210,12 @@ export async function POST(request: NextRequest) {
         cits: WikiCitation[],
       ) => {
         try {
-          conversationsRepo.appendMessage(activeConversationId, 'user', intentQuestion, null);
+          conversationsRepo.appendMessage(
+            activeConversationId,
+            'user',
+            intentQuestion,
+            messageReferences.length > 0 ? JSON.stringify(messageReferences) : null,
+          );
           conversationsRepo.appendMessage(
             activeConversationId,
             'assistant',
