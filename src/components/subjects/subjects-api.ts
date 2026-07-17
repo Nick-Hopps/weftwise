@@ -2,6 +2,7 @@ import { apiFetch } from '@/lib/api-fetch';
 import {
   DEFAULT_AUGMENTATION_LEVEL,
   type AugmentationLevel,
+  type Subject,
   type SubjectListEntry,
 } from '@/lib/contracts';
 
@@ -60,6 +61,39 @@ export async function createSubject(payload: CreateSubjectPayload): Promise<Subj
     return patchSubject({ id: subject.id, augmentationLevel: payload.augmentationLevel });
   }
   return subject;
+}
+
+/** 导出下载 URL（浏览器直接导航触发下载，走 cookie 鉴权）。 */
+export function subjectExportUrl(id: string): string {
+  return `/api/subjects/${id}/export`;
+}
+
+export class ImportSubjectError extends Error {
+  constructor(
+    message: string,
+    public code?: string,
+  ) {
+    super(message);
+    this.name = 'ImportSubjectError';
+  }
+}
+
+export interface ImportSubjectResult {
+  subject: Subject;
+  stats: { pages: number; sources: number; assets: number };
+}
+
+/** 导入归档 zip；slug 冲突时抛 code='slug-conflict'，可换 slug 重试。 */
+export async function importSubject(file: File, slug?: string): Promise<ImportSubjectResult> {
+  const form = new FormData();
+  form.append('file', file);
+  if (slug) form.append('slug', slug);
+  const res = await apiFetch('/api/subjects/import', { method: 'POST', body: form });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+    throw new ImportSubjectError(body.error ?? `HTTP ${res.status}`, body.code);
+  }
+  return res.json();
 }
 
 export async function deleteSubject(id: string): Promise<void> {

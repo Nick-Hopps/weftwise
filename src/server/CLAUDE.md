@@ -128,6 +128,7 @@ src/server/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 新增 `subjects/` 模块：`subject-archive-core.ts`（manifest 契约 + zip entry 路径安全校验，纯函数）与 `subject-archive.ts`（导出 zip / 导入落盘 + `indexTouchedPages` + 侧车恢复 sources/page_sources + git commit，失败清理回滚）；DB 可再生数据不进归档，与 rebuild 口径一致 |
 | 2026-07-17 | Worker 注册 `image-insert-service`：批准后生图，页面引用与 base64 asset 同一 Saga；生图前后稳定 HEAD/锚点复核、取消 rollback 与 applied operation 幂等恢复 |
 | 2026-04-22 | 初始化：梳理后端分层与交叉引用 |
 | 2026-04-25 | 引入 Subject：subjects 表 + 复合 PK + middleware/subject + 全链路 subjectId |
