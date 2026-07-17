@@ -107,6 +107,23 @@ describe('pages-repo 复合身份约束', () => {
 });
 
 describe('pages-repo 手动 FTS 一致性', () => {
+  it('正文命中返回带高亮标记的正文上下文，而不是页面标题', async () => {
+    const { repo } = await setup();
+    repo.upsertPage(page('s1', 'subject-a', 'body-match', 'Unrelated page title'));
+    repo.updateFtsEntry(
+      's1',
+      'body-match',
+      'Unrelated page title',
+      'A summary without the search phrase',
+      'The surrounding paragraph explains alpha needleterm omega in detail.',
+    );
+
+    const [result] = repo.searchPages('s1', 'needleterm');
+
+    expect(result.snippet).toContain('alpha <mark>needleterm</mark> omega');
+    expect(result.snippet).not.toContain('Unrelated page title');
+  });
+
   it('update 替换旧索引且按 Subject 隔离，不产生重复行', async () => {
     const { db, repo } = await setup();
     repo.upsertPage(page('s1', 'subject-a', 'shared', 'Shared A'));

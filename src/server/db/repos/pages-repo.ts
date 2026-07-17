@@ -176,7 +176,7 @@ export function searchPages(subjectId: SubjectId, query: string): SearchResult[]
       p.tags,
       p.created_at,
       p.updated_at,
-      snippet(pages_fts, 0, '<mark>', '</mark>', '...', 32) AS snippet,
+      snippet(pages_fts, 2, '<mark>', '</mark>', '...', 32) AS snippet,
       rank
     FROM pages_fts
     JOIN pages p
