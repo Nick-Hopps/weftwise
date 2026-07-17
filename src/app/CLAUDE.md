@@ -161,6 +161,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 标志 v2：`icon.svg`/`apple-icon.png`/`opengraph-image.png` 随织纹 mark 改版重生成（三经 + 波形纬线，小尺寸可读），几何与 `shared/weftwise-mark.tsx` 保持一致 |
 | 2026-07-17 | `/api/query` 统一使用结构化 LLM 分类普通提案、Re-enrich、选区配图与 Wiki 重置；新增 `intentContext:'reset-confirmation'` 和 `reset-confirmation` SSE，删除服务端/客户端自然语言意图正则，失败保持 fail-closed |
 | 2026-07-17 | Subject 导出/导入：新增 `GET /api/subjects/[id]/export`（vault 锁内打 zip：manifest + wiki/raw/assets/sources 侧车）与 `POST /api/subjects/import`（multipart zip，manifest/formatVersion/zip-slip 校验，slug 冲突 409 可换名重试，失败清理回滚）；Subjects 页加 Import 按钮、编辑弹窗加 Export。spec/plan 见 docs/{specs,plans}/2026-07-17-subject-export-import.md |
 | 2026-07-17 | 全站主题色切换 weftwise 双色语法：`globals.css` BASE 层 violet 家族 → weft（纬线朱=动作，UI 主档 `#CC3F27` 白字 4.87:1）+ warp（经线靛=连接）两家族；accent/focus/selection/input-focus → weft，新增 `--color-link(-hover)` → warp，graph 节点 → warp、active → weft；danger 移向绯红 `#DB374F` 拉开色相；亮 canvas 贴品牌纸 `#F6F5F2`，暗色底面/边框整体带品牌蓝调（canvas `#131315`）；暗色主按钮前景改深墨。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |

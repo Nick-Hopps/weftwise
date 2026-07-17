@@ -185,6 +185,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 标志 v2 小尺寸优化：`shared/weftwise-mark.tsx` 织纹改「三经 + 正弦波纬」（幅 6/周期 20/笔画 3.6，穿 1 压 2 穿 3）——直纬在 16-24px 读作四竖一横，波形自身即传达编织；favicon/apple-icon/OG/docs/brand SVG 同步重生成 |
 | 2026-07-17 | Chat 删除 Wiki 重置与 yes/no 正则；普通消息统一交给 `/api/query` 结构化分类，重置确认通过专用 SSE + 纯状态机接线，仅 pending + confirm 执行现有 `/api/reset` |
 | 2026-07-17 | 全站主题色切换 weftwise：`wiki-link.tsx` 正文 wikilink 改挂新 `link` 色族（warp 经线靛，hover 加深）；`page-renderer.tsx` callout-quiz 边框与图标改 `--brand-warp`；`mermaid-theme.ts` secondary 家族 violet → warp、暗色底对齐新暗面；tailwind 新增 `link` 色族映射；mermaid 测试基准色同步。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |
 | 2026-07-17 | Ask AI 选区信箱贯通 canonical/reshape 与顶层块 offset；配图审批卡展示视觉请求详情，`image-insert` 任务显示 Illustrating，成功终态全局刷新阅读页 |
