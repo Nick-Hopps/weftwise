@@ -24,7 +24,22 @@ function lensPath(subjectSlug: string, slug: string): string {
   return `/api/lens/${pagePath}?s=${encodeURIComponent(subjectSlug)}`;
 }
 
-/** 管理持久化版本读取、强制刷新和浏览器侧取消；取消不会清空旧成功版本。 */
+type LensApiFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+/** 只读取已保存版本；无版本时返回 null，绝不触发 POST 生成。 */
+export async function loadSavedLens(
+  apiFetch: LensApiFetch,
+  subjectSlug: string,
+  slug: string,
+  signal?: AbortSignal,
+): Promise<LensResult | null> {
+  const response = await apiFetch(lensPath(subjectSlug, slug), { signal });
+  if (!response.ok) throw new Error(`lens ${response.status}`);
+  const result = await response.json() as LensResult;
+  return result.source === 'canonical' ? null : result;
+}
+
+/** 进入页面恢复持久化版本，并管理强制生成、刷新和浏览器侧取消。 */
 export function useLens(subjectSlug: string, slug: string) {
   const apiFetch = useApiFetch();
   const controllerRef = useRef<AbortController | null>(null);
@@ -86,11 +101,27 @@ export function useLens(subjectSlug: string, slug: string) {
 
   useEffect(() => {
     controllerRef.current?.abort();
-    controllerRef.current = null;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setData(null);
     setState('idle');
-    return () => controllerRef.current?.abort();
-  }, [subjectSlug, slug]);
+    void loadSavedLens(apiFetch, subjectSlug, slug, controller.signal)
+      .then((saved) => {
+        if (!saved || controllerRef.current !== controller) return;
+        setData(saved);
+        setState('ready');
+      })
+      .catch(() => {
+        // 静默恢复失败不影响 canonical 阅读；显式点击仍可重试。
+      })
+      .finally(() => {
+        if (controllerRef.current === controller) controllerRef.current = null;
+      });
+    return () => {
+      controller.abort();
+      if (controllerRef.current === controller) controllerRef.current = null;
+    };
+  }, [apiFetch, subjectSlug, slug]);
 
   return { data, state, request, refresh, cancel };
 }
