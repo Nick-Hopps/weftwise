@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, Trash2, ChevronRight } from 'lucide-react';
+import { X, Trash2, ChevronRight, Download } from 'lucide-react';
 import { normalizeSubjectSlug, sanitizeSubjectSlugInput } from '@/lib/slug';
 import { DEFAULT_AUGMENTATION_LEVEL, type AugmentationLevel, type SubjectListEntry } from '@/lib/contracts';
 import { useUIStore } from '@/stores/ui-store';
@@ -20,6 +20,7 @@ import {
   createSubject,
   patchSubject,
   deleteSubject,
+  subjectExportUrl,
 } from '@/components/subjects/subjects-api';
 import { AugmentationField } from '@/components/subjects/augmentation-field';
 import { Button } from '@/components/ui/button';
@@ -360,6 +361,28 @@ function EditSubjectBody({
           </Button>
         </div>
       </form>
+
+      <div className="border-t border-border px-4 py-3">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-foreground-tertiary">
+          Export
+        </p>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-foreground-tertiary">
+            Download this subject&apos;s pages, sources and assets as a zip archive. It can be
+            imported on the Subjects page.
+          </p>
+          {/* cookie 鉴权下浏览器直接下载；不用 fetch，避免手动组装 Blob。 */}
+          <Button
+            intent="outline"
+            size="sm"
+            type="button"
+            onClick={() => window.location.assign(subjectExportUrl(subject.id))}
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export
+          </Button>
+        </div>
+      </div>
 
       <div className="border-t border-border bg-subtle/40 px-4 py-3">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-foreground-tertiary">
