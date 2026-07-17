@@ -370,7 +370,7 @@ Run: `npm run dev`，浏览器按下列场景核对：
 - [ ] **Step 3: 复查主仓库工作树无泄漏**
 
 ```bash
-git -C /Users/nickhopps/Documents/playground/agentic-wiki status -sb
+git -C /Users/nickhopps/Documents/playground/weftwise status -sb
 ```
 
 Expected：除既有的 `M src/stores/ui-store.ts`（CONTEXT_PANEL_WIDTH 用户改动，非本需求）与 `?? IDEAS.md` 外，无本需求文件意外落到主仓库（本需求改动应只在 worktree 分支）。

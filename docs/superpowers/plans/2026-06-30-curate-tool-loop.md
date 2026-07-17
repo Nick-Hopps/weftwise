@@ -966,14 +966,14 @@ git commit -m "feat(ui): curate 工具活动映射(🔗/✂️) + 注册 curate:
 
 在第九节变更记录表末尾追加：
 ```
-| 2026-06-30 | Curate 改造为 tool-loop（Agentic Wiki Tools Spec 2）| `curate` 由 triage→confirm→execute 结构化流水线改为自驱 tool-loop：worker `generateTextWithTools('curate')` 驱动，模型读页后调 `wiki.merge`/`wiki.split`/`wiki.delete`/`wiki.create`。新增 `wiki.merge`/`wiki.split` 工具（包装 page-ops 内核）+ `ToolContext.mergePages?/splitPage?`（`ToolDef.sideEffect` 加 `merge`/`split`）；新 `services/curate-tools.ts::buildCurateToolContext`（worker 读侧 + 写能力，经 `createCurateGuard` 硬护栏把守再调内核+emit）；新 `wiki/curate-plan.ts::createCurateGuard`（caps≤5×4 计数器 + auto seed 强制 + auto 禁 create + 保护页，模型物理越不过），退休 `applyDecisionCaps`/`restrictToSeed`；`curate-prompt` 退休 triage/confirm 三套、新增 agentic prompt；`use-job-stream` 注册 `curate:delete/create`、`tool-activity` 加 🔗/✂️。auto 安全靠工具层确定性闸门而非提示。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-curate-tool-loop* |
+| 2026-06-30 | Curate 改造为 tool-loop（weftwise Tools Spec 2）| `curate` 由 triage→confirm→execute 结构化流水线改为自驱 tool-loop：worker `generateTextWithTools('curate')` 驱动，模型读页后调 `wiki.merge`/`wiki.split`/`wiki.delete`/`wiki.create`。新增 `wiki.merge`/`wiki.split` 工具（包装 page-ops 内核）+ `ToolContext.mergePages?/splitPage?`（`ToolDef.sideEffect` 加 `merge`/`split`）；新 `services/curate-tools.ts::buildCurateToolContext`（worker 读侧 + 写能力，经 `createCurateGuard` 硬护栏把守再调内核+emit）；新 `wiki/curate-plan.ts::createCurateGuard`（caps≤5×4 计数器 + auto seed 强制 + auto 禁 create + 保护页，模型物理越不过），退休 `applyDecisionCaps`/`restrictToSeed`；`curate-prompt` 退休 triage/confirm 三套、新增 agentic prompt；`use-job-stream` 注册 `curate:delete/create`、`tool-activity` 加 🔗/✂️。auto 安全靠工具层确定性闸门而非提示。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-curate-tool-loop* |
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add src/server/agents/CLAUDE.md src/server/services/CLAUDE.md src/server/wiki/CLAUDE.md src/server/llm/CLAUDE.md src/lib/CLAUDE.md CLAUDE.md
-git commit -m "docs: 同步 Agentic Wiki Tools Spec 2（curate tool-loop）模块文档与 changelog"
+git commit -m "docs: 同步 weftwise Tools Spec 2（curate tool-loop）模块文档与 changelog"
 ```
 
 ---

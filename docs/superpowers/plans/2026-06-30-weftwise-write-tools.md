@@ -1,4 +1,4 @@
-# Agentic Wiki 写工具内核 + 对话删除/创建（Spec 1）Implementation Plan
+# weftwise 写工具内核 + 对话删除/创建（Spec 1）Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 设计文档：`docs/superpowers/specs/2026-06-30-agentic-wiki-write-tools-design.md`（本计划仅实现其 Spec 1）。
+- 设计文档：`docs/superpowers/specs/2026-06-30-weftwise-write-tools-design.md`（本计划仅实现其 Spec 1）。
 - 所有领域类型集中在 `src/lib/contracts.ts`；`@/*` → `src/*` 路径别名。
 - 写操作必须经 Saga（`wiki/wiki-transaction`）；不得绕过 `validateChangeset`。
 - 保护页 `index` / `log` 与带 `meta` tag 的页永不可删。
@@ -1091,14 +1091,14 @@ git commit -m "refactor(api): DELETE /api/pages 复用 validateDeleteTarget+exec
 在 `CLAUDE.md` 第九节变更记录表末尾追加：
 
 ```
-| 2026-06-30 | 对话创建/删除页面（Agentic Wiki Tools Spec 1）| 新增共享语义级写工具内核：`page-ops` 补 `executePageCreate`/`executePageDelete`（不 emit/enqueue）+ `deriveUniqueSlug`（create/split 共用）；`services/page-write.ts`（`validateDeleteTarget` 删除规则单一源 + `delete/createPageInSubject` 同步 Saga+embed 回填）；builtin 工具 `wiki.create`/`wiki.delete`（`ToolDef.sideEffect` 加 `create`/`destructive`）+ `ToolContext.createPage?/deletePage?`（仅 query 注入）；Ask AI 工具循环 resolve 二工具 + 系统提示加写动作确认纪律（删除须后续轮确认、禁同轮）；`tool-activity` 加 ➕/🗑 映射；DELETE 路由 DRY 复用 + 附 brokenBacklinks。每写一次一个 git commit 可回滚。Spec 2(curate→tool-loop)/Spec 3(fix→tool-loop) 待续。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-agentic-wiki-write-tools* |
+| 2026-06-30 | 对话创建/删除页面（weftwise Tools Spec 1）| 新增共享语义级写工具内核：`page-ops` 补 `executePageCreate`/`executePageDelete`（不 emit/enqueue）+ `deriveUniqueSlug`（create/split 共用）；`services/page-write.ts`（`validateDeleteTarget` 删除规则单一源 + `delete/createPageInSubject` 同步 Saga+embed 回填）；builtin 工具 `wiki.create`/`wiki.delete`（`ToolDef.sideEffect` 加 `create`/`destructive`）+ `ToolContext.createPage?/deletePage?`（仅 query 注入）；Ask AI 工具循环 resolve 二工具 + 系统提示加写动作确认纪律（删除须后续轮确认、禁同轮）；`tool-activity` 加 ➕/🗑 映射；DELETE 路由 DRY 复用 + 附 brokenBacklinks。每写一次一个 git commit 可回滚。Spec 2(curate→tool-loop)/Spec 3(fix→tool-loop) 待续。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-weftwise-write-tools* |
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add src/lib/CLAUDE.md src/server/agents/CLAUDE.md src/server/services/CLAUDE.md src/server/wiki/CLAUDE.md src/app/CLAUDE.md CLAUDE.md
-git commit -m "docs: 同步 Agentic Wiki Tools Spec 1（对话创建/删除）模块文档与 changelog"
+git commit -m "docs: 同步 weftwise Tools Spec 1（对话创建/删除）模块文档与 changelog"
 ```
 
 ---
