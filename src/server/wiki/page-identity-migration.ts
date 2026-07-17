@@ -77,6 +77,11 @@ export function migratePageIdentityCaches(
   ).run(subjectId, fromSlug);
 
   sqlite.prepare(`
+    UPDATE page_rendition_assets SET slug = ?
+    WHERE subject_id = ? AND slug = ?
+  `).run(toSlug, subjectId, fromSlug);
+
+  sqlite.prepare(`
     UPDATE profile_signals SET slug = ?
     WHERE subject_id = ? AND slug = ?
   `).run(toSlug, subjectId, fromSlug);

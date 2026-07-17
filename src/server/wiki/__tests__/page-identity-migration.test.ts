@@ -38,6 +38,9 @@ describe('migratePageIdentityCaches', () => {
       INSERT INTO page_renditions VALUES ('s1','old-page','h',2,'rendered','m','now')
     `).run();
     db.prepare(`
+      INSERT INTO page_rendition_assets VALUES ('asset-1','s1','old-page','image/png','YQ==','now')
+    `).run();
+    db.prepare(`
       INSERT INTO profile_signals (user_id,type,subject_id,slug,created_at)
       VALUES ('local','helpful','s1','old-page','now')
     `).run();
@@ -50,6 +53,7 @@ describe('migratePageIdentityCaches', () => {
       ['page_embeddings', 'slug'],
       ['page_maturity', 'slug'],
       ['page_renditions', 'slug'],
+      ['page_rendition_assets', 'slug'],
       ['profile_signals', 'slug'],
     ]) {
       expect(db.prepare(`SELECT ${column} AS slug FROM ${table}`).all())
@@ -60,6 +64,8 @@ describe('migratePageIdentityCaches', () => {
     expect(db.prepare(`SELECT page_slug AS slug FROM page_sources`).all())
       .toEqual([{ slug: 'old-page' }]);
     expect(db.prepare(`SELECT slug FROM page_maturity`).all())
+      .toEqual([{ slug: 'old-page' }]);
+    expect(db.prepare(`SELECT slug FROM page_rendition_assets`).all())
       .toEqual([{ slug: 'old-page' }]);
   });
 });

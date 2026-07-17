@@ -45,6 +45,7 @@ describe('wiki.move Saga integration', () => {
     const subjectsRepo = await import('../../db/repos/subjects-repo');
     const sourcesRepo = await import('../../db/repos/sources-repo');
     const pagesRepo = await import('../../db/repos/pages-repo');
+    const renditionsRepo = await import('../../db/repos/renditions-repo');
     const { getRawDb } = await import('../../db/client');
     const { ensureVaultRepo, commitVaultChanges } = await import('../../git/git-service');
     const { writeVaultFiles } = await import('../wiki-store');
@@ -91,6 +92,9 @@ describe('wiki.move Saga integration', () => {
     db.prepare(`
       INSERT INTO page_renditions VALUES (?, 'old-page', 'h', 2, 'rendered', 'm', 'now')
     `).run(subject.id);
+    db.prepare(`
+      INSERT INTO page_rendition_assets VALUES ('old-asset', ?, 'old-page', 'image/png', 'YQ==', 'now')
+    `).run(subject.id);
 
     const plan = await planPageMove('job-move', subject, {
       slug: 'old-page', newSlug: 'new-page', effectiveAt: '2026-07-14T00:00:00.000Z',
@@ -130,6 +134,20 @@ describe('wiki.move Saga integration', () => {
         `SELECT COUNT(*) AS n FROM ${table} WHERE subject_id = ? AND slug = 'new-page'`,
       ).get(subject.id)).toEqual({ n: 1 });
     }
+    expect(db.prepare(`SELECT slug FROM page_rendition_assets WHERE id = 'old-asset'`).get())
+      .toEqual({ slug: 'new-page' });
+
+    renditionsRepo.replaceRendition({
+      subjectId: subject.id,
+      slug: 'new-page',
+      canonicalHash: 'new-hash',
+      profileVersion: 3,
+      renderedMd: 'new rendition',
+      model: null,
+      assets: [{ id: 'new-asset', mediaType: 'image/webp', dataBase64: 'Yg==' }],
+    });
+    expect(renditionsRepo.getRenditionAsset('old-asset')).toBeNull();
+    expect(renditionsRepo.getRenditionAsset('new-asset')).not.toBeNull();
   });
 
   it('重建索引时按目标 Subject 隔离同名标题', async () => {
