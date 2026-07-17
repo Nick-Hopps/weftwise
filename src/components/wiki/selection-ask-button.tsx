@@ -4,6 +4,7 @@ import { type RefObject } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useTextSelection } from '@/hooks/use-text-selection';
 import { useUIStore } from '@/stores/ui-store';
+import type { SelectionSourceKind } from '@/lib/contracts';
 
 /** 选区上方按钮与选区之间的间距（px）。 */
 const OFFSET = 8;
@@ -12,8 +13,10 @@ const FLIP_THRESHOLD = 48;
 
 export function SelectionAskButton({
   containerRef,
+  sourceKind,
 }: {
   containerRef: RefObject<HTMLElement | null>;
+  sourceKind: SelectionSourceKind;
 }) {
   const selection = useTextSelection(containerRef);
   const askAboutSelection = useUIStore((s) => s.askAboutSelection);
@@ -31,7 +34,17 @@ export function SelectionAskButton({
       // 阻止默认避免点击清掉原生选区（文本已在 hook state 里捕获，双保险）。
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => askAboutSelection(
-        { section: selection.section, text: selection.text },
+        {
+          section: selection.section,
+          text: selection.text,
+          selection: {
+            sourceKind,
+            quote: selection.text,
+            section: selection.section,
+            blockStart: selection.blockStart,
+            blockEnd: selection.blockEnd,
+          },
+        },
         { x: anchor.left + anchor.width, y: anchor.top + anchor.height },
       )}
       style={{

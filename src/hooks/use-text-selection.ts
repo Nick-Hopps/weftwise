@@ -5,7 +5,9 @@ import {
   normalizeSelectionText,
   truncateForContext,
   findNearestHeadingText,
+  findSelectionBlockRange,
   type HeadingScanNode,
+  type SelectionBlockScanNode,
 } from '@/lib/selection-text';
 
 export interface SelectionRect {
@@ -21,6 +23,8 @@ export interface SelectionInfo {
   rect: SelectionRect;
   /** 选区的视觉末端，用作 Ask AI 面板锚点。 */
   endRect: SelectionRect;
+  blockStart: number;
+  blockEnd: number;
 }
 
 /**
@@ -62,6 +66,18 @@ export function useTextSelection(
         startNode.nodeType === Node.TEXT_NODE
           ? startNode.parentElement
           : (startNode as Element);
+      const endNode = range.endContainer;
+      const endEl = endNode.nodeType === Node.TEXT_NODE
+        ? endNode.parentElement
+        : (endNode as Element);
+      const blockRange = findSelectionBlockRange(
+        startEl as unknown as SelectionBlockScanNode | null,
+        endEl as unknown as SelectionBlockScanNode | null,
+      );
+      if (!blockRange) {
+        setSelection(null);
+        return;
+      }
       const section = findNearestHeadingText(
         startEl as unknown as HeadingScanNode | null,
       );
@@ -84,6 +100,7 @@ export function useTextSelection(
           width: endDomRect.width,
           height: endDomRect.height,
         },
+        ...blockRange,
       });
     };
 

@@ -72,7 +72,11 @@ export default function PageRenderer({
   subjectSlug,
 }: PageRendererProps) {
   const rendered = useMemo(
-    () => renderMarkdown(content, titleSlugMap, { math: true, headingAnchors: true }),
+    () => renderMarkdown(content, titleSlugMap, {
+      math: true,
+      headingAnchors: true,
+      selectionBlocks: true,
+    }),
     [content, titleSlugMap],
   );
 

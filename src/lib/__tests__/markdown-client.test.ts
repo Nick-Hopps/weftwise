@@ -145,3 +145,25 @@ describe('renderMarkdown — 正文标题锚点', () => {
     expect(html).toContain('<h2 id="核心概念-2">核心概念</h2>');
   });
 });
+
+describe('renderMarkdown — 选区块源位置', () => {
+  it('显式开启后为每个顶层 Markdown 块写入完整 UTF-16 offset', () => {
+    const markdown = 'Alpha\n\n- one\n- two\n\n```js\nx\n```';
+    const html = toHtml(renderMarkdown(markdown, undefined, {
+      selectionBlocks: true,
+    }));
+
+    expect(html).toContain('data-md-block-start="0"');
+    expect(html).toContain('data-md-block-end="5"');
+    expect(html).toContain('data-md-block-start="7"');
+    expect(html).toContain('data-md-block-end="18"');
+    expect(html).toContain('data-md-block-start="20"');
+    expect(html).toContain('data-md-block-end="31"');
+  });
+
+  it('默认不向其他 Markdown 渲染表面泄漏选区属性', () => {
+    const html = toHtml(renderMarkdown('Alpha'));
+    expect(html).not.toContain('data-md-block-start');
+    expect(html).not.toContain('data-md-block-end');
+  });
+});

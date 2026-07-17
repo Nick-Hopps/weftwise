@@ -809,6 +809,17 @@ export interface ConversationMessage {
   createdAt: string;
 }
 
+export type SelectionSourceKind = 'canonical' | 'reshape';
+
+/** 阅读页选区绑定的顶层 Markdown 块范围；page/subject 由当前请求上下文注入。 */
+export interface SelectionAnchorInput {
+  sourceKind: SelectionSourceKind;
+  quote: string;
+  section: string | null;
+  blockStart: number;
+  blockEnd: number;
+}
+
 export type PendingActionOperation =
   | 'create'
   | 'update'
