@@ -63,7 +63,7 @@
 | `/api/pages/[...slug]` | PUT | 改整文件 markdown（Saga 重索引）。若 frontmatter 标题变化且 `refreshReferences`(默认 true)，同事务把本 subject 内以旧标题书写的 `[[Old Title]]` 引用重写为新标题（排除自引用页），返回 `referencesUpdated` 计数；slug/URL/文件不动 |
 | `/api/assets/[...path]` | GET | 读取 enrich 生成的 subject-scoped PNG/JPEG/WebP 图片；只允许 `assets/<subject>/<filename>` 安全路径 |
 | `/api/search` | GET | FTS5 全文搜索（`?q=...&subjectId=...`） |
-| `/api/graph` | GET | 返回图视图需要的节点 + 边数据（`?subjectId=...`） |
+| `/api/graph` | GET | 返回图视图节点 + 聚合有向关系（重复引用折叠为 `weight`，meta 含唯一关系/原始引用计数；`?subjectId=...`） |
 | `/api/conversations` | GET | 🆕 列出当前 subject 会话（`updated_at DESC, rowid DESC`）|
 | `/api/conversations/[id]` | GET / PATCH / DELETE | 🆕 读单个会话含 messages / 重命名（仅 title）/ 删除（跨 subject→404，PATCH 空 title→400）|
 | `/api/query` | POST | 默认流式分支扩展：body 加 `conversationId?`（无/跨 subject 静默当新会话防泄漏）→ 载末 8 条历史注入 prompt → 流末 best-effort 落库 → done 回传 `{subjectId, conversationId}`；save-as-page/save-to-wiki 模式不持久化 |
@@ -165,6 +165,7 @@ src/app/
 | 2026-07-17 | canonical 选区配图改用独立 `image-insert` Query mode，只注册只读工具与 `wiki.image.insert`，避免无关 `wiki.preview_change` union schema 导致 provider 拒绝整批工具 |
 | 2026-07-17 | `/api/query` 统一使用结构化 LLM 分类普通提案、Re-enrich、选区配图与 Wiki 重置；新增 `intentContext:'reset-confirmation'` 和 `reset-confirmation` SSE，删除服务端/客户端自然语言意图正则，失败保持 fail-closed |
 | 2026-07-17 | Subject 导出/导入：新增 `GET /api/subjects/[id]/export`（vault 锁内打 zip：manifest + wiki/raw/assets/sources 侧车）与 `POST /api/subjects/import`（multipart zip，manifest/formatVersion/zip-slip 校验，slug 冲突 409 可换名重试，失败清理回滚）；Subjects 页加 Import 按钮、编辑弹窗加 Export。spec/plan 见 docs/{specs,plans}/2026-07-17-subject-export-import.md |
+| 2026-07-17 | Wiki Graph 可读性优化：`/api/graph` 将同向重复引用聚合为带 `weight` 的唯一有向关系，节点热度按唯一入链来源计算，`meta` 区分 `edgeCount` 与 `referenceCount`；Dashboard 图改为 28/32/36rem 响应式稳定高度。spec/plan 见 `docs/{specs,plans}/2026-07-17-wiki-graph-readability.md` |
 | 2026-07-17 | 全站主题色切换 weftwise 双色语法：`globals.css` BASE 层 violet 家族 → weft（纬线朱=动作，UI 主档 `#CC3F27` 白字 4.87:1）+ warp（经线靛=连接）两家族；accent/focus/selection/input-focus → weft，新增 `--color-link(-hover)` → warp，graph 节点 → warp、active → weft；danger 移向绯红 `#DB374F` 拉开色相；亮 canvas 贴品牌纸 `#F6F5F2`，暗色底面/边框整体带品牌蓝调（canvas `#131315`）；暗色主按钮前景改深墨。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |
 | 2026-07-17 | Ask AI 结构化选区支持 canonical 完整 Markdown 块锚点；`wiki.image.insert` 只创建配图 PendingAction，批准后才原子启动 `image-insert` job，Reshape 配图命令拒绝写 canonical |
 | 2026-07-17 | Ask AI 选区配图意图由 `query` 结构化 LLM 分类 `image-insert/other`，API 以 `userQuestion` 接收未拼 Passage 的原始问题；分类失败保守回退 read，工具授权不再依赖自然语言正则 |
