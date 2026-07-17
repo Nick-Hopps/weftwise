@@ -1,13 +1,13 @@
 # Curate（Tidy structure）改造为 tool-loop agent（Spec 2）— 设计文档
 
 > 日期：2026-06-30
-> 主题：把 `curate` 任务从「triage→confirm→execute 结构化流水线」改造为**自驱 tool-loop agent**——模型读页后自行调用 `wiki.merge`/`wiki.split`/`wiki.delete`/`wiki.create` 完成结构整理。「Agentic Wiki Tools」三阶段计划的 **Spec 2**（Spec 1=对话创建/删除已并入 main）。
+> 主题：把 `curate` 任务从「triage→confirm→execute 结构化流水线」改造为**自驱 tool-loop agent**——模型读页后自行调用 `wiki.merge`/`wiki.split`/`wiki.delete`/`wiki.create` 完成结构整理。「weftwise Tools」三阶段计划的 **Spec 2**（Spec 1=对话创建/删除已并入 main）。
 
 ---
 
 ## 〇、承接 Spec 1 与 Initiative 背景
 
-Spec 1（`2026-06-30-agentic-wiki-write-tools-design.md`，已并入 main）建立了共享语义级写工具内核：`wiki/page-ops.ts` 的 `executePageMerge/Split/Delete/Create` + builtin 工具 `wiki.create`/`wiki.delete` + `ToolContext` 写能力 + 对话循环接入。**架构前提**：供应商已迁移、不再走 packyapi，tool-loop 现为一等公民（详见根 CLAUDE.md Changelog 2026-06-30 与项目记忆）。
+Spec 1（`2026-06-30-weftwise-write-tools-design.md`，已并入 main）建立了共享语义级写工具内核：`wiki/page-ops.ts` 的 `executePageMerge/Split/Delete/Create` + builtin 工具 `wiki.create`/`wiki.delete` + `ToolContext` 写能力 + 对话循环接入。**架构前提**：供应商已迁移、不再走 packyapi，tool-loop 现为一等公民（详见根 CLAUDE.md Changelog 2026-06-30 与项目记忆）。
 
 本 Spec 把 `curate`（Health 页 "Tidy structure" 手动触发 + ingest 后 `agentAutoCurate` 自动入队）从结构化流水线改造为 tool-loop。Spec 3 再改 `fix`。
 

@@ -3,7 +3,7 @@
 ## 基线与范围
 
 - 基线分支：`agent/rewrite-readme`
-- 特性分支：`feat/rename-agentic-wiki-to-weftwise`
+- 特性分支：`feat/rename-project-to-weftwise`
 - 设计文档：`docs/specs/2026-07-18-weftwise-project-rename.md`
 - 范围：当前 Git HEAD 的可追踪文本、运行时标识、包元数据与文件名
 

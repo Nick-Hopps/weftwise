@@ -1,4 +1,4 @@
-# Agentic Wiki — 项目架构导航
+# weftwise — 项目架构导航
 
 > 个人知识管理 Web 应用：由 LLM 从原始资料（Markdown / HTML / PDF / 纯文本）增量构建并维护一个可持久化、相互交叉引用的 Wiki 系统。
 
@@ -66,7 +66,7 @@
 
 ```mermaid
 graph TD
-    Root["(根) agentic-wiki"] --> App["src/app<br/>Next.js App Router"]
+    Root["(根) weftwise"] --> App["src/app<br/>Next.js App Router"]
     Root --> Server["src/server<br/>后端业务逻辑"]
     Root --> Components["src/components<br/>React UI 组件"]
     Root --> Lib["src/lib<br/>共享工具"]
