@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
+  buildQueryIntentUserPrompt,
   buildQueryAgenticSystemPrompt,
   buildQueryUserPrompt,
-  buildSelectionIntentUserPrompt,
+  QUERY_INTENT_SYSTEM_PROMPT,
+  QueryIntentSchema,
   QueryResponseSchema,
-  SELECTION_INTENT_SYSTEM_PROMPT,
-  SelectionIntentSchema,
 } from '../query-prompt';
 import type { PromptContext } from '../prompt-context';
 
@@ -213,17 +213,51 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
   });
 });
 
-describe('SelectionIntentSchema', () => {
-  it('只接受 image-insert 或 other', () => {
-    expect(SelectionIntentSchema.parse({ intent: 'image-insert' })).toEqual({ intent: 'image-insert' });
-    expect(SelectionIntentSchema.parse({ intent: 'other' })).toEqual({ intent: 'other' });
-    expect(() => SelectionIntentSchema.parse({ intent: 'delete-page' })).toThrow();
+describe('QueryIntentSchema', () => {
+  it.each([
+    'read',
+    'propose',
+    'direct-reenrich',
+    'image-insert',
+    'reset-request',
+    'reset-confirm',
+    'reset-cancel',
+    'reset-unclear',
+  ])('接受统一意图枚举：%s', (intent) => {
+    expect(QueryIntentSchema.parse({
+      intent,
+      targetPage: { reference: 'none', slug: null },
+    }).intent).toBe(intent);
   });
 
-  it('prompt 明确区分执行意图、能力询问、否定与已有图片解释', () => {
-    expect(SELECTION_INTENT_SYSTEM_PROMPT).toMatch(/explicitly asks[\s\S]*now[\s\S]*generate[\s\S]*insert/i);
-    expect(SELECTION_INTENT_SYSTEM_PROMPT).toMatch(/capability|negated|existing image/i);
-    expect(buildSelectionIntentUserPrompt('在这下面生成一张图片说明'))
+  it('拒绝未知意图与不完整目标结构', () => {
+    expect(() => QueryIntentSchema.parse({
+      intent: 'delete-page',
+      targetPage: { reference: 'none', slug: null },
+    })).toThrow();
+    expect(() => QueryIntentSchema.parse({ intent: 'read' })).toThrow();
+  });
+
+  it('prompt 同时覆盖提案、直接 Re-enrich、配图、重置与失败收窄语义', () => {
+    expect(QUERY_INTENT_SYSTEM_PROMPT).toMatch(/direct-reenrich/i);
+    expect(QUERY_INTENT_SYSTEM_PROMPT).toMatch(/image-insert/i);
+    expect(QUERY_INTENT_SYSTEM_PROMPT).toMatch(/reset-request/i);
+    expect(QUERY_INTENT_SYSTEM_PROMPT).toMatch(/capability|negated|hypothetical/i);
+    expect(buildQueryIntentUserPrompt('在这下面生成一张图片说明', {
+      phase: 'request',
+      hasSelection: true,
+      hasCurrentPage: true,
+    }))
       .toContain('<user_input>\n在这下面生成一张图片说明\n</user_input>');
+  });
+
+  it('重置确认上下文被显式写入 prompt', () => {
+    const prompt = buildQueryIntentUserPrompt('继续', {
+      phase: 'reset-confirmation',
+      hasSelection: false,
+      hasCurrentPage: false,
+    });
+    expect(prompt).toContain('<classification_phase>reset-confirmation</classification_phase>');
+    expect(prompt).toMatch(/pending reset/i);
   });
 });

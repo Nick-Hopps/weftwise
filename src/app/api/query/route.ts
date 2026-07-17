@@ -14,9 +14,9 @@ import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
 import {
-  classifySelectionIntent,
-  resolveDirectReenrichSlug,
-  resolveQueryMode,
+  classifyQueryIntent,
+  queryModeForIntent,
+  resolveDirectReenrichTarget,
 } from '@/server/services/query-intent';
 import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
 import type { WikiCitation } from '@/lib/contracts';
@@ -26,6 +26,7 @@ export const runtime = 'nodejs';
 const QueryBodySchema = z.object({
   question: z.string().min(1).optional(),
   userQuestion: z.string().trim().min(1).max(10_000).optional(),
+  intentContext: z.literal('reset-confirmation').optional(),
   conversationId: z.string().optional(),
   saveAsPage: z.boolean().optional(),
   pageTitle: z.string().optional(),
@@ -161,8 +162,6 @@ export async function POST(request: NextRequest) {
     .listMessages(activeConversationId)
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
-  const directReenrichSlug = resolveDirectReenrichSlug(intentQuestion, pageSlug);
-
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let closed = false;
@@ -201,12 +200,43 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        const selectionIntent = selection
-          ? await classifySelectionIntent(intentQuestion)
-          : 'other';
+        const intent = await classifyQueryIntent(intentQuestion, {
+          phase: parsed.data.intentContext ?? 'request',
+          hasSelection: selection !== undefined,
+          hasCurrentPage: pageSlug !== undefined,
+        });
         if (request.signal.aborted) return;
 
-        if (selection?.sourceKind === 'reshape' && selectionIntent === 'image-insert') {
+        if (parsed.data.intentContext === 'reset-confirmation') {
+          const decision = intent.intent === 'reset-confirm'
+            ? 'confirm'
+            : intent.intent === 'reset-cancel'
+              ? 'cancel'
+              : 'unclear';
+          const answer = decision === 'confirm'
+            ? '已确认重置请求，正在执行…'
+            : decision === 'cancel'
+              ? '好的，已取消重置，wiki 保持不变。'
+              : '我没太确定你的意思。请明确确认执行重置，或取消重置。';
+          emit('reset-confirmation', { decision });
+          emit('answer-delta', { delta: answer });
+          emit('citations', { citations: [] });
+          persistTurn(answer, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          return;
+        }
+
+        if (intent.intent === 'reset-request') {
+          const answer = '你确定要重置当前 Wiki 吗？这会清空当前 Subject 的所有页面、数据源和任务记录，且无法恢复。请明确确认执行，或取消。';
+          emit('reset-confirmation', { decision: 'requested' });
+          emit('answer-delta', { delta: answer });
+          emit('citations', { citations: [] });
+          persistTurn(answer, []);
+          emit('done', { subjectId: subject.id, conversationId: activeConversationId });
+          return;
+        }
+
+        if (selection?.sourceKind === 'reshape' && intent.intent === 'image-insert') {
           const answer = '当前选区来自 Reshape 内容。请切换至 Original 后重新选择正文，再发起配图插入。';
           emit('answer-delta', { delta: answer });
           emit('citations', { citations: [] });
@@ -214,6 +244,7 @@ export async function POST(request: NextRequest) {
           emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           return;
         }
+        const directReenrichSlug = resolveDirectReenrichTarget(intent, pageSlug);
         // 明确的 re-enrich 是控制面命令，不需要让 Query LLM 再做一次工具选择。
         // 直接生成审批预览可避免模型首个 tool-call 最长等待 route timeout。
         if (directReenrichSlug) {
@@ -236,8 +267,8 @@ export async function POST(request: NextRequest) {
         }
 
         const imageInsertEnabled =
-          selection?.sourceKind === 'canonical' && selectionIntent === 'image-insert';
-        const mode = imageInsertEnabled ? 'propose' : resolveQueryMode(intentQuestion);
+          selection?.sourceKind === 'canonical' && intent.intent === 'image-insert';
+        const mode = imageInsertEnabled ? 'propose' : queryModeForIntent(intent);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,
           subject,

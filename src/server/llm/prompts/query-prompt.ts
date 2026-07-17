@@ -54,29 +54,57 @@ export const QueryResponseSchema = z.object({
 
 export type QueryResponse = z.infer<typeof QueryResponseSchema>;
 
-export const SelectionIntentSchema = z.object({
-  intent: z.enum(['image-insert', 'other']),
+export const QueryIntentSchema = z.object({
+  intent: z.enum([
+    'read',
+    'propose',
+    'direct-reenrich',
+    'image-insert',
+    'reset-request',
+    'reset-confirm',
+    'reset-cancel',
+    'reset-unclear',
+  ]),
+  targetPage: z.object({
+    reference: z.enum(['none', 'current-page', 'slug']),
+    slug: z.string().trim().min(1).max(1_000).nullable(),
+  }),
 });
 
-export type SelectionIntent = z.infer<typeof SelectionIntentSchema>['intent'];
+export type QueryIntentClassification = z.infer<typeof QueryIntentSchema>;
+export type QueryIntentContext = {
+  phase: 'request' | 'reset-confirmation';
+  hasSelection: boolean;
+  hasCurrentPage: boolean;
+};
 
-export const SELECTION_INTENT_SYSTEM_PROMPT = `You classify the intent of a user message sent with a trusted text selection from a personal wiki.
+export const QUERY_INTENT_SYSTEM_PROMPT = `You classify the intent of a user message sent to a personal wiki assistant.
 
-Return \`image-insert\` only when the user explicitly asks to now generate an explanatory image and insert or place it at, below, after, or near the selected passage.
+Return exactly one intent:
+- \`read\`: ordinary questions, explanations, summaries, capability questions, tutorials, hypotheticals, negated requests, and cancelled requests.
+- \`propose\`: an explicit request to now create, update, patch, delete, move, or rename wiki content; revert history; start research; or cancel a workflow. These actions only create approval previews.
+- \`direct-reenrich\`: only a complete, single-action command to re-enrich one page now. Put its target in targetPage: use \`current-page\` for a deictic current/this page reference, or when a current page is present and the command clearly omits the page name because it refers to that page; use \`slug\` and the explicit target text for a named page. Composite, tutorial, hypothetical, negated, or genuinely targetless requests are not direct commands.
+- \`image-insert\`: only when a trusted selection is present and the user explicitly asks to now generate an explanatory image and insert or place it at, below, after, or near that selection.
+- \`reset-request\`: an explicit request to now wipe, clear, or reset the current wiki/knowledge base. A request to delete one page is \`propose\`, not reset-request.
+- \`reset-confirm\`, \`reset-cancel\`, or \`reset-unclear\`: use only in reset-confirmation phase, based on whether the reply clearly confirms, clearly cancels, or does neither for the pending reset.
 
-Return \`other\` for every other request, including:
-- a capability question about whether images can be generated;
-- a tutorial or hypothetical question about image generation;
-- a negated, cancelled, or conditional image request;
-- a request to explain or inspect an existing image;
-- a request that only asks for an image prompt without inserting an image;
-- any ordinary question about the selected text.
+For capability questions, tutorials, hypotheticals, negated commands, conditional commands, and discussions of what an action would do, return \`read\` in request phase. Classify semantics across languages and word order; do not infer actions from keywords alone.
 
-Classify semantics across languages and word order. Do not infer an execution request from image-related keywords alone.`;
+Always return targetPage. Use { "reference": "none", "slug": null } unless intent is direct-reenrich. Never invent or normalize a page slug.`;
 
-export function buildSelectionIntentUserPrompt(question: string): string {
-  return `Classify this user message:
+export function buildQueryIntentUserPrompt(
+  question: string,
+  context: QueryIntentContext,
+): string {
+  const phaseNote = context.phase === 'reset-confirmation'
+    ? 'A reset is pending. Classify only whether this reply confirms or cancels that pending reset.'
+    : 'Classify this as a new request. There is no pending reset confirmation.';
+  return `Classify this user message.
 
+<classification_phase>${context.phase}</classification_phase>
+<trusted_selection_present>${context.hasSelection ? 'true' : 'false'}</trusted_selection_present>
+<current_page_present>${context.hasCurrentPage ? 'true' : 'false'}</current_page_present>
+<phase_note>${phaseNote}</phase_note>
 <user_input>
 ${question}
 </user_input>`;
