@@ -111,7 +111,7 @@ export default function WikiLink({
       <Link
         href={href}
         data-wiki-slug={slug}
-        className="text-accent underline decoration-1 underline-offset-4 decoration-accent/40 hover:decoration-accent transition-colors duration-fast"
+        className="text-link underline decoration-1 underline-offset-4 decoration-link/40 hover:text-link-hover hover:decoration-link-hover transition-colors duration-fast"
       >
         {children}
       </Link>

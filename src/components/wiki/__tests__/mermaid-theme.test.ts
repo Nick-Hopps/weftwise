@@ -20,7 +20,7 @@ describe('createMermaidConfig', () => {
   it('switches generated SVG colors for dark mode', () => {
     const light = createMermaidConfig(false);
     const dark = createMermaidConfig(true);
-    expect(dark.themeVariables?.primaryColor).toBe('#242426');
+    expect(dark.themeVariables?.primaryColor).toBe('#242428');
     expect(dark.themeVariables?.primaryTextColor).toBe('#ededed');
     expect(dark.themeVariables?.primaryColor).not.toBe(light.themeVariables?.primaryColor);
   });

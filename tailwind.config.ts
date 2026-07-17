@@ -40,6 +40,11 @@ const config: Config = {
           strong:  'rgb(var(--color-accent-strong-fg) / <alpha-value>)',
         },
 
+        link: {
+          DEFAULT: 'rgb(var(--color-link) / <alpha-value>)',
+          hover:   'rgb(var(--color-link-hover) / <alpha-value>)',
+        },
+
         success: {
           DEFAULT: 'rgb(var(--color-success-fg) / <alpha-value>)',
           bg:      'rgb(var(--color-success-bg) / <alpha-value>)',
