@@ -8,15 +8,23 @@ import { useUIStore } from '@/stores/ui-store';
 import {
   centerAskAiPosition,
   clampAskAiPosition,
+  fitAskAiRectToViewport,
   positionAskAiAtTrigger,
   positionAskAiFromAnchor,
+  resizeAskAiSize,
   shouldDismissAskAiSheet,
   type AskAiPoint,
+  type AskAiSize,
 } from '@/lib/ask-ai-floating-panel';
 import { cn } from '@/lib/cn';
 
 const MOBILE_QUERY = '(max-width: 1023.98px)';
 const DESKTOP_PANEL_SIZE = { width: 440, height: 680 };
+type ResizeAxis = 'width' | 'height' | 'both';
+type AskAiPanelStyle = React.CSSProperties & {
+  '--ask-ai-width': string;
+  '--ask-ai-height': string;
+};
 
 function useMatchesMobile(): boolean {
   const [matches, setMatches] = useState(false);
@@ -40,7 +48,11 @@ export function AskAiFloatingPanel() {
   const setPosition = useUIStore((state) => state.setAskAiPosition);
   const isMobile = useMatchesMobile();
   const panelRef = useRef<HTMLElement>(null);
+  const panelSizeRef = useRef<AskAiSize>(DESKTOP_PANEL_SIZE);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const sizeInitializedRef = useRef(false);
   const [everMounted, setEverMounted] = useState(false);
+  const [panelSize, setPanelSize] = useState<AskAiSize>(DESKTOP_PANEL_SIZE);
   const [sheetOffset, setSheetOffset] = useState(0);
   const [sheetDragging, setSheetDragging] = useState(false);
   const sheetDragRef = useRef<{ startY: number; startedAt: number } | null>(null);
@@ -48,6 +60,10 @@ export function AskAiFloatingPanel() {
   useEffect(() => {
     if (open) setEverMounted(true);
   }, [open]);
+
+  useEffect(() => {
+    panelSizeRef.current = panelSize;
+  }, [panelSize]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,22 +86,29 @@ export function AskAiFloatingPanel() {
   useEffect(() => {
     if (!open || isMobile) return;
     const frame = requestAnimationFrame(() => {
-      const panel = panelRef.current;
-      const panelSize = {
-        width: panel?.offsetWidth ?? DESKTOP_PANEL_SIZE.width,
-        height: panel?.offsetHeight ?? Math.min(DESKTOP_PANEL_SIZE.height, window.innerHeight - 64),
-      };
       const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const requestedSize = sizeInitializedRef.current
+        ? panelSizeRef.current
+        : {
+            width: DESKTOP_PANEL_SIZE.width,
+            height: Math.min(DESKTOP_PANEL_SIZE.height, window.innerHeight - 64),
+          };
+      sizeInitializedRef.current = true;
       const currentPosition = useUIStore.getState().askAiPosition;
-      const nextPosition = anchor
+      const requestedPosition = anchor
         ? anchorMode === 'selection'
-          ? positionAskAiFromAnchor(anchor, panelSize, viewport)
-          : positionAskAiAtTrigger(anchor, panelSize, viewport)
+          ? positionAskAiFromAnchor(anchor, requestedSize, viewport)
+          : positionAskAiAtTrigger(anchor, requestedSize, viewport)
         : currentPosition
-          ? clampAskAiPosition(currentPosition, panelSize, viewport)
-          : centerAskAiPosition(panelSize, viewport);
-      setPosition(nextPosition);
-      panel?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+          ? clampAskAiPosition(currentPosition, requestedSize, viewport)
+          : centerAskAiPosition(requestedSize, viewport);
+      const fitted = fitAskAiRectToViewport(
+        { position: requestedPosition, size: requestedSize },
+        viewport,
+      );
+      setPanelSize(fitted.size);
+      setPosition(fitted.position);
+      panelRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [anchor, anchorMode, isMobile, open, setPosition]);
@@ -102,19 +125,20 @@ export function AskAiFloatingPanel() {
   useEffect(() => {
     if (!open || isMobile) return;
     const onResize = () => {
-      const panel = panelRef.current;
-      if (!panel) return;
       const currentPosition = useUIStore.getState().askAiPosition;
       if (!currentPosition) return;
-      setPosition(clampAskAiPosition(
-        currentPosition,
-        { width: panel.offsetWidth, height: panel.offsetHeight },
+      const fitted = fitAskAiRectToViewport(
+        { position: currentPosition, size: panelSizeRef.current },
         { width: window.innerWidth, height: window.innerHeight },
-      ));
+      );
+      setPanelSize(fitted.size);
+      setPosition(fitted.position);
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, [isMobile, open, setPosition]);
+
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
 
   const startDesktopDrag = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (isMobile || event.button !== 0) return;
@@ -148,6 +172,72 @@ export function AskAiFloatingPanel() {
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'grabbing';
   }, [isMobile, setPosition]);
+
+  const startDesktopResize = useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    axis: ResizeAxis,
+  ) => {
+    if (isMobile || event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeCleanupRef.current?.();
+
+    const start = { x: event.clientX, y: event.clientY };
+    const startSize = panelSizeRef.current;
+    const position = useUIStore.getState().askAiPosition ?? { x: 16, y: 72 };
+    const cursor = axis === 'width' ? 'ew-resize' : axis === 'height' ? 'ns-resize' : 'nwse-resize';
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const delta = {
+        width: axis === 'height' ? 0 : moveEvent.clientX - start.x,
+        height: axis === 'width' ? 0 : moveEvent.clientY - start.y,
+      };
+      setPanelSize(resizeAskAiSize(
+        startSize,
+        delta,
+        position,
+        { width: window.innerWidth, height: window.innerHeight },
+      ));
+    };
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', cleanup);
+      window.removeEventListener('pointercancel', cleanup);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      resizeCleanupRef.current = null;
+    };
+
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', cleanup);
+    window.addEventListener('pointercancel', cleanup);
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = cursor;
+  }, [isMobile]);
+
+  const resizeWithKeyboard = useCallback((
+    event: React.KeyboardEvent<HTMLDivElement>,
+    axis: ResizeAxis,
+  ) => {
+    if (isMobile) return;
+    const step = event.shiftKey ? 32 : 16;
+    let width = 0;
+    let height = 0;
+    if (axis !== 'height' && event.key === 'ArrowLeft') width = -step;
+    if (axis !== 'height' && event.key === 'ArrowRight') width = step;
+    if (axis !== 'width' && event.key === 'ArrowUp') height = -step;
+    if (axis !== 'width' && event.key === 'ArrowDown') height = step;
+    if (width === 0 && height === 0) return;
+    event.preventDefault();
+    const position = useUIStore.getState().askAiPosition ?? { x: 16, y: 72 };
+    setPanelSize((current) => resizeAskAiSize(
+      current,
+      { width, height },
+      position,
+      { width: window.innerWidth, height: window.innerHeight },
+    ));
+  }, [isMobile]);
 
   const startSheetDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!isMobile || event.button !== 0) return;
@@ -200,12 +290,19 @@ export function AskAiFloatingPanel() {
         role="dialog"
         aria-modal={isMobile ? 'true' : undefined}
         aria-label="Ask AI"
-        style={isMobile
-          ? { transform: `translateY(${sheetOffset}px)` }
-          : { left: position?.x ?? 16, top: position?.y ?? 72 }}
+        style={{
+          '--ask-ai-width': `${panelSize.width}px`,
+          '--ask-ai-height': `${panelSize.height}px`,
+          ...(isMobile
+            ? { transform: `translateY(${sheetOffset}px)` }
+            : {
+              left: position?.x ?? 16,
+              top: position?.y ?? 72,
+            }),
+        } as AskAiPanelStyle}
         className={cn(
           'pointer-events-auto absolute bottom-0 left-0 flex h-[88svh] w-full flex-col overflow-hidden rounded-t-xl border border-border bg-surface shadow-lg',
-        'lg:bottom-auto lg:h-[min(680px,calc(100vh-64px))] lg:w-[440px] lg:rounded-xl',
+          'lg:bottom-auto lg:h-[var(--ask-ai-height)] lg:w-[var(--ask-ai-width)] lg:rounded-xl',
           'motion-safe:animate-fade-in',
           !sheetDragging && 'transition-transform duration-base ease-standard',
         )}
@@ -242,6 +339,38 @@ export function AskAiFloatingPanel() {
 
         <div className="min-h-0 flex-1">
           <ContextPanelChatTab key={invocationId} />
+        </div>
+
+        <div
+          role="separator"
+          aria-label="Resize Ask AI width"
+          aria-orientation="vertical"
+          tabIndex={0}
+          data-ask-ai-resize-handle="width"
+          className="absolute bottom-3 right-0 top-12 z-20 hidden w-2 cursor-ew-resize focus-ring lg:block"
+          onPointerDown={(event) => startDesktopResize(event, 'width')}
+          onKeyDown={(event) => resizeWithKeyboard(event, 'width')}
+        />
+        <div
+          role="separator"
+          aria-label="Resize Ask AI height"
+          aria-orientation="horizontal"
+          tabIndex={0}
+          data-ask-ai-resize-handle="height"
+          className="absolute bottom-0 left-3 right-3 z-20 hidden h-2 cursor-ns-resize focus-ring lg:block"
+          onPointerDown={(event) => startDesktopResize(event, 'height')}
+          onKeyDown={(event) => resizeWithKeyboard(event, 'height')}
+        />
+        <div
+          role="separator"
+          aria-label="Resize Ask AI width and height"
+          tabIndex={0}
+          data-ask-ai-resize-handle="both"
+          className="group absolute bottom-0 right-0 z-30 hidden h-4 w-4 cursor-nwse-resize rounded-br-xl focus-ring lg:block"
+          onPointerDown={(event) => startDesktopResize(event, 'both')}
+          onKeyDown={(event) => resizeWithKeyboard(event, 'both')}
+        >
+          <span className="absolute bottom-1 right-1 h-1.5 w-1.5 border-b border-r border-foreground-tertiary/60 transition-colors group-hover:border-accent" />
         </div>
       </section>
     </div>
