@@ -72,7 +72,7 @@ Make sure the comma after `"db:migrate-subjects"` value is added so the JSON sta
 
 - [ ] **Step 3: Create `vitest.config.ts` at repo root**
 
-Create `/Users/nickhopps/Documents/playground/agentic-wiki/vitest.config.ts`:
+Create `/Users/nickhopps/Documents/playground/weftwise/vitest.config.ts`:
 
 ```ts
 import { defineConfig } from 'vitest/config';
@@ -972,7 +972,7 @@ Find the JSX block ending with the version footer:
 <Separator />
 
 <div className="flex items-center justify-between text-xs text-foreground-tertiary">
-  <span>Agentic Wiki</span>
+  <span>weftwise</span>
   <span className="tabular-nums">v{APP_VERSION}</span>
 </div>
 ```
@@ -1080,7 +1080,7 @@ git commit -m "feat(ui): add Wiki language row to settings dialog"
 
 - [ ] **Step 2: Update root `CLAUDE.md` changelog**
 
-Open `/Users/nickhopps/Documents/playground/agentic-wiki/CLAUDE.md`. In the "九、变更记录 (Changelog)" table, append a new row:
+Open `/Users/nickhopps/Documents/playground/weftwise/CLAUDE.md`. In the "九、变更记录 (Changelog)" table, append a new row:
 
 ```markdown
 | 2026-04-26 | 引入 wikiLanguage 全局设置 | 新增 `app_settings` 表 + `settings-repo` + `GET/PUT /api/settings`；左侧 settings dialog 加 "Wiki language" 行；`PromptContext` 把语言指令注入 ingest/query/lint 五个 user prompt（slugs/wikilinks/frontmatter keys 明确禁止翻译）；首批 vitest 单测落地 |

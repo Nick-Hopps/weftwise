@@ -1866,7 +1866,7 @@ export interface McpClientHandle {
 }
 
 export async function connectServer(serverId: string, cfg: McpServerConfig): Promise<McpClientHandle> {
-  const client = new Client({ name: `agentic-wiki:${serverId}`, version: '1.0.0' }, { capabilities: {} });
+  const client = new Client({ name: `weftwise:${serverId}`, version: '1.0.0' }, { capabilities: {} });
 
   if (cfg.transport === 'stdio') {
     const transport = new StdioClientTransport({
