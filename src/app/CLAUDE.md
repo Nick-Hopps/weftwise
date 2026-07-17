@@ -161,6 +161,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Subject 导出/导入：新增 `GET /api/subjects/[id]/export`（vault 锁内打 zip：manifest + wiki/raw/assets/sources 侧车）与 `POST /api/subjects/import`（multipart zip，manifest/formatVersion/zip-slip 校验，slug 冲突 409 可换名重试，失败清理回滚）；Subjects 页加 Import 按钮、编辑弹窗加 Export。spec/plan 见 docs/{specs,plans}/2026-07-17-subject-export-import.md |
 | 2026-07-17 | 全站主题色切换 weftwise 双色语法：`globals.css` BASE 层 violet 家族 → weft（纬线朱=动作，UI 主档 `#CC3F27` 白字 4.87:1）+ warp（经线靛=连接）两家族；accent/focus/selection/input-focus → weft，新增 `--color-link(-hover)` → warp，graph 节点 → warp、active → weft；danger 移向绯红 `#DB374F` 拉开色相；亮 canvas 贴品牌纸 `#F6F5F2`，暗色底面/边框整体带品牌蓝调（canvas `#131315`）；暗色主按钮前景改深墨。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |
 | 2026-07-17 | Ask AI 结构化选区支持 canonical 完整 Markdown 块锚点；`wiki.image.insert` 只创建配图 PendingAction，批准后才原子启动 `image-insert` job，Reshape 配图命令拒绝写 canonical |
 | 2026-07-17 | 品牌落地 weftwise（织识）：根 layout metadata 改 `title: {default:'weftwise 织识', template:'%s · weftwise'}` + 品牌 description；新增 `icon.svg`（自适应 favicon）、`apple-icon.png`、`opengraph-image.png(+alt)`；ingest 与 wiki not-found 标题去手写后缀交给 template；`globals.css` BASE 层新增 `--brand-warp`/`--brand-weft` token（`.dark` 覆盖）。plan 见 docs/plans/2026-07-17-brand-weftwise.md |
