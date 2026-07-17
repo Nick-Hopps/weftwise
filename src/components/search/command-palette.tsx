@@ -8,6 +8,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { useWikiSearch } from '@/hooks/use-wiki-search';
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/cn';
+import { parseSearchSnippet } from '@/lib/search-snippet';
 
 export function CommandPalette() {
   const router = useRouter();
@@ -111,8 +112,19 @@ export function CommandPalette() {
                           {result.page.title ?? result.page.slug}
                         </span>
                         {result.snippet && (
-                          <span className="block text-xs text-foreground-tertiary line-clamp-1">
-                            {result.snippet}
+                          <span className="mt-0.5 text-xs leading-5 text-foreground-tertiary line-clamp-2">
+                            {parseSearchSnippet(result.snippet).map((segment, index) =>
+                              segment.highlighted ? (
+                                <mark
+                                  key={index}
+                                  className="rounded-sm bg-accent-subtle px-0.5 font-medium text-accent-strong"
+                                >
+                                  {segment.text}
+                                </mark>
+                              ) : (
+                                <span key={index}>{segment.text}</span>
+                              ),
+                            )}
                           </span>
                         )}
                       </span>
