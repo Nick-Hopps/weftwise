@@ -36,7 +36,7 @@
 - `getPageBySlug(subjectId, slug): WikiPage | null`
 - `getAllPages(subjectId): WikiPage[]`
 - `getAllLinks(subjectId?): WikiLink[]`（不传时全量，用于 graph 全景图）
-- `searchPages(subjectId, query): WikiPage[]`（FTS5 + `subject_id` filter）
+- `searchPages(subjectId, query): { page, snippet, rank }[]`（FTS5 + `subject_id` filter；snippet 固定取正文列并携带受控 `<mark>` 命中标记）
 - `getBacklinks(subjectId, slug): WikiLink[]`
 - `getMetaPageKeys(subjectId): Set<string>`（复合键 `<subjectId>:<slug>` 防跨主题误命中）
 - `findPageInOtherSubjects(slug): { subjectId, slug, title }[]`（404 兜底提示用）
