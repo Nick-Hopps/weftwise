@@ -100,3 +100,46 @@
 3. 每个 Task 完成后使用英文类型前缀 + 中文一句话提交；实现提交使用 `feat:`，与本 `docs:` 提交配对。
 4. 检查 feature diff，在 main 上 `git merge --no-ff feat/reshape-experience`，merge message 包含分支名。
 5. 删除 worktree 与特性分支，确认最终 commit 落在 main。
+
+## Task 7：补齐 Review 发现的生命周期与成功判定
+
+涉及文件：
+
+- `src/server/db/repos/renditions-repo.ts`
+- `src/server/wiki/indexer.ts`
+- `src/server/wiki/page-identity-migration.ts`
+- `src/app/api/reset/route.ts`
+- 对应 repo / page move / reset / page delete 测试
+
+步骤：
+
+1. 先写失败测试：删页后 rendition 与图片消失；页面 move 同步迁移资产归属；Subject/global reset 不残留资产。
+2. 增加按页删除与资产迁移 repo 操作，并接入 indexer、page identity migration 与 reset 事务。
+3. 验证页面删除重建不会返回旧 rendition，move 后 Refresh 能清理旧图片。
+
+## Task 8：拒绝空正文并过滤未引用图片
+
+涉及文件：
+
+- `src/server/services/reshape-service.ts`
+- `src/server/services/__tests__/reshape-service.test.ts`
+
+步骤：
+
+1. 先写失败测试：空文本流抛错；生成但未被 Markdown 引用的图片不进入返回资产；引用未知 rendition ID 时抛错。
+2. 增加最终 Markdown 非空校验与本次请求资产引用解析，只返回实际引用资产。
+3. 跑 Reshape service 与 Lens route 定向测试，确认失败不触发 `replaceRendition`。
+
+## Task 9：呈现 stale 保存版本
+
+涉及文件：
+
+- `src/components/wiki/page-actions.tsx`
+- `src/components/wiki/wiki-reading-view.tsx`
+- `src/components/wiki/__tests__/page-actions-reshape.test.tsx`
+
+步骤：
+
+1. 先写失败组件测试：stale 重塑版显示旧版本提示；新鲜版本保持现有文案。
+2. 把 `LensResult.stale` 传入状态行，以现有行内层级显示警示图标和短文案。
+3. 验证 Refresh/Cancel/Show original 行为与现有布局不回归。
