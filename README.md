@@ -1,8 +1,10 @@
-# Agentic Wiki
+# weftwise 织识
 
-> 个人知识管理 Web 应用：由 LLM 从原始资料（Markdown / HTML / PDF / 纯文本）增量构建并维护一个可持久化、相互交叉引用的 Obsidian 兼容 Wiki。
+> **Knowledge, woven. —— 让读过的一切，织成一张布。**
+>
+> 个人知识管理 Web 应用（内部代号 `agentic-wiki`）：由 LLM 从原始资料（Markdown / HTML / PDF / 纯文本）增量构建并维护一个可持久化、相互交叉引用的 Obsidian 兼容 Wiki。每次 ingest，就是引一根新纬线（weft）穿过既有的知识经线。
 
-详细的模块说明请见 [`CLAUDE.md`](./CLAUDE.md) 与各子模块的 `CLAUDE.md`。
+品牌资产与使用规范见 [`docs/brand/`](./docs/brand/README.md)；详细的模块说明请见 [`CLAUDE.md`](./CLAUDE.md) 与各子模块的 `CLAUDE.md`。
 
 ---
 

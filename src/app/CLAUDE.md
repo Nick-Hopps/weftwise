@@ -161,6 +161,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 品牌落地 weftwise（织识）：根 layout metadata 改 `title: {default:'weftwise 织识', template:'%s · weftwise'}` + 品牌 description；新增 `icon.svg`（自适应 favicon）、`apple-icon.png`、`opengraph-image.png(+alt)`；ingest 与 wiki not-found 标题去手写后缀交给 template；`globals.css` BASE 层新增 `--brand-warp`/`--brand-weft` token（`.dark` 覆盖）。plan 见 docs/plans/2026-07-17-brand-weftwise.md |
 | 2026-07-16 | Tags Review 增加 Rename/Merge/Delete 治理入口；`/api/tag-actions` 只创建/恢复服务端 PendingAction，批准继续复用通用 approve/reject API，批量写入由单 changeset Saga 原子执行 |
 | 2026-07-16 | Tags 两路由升级为目录/组合浏览工作台，筛选状态 URL 化并增加 Suspense 加载边界；仍复用 subject-aware `/api/pages`，不新增写接口 |
 | 2026-07-16 | 明确的“重新丰富当前页面 / 重新丰富页面 `<slug>`”由 `/api/query` 确定性创建 workflow PendingAction，不再等待 Query LLM 首次 tool-call；仍须独立批准才入队 |
