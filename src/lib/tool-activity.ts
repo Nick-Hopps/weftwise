@@ -1,32 +1,55 @@
 /**
  * 聊天工具活动展示：把 SSE tool-call 的 provider 工具名（点号已转下划线）
- * 映射为图标 / 动词 / 参数摘要。client 与 server（query route）共用单一源。
+ * 映射为语义图标键 / 动词 / 参数摘要。client 与 server（query route）共用单一源。
+ * 图标键由客户端映射为 Lucide 组件，避免把彩色 emoji 或 React 依赖写入 worker 日志。
  */
-export function toolActivityIcon(tool: string): string {
+export type ToolActivityIconName =
+  | 'activity'
+  | 'compass'
+  | 'file-diff'
+  | 'file-pen'
+  | 'file-plus'
+  | 'file-text'
+  | 'files'
+  | 'globe'
+  | 'image'
+  | 'library'
+  | 'link'
+  | 'merge'
+  | 'move-right'
+  | 'search'
+  | 'sparkles'
+  | 'split'
+  | 'stop'
+  | 'tags'
+  | 'telescope'
+  | 'trash';
+
+export function toolActivityIcon(tool: string): ToolActivityIconName {
   switch (tool) {
-    case 'wiki_search': return '🔍';
-    case 'wiki_read': return '📄';
-    case 'wiki_list': return '🗂';
-    case 'subject_list': return '🗂';
-    case 'wiki_search_cross_subject': return '🔭';
-    case 'wiki_read_cross_subject': return '📚';
+    case 'wiki_search': return 'search';
+    case 'wiki_read': return 'file-text';
+    case 'wiki_list': return 'files';
+    case 'subject_list': return 'files';
+    case 'wiki_search_cross_subject': return 'telescope';
+    case 'wiki_read_cross_subject': return 'library';
     case 'wiki_reenrich':
-    case 'workflow_reenrich_start': return '✨';
-    case 'workflow_research_start': return '🌐';
-    case 'workflow_status': return '🧭';
-    case 'workflow_cancel': return '⏹️';
-    case 'wiki_image_insert': return '🖼️';
-    case 'wiki_create': return '➕';
-    case 'wiki_update': return '✏️';
-    case 'wiki_patch': return '✏️';
-    case 'wiki_metadata_patch': return '✏️';
-    case 'wiki_link_ensure': return '🔗';
-    case 'wiki_delete': return '🗑';
-    case 'wiki_move': return '↪️';
-    case 'wiki_merge': return '🔗';
-    case 'wiki_split': return '✂️';
-    case 'web_search': return '🌐';
-    default: return '•';
+    case 'workflow_reenrich_start': return 'sparkles';
+    case 'workflow_research_start': return 'globe';
+    case 'workflow_status': return 'compass';
+    case 'workflow_cancel': return 'stop';
+    case 'wiki_image_insert': return 'image';
+    case 'wiki_create': return 'file-plus';
+    case 'wiki_update': return 'file-pen';
+    case 'wiki_patch': return 'file-diff';
+    case 'wiki_metadata_patch': return 'tags';
+    case 'wiki_link_ensure': return 'link';
+    case 'wiki_delete': return 'trash';
+    case 'wiki_move': return 'move-right';
+    case 'wiki_merge': return 'merge';
+    case 'wiki_split': return 'split';
+    case 'web_search': return 'globe';
+    default: return 'activity';
   }
 }
 
@@ -119,11 +142,45 @@ export function summarizeToolArgs(tool: string, args: unknown): string {
   return '';
 }
 
-/** 组装单行日志文案（供 job 事件日志用），如 `📄 Reading "some-page"…`。 */
+/** 组装可复制的纯文本日志文案；视觉图标由客户端根据事件中的 tool 字段渲染。 */
 export function toolActivityLine(tool: string, args: unknown): string {
   const summary = summarizeToolArgs(tool, args);
-  const head = `${toolActivityIcon(tool)} ${toolActivityVerb(tool)}`;
+  const head = toolActivityVerb(tool);
   return summary ? `${head} "${summary}"…` : `${head}…`;
+}
+
+const LEGACY_TOOL_ACTIVITY_PREFIXES = [
+  '⏹️', '🖼️', '✏️', '↪️', '✂️',
+  '🔍', '📄', '🗂', '🔭', '📚', '✨', '🌐', '🧭', '➕', '🔗', '🗑', '•',
+] as const;
+
+/** 仅清理旧版工具事件写入的行首 emoji；普通用户内容不应调用此函数。 */
+export function stripLegacyToolActivityIcon(message: string): string {
+  for (const prefix of LEGACY_TOOL_ACTIVITY_PREFIXES) {
+    if (message.startsWith(prefix)) return message.slice(prefix.length).trimStart();
+  }
+  return message;
+}
+
+/** SSE 将业务 data 包在顶层 data 字段内；同时兼容测试/旧调用方的扁平形态。 */
+export function toolNameFromEvent(event: { data?: Record<string, unknown> }): string | null {
+  const data = event.data ?? {};
+  const nested = data.data;
+  const nestedTool = nested && typeof nested === 'object'
+    ? (nested as Record<string, unknown>).tool
+    : undefined;
+  const tool = nestedTool ?? data.tool;
+  return typeof tool === 'string' && tool.length > 0 ? tool : null;
+}
+
+export function latestToolName(events: readonly { data?: Record<string, unknown> }[]): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const data = events[index].data ?? {};
+    const updatesLatestMessage = [data.message, data.step, data.description]
+      .some((value) => typeof value === 'string' && value.length > 0);
+    if (updatesLatestMessage) return toolNameFromEvent(events[index]);
+  }
+  return null;
 }
 
 /** 根据 SSE 事件识别 job 活动标题，供进度条与详情弹窗共用。 */

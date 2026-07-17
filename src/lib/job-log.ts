@@ -1,9 +1,11 @@
 import type { JobStreamEvent } from '@/hooks/use-job-stream';
+import { stripLegacyToolActivityIcon, toolNameFromEvent } from '@/lib/tool-activity';
 
 export interface JobLogLine {
   time: string;
   text: string;
   isError: boolean;
+  tool: string | null;
 }
 
 export interface JobError {
@@ -32,10 +34,13 @@ function formatLogTime(iso: string): string {
 export function eventLogLine(event: JobStreamEvent): JobLogLine {
   const data = event.data ?? {};
   const createdAt = typeof data.createdAt === 'string' ? data.createdAt : '';
+  const tool = toolNameFromEvent(event);
+  const text = pickText(data) || event.type;
   return {
     time: formatLogTime(createdAt),
-    text: pickText(data) || event.type,
+    text: tool ? stripLegacyToolActivityIcon(text) : text,
     isError: event.type === 'job:failed' || event.type.endsWith(':error'),
+    tool,
   };
 }
 

@@ -9,7 +9,9 @@ import type { JobStreamStatus } from '@/hooks/job-stream-logic';
 import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
+import { latestToolName, stripLegacyToolActivityIcon } from '@/lib/tool-activity';
 import { JobDetailDialog } from './job-detail-dialog';
+import { ToolActivityIcon } from './tool-activity-icon';
 import {
   jobTypeVerb,
   shouldRefreshPageForCompletedJob,
@@ -49,6 +51,7 @@ function JobRow({
   const isCompleted = status === 'completed';
   const isFailed = status === 'failed';
   const wasCancelled = events.some((e) => e.type === 'job:cancelled');
+  const latestTool = latestToolName(events);
 
   useEffect(() => {
     onStatusChange(job.id, status);
@@ -110,14 +113,17 @@ function JobRow({
             </IconButton>
           )}
         </div>
-        <p className="truncate pl-[22px] text-xs text-foreground-tertiary">
+        <p className="flex items-center gap-1.5 truncate pl-[22px] text-xs text-foreground-tertiary">
+          {latestTool && <ToolActivityIcon tool={latestTool} className="h-3 w-3 shrink-0" />}
+          <span className="truncate">
           {job.queueStatus === 'pending' && status === 'idle'
             ? 'Queued'
             : isFailed
               ? wasCancelled
                 ? 'Cancelled'
-                : latestMessage || 'Failed'
-              : latestMessage || '…'}
+                : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || 'Failed'
+              : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || '…'}
+          </span>
         </p>
         {(isFailed || events.length > 0) && (
           <button

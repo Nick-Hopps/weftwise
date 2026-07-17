@@ -6,6 +6,23 @@ describe('eventLogLine', () => {
     expect(eventLogLine({ type: 'ingest:llm', data: { message: 'A' } }).text).toBe('A');
   });
 
+  it('exposes the semantic tool name and removes legacy emoji from log text', () => {
+    expect(eventLogLine({
+      type: 'fix:tool',
+      data: { message: '✏️ Editing "page-a"…', data: { tool: 'wiki_update' } },
+    })).toMatchObject({
+      text: 'Editing "page-a"…',
+      tool: 'wiki_update',
+    });
+  });
+
+  it('does not strip emoji from ordinary non-tool event messages', () => {
+    expect(eventLogLine({
+      type: 'ingest:complete',
+      data: { message: '保留用户内容 🚀' },
+    }).text).toBe('保留用户内容 🚀');
+  });
+
   it('falls back to event.type when message is absent or empty', () => {
     expect(eventLogLine({ type: 'ingest:start', data: {} }).text).toBe('ingest:start');
     expect(eventLogLine({ type: 'job:failed', data: { message: '' } }).text).toBe('job:failed');
