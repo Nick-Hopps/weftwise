@@ -69,7 +69,7 @@ import {
 } from '../query-prompt';
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
-  const prompt = buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false });
+  const prompt = buildQueryAgenticSystemPrompt({ mode: 'read' });
 
   it('说明受治理工具与 subject 隔离', () => {
     expect(prompt).toContain('wiki_list');
@@ -136,16 +136,16 @@ describe('QueryResponseSchema — coverage 字段', () => {
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT — web search 纪律', () => {
   it('提到 web_search 工具与来源标注要求', () => {
-    const prompt = buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false });
+    const prompt = buildQueryAgenticSystemPrompt({ mode: 'read' });
     expect(prompt).toContain('web_search');
     expect(prompt).toMatch(/not in your wiki/i);
   });
 });
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
-  const readPrompt = buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false });
-  const proposePrompt = buildQueryAgenticSystemPrompt({ mode: 'propose', imageInsertEnabled: false });
-  const imagePrompt = buildQueryAgenticSystemPrompt({ mode: 'propose', imageInsertEnabled: true });
+  const readPrompt = buildQueryAgenticSystemPrompt({ mode: 'read' });
+  const proposePrompt = buildQueryAgenticSystemPrompt({ mode: 'propose' });
+  const imagePrompt = buildQueryAgenticSystemPrompt({ mode: 'image-insert' });
 
   it('不宣称 Ask AI 可直接执行写操作或口头确认授权', () => {
     for (const tool of ['wiki_create', 'wiki_update', 'wiki_patch', 'wiki_delete']) {
@@ -177,9 +177,11 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
     expect(proposePrompt).toMatch(/does not enqueue|does not cancel/i);
   });
 
-  it('只有 imageInsertEnabled prompt 描述选区配图工具', () => {
+  it('只有 image-insert prompt 描述选区配图工具', () => {
     expect(proposePrompt).not.toContain('wiki_image_insert');
     expect(imagePrompt).toContain('wiki_image_insert');
+    expect(imagePrompt).not.toContain('wiki_preview_change');
+    expect(imagePrompt).not.toContain('workflow_reenrich_start');
     expect(imagePrompt).toMatch(/read the current page first/i);
     expect(imagePrompt).toMatch(/does not call the image model|after the user clicks Approve/i);
     expect(imagePrompt).not.toContain('image_generate');

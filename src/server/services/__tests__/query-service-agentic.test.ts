@@ -157,8 +157,7 @@ describe('streamAgenticQuery - 动态工具模式', () => {
     streamAgenticQuery({
       question: '在这下面生成一张图片说明',
       subject: SUBJECT,
-      mode: 'propose',
-      imageInsertEnabled: true,
+      mode: 'image-insert',
     });
 
     expect(mockStreamTools).toHaveBeenCalledWith(
@@ -167,13 +166,13 @@ describe('streamAgenticQuery - 动态工具模式', () => {
         system: expect.stringContaining('wiki_image_insert'),
       }),
     );
+    expect(mockStreamTools.mock.calls[0]?.[1]?.system).not.toContain('wiki_preview_change');
 
     mockStreamTools.mockClear();
     streamAgenticQuery({
       question: '解释一下这段内容',
       subject: SUBJECT,
       mode: 'read',
-      imageInsertEnabled: false,
     });
     expect(mockStreamTools).toHaveBeenCalledWith(
       'query',
