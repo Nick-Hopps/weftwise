@@ -15,6 +15,7 @@ import type { Code as MdastCode } from 'mdast';
 import type { Plugin } from 'unified';
 import WikiLinkComponent from '@/components/wiki/wiki-link';
 import MermaidDiagram from '@/components/wiki/mermaid-diagram';
+import { CalloutIcon } from '@/components/wiki/callout-icon';
 import { remarkArticleHeadings } from '@/lib/article-toc';
 
 // ---------------------------------------------------------------------------
@@ -187,10 +188,11 @@ function splitTextForWikiLinks(text: string, resolver?: SlugResolver): MdastNode
 // remarkCallouts plugin
 // ---------------------------------------------------------------------------
 // 把首段首行匹配 `[!type]` 的 blockquote 重标为 <div data-callout=type>，
-// 并剥离 `[!type]` 标记（保留紧随其后的 emoji/标题文字作为容器首行）。
+// 并剥离 `[!type]` 标记及旧版标题开头的已知 emoji。
 // 仅改 hast 提示（hName/hProperties），不改 mdast 结构，故 wikilink/math 子节点照常处理。
 
 const CALLOUT_RE = /^\[!([\w-]+)\]\s*/;
+const LEGACY_CALLOUT_ICON_RE = /^(?:\u{1F4A1}|\u{1F4DD}|\u{2753}|\u{1F517}|\u{26A0}\u{FE0F}?|\u{1F4CA}|\u{1F4C8}|\u{1F4C9}|\u{1F9E9}|\u{1F9E0})\s*/u;
 
 function createRemarkCallouts(): Plugin<[], MdastRoot> {
   return function () {
@@ -220,7 +222,7 @@ function tagCalloutBlockquote(bq: MdastParent): void {
   if (!m) return;
 
   const type = m[1].toLowerCase();
-  (firstText as MdastText).value = value.slice(m[0].length);
+  (firstText as MdastText).value = value.slice(m[0].length).replace(LEGACY_CALLOUT_ICON_RE, '');
   const node = bq as MdastNode & { data?: Record<string, unknown> };
   node.data = {
     ...node.data,
@@ -377,6 +379,16 @@ export function renderMarkdown(
         },
         mermaiddiagram: function MermaidRenderer(props: { code?: string }) {
           return createElement(MermaidDiagram, { code: props.code ?? '' });
+        },
+        div: function CalloutRenderer(props: React.ComponentPropsWithoutRef<'div'>) {
+          const calloutType = props['data-callout' as keyof typeof props];
+          if (typeof calloutType !== 'string') return createElement('div', props);
+          return createElement(
+            'div',
+            props,
+            createElement(CalloutIcon, { type: calloutType }),
+            props.children,
+          );
         },
       },
     })

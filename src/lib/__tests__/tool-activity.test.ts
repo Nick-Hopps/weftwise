@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   jobActivityTitle,
+  latestToolName,
   summarizeToolArgs,
   toolActivityIcon,
   toolActivityLine,
@@ -9,14 +10,14 @@ import {
 
 describe('tool-activity', () => {
   it('已知工具映射 icon/verb（含 wiki_reenrich）', () => {
-    expect(toolActivityIcon('wiki_reenrich')).toBe('✨');
+    expect(toolActivityIcon('wiki_reenrich')).toBe('sparkles');
     expect(toolActivityVerb('wiki_reenrich')).toBe('Planning re-enrichment');
-    expect(toolActivityIcon('wiki_search')).toBe('🔍');
+    expect(toolActivityIcon('wiki_search')).toBe('search');
     expect(toolActivityVerb('wiki_read')).toBe('Reading');
-    expect(toolActivityIcon('wiki_list')).toBe('🗂');
+    expect(toolActivityIcon('wiki_list')).toBe('files');
   });
   it('未知工具回落', () => {
-    expect(toolActivityIcon('mystery')).toBe('•');
+    expect(toolActivityIcon('mystery')).toBe('activity');
     expect(toolActivityVerb('mystery')).toBe('mystery');
   });
   it('summarizeToolArgs：search→query，read/reenrich→slug，其它空', () => {
@@ -30,8 +31,8 @@ describe('tool-activity', () => {
 
 describe('tool-activity - wiki_create/wiki_delete', () => {
   it('图标', () => {
-    expect(toolActivityIcon('wiki_create')).toBe('➕');
-    expect(toolActivityIcon('wiki_delete')).toBe('🗑');
+    expect(toolActivityIcon('wiki_create')).toBe('file-plus');
+    expect(toolActivityIcon('wiki_delete')).toBe('trash');
   });
   it('动词', () => {
     expect(toolActivityVerb('wiki_create')).toBe('Creating');
@@ -45,8 +46,8 @@ describe('tool-activity - wiki_create/wiki_delete', () => {
 
 describe('tool-activity - wiki_merge/wiki_split', () => {
   it('图标', () => {
-    expect(toolActivityIcon('wiki_merge')).toBe('🔗');
-    expect(toolActivityIcon('wiki_split')).toBe('✂️');
+    expect(toolActivityIcon('wiki_merge')).toBe('merge');
+    expect(toolActivityIcon('wiki_split')).toBe('split');
   });
   it('动词', () => {
     expect(toolActivityVerb('wiki_merge')).toBe('Merging');
@@ -60,7 +61,7 @@ describe('tool-activity - wiki_merge/wiki_split', () => {
 
 describe('tool-activity - wiki_patch', () => {
   it('图标/动词/参数摘要（slug）', () => {
-    expect(toolActivityIcon('wiki_patch')).toBe('✏️');
+    expect(toolActivityIcon('wiki_patch')).toBe('file-diff');
     expect(toolActivityVerb('wiki_patch')).toBe('Patching');
     expect(summarizeToolArgs('wiki_patch', { slug: 'eigen' })).toBe('eigen');
     expect(summarizeToolArgs('wiki_patch', {})).toBe('');
@@ -70,7 +71,7 @@ describe('tool-activity - wiki_patch', () => {
 describe('tool-activity - narrow writes', () => {
   it('metadata 摘要只显示 slug 与字段名', () => {
     const args = { slug: 'page-a', title: '秘密标题', tags: ['秘密标签'] };
-    expect(toolActivityIcon('wiki_metadata_patch')).toBe('✏️');
+    expect(toolActivityIcon('wiki_metadata_patch')).toBe('tags');
     expect(toolActivityVerb('wiki_metadata_patch')).toBe('Editing metadata');
     expect(summarizeToolArgs('wiki_metadata_patch', args)).toBe('page-a (title, tags)');
     expect(toolActivityLine('wiki_metadata_patch', args)).not.toContain('秘密');
@@ -81,7 +82,7 @@ describe('tool-activity - narrow writes', () => {
       sourceSlug: 'source', mode: 'retarget', targetSubjectSlug: 'other',
       targetSlug: 'target', oldString: '秘密上下文', displayText: '秘密锚点',
     };
-    expect(toolActivityIcon('wiki_link_ensure')).toBe('🔗');
+    expect(toolActivityIcon('wiki_link_ensure')).toBe('link');
     expect(toolActivityVerb('wiki_link_ensure')).toBe('Maintaining link');
     expect(summarizeToolArgs('wiki_link_ensure', args))
       .toBe('source retarget other:target');
@@ -91,7 +92,7 @@ describe('tool-activity - narrow writes', () => {
 
 describe('tool-activity - web_search', () => {
   it('图标/动词/参数摘要', () => {
-    expect(toolActivityIcon('web_search')).toBe('🌐');
+    expect(toolActivityIcon('web_search')).toBe('globe');
     expect(toolActivityVerb('web_search')).toBe('Searching the web');
     expect(summarizeToolArgs('web_search', { query: 'foo' })).toBe('foo');
   });
@@ -100,11 +101,11 @@ describe('tool-activity - web_search', () => {
 describe('tool-activity - Phase 3A 跨主题读取', () => {
   it('显示 Subject 列表、跨主题搜索和跨主题读取的安全摘要', () => {
     expect(toolActivityVerb('subject_list')).toBe('Listing subjects');
-    expect(toolActivityIcon('wiki_search_cross_subject')).toBe('🔭');
+    expect(toolActivityIcon('wiki_search_cross_subject')).toBe('telescope');
     expect(summarizeToolArgs('wiki_search_cross_subject', {
       query: 'WAL', subjectSlugs: ['notes', 'archive'],
     })).toBe('notes, archive: WAL');
-    expect(toolActivityIcon('wiki_read_cross_subject')).toBe('📚');
+    expect(toolActivityIcon('wiki_read_cross_subject')).toBe('library');
     expect(summarizeToolArgs('wiki_read_cross_subject', {
       subjectSlug: 'notes', slug: 'sqlite',
     })).toBe('notes:sqlite');
@@ -113,56 +114,76 @@ describe('tool-activity - Phase 3A 跨主题读取', () => {
 
 describe('toolActivityLine', () => {
   it('拼装 icon + verb + 参数摘要', () => {
-    expect(toolActivityLine('wiki_read', { slug: 'some-page' })).toBe('📄 Reading "some-page"…');
-    expect(toolActivityLine('wiki_search', { query: 'panda diet' })).toBe('🔍 Searching "panda diet"…');
-    expect(toolActivityLine('wiki_merge', { sourceSlug: 'a', targetSlug: 'b' })).toBe('🔗 Merging "a → b"…');
+    expect(toolActivityLine('wiki_read', { slug: 'some-page' })).toBe('Reading "some-page"…');
+    expect(toolActivityLine('wiki_search', { query: 'panda diet' })).toBe('Searching "panda diet"…');
+    expect(toolActivityLine('wiki_merge', { sourceSlug: 'a', targetSlug: 'b' })).toBe('Merging "a → b"…');
   });
 
   it('无参数摘要时省略引号段', () => {
-    expect(toolActivityLine('wiki_list', {})).toBe('🗂 Listing pages…');
+    expect(toolActivityLine('wiki_list', {})).toBe('Listing pages…');
   });
 
   it('未知工具回落工具名', () => {
-    expect(toolActivityLine('mystery_tool', { x: 1 })).toBe('• mystery_tool…');
+    expect(toolActivityLine('mystery_tool', { x: 1 })).toBe('mystery_tool…');
+  });
+});
+
+describe('latestToolName', () => {
+  it('只在最新文案事件本身是工具事件时返回工具名', () => {
+    expect(latestToolName([
+      { data: { message: 'Editing…', data: { tool: 'wiki_update' } } },
+    ])).toBe('wiki_update');
+
+    expect(latestToolName([
+      { data: { message: 'Editing…', data: { tool: 'wiki_update' } } },
+      { data: { message: 'Verification complete' } },
+    ])).toBeNull();
+  });
+
+  it('忽略不更新 latestMessage 的尾随事件', () => {
+    expect(latestToolName([
+      { data: { message: 'Searching…', data: { tool: 'wiki_search' } } },
+      { data: { status: 'streaming' } },
+    ])).toBe('wiki_search');
   });
 });
 
 describe('Phase 3C workflow activity', () => {
   it('使用计划语义并只展示安全参数', () => {
-    expect(toolActivityIcon('workflow_status')).toBe('🧭');
+    expect(toolActivityIcon('workflow_status')).toBe('compass');
     expect(toolActivityVerb('workflow_status')).toBe('Checking workflow');
     expect(toolActivityLine('workflow_status', { jobId: 'job-1', secret: 'x' }))
-      .toBe('🧭 Checking workflow "job-1"…');
+      .toBe('Checking workflow "job-1"…');
 
-    expect(toolActivityIcon('workflow_reenrich_start')).toBe('✨');
+    expect(toolActivityIcon('workflow_reenrich_start')).toBe('sparkles');
     expect(toolActivityVerb('wiki_reenrich')).toBe('Planning re-enrichment');
     expect(toolActivityLine('workflow_reenrich_start', { slug: 'page-a', body: 'secret' }))
-      .toBe('✨ Planning re-enrichment "page-a"…');
+      .toBe('Planning re-enrichment "page-a"…');
 
-    expect(toolActivityIcon('workflow_research_start')).toBe('🌐');
+    expect(toolActivityIcon('workflow_research_start')).toBe('globe');
     expect(toolActivityLine('workflow_research_start', { topic: 'SQLite', apiKey: 'secret' }))
-      .toBe('🌐 Planning research "SQLite"…');
+      .toBe('Planning research "SQLite"…');
 
-    expect(toolActivityIcon('workflow_cancel')).toBe('⏹️');
+    expect(toolActivityIcon('workflow_cancel')).toBe('stop');
     expect(toolActivityLine('workflow_cancel', { jobId: 'job-1', result: 'secret' }))
-      .toBe('⏹️ Planning cancellation "job-1"…');
+      .toBe('Planning cancellation "job-1"…');
   });
 });
 
 describe('Phase 3D wiki.move activity', () => {
   it('只展示旧/新 slug，不泄漏其他参数', () => {
-    expect(toolActivityIcon('wiki_move')).toBe('↪️');
+    expect(toolActivityIcon('wiki_move')).toBe('move-right');
     expect(toolActivityVerb('wiki_move')).toBe('Planning page move');
     expect(toolActivityLine('wiki_move', {
       slug: 'old-page', newSlug: 'new-page', content: 'secret',
-    })).toBe('↪️ Planning page move "old-page → new-page"…');
+    })).toBe('Planning page move "old-page → new-page"…');
   });
 });
 
 describe('Ask AI 选区配图 activity', () => {
   it('使用计划语义并限制 prompt 摘要长度', () => {
     const prompt = `教育插图：${'细节'.repeat(100)}`;
-    expect(toolActivityIcon('wiki_image_insert')).toBe('🖼️');
+    expect(toolActivityIcon('wiki_image_insert')).toBe('image');
     expect(toolActivityVerb('wiki_image_insert')).toBe('Planning illustration');
     const summary = summarizeToolArgs('wiki_image_insert', {
       prompt,

@@ -118,7 +118,7 @@ export const PAGE_BODY_SYSTEM_PROMPT = `You are a meticulous wiki editor writing
 3. Headings use ATX style (\`#\`, \`##\`, etc.). Start with ## (the page title is rendered separately).
 4. Prefer encyclopedic, neutral prose. Remove marketing language and superlatives.
 5. Do NOT invent facts not present in the source. Stick to what the source says.
-6. If a contradiction with existing pages was noted, include a "> ⚠ Contradiction:" blockquote.
+6. If a contradiction with existing pages was noted, include a "> [!pitfall] Contradiction" callout.
 7. Keep the page focused and concise — aim for 200-800 words.
 
 ## Subject scoping

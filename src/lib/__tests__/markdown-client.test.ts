@@ -50,12 +50,14 @@ describe('renderMarkdown — KaTeX 公式渲染', () => {
 });
 
 describe('renderMarkdown — Callout 渲染', () => {
-  it('[!type] blockquote 渲染为 data-callout 容器并剥离标记', () => {
+  it('[!type] blockquote 渲染为 Lucide 图标容器并剥离历史 emoji', () => {
     const md = '> [!intuition] 💡 直觉\n> 把 T 想成一次搅动。';
     const html = toHtml(renderMarkdown(md));
     expect(html).toContain('data-callout="intuition"');
     expect(html).toContain('callout-intuition');
-    expect(html).toContain('💡 直觉');
+    expect(html).toContain('data-callout-icon="intuition"');
+    expect(html).toContain('直觉');
+    expect(html).not.toContain('💡');
     expect(html).not.toContain('[!intuition]');
   });
 
@@ -74,6 +76,18 @@ describe('renderMarkdown — Callout 渲染', () => {
     const html = toHtml(renderMarkdown('> [!background] 🔗 背景\n> 见 [[Vectors]]'));
     expect(html).toContain('data-callout="background"');
     expect(html).toContain('Vectors');
+  });
+
+  it('只清理 callout 标题开头的已知 emoji，正文 emoji 保持不变', () => {
+    const html = toHtml(renderMarkdown('> [!example] 📝 示例\n> 发射成功 🚀'));
+    expect(html).not.toContain('📝');
+    expect(html).toContain('发射成功 🚀');
+  });
+
+  it('未知 callout 类型使用通用图标并保留标题', () => {
+    const html = toHtml(renderMarkdown('> [!custom] 自定义说明'));
+    expect(html).toContain('data-callout-icon="custom"');
+    expect(html).toContain('自定义说明');
   });
 });
 

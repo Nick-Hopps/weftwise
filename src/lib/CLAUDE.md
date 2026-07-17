@@ -155,7 +155,7 @@ src/lib/
 ├── tags.ts                 # 标签目录、组合筛选与 Review 清理队列纯分析
 ├── chat-reference.ts       # Ask AI 用户消息 Passage → Subject/page 引用
 ├── selection-text.ts       # 🆕 正文选区文本纯函数（归一化/截断/id/最近标题）
-├── tool-activity.ts        # 工具活动展示与参数脱敏（含 metadata ✏️ / link 🔗，只显示 slug/字段名/mode，不泄露值或锚点）
+├── tool-activity.ts        # 工具活动语义图标键、纯文本日志与参数脱敏（只显示 slug/字段名/mode，不泄露值或锚点）
 ├── job-started-event.ts    # 客户端后台任务启动事件的真实 type/label/queueStatus 契约
 ├── error-format.ts         # 🆕 describeErrorMessage：补全 RetryError 丢失的真实原因
 └── theme/
@@ -166,6 +166,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-18 | `tool-activity.ts` 将 emoji 映射改为稳定语义图标键，worker 事件只写可复制纯文本；`markdown-client.ts` 为 callout 注入 Lucide 图标并在渲染期兼容剥离历史标题 emoji，不改写 vault |
 | 2026-07-17 | `ask-ai-floating-panel.ts` 新增桌面工作面 resize 尺寸约束与视口矩形适配，保证右/下/双轴调整及窗口变化后仍完整可操作 |
 | 2026-07-17 | contracts 新增 `UserMessageReference`（含可选页面标题快照）与 `ConversationMessage.references`；`chat-reference.ts` 统一把发送 Passage 绑定到当前 Subject/page，供用户消息即时展示和持久化恢复 |
 | 2026-07-17 | contracts 新增结构化选区、持久化 Markdown 块锚点、图片请求、`workflow-image-insert-start` 与 `image-insert` job；job-started event 保留真实图片任务类型 |

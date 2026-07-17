@@ -5,7 +5,8 @@ import React, { useEffect, useRef, useState, memo, useMemo } from 'react';
 import { ChevronDown, MessageCircleQuestion, TextQuote } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
-import { toolActivityIcon, toolActivityVerb } from '@/lib/tool-activity';
+import { toolActivityVerb } from '@/lib/tool-activity';
+import { ToolActivityIcon } from '@/components/shared/tool-activity-icon';
 import { citationHref } from '@/lib/wiki-citation';
 import { displayTitleForSlug } from '@/lib/path-display';
 import {
@@ -183,7 +184,7 @@ const MessageRow = memo(function MessageRow({
                     key={index}
                     className="flex items-center gap-1.5 font-mono text-[11px] text-foreground-tertiary"
                   >
-                    <span>{toolActivityIcon(activity.tool)}</span>
+                    <ToolActivityIcon tool={activity.tool} className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">
                       {toolActivityVerb(activity.tool)}
                       {activity.label ? `: ${activity.label}` : ''}

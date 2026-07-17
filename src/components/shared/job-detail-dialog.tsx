@@ -20,6 +20,7 @@ import type { Job } from '@/lib/contracts';
 import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
 import { eventLogLine, parseJobError } from '@/lib/job-log';
 import { jobActivityTitle } from '@/lib/tool-activity';
+import { ToolActivityIcon } from './tool-activity-icon';
 
 interface JobDetailDialogProps {
   jobId: string;
@@ -145,6 +146,9 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
                 >
                   {line.time && (
                     <span className="shrink-0 text-foreground-tertiary tabular-nums">{line.time}</span>
+                  )}
+                  {line.tool && (
+                    <ToolActivityIcon tool={line.tool} className="mt-px h-3.5 w-3.5 shrink-0" />
                   )}
                   <span>{line.text}</span>
                 </div>
