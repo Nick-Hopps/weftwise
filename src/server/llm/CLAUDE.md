@@ -29,7 +29,7 @@
 | 阶段 | `ingest:chunk-summarizer` | ingest：大文件分片摘要（map 阶段） |
 | 阶段 | `ingest:writer` | ingest：写/并入页面正文（fanout 阶段） |
 | 阶段 | `ingest:enricher` | ingest：叠加 callout 增益层 |
-| 阶段 | `ingest:image` | ingest enrich：使用 image-capable 模型生成 PNG/JPEG/WebP |
+| 阶段 | `ingest:image` | ingest enrich 与已批准选区配图：使用 image-capable 模型生成 PNG/JPEG/WebP |
 | 阶段 | `ingest:verifier` | ingest：参数化自检（联网核查降级回落） |
 | 阶段 | `ingest:verifier-triage` | ingest：联网核查 triage（挑存疑断言+query） |
 | 阶段 | `ingest:verifier-apply` | ingest：联网核查 apply（证据驱动改 callout） |
@@ -231,6 +231,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Ask AI canonical 选区可提议一张解释配图；批准后的 `image-insert` worker 继续复用 `ingest:image`，不新增 task schema/示例配置，Query 模型本身无真实生图权限 |
 | 2026-07-16 | `ingest:image` 增加运行时路由预检：必须显式解析到 Google 图片模型，禁止缺配置时继承默认文本模型 |
 | 2026-07-16 | enrich 新增 `image.generate` 图片工具；独立 `ingest:image` 路由示例指向 `gemini-3.1-flash-image-preview`，通过 image response 返回位图 |
 | 2026-07-15 | `generateStructuredOutput` 增加调用点级 schema 定向重试（最多 2 次、共享总超时），抽出 `generation-error.ts` 统一错误路径摘要；Lint 开启 1 次重试并仅向 job event 写入脱敏后的 `finishReason/detail` |

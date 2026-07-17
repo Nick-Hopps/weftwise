@@ -128,6 +128,7 @@ src/server/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Worker 注册 `image-insert-service`：批准后生图，页面引用与 base64 asset 同一 Saga；生图前后稳定 HEAD/锚点复核、取消 rollback 与 applied operation 幂等恢复 |
 | 2026-04-22 | 初始化：梳理后端分层与交叉引用 |
 | 2026-04-25 | 引入 Subject：subjects 表 + 复合 PK + middleware/subject + 全链路 subjectId |
 | 2026-06-22 | git-service 加 getVaultLog/parseGitLog；新增 operations-repo + wiki/{revert,history}.ts + /api/history* 路由（⑥ 版本历史/diff）|

@@ -59,12 +59,12 @@
 - `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装；`height="100%"` 撑满父高，`components.preview` 接 `previewRenderer` 自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
 - `editor-preview.tsx` —— 🆕 编辑器实时预览：复用 `PageRenderer`（**不传 title**→跳过 FrontmatterDisplay、仅正文），与阅读页同管线（wikilink/callout/mermaid/数学公式一致），`renderMarkdown` 的 `remarkFrontmatter` 自动剥离 `---` 块
 - `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
-- `selection-ask-button.tsx` —— 正文选区末端浮出的「Ask AI」按钮：消费 `hooks/use-text-selection`（选区限定在 `wiki-reading-view` 包的正文容器 ref 内），点击调 `ui-store.askAboutSelection`（写瞬态信箱 `pendingChatReference` + 以选区末端为锚点打开悬浮工作面）；滚动/折叠/落在容器外自动隐藏
+- `selection-ask-button.tsx` —— 正文选区末端浮出的「Ask AI」按钮：消费 `hooks/use-text-selection`（选区限定在阅读正文，并组合首尾完整顶层 Markdown 块 offset）；点击调 `ui-store.askAboutSelection`，结构化信箱保留 canonical/reshape、quote、section 和块范围；滚动/折叠/落在容器外自动隐藏
 
 ### `chat/`
 
 - `chat-interface.tsx` —— 对话主界面（消息流 + 输入框 + stream handling），发问 body 含 `subjectId`；`reset` 口头确认状态已独立命名为 `PendingResetConfirmation`，不会授权普通 Wiki 写入；会话加载并行恢复 messages 与 pending actions，切换 subject/conversation 时取消旧请求；消费 `pending-action` SSE 后按 actionId upsert，消费 `error` SSE 后把错误写入当前 assistant 消息而非留下空白 loading；批准 workflow 后通过 `job-started-event` 派发真实 job type/label，cancel 与同步页面写入不误报为新任务
-- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/页面 move/标签批量治理/History 回滚/工作流标题、diff 仅文本 `<pre>`、警告列表、pending 按钮、执行/终态 status）与 actionId 原位替换/会话快照去重纯函数；受影响页面默认只显示前 8 条并汇总余量；move 明确提示旧链接 alias 兼容，Research start 提醒候选二次审批，cancel 显示终止语义
+- `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/move/标签治理/History/工作流/选区配图）与 actionId 原位替换；配图卡显示完整 Markdown 块、prompt、alt、比例/风格，`applied` 只表示后台任务已启动；受影响页面默认只显示前 8 条
 - `conversation-switcher.tsx` —— 🆕 chat tab 顶部：当前会话标题下拉 + New + 重命名 + 删除，React Query `['conversations',subjectId]`
 - `message-list.tsx` —— 消息流渲染；`MarkdownText` 经 `renderMarkdown()` 支持 GFM 表格；新增 `MessageCitations` 组件，每条消息的引用列表支持展开/折叠（仿 `layout/sidebar.tsx` "Sources" 分组模式），>3 条默认折叠、≤3 条默认展开，各消息独立维护本地折叠状态
 - `save-to-wiki-button.tsx` —— 触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
@@ -108,7 +108,7 @@
 ### `shared/`
 
 - `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），queued 行离开 active 列表时切入 SSE 终态恢复，托管 `JobsPanel`
-- `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态，终态行支持单条关闭或一键清理，折叠态按处理中/全部成功/包含失败显示对应图标
+- `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态；`image-insert` 显示 `Illustrating`，成功后失效页面缓存并 `router.refresh()`
 - `progress-toast.tsx` —— SSE 进度条 toast 组件（保留，但不再被 `global-job-tracker` 挂载，供 `JobsPanel` 内部行复用）
 
 > Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
@@ -184,6 +184,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Ask AI 选区信箱贯通 canonical/reshape 与顶层块 offset；配图审批卡展示视觉请求详情，`image-insert` 任务显示 Illustrating，成功终态全局刷新阅读页 |
 | 2026-07-17 | 品牌落地 weftwise（织识）：新增 `shared/weftwise-mark.tsx`（织纹标志，走 `--brand-warp`/`--brand-weft` token 自动亮暗）；Header 换 weftwise lockup（Space Grotesk wordmark + 「织识」lg 起显示），替换旧网络图形与 "Agentic Wiki"；Settings About 两处文案改 `weftwise 织识`。plan 见 docs/plans/2026-07-17-brand-weftwise.md |
 | 2026-07-16 | Wiki 阅读页面包屑安全解码中文 slug，并将 Edit / Sources / Reshape 收敛为带 tooltip 的纯图标按钮 |
 | 2026-07-17 | Wiki 正文增加自适应固定目录：宽内容区常驻右侧章节轨道，窄内容区使用粘性入口；普通阅读与 Sources 分栏共享当前章节跟踪和稳定标题锚点 |

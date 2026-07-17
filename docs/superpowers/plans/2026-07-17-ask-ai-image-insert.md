@@ -2,8 +2,8 @@
 
 **目标：** 在 canonical 阅读页选中完整 Markdown 块后，通过 Ask AI PendingAction 批准并启动单图生成，最终把图片资产与正文引用原子提交。
 
-**设计：** `docs/superpowers/specs/2026-07-17-ask-ai-image-insert-design.md`  
-**分支：** `feat/ask-ai-image-insert`  
+**设计：** `docs/superpowers/specs/2026-07-17-ask-ai-image-insert-design.md`
+**分支：** `feat/ask-ai-image-insert`
 **Worktree：** `.worktrees/ask-ai-image-insert`
 
 ## Task 1：结构化选区与块级源位置

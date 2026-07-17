@@ -142,6 +142,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | 新增顶层 Markdown 块持久化锚点；`applyChangeset` 支持持锁后的 `assertCanApply` 多点复核，选区配图取消可在写入/commit 前触发 Saga rollback；页面与图片 asset 同一 changeset |
 | 2026-07-16 | 新增 `planTagBatch`：Rename 要求新标签未使用、Merge 要求目标已存在、Delete 只移除标签；精确匹配原始大小写、跳过 meta 页、正文保持不变，全部受影响页在单 changeset 中预览/批准/apply |
 | 2026-07-14 | Wiki 解析边界：frontmatter 补齐 emoji/fenced code/CRLF 语义往返测试；`TitleResolver` 接收目标 Subject，indexer 与页面操作按 Subject 隔离同名 title，跨 Subject 标题正确解析到 canonical slug |
 | 2026-07-14 | 页面身份迁移 Phase 3D：新增 move plan、alias 解析、当前 Subject backlink 与 source sidecar 同 commit 更新；Saga 按 marker 迁移 slug 派生缓存并重建索引，rollback/recovery/History revert 支持反向身份迁移 |

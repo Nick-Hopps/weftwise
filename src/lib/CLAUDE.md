@@ -35,7 +35,7 @@ SubjectId      = string  // uuid 或 'subject-general' / 'subject-<uuid>' legacy
 Subject        { id: SubjectId, slug, name, description, createdAt, updatedAt }
 WikiPage       { subjectId, slug, title, path, summary, contentHash, tags, createdAt, updatedAt }
 WikiLink       { subjectId, sourceSlug, targetSubjectId, targetSlug, context }
-Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'embed-index'|'curate'|'re-enrich'|'fix'|'research'|'research-import', status, subjectId: SubjectId|null,
+Job            { id, type: 'ingest'|'lint'|'save-to-wiki'|'embed-index'|'curate'|'re-enrich'|'fix'|'research'|'research-import'|'image-insert', status, subjectId: SubjectId|null,
                  paramsJson, resultJson, createdAt, startedAt, completedAt,
                  leaseExpiresAt, heartbeatAt, attemptCount }
 JobEvent       { id, jobId, type, message, dataJson, createdAt }
@@ -63,11 +63,14 @@ Conversation   { id, subjectId, title, createdAt, updatedAt }
 ConversationMessage { id, conversationId, role: 'user'|'assistant', content, citations: WikiCitation[]|null, createdAt }
 MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
 LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
-PendingActionOperation = 'create'|'update'|'patch'|'delete'|'move'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'|'workflow-reenrich-start'|'workflow-research-start'|'workflow-cancel'
+PendingActionOperation = 'create'|'update'|'patch'|'delete'|'move'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'|'workflow-reenrich-start'|'workflow-research-start'|'workflow-image-insert-start'|'workflow-cancel'
 PreviewChangeInput { operation, payload } // discriminated union；Query 只提交预览，不持有真实写工具
 MovePageInput { slug, newSlug } // 当前 Subject canonical 页面身份迁移
 WorkflowStatusResult { found, job: null|{ jobId,type,status,cancelled,createdAt,startedAt,completedAt,attemptCount } }
-WorkflowPreviewInput { operation:'workflow-reenrich-start'|'workflow-research-start'|'workflow-cancel', payload }
+SelectionAnchorInput { sourceKind:'canonical'|'reshape', quote, section, blockStart, blockEnd }
+PersistedMarkdownBlockAnchor { start, end, markdown, prefix, suffix, quote, section }
+ImageGenerateInput { prompt, alt, aspectRatio?, style? }
+WorkflowPreviewInput { operation:'workflow-reenrich-start'|'workflow-research-start'|'workflow-image-insert-start'|'workflow-cancel', payload }
 ResearchRunView { id, subjectId, researchJobId, origin, status, version, findings, candidates, approval, verificationLintJobId, ... }
 ResearchCandidateView { ...ResearchCandidateSnapshot, decision, delivery }
 ResearchCandidateDeliveryView { status, sourceId, ingestJobId, operationIds, touchedPages, commitSha, attemptCount, error }
@@ -160,6 +163,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | contracts 新增结构化选区、持久化 Markdown 块锚点、图片请求、`workflow-image-insert-start` 与 `image-insert` job；job-started event 保留真实图片任务类型 |
 | 2026-07-16 | 新增 `path-display.ts::displayTitleForSlug`，为面包屑安全解码 URL slug 并兼容页面标题匹配 |
 | 2026-07-16 | `tags.ts` 新增即时 `TagReviewQueue`：格式变体按使用次数、标准 kebab-case、名称稳定选择推荐目标；变体与 singleton 去重，补充未标记页、问题计数和跨分区搜索 |
 | 2026-07-16 | 新增 `job-started-event.ts`：统一 ingest/re-enrich/research/save-to-wiki 的启动事件元数据，禁止全局 tracker 与 Ingest UI 按 jobId 猜类型 |
