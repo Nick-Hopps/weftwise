@@ -24,6 +24,11 @@ import { useWikiGraph } from './use-wiki-graph';
 import { FullscreenGraph } from './fullscreen-graph';
 import { EmptyGraphState } from './empty-graph-state';
 
+interface ViewportSnapshot {
+  zoom: number;
+  pan: { x: number; y: number };
+}
+
 interface MiniGraphViewProps {
   /** Slug of the page currently being viewed; highlighted and centered when present. */
   currentSlug?: string;
@@ -34,11 +39,10 @@ interface MiniGraphViewProps {
 export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps) {
   const compactRef = useRef<HTMLDivElement | null>(null);
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
-  // Snapshot captured on entering fullscreen, consumed on exiting. Storing the
-  // pre-fullscreen zoom lets us restore it verbatim instead of reverse-scaling
-  // (1/0.85) — user zoom interactions inside fullscreen would otherwise cause
-  // accumulated drift on repeated toggles.
-  const preFullscreenZoomRef = useRef<number | null>(null);
+  // Snapshot captured on entering fullscreen, consumed on exiting. Restoring
+  // zoom and pan verbatim keeps fullscreen exploration from leaking into the
+  // compact graph's viewport on repeated toggles.
+  const preFullscreenViewportRef = useRef<ViewportSnapshot | null>(null);
 
   const { cyRef, simRef, isLoading, isEmpty, stats } = useWikiGraph(compactRef, currentSlug);
 
@@ -64,9 +68,10 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
   // drag every node toward the new center until alpha decays. Freezing pins
   // alpha at 0; the grab/free listeners still reheat it on user interaction.
   //
-  // Zoom is *snapshotted* on enter and restored on exit, not reverse-scaled.
-  // Scroll-wheel zoom inside fullscreen must not leak back into the compact
-  // footprint as unpredictable scale drift.
+  // The compact viewport is snapshotted on enter and restored on exit.
+  // Fullscreen uses Cytoscape's fit operation against the real large host, so
+  // dense graphs use the available canvas instead of inheriting a fixed 2x
+  // scale from the compact view.
   //
   // This effect's body is skipped on the initial mount because cy is still
   // null at that point (created asynchronously after the /api/graph fetch).
@@ -81,32 +86,33 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
     cy.mount(nextHost);
     cy.resize();
 
-    let targetZoom: number;
     if (isFullscreen) {
-      preFullscreenZoomRef.current = cy.zoom();
-      targetZoom = cy.zoom() * 2;
-    } else if (preFullscreenZoomRef.current !== null) {
-      targetZoom = preFullscreenZoomRef.current;
-      preFullscreenZoomRef.current = null;
-    } else {
-      // Never entered fullscreen (or snapshot already consumed) — nothing to do.
+      preFullscreenViewportRef.current = { zoom: cy.zoom(), pan: cy.pan() };
+      if (prefersReducedMotion()) {
+        cy.fit(cy.elements(), 64);
+        return;
+      }
+      cy.animate(
+        { fit: { eles: cy.elements(), padding: 64 } },
+        { duration: 240, easing: 'ease-out' },
+      );
       return;
     }
 
-    const clamped = Math.min(Math.max(targetZoom, cy.minZoom()), cy.maxZoom());
+    const compactViewport = preFullscreenViewportRef.current;
+    if (!compactViewport) {
+      // Never entered fullscreen (or snapshot already consumed) — nothing to do.
+      return;
+    }
+    preFullscreenViewportRef.current = null;
 
-    // Center the whole graph in the new viewport AND set zoom in one pass.
-    // Using `center: { eles }` overrides pan so the graph bounding box is
-    // centered; otherwise the pan carried over from the compact container
-    // leaves the cluster hugging the left edge of the fullscreen canvas.
     if (prefersReducedMotion()) {
-      cy.zoom(clamped);
-      cy.center(cy.elements());
+      cy.viewport(compactViewport);
       return;
     }
 
     cy.animate(
-      { zoom: clamped, center: { eles: cy.elements() } },
+      compactViewport,
       { duration: 240, easing: 'ease-out' },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
