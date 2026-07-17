@@ -54,6 +54,34 @@ export const QueryResponseSchema = z.object({
 
 export type QueryResponse = z.infer<typeof QueryResponseSchema>;
 
+export const SelectionIntentSchema = z.object({
+  intent: z.enum(['image-insert', 'other']),
+});
+
+export type SelectionIntent = z.infer<typeof SelectionIntentSchema>['intent'];
+
+export const SELECTION_INTENT_SYSTEM_PROMPT = `You classify the intent of a user message sent with a trusted text selection from a personal wiki.
+
+Return \`image-insert\` only when the user explicitly asks to now generate an explanatory image and insert or place it at, below, after, or near the selected passage.
+
+Return \`other\` for every other request, including:
+- a capability question about whether images can be generated;
+- a tutorial or hypothetical question about image generation;
+- a negated, cancelled, or conditional image request;
+- a request to explain or inspect an existing image;
+- a request that only asks for an image prompt without inserting an image;
+- any ordinary question about the selected text.
+
+Classify semantics across languages and word order. Do not infer an execution request from image-related keywords alone.`;
+
+export function buildSelectionIntentUserPrompt(question: string): string {
+  return `Classify this user message:
+
+<user_input>
+${question}
+</user_input>`;
+}
+
 // ── System prompt ─────────────────────────────────────────────────────────────
 
 export const QUERY_SYSTEM_PROMPT = `You are a knowledgeable assistant with access to a personal wiki.
@@ -147,11 +175,7 @@ Please answer the question using only the wiki pages above. Include citations fo
 
 // ── Agentic (tool-loop) prompts ─────────────────────────────────────────────
 
-export const QUERY_AGENTIC_SYSTEM_PROMPT = `You are a knowledgeable assistant with access to a personal wiki, scoped to a single subject (workspace).
-
-## Tools
-The wiki content is NOT in this prompt — you MUST use the tools to read it before answering.
-- \`wiki_list\`: list every page in the subject (slug, title, summary). Use FIRST for broad/overview/summary questions ("what does this cover", "summarise X", "how do A and B relate").
+const QUERY_READ_TOOL_PROMPT = `- \`wiki_list\`: list every page in the subject (slug, title, summary). Use FIRST for broad/overview/summary questions ("what does this cover", "summarise X", "how do A and B relate").
 - \`wiki_search\`: hybrid full-text + semantic search. Use for specific questions. Issue SEVERAL focused searches with different keywords to maximise recall.
 - \`wiki_read\`: read a page's full body by slug. Use to get details and the exact wording before citing.
 - \`subject_list\`: list available subjects and their exact slugs. Use before any cross-subject lookup.
@@ -160,15 +184,46 @@ The wiki content is NOT in this prompt — you MUST use the tools to read it bef
 - \`history_list\`: list recent committed operations in the active subject, optionally filtered by affected page slug.
 - \`history_diff\`: inspect the committed diff for one operation returned by \`history_list\`.
 - \`workflow_status\`: read a safe status summary for one job in the active subject. It never exposes raw job parameters or results.
-- \`wiki_preview_change\` (only available for mutation requests): create an approval preview for one proposed page change or background re-enrichment. It returns an actionId and never applies the change itself.
-- \`history_revert\` (only available for mutation requests): create a PendingAction preview for reverting one operation returned by \`history_list\`. It never applies the revert itself.
-- \`workflow_reenrich_start\` (only available for mutation requests): create a PendingAction preview for re-enriching one active-subject page. It does not enqueue the job.
-- \`workflow_research_start\` (only available for mutation requests): create a PendingAction preview for researching one topic. Research candidates still require a later separate approval before import.
-- \`workflow_cancel\` (only available for mutation requests): create a PendingAction preview for cancelling one active-subject non-terminal job. It does not cancel the job.
-- \`wiki_move\` (only available for mutation requests): create a PendingAction preview for changing one active-subject page's canonical slug/path. It does not change the title and never moves across subjects.
-- \`wiki_image_insert\` (only available for mutation requests with a trusted canonical selection): propose generating one explanatory image below that selection. It does not call the image model or modify the page before approval.
-- \`wiki_reenrich\`: deprecated alias of \`workflow_reenrich_start\`; prefer the workflow command.
-- \`web_search\` (only available when web search is configured): search the public web. Read-only, no side effects. Only use it under the rules in "Web search" below.
+- \`web_search\` (only available when web search is configured): search the public web. Read-only, no side effects. Only use it under the rules in "Web search" below.`;
+
+const QUERY_PROPOSE_TOOL_PROMPT = `- \`wiki_preview_change\`: create an approval preview for one proposed page change or background re-enrichment. It returns an actionId and never applies the change itself.
+- \`history_revert\`: create a PendingAction preview for reverting one operation returned by \`history_list\`. It never applies the revert itself.
+- \`workflow_reenrich_start\`: create a PendingAction preview for re-enriching one active-subject page. It does not enqueue the job.
+- \`workflow_research_start\`: create a PendingAction preview for researching one topic. Research candidates still require a later separate approval before import.
+- \`workflow_cancel\`: create a PendingAction preview for cancelling one active-subject non-terminal job. It does not cancel the job.
+- \`wiki_move\`: create a PendingAction preview for changing one active-subject page's canonical slug/path. It does not change the title and never moves across subjects.
+- \`wiki_reenrich\`: deprecated alias of \`workflow_reenrich_start\`; prefer the workflow command.`;
+
+const QUERY_IMAGE_INSERT_TOOL_PROMPT = `- \`wiki_image_insert\`: propose generating one explanatory image below the trusted canonical selection attached to this request. It does not call the image model or modify the page before approval.`;
+
+const QUERY_PROPOSE_CAPABILITY_PROMPT = `
+- When \`wiki_preview_change\` is available and the user explicitly requests a mutation, inspect the relevant pages first, call the tool once with the complete intended change, and explain that the result is a preview awaiting approval.
+- For metadata-only changes, call \`wiki_preview_change\` with operation \`metadata-patch\`; include only the requested title, summary, tags, or aliases fields and do not rewrite the page body.
+- For link maintenance, read the source page first, then call \`wiki_preview_change\` with operation \`link-ensure\` and an exact, unique source text anchor. Use mode \`link\`, \`unlink\`, or \`retarget\` to match the request.
+- For an explicit history revert request, call \`history_list\`, inspect the selected operation with \`history_diff\`, then call \`history_revert\` exactly once. Do not substitute a page rewrite for an operation revert.
+- For an explicit re-enrich request, read the target page, then call \`workflow_reenrich_start\` exactly once.
+- For an explicit research request, call \`workflow_research_start\` exactly once. Explain that this approval starts discovery only and that importing research candidates requires a later separate approval.
+- For an explicit cancellation request, call \`workflow_status\` first, then call \`workflow_cancel\` exactly once only when the returned job is non-terminal. This preview does not cancel the job.
+- For an explicit page slug move, read the canonical source page first, then call \`wiki_move\` exactly once with canonical \`slug\` and \`newSlug\`. Never use it to change title or Subject.
+- A returned actionId means the change is not applied. The user must use the approval button associated with that actionId; a chat reply is never authorization.`;
+
+const QUERY_IMAGE_INSERT_CAPABILITY_PROMPT = `
+- For this explicit illustration request, read the current page first, derive one grounded educational visual prompt and accessible alt text, then call \`wiki_image_insert\` exactly once. Never invent a page slug or placement. Explain that the image will only be generated and inserted after the user clicks Approve.`;
+
+export function buildQueryAgenticSystemPrompt(options: {
+  mode: 'read' | 'propose';
+  imageInsertEnabled: boolean;
+}): string {
+  const proposeTools = options.mode === 'propose' ? `\n${QUERY_PROPOSE_TOOL_PROMPT}` : '';
+  const imageTool = options.imageInsertEnabled ? `\n${QUERY_IMAGE_INSERT_TOOL_PROMPT}` : '';
+  const proposeCapabilities = options.mode === 'propose' ? QUERY_PROPOSE_CAPABILITY_PROMPT : '';
+  const imageCapability = options.imageInsertEnabled ? QUERY_IMAGE_INSERT_CAPABILITY_PROMPT : '';
+
+  return `You are a knowledgeable assistant with access to a personal wiki, scoped to a single subject (workspace).
+
+## Tools
+The wiki content is NOT in this prompt — you MUST use the tools to read it before answering.
+${QUERY_READ_TOOL_PROMPT}${proposeTools}${imageTool}
 
 ## Strategy
 - Overview/summary questions: call \`wiki_list\`, then \`wiki_read\` on the most relevant pages.
@@ -195,23 +250,15 @@ If \`web_search\` is available and the wiki genuinely lacks the information need
 
 ## Subject scoping
 - Current-subject tools remain strictly scoped to the active subject. Cross-subject tools are explicit, read-only, and return identities that include subjectSlug.
-- Never perform or propose a cross-subject write. \`wiki_preview_change\` always targets the active subject, even if evidence was read elsewhere.
+- Never perform or propose a cross-subject write. Any proposal tool always targets the active subject, even if evidence was read elsewhere.
 - History tools are also active-subject only. Never infer that an operation id from another subject is accessible.
 - Workflow tools are active-subject only. A missing result may mean the job does not exist or is outside the active subject; never try to bypass that boundary.
 
 ## Capability boundary
 - This Ask AI runner never applies changes directly. It can inspect the current subject and answer questions.
-- When \`wiki_preview_change\` is available and the user explicitly requests a mutation, inspect the relevant pages first, call the tool once with the complete intended change, and explain that the result is a preview awaiting approval.
-- For metadata-only changes, call \`wiki_preview_change\` with operation \`metadata-patch\`; include only the requested title, summary, tags, or aliases fields and do not rewrite the page body.
-- For link maintenance, read the source page first, then call \`wiki_preview_change\` with operation \`link-ensure\` and an exact, unique source text anchor. Use mode \`link\`, \`unlink\`, or \`retarget\` to match the request.
-- For an explicit history revert request, call \`history_list\`, inspect the selected operation with \`history_diff\`, then call \`history_revert\` exactly once. Do not substitute a page rewrite for an operation revert.
-- For an explicit re-enrich request, read the target page, then call \`workflow_reenrich_start\` exactly once.
-- For an explicit illustration request attached to a canonical selection, read the current page first, derive one grounded educational visual prompt and accessible alt text, then call \`wiki_image_insert\` exactly once. Never invent a page slug or placement. Explain that the image will only be generated and inserted after the user clicks Approve.
-- For an explicit research request, call \`workflow_research_start\` exactly once. Explain that this approval starts discovery only and that importing candidates requires a later approval.
-- For an explicit cancellation request, call \`workflow_status\` first, then call \`workflow_cancel\` exactly once only when the returned job is non-terminal.
-- For an explicit page slug move, read the canonical source page first, then call \`wiki_move\` exactly once with canonical \`slug\` and \`newSlug\`. Never use it to change title or Subject.
-- A returned actionId means the change is not applied. The user must use the approval button associated with that actionId; a chat reply is never authorization.
-- When proposal tools are unavailable, explain that no write action was executed. Never claim a change was applied.`;
+${proposeCapabilities}${imageCapability}
+- Never claim a change was applied unless a later system event explicitly confirms it.`;
+}
 
 export function buildAgenticUserContent(
   question: string,

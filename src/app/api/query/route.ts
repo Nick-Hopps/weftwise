@@ -13,7 +13,11 @@ import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import { deriveConversationTitle } from '@/server/services/conversation-title';
 import { summarizeToolArgs } from '@/lib/tool-activity';
-import { isImageInsertIntent, resolveDirectReenrichSlug, resolveQueryMode } from '@/server/services/query-intent';
+import {
+  classifySelectionIntent,
+  resolveDirectReenrichSlug,
+  resolveQueryMode,
+} from '@/server/services/query-intent';
 import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
 import type { WikiCitation } from '@/lib/contracts';
 
@@ -21,6 +25,7 @@ export const runtime = 'nodejs';
 
 const QueryBodySchema = z.object({
   question: z.string().min(1).optional(),
+  userQuestion: z.string().trim().min(1).max(10_000).optional(),
   conversationId: z.string().optional(),
   saveAsPage: z.boolean().optional(),
   pageTitle: z.string().optional(),
@@ -69,7 +74,16 @@ export async function POST(request: NextRequest) {
   if (resolution.error) return resolution.error;
   const { subject } = resolution;
 
-  const { question, saveAsPage, pageTitle, answer, citations, pageSlug, selection } = parsed.data;
+  const {
+    question,
+    userQuestion,
+    saveAsPage,
+    pageTitle,
+    answer,
+    citations,
+    pageSlug,
+    selection,
+  } = parsed.data;
 
   // Save-only mode: enqueue save-to-wiki job
   if (saveAsPage && pageTitle && pageTitle.trim().length > 0 && answer) {
@@ -123,6 +137,7 @@ export async function POST(request: NextRequest) {
   // Default: streaming SSE mode
   const encoder = new TextEncoder();
   const trimmedQuestion = question.trim();
+  const intentQuestion = userQuestion?.trim() || trimmedQuestion;
 
   const MAX_HISTORY_MESSAGES = 8;
 
@@ -134,11 +149,11 @@ export async function POST(request: NextRequest) {
     activeConversationId =
       existing && existing.subjectId === subject.id
         ? existing.id
-        : conversationsRepo.createConversation(subject.id, deriveConversationTitle(trimmedQuestion)).id;
+        : conversationsRepo.createConversation(subject.id, deriveConversationTitle(intentQuestion)).id;
   } else {
     activeConversationId = conversationsRepo.createConversation(
       subject.id,
-      deriveConversationTitle(trimmedQuestion),
+      deriveConversationTitle(intentQuestion),
     ).id;
   }
 
@@ -146,7 +161,7 @@ export async function POST(request: NextRequest) {
     .listMessages(activeConversationId)
     .slice(-MAX_HISTORY_MESSAGES)
     .map((m) => ({ role: m.role, content: m.content }));
-  const directReenrichSlug = resolveDirectReenrichSlug(trimmedQuestion, pageSlug);
+  const directReenrichSlug = resolveDirectReenrichSlug(intentQuestion, pageSlug);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -169,7 +184,7 @@ export async function POST(request: NextRequest) {
         cits: WikiCitation[],
       ) => {
         try {
-          conversationsRepo.appendMessage(activeConversationId, 'user', trimmedQuestion, null);
+          conversationsRepo.appendMessage(activeConversationId, 'user', intentQuestion, null);
           conversationsRepo.appendMessage(
             activeConversationId,
             'assistant',
@@ -186,7 +201,12 @@ export async function POST(request: NextRequest) {
       request.signal.addEventListener('abort', onAbort, { once: true });
 
       try {
-        if (selection?.sourceKind === 'reshape' && isImageInsertIntent(trimmedQuestion)) {
+        const selectionIntent = selection
+          ? await classifySelectionIntent(intentQuestion)
+          : 'other';
+        if (request.signal.aborted) return;
+
+        if (selection?.sourceKind === 'reshape' && selectionIntent === 'image-insert') {
           const answer = '当前选区来自 Reshape 内容。请切换至 Original 后重新选择正文，再发起配图插入。';
           emit('answer-delta', { delta: answer });
           emit('citations', { citations: [] });
@@ -215,9 +235,9 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const mode = resolveQueryMode(trimmedQuestion, {
-          hasCanonicalSelection: selection?.sourceKind === 'canonical',
-        });
+        const imageInsertEnabled =
+          selection?.sourceKind === 'canonical' && selectionIntent === 'image-insert';
+        const mode = imageInsertEnabled ? 'propose' : resolveQueryMode(intentQuestion);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,
           subject,
@@ -225,6 +245,7 @@ export async function POST(request: NextRequest) {
           currentPageSlug: pageSlug,
           conversationId: activeConversationId,
           mode,
+          imageInsertEnabled,
           onPendingAction: (action) => emit('pending-action', action),
           selection,
           abortSignal: request.signal,
@@ -257,7 +278,7 @@ export async function POST(request: NextRequest) {
         emit('citations', { citations });
         persistTurn(fullAnswer, citations);
         emit('done', { subjectId: subject.id, conversationId: activeConversationId });
-        assessCoverageInBackground(subject, trimmedQuestion, fullAnswer);
+        assessCoverageInBackground(subject, intentQuestion, fullAnswer);
       } catch (error) {
         if (!request.signal.aborted) {
           const message = error instanceof Error ? error.message : String(error);

@@ -152,6 +152,36 @@ describe('streamAgenticQuery - 动态工具模式', () => {
       }),
     );
   });
+
+  it('只在明确授权时把配图能力写入 provider prompt', () => {
+    streamAgenticQuery({
+      question: '在这下面生成一张图片说明',
+      subject: SUBJECT,
+      mode: 'propose',
+      imageInsertEnabled: true,
+    });
+
+    expect(mockStreamTools).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({
+        system: expect.stringContaining('wiki_image_insert'),
+      }),
+    );
+
+    mockStreamTools.mockClear();
+    streamAgenticQuery({
+      question: '解释一下这段内容',
+      subject: SUBJECT,
+      mode: 'read',
+      imageInsertEnabled: false,
+    });
+    expect(mockStreamTools).toHaveBeenCalledWith(
+      'query',
+      expect.objectContaining({
+        system: expect.not.stringContaining('wiki_image_insert'),
+      }),
+    );
+  });
 });
 
 describe('runQuery — coverage gap → research backlog（异步）', () => {

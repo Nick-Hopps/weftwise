@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { isImageInsertIntent, resolveDirectReenrichSlug, resolveQueryMode } from '../query-intent';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  classifySelectionIntent,
+  resolveDirectReenrichSlug,
+  resolveQueryMode,
+} from '../query-intent';
 
 describe('resolveQueryMode', () => {
   it.each([
@@ -54,20 +58,49 @@ describe('resolveQueryMode', () => {
     expect(resolveQueryMode(question)).toBe('read');
   });
 
-  it('只有携带选区的明确配图插入命令进入 propose', () => {
-    const question = '帮我在这段内容下方生成一张配图，方便理解文章内容';
-    expect(isImageInsertIntent(question)).toBe(true);
-    expect(resolveQueryMode(question)).toBe('read');
-    expect(resolveQueryMode(question, { hasCanonicalSelection: true })).toBe('propose');
+  it('选区配图不再由同步正则扩大 propose 权限', () => {
+    expect(resolveQueryMode('帮我在这段内容下方生成一张配图')).toBe('read');
+    expect(resolveQueryMode('在这下面生成一张图片说明')).toBe('read');
+  });
+});
+
+describe('classifySelectionIntent', () => {
+  it('使用 query 任务的结构化 LLM 分类真实口语指令', async () => {
+    const generate = vi.fn().mockResolvedValue({ intent: 'image-insert' });
+
+    await expect(classifySelectionIntent('在这下面生成一张图片说明', { generate }))
+      .resolves.toBe('image-insert');
+
+    expect(generate).toHaveBeenCalledOnce();
+    expect(generate).toHaveBeenCalledWith(
+      'query',
+      expect.anything(),
+      expect.stringMatching(/image-insert/),
+      expect.stringContaining('在这下面生成一张图片说明'),
+      {},
+      { schemaRetries: 1 },
+    );
   });
 
   it.each([
-    '如何生成一张配图？',
     '不要在这段内容下方插入图片',
     '你能给文章配图吗？',
     '解释一下这张图片',
-  ])('选区上的教程、否定、能力询问或普通图片问题仍为 read：%s', (question) => {
-    expect(resolveQueryMode(question, { hasCanonicalSelection: true })).toBe('read');
+  ])('采用 LLM 返回的 other，不从关键词猜测：%s', async (question) => {
+    const generate = vi.fn().mockResolvedValue({ intent: 'other' });
+    await expect(classifySelectionIntent(question, { generate })).resolves.toBe('other');
+  });
+
+  it('LLM 分类失败时记录告警并保守回退 other', async () => {
+    const generate = vi.fn().mockRejectedValue(new Error('provider unavailable'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(classifySelectionIntent('在这下面生成图片', { generate })).resolves.toBe('other');
+    expect(warn).toHaveBeenCalledWith(
+      '[query-intent] selection intent classification failed; falling back to other',
+      'provider unavailable',
+    );
+    warn.mockRestore();
   });
 });
 
