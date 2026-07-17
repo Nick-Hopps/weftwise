@@ -45,7 +45,7 @@
 
 ### `wiki/` — wiki 页面渲染
 
-- `page-renderer.tsx` —— 把 markdown + frontmatter + titleSlugMap → React（unified + rehype-pretty-code + Shiki）；标题行 `actions` 插槽（透传给 FrontmatterDisplay）+ `headerExtra` 插槽（渲染在 frontmatter 之后、正文之前，复用 article reading 宽度）
+- `page-renderer.tsx` / `callout-icon.tsx` —— 把 markdown + frontmatter + titleSlugMap → React；callout 类型统一渲染 Lucide 语义图标并兼容历史标题 emoji；标题行 `actions` 与 `headerExtra` 插槽保持不变
 - `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped，保存版 stale 时显示行内 Update available 提示
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `article-toc.tsx` —— 阅读页固定目录：宽内容区显示右侧 sticky 目录轨道，窄内容区收敛为 sticky 入口/浮层；跟踪普通主滚动区与 Sources 左栏的当前章节并复用稳定 heading anchors
@@ -70,7 +70,7 @@
 - `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/move/标签治理/History/工作流/选区配图）与 actionId 原位替换；配图卡显示完整 Markdown 块、prompt、alt、比例/风格，`applied` 只表示后台任务已启动；受影响页面默认只显示前 8 条
 - `conversation-switcher.tsx` —— chat 工具区的当前会话标题下拉 + 重命名 + 删除，React Query `['conversations',subjectId]`；New 由统一工具区持有；菜单支持点击外部/Escape 关闭
 - `chat-message.ts` —— Chat 内存消息纯契约与 role-aware 映射：新发送用户消息保留 references，历史 `ConversationMessage` 分别恢复 user references / assistant citations
-- `message-list.tsx` —— 消息流渲染；用户消息正文上方最多展示一个可点击的“页面标题 · 章节/短摘要”胶囊，章节缺失时摘录截断到 36 字符，不展开完整选中文字；Assistant 的 `MessageCitations` 继续使用可折叠 Sources（>3 默认折叠、≤3 默认展开）；消息行 memo 化，只有贴近底部时才随流式回答即时滚动；`MarkdownText` 经 `renderMarkdown()` 支持固定布局 GFM 表格
+- `message-list.tsx` —— 消息流渲染；工具活动经共享 `ToolActivityIcon` 渲染 Lucide 语义图标；用户消息正文上方最多展示一个可点击的“页面标题 · 章节/短摘要”胶囊；Assistant Sources 保持可折叠，消息行 memo 化且仅贴底时跟随流式回答
 - `save-to-wiki-button.tsx` —— 统一工具区内的稳定图标动作 + 锚定标题输入浮层；触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；回答变化时重置旧保存状态；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
 
 ### `search/`
@@ -113,7 +113,7 @@
 
 - `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），queued 行离开 active 列表时切入 SSE 终态恢复，托管 `JobsPanel`
 - `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态；`image-insert` 显示 `Illustrating`，成功后失效页面缓存并 `router.refresh()`
-- `progress-toast.tsx` —— SSE 进度条 toast 组件（保留，但不再被 `global-job-tracker` 挂载，供 `JobsPanel` 内部行复用）
+- `progress-toast.tsx` / `tool-activity-icon.tsx` —— SSE 进度表面与共享 Lucide 工具图标适配；任务摘要和详情日志消费事件 `data.tool`，历史 emoji 只在展示层兼容清理
 
 > Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
 
@@ -188,6 +188,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-18 | Ask AI、Tasks 摘要与任务详情日志统一使用 `ToolActivityIcon` 的 Lucide 语义图标；正文 callout 按类型注入 `CalloutIcon`，历史 Markdown 的标题 emoji 在渲染期清理，普通正文 emoji 不受影响 |
 | 2026-07-17 | Ask AI 桌面工作面支持右/下/右下受控 resize 与键盘微调；会话选择、New/Clear/Save 合并为稳定功能区；流式 delta 按动画帧合并，消息仅在贴底时跟随并按行 memo，修复滚动争用与表格高频重排 |
 | 2026-07-17 | Ask AI 外部触发新增代次边界，每次打开进入新空白会话；双击点直接作为候选左上角，Header 等无锚点入口首次居中、其后复用末位置；用户消息引用在发送与历史恢复后显示单个“页面标题 · 章节/短摘要”胶囊，不展开完整选中文字 |
 | 2026-07-17 | 标志 v2 小尺寸优化：`shared/weftwise-mark.tsx` 织纹改「三经 + 正弦波纬」（幅 6/周期 20/笔画 3.6，穿 1 压 2 穿 3）——直纬在 16-24px 读作四竖一横，波形自身即传达编织；favicon/apple-icon/OG/docs/brand SVG 同步重生成 |

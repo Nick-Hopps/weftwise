@@ -316,11 +316,11 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       updateLastAssistant((msg) => ({
         ...msg,
         content:
-          '✅ 当前 subject 已重置。该 subject 的页面、数据源与任务记录都已清空，你可以重新摄入内容了。',
+          '当前 subject 已重置。该 subject 的页面、数据源与任务记录都已清空，你可以重新摄入内容了。',
       }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      updateLastAssistant((m) => ({ ...m, content: `❌ 重置失败：${msg}` }));
+      updateLastAssistant((m) => ({ ...m, content: `重置失败：${msg}` }));
     } finally {
       setIsLoading(false);
     }

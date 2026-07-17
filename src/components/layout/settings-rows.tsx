@@ -4,7 +4,7 @@
  * 设置弹窗行级原语 —— 统一「标签+描述在左、控件在右」布局，全部即时自动保存。
  * 行级保存状态：panel 级 mutation 的 pending/error 经 RowSaveState 传入；
  * 每行本地记录「本行是否发起了最近一次保存」（touched），只有发起行显示
- * spinner/✓/错误，避免共享 pending 让全 panel 一起转圈。
+ * spinner/成功/错误，避免共享 pending 让全 panel 一起转圈。
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
@@ -53,7 +53,7 @@ export function SettingRow({ label, description, children, className }: SettingR
  * 据共享 pending 的下降沿派生 'saving' → 'saved'(1.5s) / 'error'。
  */
 function useRowSaveStatus(save: RowSaveState | undefined) {
-  // touched：本行发起了保存且尚未收到结果；settled：结果已回（成功→✓ 1.5s，失败→常驻错误直到下次发起）。
+  // touched：本行发起了保存且尚未收到结果；settled：结果已回（成功标记 1.5s，失败则常驻错误直到下次发起）。
   const [touched, setTouched] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [rowError, setRowError] = useState<unknown>(undefined);
@@ -89,7 +89,7 @@ function useRowSaveStatus(save: RowSaveState | undefined) {
   };
 }
 
-/** 控件旁的保存状态小标记：spinner / ✓（1.5s 淡出）。*/
+/** 控件旁的保存状态小标记：spinner / 成功标记（1.5s 淡出）。*/
 function SaveIndicator({ saving, saved }: { saving: boolean; saved: boolean }) {
   return (
     <span className="inline-flex w-4 justify-center" aria-hidden={!saving && !saved}>
