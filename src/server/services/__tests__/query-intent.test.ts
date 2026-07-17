@@ -104,7 +104,7 @@ describe('queryModeForIntent', () => {
     ['read', 'read'],
     ['propose', 'propose'],
     ['direct-reenrich', 'propose'],
-    ['image-insert', 'read'],
+    ['image-insert', 'image-insert'],
     ['reset-request', 'read'],
   ] as const)('%s 映射为 %s', (intent, mode) => {
     expect(queryModeForIntent(classification(intent))).toBe(mode);

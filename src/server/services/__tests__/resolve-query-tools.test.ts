@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { zodSchema } from 'ai';
 
 const mockGetWebSearchConfig = vi.fn();
 
@@ -60,14 +61,33 @@ describe('resolveQueryTools', () => {
     ]));
   });
 
-  it('只有 LLM 分类确认后才解析选区配图提案工具', async () => {
+  it('image-insert mode 只解析 read 工具与选区配图工具', async () => {
     mockGetWebSearchConfig.mockReturnValue({ provider: 'tavily', apiKey: '', maxResults: 5 });
     const { resolveQueryTools } = await import('../query-service');
+    const read = resolveQueryTools('read').map((tool) => tool.name);
     const ordinary = resolveQueryTools('propose').map((tool) => tool.name);
-    const imageInsert = resolveQueryTools('propose', { imageInsertEnabled: true })
-      .map((tool) => tool.name);
+    const imageInsert = resolveQueryTools('image-insert').map((tool) => tool.name);
 
     expect(ordinary).not.toContain('wiki.image.insert');
-    expect(imageInsert).toEqual([...ordinary, 'wiki.image.insert']);
+    expect(imageInsert).toEqual([...read, 'wiki.image.insert']);
+    expect(imageInsert).not.toEqual(expect.arrayContaining([
+      'wiki.preview_change',
+      'history.revert',
+      'workflow.reenrich.start',
+      'workflow.research.start',
+      'workflow.cancel',
+      'wiki.reenrich',
+      'wiki.move',
+    ]));
+  });
+
+  it('image-insert mode 的全部 provider schema 都以 object 为根', async () => {
+    mockGetWebSearchConfig.mockReturnValue({ provider: 'tavily', apiKey: '', maxResults: 5 });
+    const { resolveQueryTools } = await import('../query-service');
+
+    for (const tool of resolveQueryTools('image-insert')) {
+      const schema = await zodSchema(tool.inputSchema).jsonSchema;
+      expect(schema, tool.name).toMatchObject({ type: 'object' });
+    }
   });
 });

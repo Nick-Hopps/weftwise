@@ -7,7 +7,7 @@ import {
   type QueryIntentContext,
 } from '@/server/llm/prompts/query-prompt';
 
-export type QueryMode = 'read' | 'propose';
+export type QueryMode = 'read' | 'propose' | 'image-insert';
 export type { QueryIntentClassification, QueryIntentContext };
 
 const TARGET_NONE = { reference: 'none' as const, slug: null };
@@ -78,6 +78,7 @@ export async function classifyQueryIntent(
 }
 
 export function queryModeForIntent(intent: QueryIntentClassification): QueryMode {
+  if (intent.intent === 'image-insert') return 'image-insert';
   return intent.intent === 'propose' || intent.intent === 'direct-reenrich'
     ? 'propose'
     : 'read';
