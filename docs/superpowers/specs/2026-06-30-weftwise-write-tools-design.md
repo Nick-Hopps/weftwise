@@ -1,7 +1,7 @@
-# Agentic Wiki 写工具内核 + 对话删除/创建（Spec 1）— 设计文档
+# weftwise 写工具内核 + 对话删除/创建（Spec 1）— 设计文档
 
 > 日期：2026-06-30
-> 主题：为 chat / Tidy structure(curate) / Fix issues(fix) 三个 agent 功能建立**共享的语义级 wiki 写工具集**，并在 Ask AI 对话循环里落地**创建 / 删除页面**两个写动作。本文是「Agentic Wiki Tools」三阶段计划的 **Spec 1（基础）**。
+> 主题：为 chat / Tidy structure(curate) / Fix issues(fix) 三个 agent 功能建立**共享的语义级 wiki 写工具集**，并在 Ask AI 对话循环里落地**创建 / 删除页面**两个写动作。本文是「weftwise Tools」三阶段计划的 **Spec 1（基础）**。
 
 ---
 

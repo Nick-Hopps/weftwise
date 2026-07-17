@@ -41,7 +41,7 @@
 | Automation | Agent behavior、Web grounding、Periodic maintenance | Agents、Web search、Maintenance |
 | Usage | LLM usage | Usage |
 
-About 从内容 panel 移到导航底部，仅展示 `Agentic Wiki` 与版本号。
+About 从内容 panel 移到导航底部，仅展示 `weftwise` 与版本号。
 
 ## 视觉与交互
 
