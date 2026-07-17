@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { UserMessageReferenceCapsule } from '@/components/chat/message-list';
+import { MarkdownText, UserMessageReferenceCapsule } from '@/components/chat/message-list';
 import type { UserMessageReference } from '@/lib/contracts';
 
 const references: UserMessageReference[] = [
@@ -62,5 +62,17 @@ describe('UserMessageReferenceCapsule', () => {
     expect(renderToStaticMarkup(
       React.createElement(UserMessageReferenceCapsule, { references: [] }),
     )).toBe('');
+  });
+});
+
+describe('MarkdownText', () => {
+  it('keeps GFM tables inside a stable horizontally scrollable message surface', () => {
+    const html = renderToStaticMarkup(React.createElement(MarkdownText, {
+      content: '| Name | Value |\n| --- | --- |\n| Alpha | A long value |',
+    }));
+
+    expect(html).toContain('<table>');
+    expect(html).toContain('overflow-x-auto');
+    expect(html).toContain('[&amp;&gt;table]:table-fixed');
   });
 });

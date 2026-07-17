@@ -8,6 +8,11 @@ import { cn } from '@/lib/cn';
 import { toolActivityIcon, toolActivityVerb } from '@/lib/tool-activity';
 import { citationHref } from '@/lib/wiki-citation';
 import { displayTitleForSlug } from '@/lib/path-display';
+import {
+  didTouchGestureScrollUp,
+  shouldPauseMessageFollowForWheel,
+  updateMessageScrollFollowState,
+} from './message-scroll';
 import type { UserMessageReference } from '@/lib/contracts';
 import type { ChatMessage, Citation } from './chat-message';
 
@@ -20,11 +25,11 @@ interface MessageListProps {
 }
 
 // Memoize to prevent re-parsing on every streaming tick for unchanged messages
-const MarkdownText = memo(function MarkdownText({ content }: { content: string }) {
+export const MarkdownText = memo(function MarkdownText({ content }: { content: string }) {
   const rendered = useMemo(() => renderMarkdown(content), [content]);
   return (
     <div className={cn(
-      'text-sm leading-[22px] text-foreground',
+      'min-w-0 max-w-full overflow-x-auto text-sm leading-[22px] text-foreground',
       '[&>h1]:text-lg [&>h1]:font-semibold [&>h1]:text-foreground [&>h1]:mt-3 [&>h1]:mb-1',
       '[&>h2]:text-base [&>h2]:font-semibold [&>h2]:text-foreground [&>h2]:mt-3 [&>h2]:mb-1',
       '[&>h3]:text-sm [&>h3]:font-semibold [&>h3]:text-foreground [&>h3]:mt-3 [&>h3]:mb-1',
@@ -36,9 +41,9 @@ const MarkdownText = memo(function MarkdownText({ content }: { content: string }
       '[&>pre_code]:bg-transparent [&>pre_code]:p-0',
       '[&_a]:text-accent [&_a]:underline [&_a]:decoration-accent/40 [&_a]:underline-offset-4 [&_a]:hover:decoration-accent',
       '[&>blockquote]:border-l-2 [&>blockquote]:border-prose-quote [&>blockquote]:pl-3 [&>blockquote]:py-0.5 [&>blockquote]:my-2 [&>blockquote]:italic [&>blockquote]:text-foreground-secondary',
-      '[&>table]:w-full [&>table]:border-collapse [&>table]:my-2 [&>table]:text-xs',
-      '[&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold',
-      '[&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1',
+      '[&>table]:my-2 [&>table]:min-w-full [&>table]:table-fixed [&>table]:border-collapse [&>table]:text-xs',
+      '[&_th]:break-words [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold',
+      '[&_td]:break-words [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1',
     )}>
       {rendered}
     </div>
@@ -143,11 +148,98 @@ const SUGGESTIONS = [
   'What are the key takeaways?',
 ];
 
+const MessageRow = memo(function MessageRow({
+  message,
+  showStreaming,
+}: {
+  message: ChatMessage;
+  showStreaming: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className={cn(
+        'text-[10px] font-medium uppercase tracking-wider',
+        message.role === 'user' ? 'text-foreground-tertiary' : 'text-accent-strong',
+      )}>
+        {message.role === 'user' ? 'You' : 'Wiki'}
+      </span>
+      <div className={cn(
+        'min-w-0 border-l-2 py-0.5 pl-3',
+        message.role === 'user' ? 'border-border-strong' : 'border-accent',
+      )}>
+        {message.role === 'user' ? (
+          <>
+            {message.references && message.references.length > 0 && (
+              <UserMessageReferenceCapsule references={message.references} />
+            )}
+            <p className="whitespace-pre-wrap text-sm text-foreground">{message.content}</p>
+          </>
+        ) : (
+          <>
+            {message.activity && message.activity.length > 0 && (
+              <ul className="mb-1.5 space-y-0.5">
+                {message.activity.map((activity, index) => (
+                  <li
+                    key={index}
+                    className="flex items-center gap-1.5 font-mono text-[11px] text-foreground-tertiary"
+                  >
+                    <span>{toolActivityIcon(activity.tool)}</span>
+                    <span className="truncate">
+                      {toolActivityVerb(activity.tool)}
+                      {activity.label ? `: ${activity.label}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <MarkdownText content={message.content} />
+          </>
+        )}
+        {showStreaming && <StreamingIndicator />}
+
+        {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
+          <MessageCitations citations={message.citations} />
+        )}
+      </div>
+    </div>
+  );
+});
+
 export function MessageList({ messages, isStreaming = false, onSuggestionClick }: MessageListProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const scrollFollowStateRef = useRef({
+    followsBottom: true,
+    previousScrollTop: 0,
+  });
+  const previousTouchYRef = useRef<number | null>(null);
+  const previousMessageCountRef = useRef(0);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const list = listRef.current;
+    if (!list || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (!scrollFollowStateRef.current.followsBottom) return;
+      list.scrollTop = list.scrollHeight;
+      scrollFollowStateRef.current.previousScrollTop = list.scrollTop;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const previousCount = previousMessageCountRef.current;
+    if (messages.slice(previousCount).some((message) => message.role === 'user')) {
+      scrollFollowStateRef.current.followsBottom = true;
+    }
+    previousMessageCountRef.current = messages.length;
+    if (!scrollFollowStateRef.current.followsBottom) return;
+    const frame = requestAnimationFrame(() => {
+      const list = listRef.current;
+      if (!list) return;
+      list.scrollTop = list.scrollHeight;
+      scrollFollowStateRef.current.previousScrollTop = list.scrollTop;
+    });
+    return () => cancelAnimationFrame(frame);
   }, [messages, isStreaming]);
 
   if (messages.length === 0) {
@@ -176,62 +268,52 @@ export function MessageList({ messages, isStreaming = false, onSuggestionClick }
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+    <div
+      ref={listRef}
+      data-ask-ai-message-list
+      className="min-w-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3"
+      onWheel={(event) => {
+        if (shouldPauseMessageFollowForWheel(event.deltaY)) {
+          scrollFollowStateRef.current.followsBottom = false;
+        }
+      }}
+      onTouchStart={(event) => {
+        previousTouchYRef.current = event.touches[0]?.clientY ?? null;
+      }}
+      onTouchMove={(event) => {
+        const currentY = event.touches[0]?.clientY;
+        const previousY = previousTouchYRef.current;
+        if (currentY === undefined) return;
+        if (previousY !== null && didTouchGestureScrollUp(previousY, currentY)) {
+          scrollFollowStateRef.current.followsBottom = false;
+        }
+        previousTouchYRef.current = currentY;
+      }}
+      onTouchEnd={() => {
+        previousTouchYRef.current = null;
+      }}
+      onTouchCancel={() => {
+        previousTouchYRef.current = null;
+      }}
+      onScroll={(event) => {
+        scrollFollowStateRef.current = updateMessageScrollFollowState(
+          scrollFollowStateRef.current,
+          event.currentTarget,
+        );
+      }}
+    >
       {messages.map((msg, idx) => {
         const isLast = idx === messages.length - 1;
         const showStreaming = isStreaming && isLast && msg.role === 'assistant';
 
         return (
-          <div key={idx} className="flex flex-col gap-1">
-            {/* Role label for clarity — Linear/Notion chat style, no bubbles */}
-            <span className={cn(
-              'text-[10px] font-medium uppercase tracking-wider',
-              msg.role === 'user' ? 'text-foreground-tertiary' : 'text-accent-strong',
-            )}>
-              {msg.role === 'user' ? 'You' : 'Wiki'}
-            </span>
-            <div className={cn(
-              'border-l-2 pl-3 py-0.5',
-              msg.role === 'user' ? 'border-border-strong' : 'border-accent',
-            )}>
-              {msg.role === 'user' ? (
-                <>
-                  {msg.references && msg.references.length > 0 && (
-                    <UserMessageReferenceCapsule references={msg.references} />
-                  )}
-                  <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
-                </>
-              ) : (
-                <>
-                  {msg.activity && msg.activity.length > 0 && (
-                    <ul className="mb-1.5 space-y-0.5">
-                      {msg.activity.map((act, aIdx) => (
-                        <li
-                          key={aIdx}
-                          className="text-[11px] text-foreground-tertiary font-mono flex items-center gap-1.5"
-                        >
-                          <span>{toolActivityIcon(act.tool)}</span>
-                          <span className="truncate">
-                            {toolActivityVerb(act.tool)}
-                            {act.label ? `: ${act.label}` : ''}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <MarkdownText content={msg.content} />
-                </>
-              )}
-              {showStreaming && <StreamingIndicator />}
-
-              {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
-                <MessageCitations citations={msg.citations} />
-              )}
-            </div>
-          </div>
+          <MessageRow
+            key={`${msg.role}-${idx}`}
+            message={msg}
+            showStreaming={showStreaming}
+          />
         );
       })}
-      <div ref={bottomRef} />
     </div>
   );
 }

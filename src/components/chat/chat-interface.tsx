@@ -2,10 +2,15 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowUp, Check, StopCircle, TextQuote, Trash2, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { ArrowUp, Check, StopCircle, TextQuote, X } from 'lucide-react';
 import { IconButton } from '@/components/ui/icon-button';
 import { MessageList } from './message-list';
+import { ChatToolbar } from './chat-toolbar';
+import { ConversationSwitcher } from './conversation-switcher';
+import {
+  createMessageStreamBatcher,
+  type MessageStreamBatcher,
+} from './message-stream-batcher';
 import {
   chatMessageFromConversation,
   createOutgoingUserMessage,
@@ -216,6 +221,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
+  const streamBatcherRef = useRef<MessageStreamBatcher | null>(null);
   // 记录「当前内存消息所属的会话 id」——防止 done 设置新 id 后再重拉覆盖流式消息
   const loadedConversationIdRef = useRef<string | null>(null);
   const loadedSubjectIdRef = useRef<string | null>(null);
@@ -271,8 +277,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     return () => controller.abort();
   }, [currentConversationId, ctxSubjectId, apiFetchClient]);
 
-  const lastAssistantMessage =
-    [...messages].reverse().find((m) => m.role === 'assistant') ?? null;
+  const lastAssistantMessage = messages.findLast((message) => message.role === 'assistant') ?? null;
 
   const updateLastAssistant = (updater: (msg: ChatMessage) => ChatMessage) => {
     setMessages((prev) => {
@@ -394,6 +399,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     setMessages((prev) => [...prev, createOutgoingUserMessage(question, userReferences)]);
     setMessages((prev) => [...prev, { role: 'assistant', content: '', citations: [] }]);
     abortRef.current = new AbortController();
+    let streamBatcher: MessageStreamBatcher | null = null;
 
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
@@ -436,6 +442,10 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       const parser = createSSEParser();
       let fullContent = '';
       let shouldResetAfterStream = false;
+      streamBatcher = createMessageStreamBatcher((content) => {
+        updateLastAssistant((message) => ({ ...message, content }));
+      });
+      streamBatcherRef.current = streamBatcher;
 
       try {
         while (true) {
@@ -446,7 +456,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             if (event === 'answer-delta') {
               const delta = (data as { delta: string }).delta;
               fullContent += delta;
-              updateLastAssistant((msg) => ({ ...msg, content: fullContent }));
+              streamBatcher?.push(fullContent);
             } else if (event === 'tool-call') {
               const { toolName, args } = data as { toolName: string; args: string };
               updateLastAssistant((msg) => ({
@@ -474,7 +484,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               fullContent = fullContent
                 ? `${fullContent}\n\nError: ${detail}`
                 : `Error: ${detail}`;
-              updateLastAssistant((msg) => ({ ...msg, content: fullContent }));
+              streamBatcher?.push(fullContent);
             } else if (event === 'done') {
               const convId = (data as { conversationId?: string }).conversationId;
               if (convId) {
@@ -493,8 +503,10 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
         reader.releaseLock();
         readerRef.current = null;
       }
+      streamBatcher.flush();
       if (shouldResetAfterStream) await performReset();
     } catch (err) {
+      streamBatcher?.cancel();
       if ((err as Error).name === 'AbortError') {
         setMessages((prev) => {
           const last = prev[prev.length - 1];
@@ -506,6 +518,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       const errMsg = err instanceof Error ? err.message : 'Something went wrong';
       updateLastAssistant((msg) => ({ ...msg, content: errMsg }));
     } finally {
+      if (streamBatcherRef.current === streamBatcher) streamBatcherRef.current = null;
       setIsLoading(false);
     }
   }, [input, isLoading, resetConfirmationState, performReset, currentPageSlug, ctxSubjectSlug, refs, pageContent, setCurrentConversation, queryClient]);
@@ -516,6 +529,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     return () => {
       abortRef.current?.abort();
       readerRef.current?.cancel().catch(() => {});
+      streamBatcherRef.current?.cancel();
     };
   }, []);
 
@@ -527,18 +541,33 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     }
   };
 
-  const handleStop = () => {
+  const handleStop = useCallback(() => {
+    streamBatcherRef.current?.cancel();
+    streamBatcherRef.current = null;
     abortRef.current?.abort();
     readerRef.current?.cancel();
     readerRef.current = null;
     setIsLoading(false);
-  };
+  }, []);
 
-  const handleClear = () => {
+  const handleClear = useCallback(() => {
     if (isLoading) handleStop();
     setMessages([]);
     setResetConfirmationState('idle');
-  };
+  }, [handleStop, isLoading]);
+
+  const handleNewConversation = useCallback(() => {
+    if (isLoading) handleStop();
+    setMessages([]);
+    setPendingActions([]);
+    setRefs([]);
+    setPickerOpen(false);
+    setResetConfirmationState('idle');
+    loadedConversationIdRef.current = null;
+    loadedSubjectIdRef.current = ctxSubjectId ?? null;
+    setCurrentConversation(null);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, [ctxSubjectId, handleStop, isLoading, setCurrentConversation]);
 
   const containerClass =
     variant === 'embedded'
@@ -548,24 +577,26 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
   return (
     <div className={containerClass}>
       {!hideHeader && (
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex h-10 shrink-0 items-center px-4 border-b border-border">
           <h2 className="text-sm font-semibold text-foreground">Ask your Wiki</h2>
-          {messages.length > 0 && (
-            <Button intent="ghost" size="sm" onClick={handleClear}>
-              <Trash2 className="h-3 w-3" />
-              Clear
-            </Button>
-          )}
         </div>
       )}
-      {hideHeader && messages.length > 0 && (
-        <div className="flex items-center justify-end px-3 py-1">
-          <Button intent="ghost" size="sm" onClick={handleClear}>
-            <Trash2 className="h-3 w-3" />
-            Clear
-          </Button>
-        </div>
-      )}
+
+      <ChatToolbar
+        conversationSwitcher={<ConversationSwitcher />}
+        canClear={messages.length > 0}
+        onClear={handleClear}
+        onNewConversation={handleNewConversation}
+        saveAction={(
+          <SaveToWikiButton
+            answer={!isLoading && lastAssistantMessage?.content
+              ? lastAssistantMessage.content
+              : null}
+            citations={lastAssistantMessage?.citations ?? []}
+            disabled={isLoading}
+          />
+        )}
+      />
 
       <MessageList
         key={currentConversationId ?? 'none'}
@@ -588,15 +619,6 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               onReject={(actionId) => void handlePendingAction(actionId, 'reject')}
             />
           ))}
-        </div>
-      )}
-
-      {lastAssistantMessage && !isLoading && lastAssistantMessage.content && (
-        <div className="px-3 pb-2">
-          <SaveToWikiButton
-            answer={lastAssistantMessage.content}
-            citations={lastAssistantMessage.citations ?? []}
-          />
         </div>
       )}
 

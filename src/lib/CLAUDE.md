@@ -21,7 +21,7 @@
 | `chat-reference.ts` | Ask AI 用户消息引用纯函数：把本轮 Passage 绑定到当前 Subject/page，过滤空摘录并限制最多 40 条，供即时消息展示与 API 持久化共用 |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `search-snippet.ts` | 搜索片段纯函数：只解析 FTS 生成的受控 `<mark>` 对，返回普通/高亮文本段供 React 安全渲染；其他 HTML 与损坏标记保持普通文本 |
-| `ask-ai-floating-panel.ts` | Ask AI 悬浮工作面纯逻辑：锚点定位、视口安全区约束、移动 Sheet 下滑关闭阈值 |
+| `ask-ai-floating-panel.ts` | Ask AI 悬浮工作面纯逻辑：锚点定位、受控尺寸最小/最大约束、窗口变化时矩形回收、移动 Sheet 下滑关闭阈值 |
 | `subject-nav.ts` | 🆕 subject 切换的可记忆路径判定与 query 拼接：`isRememberablePath`（`/wiki/*` / `/sources/*` 判定）/ `withSubjectParam`（`?s=<subject-slug>` 拼接） + 单测 |
 | `job-started-event.ts` | 客户端后台任务启动事件契约：必须携带 `jobId/type/label/queueStatus`；PendingAction workflow 映射真实 job 类型，ingest 专属 UI 用 `isIngestJobStarted` 过滤 |
 | `error-format.ts` | 🆕 `describeErrorMessage(error)`：AI SDK `RetryError` 最后一次尝试自身 message 为空时，补上 `.lastError` 的 message/cause，避免真实原因丢失；`server/jobs/worker.ts` 与 `server/db/repos/jobs-repo.ts::failJob` 共用 |
@@ -166,6 +166,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | `ask-ai-floating-panel.ts` 新增桌面工作面 resize 尺寸约束与视口矩形适配，保证右/下/双轴调整及窗口变化后仍完整可操作 |
 | 2026-07-17 | contracts 新增 `UserMessageReference`（含可选页面标题快照）与 `ConversationMessage.references`；`chat-reference.ts` 统一把发送 Passage 绑定到当前 Subject/page，供用户消息即时展示和持久化恢复 |
 | 2026-07-17 | contracts 新增结构化选区、持久化 Markdown 块锚点、图片请求、`workflow-image-insert-start` 与 `image-insert` job；job-started event 保留真实图片任务类型 |
 | 2026-07-16 | 新增 `path-display.ts::displayTitleForSlug`，为面包屑安全解码 URL slug 并兼容页面标题匹配 |

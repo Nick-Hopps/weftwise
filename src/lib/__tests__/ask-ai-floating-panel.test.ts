@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ASK_AI_MIN_SIZE,
   centerAskAiPosition,
   clampAskAiPosition,
+  fitAskAiRectToViewport,
   positionAskAiAtTrigger,
   positionAskAiFromAnchor,
+  resizeAskAiSize,
   shouldDismissAskAiSheet,
 } from '@/lib/ask-ai-floating-panel';
 
@@ -88,5 +91,65 @@ describe('shouldDismissAskAiSheet', () => {
 
   it('returns a short slow drag to the open state', () => {
     expect(shouldDismissAskAiSheet(70, 0.2)).toBe(false);
+  });
+});
+
+describe('resizeAskAiSize', () => {
+  it('resizes width and height independently', () => {
+    expect(resizeAskAiSize(
+      { width: 440, height: 600 },
+      { width: 120, height: 80 },
+      { x: 120, y: 100 },
+      { width: 1200, height: 900 },
+    )).toEqual({ width: 560, height: 680 });
+  });
+
+  it('keeps both dimensions above the usable minimum', () => {
+    expect(resizeAskAiSize(
+      { width: 440, height: 600 },
+      { width: -1000, height: -1000 },
+      { x: 120, y: 100 },
+      { width: 1200, height: 900 },
+    )).toEqual(ASK_AI_MIN_SIZE);
+  });
+
+  it('stops expansion at the viewport safe margin', () => {
+    expect(resizeAskAiSize(
+      { width: 440, height: 600 },
+      { width: 1000, height: 1000 },
+      { x: 150, y: 120 },
+      { width: 1200, height: 900 },
+    )).toEqual({ width: 1034, height: 764 });
+  });
+
+  it('does not restore the normal minimum when a short viewport cannot fit it', () => {
+    expect(resizeAskAiSize(
+      { width: 440, height: 368 },
+      { width: 0, height: 100 },
+      { x: 16, y: 16 },
+      { width: 1024, height: 400 },
+    )).toEqual({ width: 440, height: 368 });
+  });
+});
+
+describe('fitAskAiRectToViewport', () => {
+  it('shrinks an oversized panel before clamping its position', () => {
+    expect(fitAskAiRectToViewport(
+      { position: { x: 200, y: 120 }, size: { width: 1200, height: 900 } },
+      { width: 1000, height: 800 },
+    )).toEqual({
+      position: { x: 16, y: 16 },
+      size: { width: 968, height: 768 },
+    });
+  });
+
+  it('preserves a valid size while pulling the panel back into view', () => {
+    expect(fitAskAiRectToViewport(
+      { position: { x: 700, y: 500 }, size: { width: 600, height: 600 } },
+      { width: 1000, height: 800 },
+    )).toEqual({
+      position: { x: 384, y: 184 },
+      size: { width: 600, height: 600 },
+    });
   });
 });
