@@ -150,8 +150,10 @@ export function toolActivityLine(tool: string, args: unknown): string {
 }
 
 const LEGACY_TOOL_ACTIVITY_PREFIXES = [
-  '⏹️', '🖼️', '✏️', '↪️', '✂️',
-  '🔍', '📄', '🗂', '🔭', '📚', '✨', '🌐', '🧭', '➕', '🔗', '🗑', '•',
+  '\u{23F9}\u{FE0F}', '\u{1F5BC}\u{FE0F}', '\u{270F}\u{FE0F}',
+  '\u{21AA}\u{FE0F}', '\u{2702}\u{FE0F}', '\u{1F50D}', '\u{1F4C4}',
+  '\u{1F5C2}', '\u{1F52D}', '\u{1F4DA}', '\u{2728}', '\u{1F310}',
+  '\u{1F9ED}', '\u{2795}', '\u{1F517}', '\u{1F5D1}', '\u{2022}',
 ] as const;
 
 /** 仅清理旧版工具事件写入的行首 emoji；普通用户内容不应调用此函数。 */

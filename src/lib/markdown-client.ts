@@ -192,7 +192,7 @@ function splitTextForWikiLinks(text: string, resolver?: SlugResolver): MdastNode
 // 仅改 hast 提示（hName/hProperties），不改 mdast 结构，故 wikilink/math 子节点照常处理。
 
 const CALLOUT_RE = /^\[!([\w-]+)\]\s*/;
-const LEGACY_CALLOUT_ICON_RE = /^(?:💡|📝|❓|🔗|⚠️?|📊|📈|📉|🧩|🧠)\s*/u;
+const LEGACY_CALLOUT_ICON_RE = /^(?:\u{1F4A1}|\u{1F4DD}|\u{2753}|\u{1F517}|\u{26A0}\u{FE0F}?|\u{1F4CA}|\u{1F4C8}|\u{1F4C9}|\u{1F9E9}|\u{1F9E0})\s*/u;
 
 function createRemarkCallouts(): Plugin<[], MdastRoot> {
   return function () {
