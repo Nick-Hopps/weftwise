@@ -33,6 +33,8 @@ const workflowMocks = vi.hoisted(() => ({
   planWorkflowReenrich: vi.fn(),
   planWorkflowResearch: vi.fn(),
   planWorkflowCancel: vi.fn(),
+  planWorkflowImageInsert: vi.fn(),
+  prepareWorkflowImageInsert: vi.fn(),
 }));
 vi.mock('../workflow-tools', () => workflowMocks);
 const operationPlanMocks = vi.hoisted(() => ({
@@ -51,6 +53,7 @@ import {
   PendingActionError,
   createPendingActionPreview,
   createPendingHistoryRevertPreview,
+  createPendingImageInsertActionPreview,
   createPendingWorkflowActionPreview,
   createTagBatchPendingActionPreview,
   listPendingActions,
@@ -134,6 +137,28 @@ beforeEach(() => {
   workflowMocks.planWorkflowCancel.mockResolvedValue({
     kind: 'workflow', preHead: 'head-1', summary: '取消 research 任务 job-1',
     affectedPages: [], diff: null, warnings: ['任务会终止'],
+  });
+  workflowMocks.prepareWorkflowImageInsert.mockResolvedValue({
+    input: {
+      operation: 'workflow-image-insert-start',
+      payload: {
+        slug: 'page-a',
+        anchor: {
+          start: 10, end: 29, markdown: 'Selected paragraph.', prefix: '# Title\n\n', suffix: '',
+          quote: 'Selected paragraph.', section: 'Context',
+        },
+        request: { prompt: 'Explain visually', alt: 'Explanation diagram', aspectRatio: '16:9' },
+      },
+    },
+    preview: {
+      kind: 'workflow', preHead: 'head-1', summary: '为 page-a 生成选区配图',
+      affectedPages: [{ slug: 'page-a', action: 'update' }], diff: null,
+      warnings: ['批准后才会生成图片。'],
+      imageInsert: {
+        selection: 'Selected paragraph.', prompt: 'Explain visually',
+        alt: 'Explanation diagram', aspectRatio: '16:9',
+      },
+    },
   });
   repoMocks.createPendingAction.mockImplementation((input: Record<string, unknown>) => ({
     ...input,
@@ -261,6 +286,37 @@ describe('createPendingActionPreview', () => {
       payloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     }));
     expect(view).toMatchObject({ operation, kind: 'workflow', status: 'pending' });
+  });
+
+  it('选区配图预览持久化服务端锚点与图片请求，批准前零 job', async () => {
+    const selection = {
+      sourceKind: 'canonical' as const,
+      quote: 'Selected paragraph.',
+      section: 'Context',
+      blockStart: 10,
+      blockEnd: 29,
+    };
+    const request = {
+      prompt: 'Explain visually', alt: 'Explanation diagram', aspectRatio: '16:9' as const,
+    };
+
+    const view = await createPendingImageInsertActionPreview({
+      conversationId: 'c1', subject, pageSlug: 'page-a', selection, request, now,
+    });
+
+    expect(workflowMocks.prepareWorkflowImageInsert).toHaveBeenCalledWith(
+      subject, 'page-a', selection, request,
+    );
+    expect(repoMocks.createPendingAction).toHaveBeenCalledWith(expect.objectContaining({
+      operation: 'workflow-image-insert-start',
+      payloadJson: expect.stringContaining('Selected paragraph.'),
+      payloadHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    }));
+    expect(view).toMatchObject({
+      operation: 'workflow-image-insert-start',
+      status: 'pending',
+      imageInsert: { prompt: 'Explain visually', alt: 'Explanation diagram' },
+    });
   });
 
   it('metadata/link 预览复用共享 planner，绝不 apply 或触发 embedding', async () => {

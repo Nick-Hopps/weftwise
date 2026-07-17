@@ -3,19 +3,12 @@ import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import type { Root } from 'mdast';
-import type { SelectionAnchorInput } from '@/lib/contracts';
+import type {
+  PersistedMarkdownBlockAnchor,
+  SelectionAnchorInput,
+} from '@/lib/contracts';
 
 const CONTEXT_CHARS = 160;
-
-export interface PersistedMarkdownBlockAnchor {
-  start: number;
-  end: number;
-  markdown: string;
-  prefix: string;
-  suffix: string;
-  quote: string;
-  section: string | null;
-}
 
 interface BlockRange {
   start: number;

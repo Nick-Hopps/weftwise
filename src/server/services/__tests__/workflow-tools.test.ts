@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   planReenrich: vi.fn(),
   emit: vi.fn(),
   reconcile: vi.fn(),
+  getPage: vi.fn(),
+  readPage: vi.fn(),
 }));
 
 vi.mock('@/server/jobs/queue', () => ({
@@ -27,11 +29,20 @@ vi.mock('@/server/jobs/events', () => ({
 vi.mock('../research-provenance-reconciler', () => ({
   reconcileResearchProvenanceForJob: (...args: unknown[]) => mocks.reconcile(...args),
 }));
+vi.mock('@/server/db/repos/pages-repo', () => ({
+  getPageBySlug: (...args: unknown[]) => mocks.getPage(...args),
+  isMetaPage: (page: { tags?: string[] }) => (page.tags ?? []).includes('meta'),
+}));
+vi.mock('@/server/wiki/wiki-store', () => ({
+  readPageInSubject: (...args: unknown[]) => mocks.readPage(...args),
+}));
 
 import {
   planWorkflowCancel,
+  planWorkflowImageInsert,
   planWorkflowReenrich,
   planWorkflowResearch,
+  prepareWorkflowImageInsert,
   readWorkflowStatus,
   reportWorkflowCancellation,
 } from '../workflow-tools';
@@ -60,6 +71,8 @@ beforeEach(() => {
     kind: 'workflow', preHead: 'head-1', summary: '重新丰富 page-a',
     affectedPages: [{ slug: 'page-a', action: 'update' }], diff: null, warnings: [],
   });
+  mocks.getPage.mockReturnValue({ slug: 'page-a', tags: [] });
+  mocks.readPage.mockReturnValue({ body: '# Context\n\nSelected paragraph.\n\nNext paragraph.' });
 });
 
 describe('readWorkflowStatus', () => {
@@ -134,6 +147,76 @@ describe('workflow plan', () => {
     await expect(planWorkflowCancel(subject, 'job-1')).rejects.toThrow(/terminal/i);
     mocks.getJob.mockReturnValue(job({ subjectId: 's2' }));
     await expect(planWorkflowCancel(subject, 'job-1')).rejects.toThrow(/not found/i);
+  });
+
+  it('选区配图只接受 canonical 完整块，并生成服务端持久化锚点', async () => {
+    const body = '# Context\n\nSelected paragraph.\n\nNext paragraph.';
+    const start = body.indexOf('Selected paragraph.');
+    const prepared = await prepareWorkflowImageInsert(
+      subject,
+      ' page-a ',
+      {
+        sourceKind: 'canonical',
+        quote: 'Selected paragraph.',
+        section: 'Context',
+        blockStart: start,
+        blockEnd: start + 'Selected paragraph.'.length,
+      },
+      { prompt: 'Explain visually', alt: 'Explanation diagram', aspectRatio: '16:9' },
+    );
+
+    expect(prepared.input).toMatchObject({
+      operation: 'workflow-image-insert-start',
+      payload: {
+        slug: 'page-a',
+        anchor: { start, markdown: 'Selected paragraph.', quote: 'Selected paragraph.' },
+        request: { prompt: 'Explain visually', alt: 'Explanation diagram' },
+      },
+    });
+    expect(prepared.preview).toMatchObject({
+      kind: 'workflow',
+      preHead: 'head-1',
+      affectedPages: [{ slug: 'page-a', action: 'update' }],
+      imageInsert: {
+        selection: 'Selected paragraph.',
+        prompt: 'Explain visually',
+        alt: 'Explanation diagram',
+        aspectRatio: '16:9',
+      },
+    });
+  });
+
+  it('选区配图拒绝 Reshape、meta 页与批准时失效的锚点', async () => {
+    await expect(prepareWorkflowImageInsert(
+      subject,
+      'page-a',
+      { sourceKind: 'reshape', quote: 'x', section: null, blockStart: 0, blockEnd: 1 },
+      { prompt: 'Explain', alt: 'Diagram' },
+    )).rejects.toThrow(/Original/i);
+
+    mocks.getPage.mockReturnValueOnce({ slug: 'page-a', tags: ['meta'] });
+    await expect(prepareWorkflowImageInsert(
+      subject,
+      'page-a',
+      { sourceKind: 'canonical', quote: 'x', section: null, blockStart: 0, blockEnd: 1 },
+      { prompt: 'Explain', alt: 'Diagram' },
+    )).rejects.toThrow(/system page/i);
+
+    mocks.getPage.mockReturnValue({ slug: 'page-a', tags: [] });
+    mocks.readPage.mockReturnValue({ body: '# Context\n\nChanged paragraph.' });
+    await expect(planWorkflowImageInsert(subject, {
+      slug: 'page-a',
+      anchor: {
+        start: 11,
+        end: 30,
+        markdown: 'Selected paragraph.',
+        prefix: '# Context\n\n',
+        suffix: '',
+        quote: 'Selected paragraph.',
+        section: 'Context',
+      },
+      request: { prompt: 'Explain', alt: 'Diagram' },
+    })).rejects.toThrow(/unique location/i);
   });
 });
 
