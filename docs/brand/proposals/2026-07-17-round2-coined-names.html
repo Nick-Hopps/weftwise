@@ -1,0 +1,424 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+</head>
+<body>
+<title>weft 方案 · 织识铸词六案</title>
+<style>
+  :root {
+    --paper: #F6F5F2;
+    --ink: #1D1C1A;
+    --ink-2: #6E6A63;
+    --ink-3: #9A968E;
+    --hairline: #E2DFD8;
+    --plate-light-bg: #FFFFFF;
+    --plate-light-border: #E7E4DD;
+    --plate-light-ink: #201F1C;
+    --plate-light-sub: #8A867E;
+    --plate-dark-bg: #17171B;
+    --plate-dark-border: #26262C;
+    --plate-dark-ink: #ECEAE4;
+    --plate-dark-sub: #7E7C84;
+    --table-row: #FBFAF8;
+    --chip-bg: #EFEDE8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131315;
+      --ink: #E6E4DF;
+      --ink-2: #98948C;
+      --ink-3: #6B6862;
+      --hairline: #2A2A2E;
+      --table-row: #18181B;
+      --chip-bg: #1E1E22;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #131315;
+    --ink: #E6E4DF;
+    --ink-2: #98948C;
+    --ink-3: #6B6862;
+    --hairline: #2A2A2E;
+    --table-row: #18181B;
+    --chip-bg: #1E1E22;
+  }
+  :root[data-theme="light"] {
+    --paper: #F6F5F2;
+    --ink: #1D1C1A;
+    --ink-2: #6E6A63;
+    --ink-3: #9A968E;
+    --hairline: #E2DFD8;
+    --table-row: #FBFAF8;
+    --chip-bg: #EFEDE8;
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 56px 28px 96px; }
+
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  .wm {
+    font-family: "Avenir Next", Futura, -apple-system, sans-serif;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* ---------- header ---------- */
+  header.masthead { border-bottom: 1px solid var(--ink); padding-bottom: 30px; }
+  .masthead-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 40px; }
+  h1 {
+    font-size: clamp(26px, 4.4vw, 38px);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+    text-wrap: balance;
+    margin: 0 0 18px;
+  }
+  .lede { max-width: 62ch; color: var(--ink-2); margin: 0; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  /* fixed identity strip */
+  .locked {
+    margin-top: 30px;
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch;
+  }
+  .locked .plate {
+    border-radius: 6px; padding: 14px 20px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .locked .tagline-box {
+    display: flex; flex-direction: column; justify-content: center; gap: 2px;
+    padding: 14px 4px;
+  }
+  .locked .tagline-box .en { font-weight: 600; }
+  .locked .tagline-box .zh { color: var(--ink-2); font-size: 13.5px; }
+  .plate-light { background: var(--plate-light-bg); border: 1px solid var(--plate-light-border); }
+  .plate-dark { background: var(--plate-dark-bg); border: 1px solid var(--plate-dark-border); }
+  .plate-light .wm { color: var(--plate-light-ink); }
+  .plate-dark .wm { color: var(--plate-dark-ink); }
+  .lock-cn { font-size: 12px; letter-spacing: 0.12em; }
+  .plate-light .lock-cn { color: var(--plate-light-sub); }
+  .plate-dark .lock-cn { color: var(--plate-dark-sub); }
+
+  /* ---------- candidate card ---------- */
+  section.card { padding: 46px 0 50px; border-bottom: 1px solid var(--hairline); }
+  .card-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  .idx { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; color: var(--ink-3); letter-spacing: 0.1em; }
+  .card-head .name { font-size: 32px; line-height: 1.1; margin: 0; }
+  .card-head .phon { color: var(--ink-3); font-size: 13px; }
+  .tag-reco {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    border: 1px solid var(--ink); border-radius: 999px;
+    padding: 2px 10px; color: var(--ink); align-self: center;
+  }
+
+  .card-body {
+    display: grid;
+    grid-template-columns: minmax(0, 13fr) minmax(0, 11fr);
+    gap: 32px;
+  }
+  @media (max-width: 760px) { .card-body { grid-template-columns: minmax(0, 1fr); } }
+
+  .plates { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-content: start; }
+  @media (max-width: 430px) { .plates { grid-template-columns: 1fr; } }
+  .plates .plate {
+    border-radius: 6px; padding: 30px 16px;
+    display: flex; justify-content: center; align-items: center; gap: 11px;
+  }
+  .plates .wm { font-size: 25px; line-height: 1; }
+
+  .spec { max-width: 58ch; }
+  .morph { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 16px; }
+  .morph .m {
+    display: inline-flex; align-items: baseline; gap: 7px;
+    background: var(--chip-bg); border-radius: 5px; padding: 4px 12px;
+  }
+  .morph .m b { font-weight: 650; font-size: 15px; }
+  .morph .m span { font-size: 12px; color: var(--ink-2); }
+  .morph .op { color: var(--ink-3); font-size: 14px; }
+  .morph .to { font-size: 13px; color: var(--ink-2); }
+  .why { margin: 0 0 16px; color: var(--ink-2); }
+  .why strong { color: var(--ink); font-weight: 600; }
+  .risk { font-size: 12.5px; line-height: 1.7; color: var(--ink-3); margin: 0; padding-top: 12px; border-top: 1px dashed var(--hairline); }
+  .risk b { color: var(--ink-2); font-weight: 600; }
+
+  /* ---------- summary ---------- */
+  .summary { padding-top: 52px; }
+  .summary h2 { font-size: 22px; font-weight: 650; margin: 0 0 20px; letter-spacing: -0.01em; }
+  .table-scroller { overflow-x: auto; border: 1px solid var(--hairline); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 660px; font-size: 13.5px; }
+  th {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500; text-align: left;
+    padding: 12px 16px; border-bottom: 1px solid var(--hairline);
+  }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  tbody tr:nth-child(odd) td { background: var(--table-row); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.tnum { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--ink-3); }
+  td .tn { font-weight: 600; white-space: nowrap; }
+  td.tmuted { color: var(--ink-2); }
+
+  .verdict { margin-top: 44px; border-left: 2px solid var(--ink); padding: 4px 0 4px 22px; }
+  .verdict p { margin: 0 0 12px; max-width: 62ch; }
+  .verdict p:last-child { margin-bottom: 0; }
+  .verdict .pick { font-weight: 650; }
+  .footnote { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--hairline); color: var(--ink-3); font-size: 12.5px; max-width: 70ch; line-height: 1.8; }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="masthead-top">
+      <span class="mono">weft — Name Refinement · Round 02</span>
+      <span class="mono">Agentic Wiki · 2026-07-17</span>
+    </div>
+    <h1>「织识」定盘，名字重铸</h1>
+    <p class="lede">方向已选定：weft 的<strong>标志、配色与中文名「织识」全部保留</strong>。本轮只动一个变量——把英文名从字典词 weft 升级为<strong>自造词</strong>，让它可注册、可独占。六个铸词全部从「织识」的两个语素出发：<strong>织＝weft</strong>，<strong>识＝wise / ken / lore / -ure / shí……</strong>按推荐顺序排列。</p>
+    <div class="locked">
+      <div class="plate plate-light">
+        <span data-logo="light:34"></span>
+        <span class="wm" style="font-size:21px">织识</span>
+        <span class="lock-cn">已锁定 · 标志与中文名</span>
+      </div>
+      <div class="plate plate-dark">
+        <span data-logo="dark:34"></span>
+        <span class="wm" style="font-size:21px">织识</span>
+        <span class="lock-cn">暗色适配已验证</span>
+      </div>
+      <div class="tagline-box">
+        <span class="en">“Knowledge, woven.”</span>
+        <span class="zh">让读过的一切，织成一张布。</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ 01 weftwise ============ -->
+  <section class="card" id="weftwise">
+    <div class="card-head">
+      <span class="idx">01</span>
+      <h2 class="name wm">weftwise</h2>
+      <span class="phon">/ˈwɛft.waɪz/ · 8 字母</span>
+      <span class="tag-reco">推荐</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light"><span data-logo="light:30"></span><span class="wm">weftwise</span><span class="lock-cn">织识</span></div>
+        <div class="plate plate-dark"><span data-logo="dark:30"></span><span class="wm">weftwise</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="spec">
+        <div class="morph">
+          <span class="m"><b>weft</b><span>纬线 · 织</span></span>
+          <span class="op">＋</span>
+          <span class="m"><b>wise</b><span>智 · 识</span></span>
+          <span class="op">→</span>
+          <span class="to">织识，逐字成词</span>
+        </div>
+        <p class="why">六案中唯一「<strong>发现的词</strong>」而非硬造的词：纺织行业真的用 weftwise 表示<strong>「沿纬线方向」</strong>（与 warpwise 相对）——知识沿纬向织入，正是产品每次 ingest 做的事。而 -wise 同时是 clockwise 的方向后缀与 wise 的「智」，「织识」两个语素一字不落。读音、拼写听写零障碍。</p>
+        <p class="risk"><b>风险</b> · 记忆中无知名占用；含 wise 与金融品牌 Wise 存在弱联想（后缀位置，影响小）；weftwise.com 可能被域名商停放，需实查。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 weften ============ -->
+  <section class="card" id="weften">
+    <div class="card-head">
+      <span class="idx">02</span>
+      <h2 class="name wm">weften</h2>
+      <span class="phon">/ˈwɛf.tən/ · 6 字母</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light"><span data-logo="light:30"></span><span class="wm">weften</span><span class="lock-cn">织识</span></div>
+        <div class="plate plate-dark"><span data-logo="dark:30"></span><span class="wm">weften</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="spec">
+        <div class="morph">
+          <span class="m"><b>weft</b><span>纬线 · 织</span></span>
+          <span class="op">＋</span>
+          <span class="m"><b>-en</b><span>动词化后缀</span></span>
+          <span class="op">→</span>
+          <span class="to">「织入」这个动作本身</span>
+        </div>
+        <p class="why">借 soften / deepen / sharpen 的构词法把 weft <strong>动词化</strong>：weften ＝ 把某物织进纬线。品牌即动作——每读一篇资料，就 weften 一次；「把这篇 weften 进去」天然是产品用语。六案中最短、口感最轻快，像 Notion / Linear 一路的现代产品名。「识」不在词面上，由中文名「织识」补齐。</p>
+        <p class="risk"><b>风险</b> · 记忆中无知名占用；德语区读音近人名（如 Steffen），无实害；语义完全靠教育，首次接触不自解释。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 weftlore ============ -->
+  <section class="card" id="weftlore">
+    <div class="card-head">
+      <span class="idx">03</span>
+      <h2 class="name wm">weftlore</h2>
+      <span class="phon">/ˈwɛft.lɔːr/ · 8 字母</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light"><span data-logo="light:30"></span><span class="wm">weftlore</span><span class="lock-cn">织识</span></div>
+        <div class="plate plate-dark"><span data-logo="dark:30"></span><span class="wm">weftlore</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="spec">
+        <div class="morph">
+          <span class="m"><b>weft</b><span>纬线 · 织</span></span>
+          <span class="op">＋</span>
+          <span class="m"><b>lore</b><span>累积的学问 · 识</span></span>
+          <span class="op">→</span>
+          <span class="to">织成的学问</span>
+        </div>
+        <p class="why">lore 是 folklore 的 lore——<strong>口耳相传、层层累积</strong>的那种学问，比 knowledge 更旧、更有体温，且恰好描述这个 wiki 的生长方式：一点点缠绕增厚。weftlore ＝ 织出来的学问，两个语素都是真词，读音立刻成立。lore 一词在互联网语境里正当红（角色的 lore、项目的 lore），对年轻用户有暗号感。</p>
+        <p class="risk"><b>风险</b> · 记忆中无知名占用；lore 的网感是双刃剑——书卷气与梗文化并存；8 字母中规中矩。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 weftken ============ -->
+  <section class="card" id="weftken">
+    <div class="card-head">
+      <span class="idx">04</span>
+      <h2 class="name wm">weftken</h2>
+      <span class="phon">/ˈwɛft.kɛn/ · 7 字母</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light"><span data-logo="light:30"></span><span class="wm">weftken</span><span class="lock-cn">织识</span></div>
+        <div class="plate plate-dark"><span data-logo="dark:30"></span><span class="wm">weftken</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="spec">
+        <div class="morph">
+          <span class="m"><b>weft</b><span>纬线 · 织</span></span>
+          <span class="op">＋</span>
+          <span class="m"><b>ken</b><span>认知范围 · 识</span></span>
+          <span class="op">→</span>
+          <span class="to">与「织识」语序逐字对应</span>
+        </div>
+        <p class="why">ken 是英语里快被遗忘的美词：<strong>one's ken ＝ 认知的边界</strong>（beyond my ken，超出我的认知）。weft＋ken 与「织·识」<strong>逐字对应且语序相同</strong>，是六案中对原词最忠实的翻译；两个语素都是单音节古日耳曼词根，质地统一。产品的使命恰是「扩张你的 ken」。</p>
+        <p class="risk"><b>风险</b> · 记忆中无知名占用；ken 对非英语母语者几乎无认知，需教育；ft-k 辅音簇稍硬。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 wefture ============ -->
+  <section class="card" id="wefture">
+    <div class="card-head">
+      <span class="idx">05</span>
+      <h2 class="name wm">wefture</h2>
+      <span class="phon">/ˈwɛf.tʃər/ · 7 字母</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light"><span data-logo="light:30"></span><span class="wm">wefture</span><span class="lock-cn">织识</span></div>
+        <div class="plate plate-dark"><span data-logo="dark:30"></span><span class="wm">wefture</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="spec">
+        <div class="morph">
+          <span class="m"><b>weft</b><span>纬线 · 织</span></span>
+          <span class="op">＋</span>
+          <span class="m"><b>-ure</b><span>过程之结果</span></span>
+          <span class="op">→</span>
+          <span class="to">织成之物，texture 的近亲</span>
+        </div>
+        <p class="why">texture、culture、structure 的 -ure 表示「<strong>过程沉淀下来的结果</strong>」。这里藏着六案中最深的一层词源彩蛋：<strong>text 的拉丁词源 texere 本义就是「编织」</strong>——「文本」在词根里本来就是织物。wefture 把这层被遗忘的词源织了回来：你的全部文本，织成一件东西。</p>
+        <p class="risk"><b>风险</b> · 记忆中无知名占用；重音易读歪（需统一为 WEF-cher）；字形与 welter / wetter 略近，听写需确认。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 06 wefshi ============ -->
+  <section class="card" id="wefshi">
+    <div class="card-head">
+      <span class="idx">06</span>
+      <h2 class="name wm">wefshi</h2>
+      <span class="phon">/ˈwɛf.ʃiː/ · 6 字母</span>
+    </div>
+    <div class="card-body">
+      <div class="plates">
+        <div class="plate plate-light"><span data-logo="light:30"></span><span class="wm">wefshi</span><span class="lock-cn">织识</span></div>
+        <div class="plate plate-dark"><span data-logo="dark:30"></span><span class="wm">wefshi</span><span class="lock-cn">织识</span></div>
+      </div>
+      <div class="spec">
+        <div class="morph">
+          <span class="m"><b>wef(t)</b><span>纬线 · 织</span></span>
+          <span class="op">＋</span>
+          <span class="m"><b>shí</b><span>识，拼音直入</span></span>
+          <span class="op">→</span>
+          <span class="to">中文的那半个字住进英文名</span>
+        </div>
+        <p class="why">最大胆的一案：让「识」以<strong>拼音 shi 的原形</strong>进入英文名，中西两个语素真正焊在一个词里。中文用户一眼读出「识」，英文用户读 WEF-shee 也毫无障碍，音感柔软（与和纸 washi 同构的craft感）。作为字符串它几乎<strong>必然全网独占</strong>——搜索、域名、商标都是零竞争。</p>
+        <p class="risk"><b>风险</b> · 独占性近乎保证，但拼写听写需教（f-s-h 连缀）；washi / sushi 的日系联想可能盖过中文出身；气质偏轻。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ summary ============ -->
+  <section class="summary">
+    <h2>横向对比</h2>
+    <div class="table-scroller">
+      <table>
+        <thead>
+          <tr><th>No.</th><th>铸词</th><th>语素来源</th><th>一句话</th><th>字母</th><th>主要风险</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="tnum">01</td><td><span class="tn wm">weftwise</span></td><td>weft ＋ wise（识）</td><td class="tmuted">纺织实词「沿纬向」，织识逐字成词</td><td class="tmuted">8</td><td class="tmuted">Wise 弱联想</td></tr>
+          <tr><td class="tnum">02</td><td><span class="tn wm">weften</span></td><td>weft ＋ -en 动词化</td><td class="tmuted">「织入」，品牌即动作</td><td class="tmuted">6</td><td class="tmuted">不自解释</td></tr>
+          <tr><td class="tnum">03</td><td><span class="tn wm">weftlore</span></td><td>weft ＋ lore（识）</td><td class="tmuted">织成的学问，有体温</td><td class="tmuted">8</td><td class="tmuted">lore 网感双刃</td></tr>
+          <tr><td class="tnum">04</td><td><span class="tn wm">weftken</span></td><td>weft ＋ ken（识）</td><td class="tmuted">对「织识」最忠实的逐字翻译</td><td class="tmuted">7</td><td class="tmuted">ken 需教育</td></tr>
+          <tr><td class="tnum">05</td><td><span class="tn wm">wefture</span></td><td>weft ＋ -ure 结果化</td><td class="tmuted">织成之物；text 词源本是编织</td><td class="tmuted">7</td><td class="tmuted">重音易读歪</td></tr>
+          <tr><td class="tnum">06</td><td><span class="tn wm">wefshi</span></td><td>weft ＋ 识（shí）</td><td class="tmuted">中西语素同词，独占性最强</td><td class="tmuted">6</td><td class="tmuted">日系联想</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="verdict">
+      <p class="pick">我的推荐：weftwise，备选 weften。</p>
+      <p><strong>weftwise</strong> 是六案中唯一「本来就存在、只是没人认领」的词——纺织业的「沿纬向」，又把「织」与「识」两个语素一字不落地装进去，读音拼写零教育成本，是自造词里罕见的「发现感」。若你更想要短促、动词化、口语里能直接用的名字（「把这篇 weften 进去」），选 <strong>weften</strong>。定下后我立刻做域名 / 商标 / 应用商店的正式核验清单。</p>
+    </div>
+
+    <p class="footnote">说明：六案的「风险」注记均来自模型知识（截至 2026-01），未做实时检索；自造词的重名概率天然低于字典词，但正式定名前仍需核验。标志、配色、中文名「织识」与主标语沿用 Round 01 定稿；wordmark 暂以 Avenir Next 示意，定稿后以授权字体精修字距与 ft 连字。</p>
+  </section>
+</div>
+
+<script>
+(function () {
+  var PAL = {
+    light: { a: '#3E4A6D', b: '#D9482F' },
+    dark:  { a: '#93A3CF', b: '#FF6B4D' }
+  };
+  var mark = function (c) {
+    var warp = [13, 21, 29, 37].map(function (x) {
+      return '<line x1="' + x + '" y1="9" x2="' + x + '" y2="39" stroke="' + c.a + '" stroke-width="3" stroke-linecap="round"/>';
+    }).join('');
+    var over = [13, 29].map(function (x) {
+      return '<line x1="' + x + '" y1="19" x2="' + x + '" y2="29" stroke="' + c.a + '" stroke-width="3" stroke-linecap="round"/>';
+    }).join('');
+    return warp
+      + '<line x1="7" y1="24" x2="42" y2="24" stroke="' + c.b + '" stroke-width="3" stroke-linecap="round"/>'
+      + '<circle cx="45.6" cy="24" r="1.9" fill="' + c.b + '"/>'
+      + over;
+  };
+  document.querySelectorAll('[data-logo]').forEach(function (el) {
+    var parts = el.getAttribute('data-logo').split(':');
+    var pal = PAL[parts[0]], size = parseInt(parts[1] || '30', 10);
+    if (!pal) { return; }
+    el.innerHTML = '<svg width="' + size + '" height="' + size + '" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block">' + mark(pal) + '</svg>';
+  });
+})();
+</script>
+
+</body>
+</html>

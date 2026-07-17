@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { background: #F6F5F2; font-family: -apple-system, "PingFang SC", sans-serif; padding: 40px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; }
+  .row { display: flex; gap: 14px; align-items: flex-start; }
+  .plate { border-radius: 6px; padding: 20px; display: flex; align-items: flex-end; gap: 22px; }
+  .light { background: #fff; border: 1px solid #E7E4DD; }
+  .dark  { background: #17171B; border: 1px solid #26262C; }
+  figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  figcaption { font-size: 9px; color: #999; font-family: ui-monospace, Menlo, monospace; }
+  .dark figcaption { color: #777; }
+</style>
+</head>
+<body>
+  <div id="root"></div>
+<script>
+  const PAL = { light: { a: '#3E4A6D', b: '#D9482F' }, dark: { a: '#93A3CF', b: '#FF6B4D' } };
+
+  // 现行版：4 经 + 直纬
+  function markOld(c) {
+    const warp = [13,21,29,37].map(x => `<line x1="${x}" y1="9" x2="${x}" y2="39" stroke="${c.a}" stroke-width="3" stroke-linecap="round"/>`).join('');
+    const over = [13,29].map(x => `<line x1="${x}" y1="19" x2="${x}" y2="29" stroke="${c.a}" stroke-width="3" stroke-linecap="round"/>`).join('');
+    return warp
+      + `<line x1="7" y1="24" x2="42" y2="24" stroke="${c.b}" stroke-width="3" stroke-linecap="round"/>`
+      + `<circle cx="45.6" cy="24" r="1.9" fill="${c.b}"/>`
+      + over;
+  }
+
+  // V-A：3 经 + 波动纬（幅 5，笔画 3.4）
+  function markA(c) {
+    const warp = [14,24,34].map(x => `<line x1="${x}" y1="9.5" x2="${x}" y2="38.5" stroke="${c.a}" stroke-width="3.4" stroke-linecap="round"/>`).join('');
+    const over = [14,34].map(x => `<line x1="${x}" y1="18.5" x2="${x}" y2="29.5" stroke="${c.a}" stroke-width="3.4" stroke-linecap="round"/>`).join('');
+    return warp
+      + `<path d="M5.8 19.5 C6.8 19.15 7.9 19 9 19 C12.64 19 15.36 29 19 29 C22.64 29 25.36 19 29 19 C32.64 19 35.36 29 39 29 C40.8 29 42.6 27.2 43.8 25.4" stroke="${c.b}" stroke-width="3.4" stroke-linecap="round" fill="none"/>`
+      + `<circle cx="45.6" cy="23.2" r="2" fill="${c.b}"/>`
+      + over;
+  }
+
+  // V-B：3 经 + 波动纬（幅 6，笔画 3.6，经线更短）
+  function markB(c) {
+    const warp = [14,24,34].map(x => `<line x1="${x}" y1="11" x2="${x}" y2="37" stroke="${c.a}" stroke-width="3.6" stroke-linecap="round"/>`).join('');
+    const over = [14,34].map(x => `<line x1="${x}" y1="17.5" x2="${x}" y2="30.5" stroke="${c.a}" stroke-width="3.6" stroke-linecap="round"/>`).join('');
+    return warp
+      + `<path d="M5.6 18.6 C6.7 18.2 7.9 18 9 18 C12.64 18 15.36 30 19 30 C22.64 30 25.36 18 29 18 C32.64 18 35.36 30 39 30 C40.8 30 42.7 28 44 25.8" stroke="${c.b}" stroke-width="3.6" stroke-linecap="round" fill="none"/>`
+      + `<circle cx="45.8" cy="23.4" r="2.1" fill="${c.b}"/>`
+      + over;
+  }
+
+  // V-C：4 经保留 + 波动纬（幅 4.5）
+  function markC(c) {
+    const warp = [13,21,29,37].map(x => `<line x1="${x}" y1="9.5" x2="${x}" y2="38.5" stroke="${c.a}" stroke-width="3.2" stroke-linecap="round"/>`).join('');
+    const over = [13,29].map(x => `<line x1="${x}" y1="19" x2="${x}" y2="29" stroke="${c.a}" stroke-width="3.2" stroke-linecap="round"/>`).join('');
+    return warp
+      + `<path d="M5.5 24 C6.5 21.5 7.5 19.5 9 19.5 C11.9 19.5 14.1 28.5 17 28.5 C19.9 28.5 22.1 19.5 25 19.5 C27.9 19.5 30.1 28.5 33 28.5 C35.9 28.5 38.1 19.5 41 19.5" stroke="${c.b}" stroke-width="3.2" stroke-linecap="round" fill="none"/>`
+      + `<circle cx="44.4" cy="20.4" r="2" fill="${c.b}"/>`
+      + over;
+  }
+
+  const VARIANTS = [
+    ['现行（4 经直纬）', markOld],
+    ['V-A · 3 经波纬 幅5', markA],
+    ['V-B · 3 经波纬 幅6', markB],
+    ['V-C · 4 经波纬 幅4.5', markC],
+  ];
+  const SIZES = [16, 20, 24, 32, 48, 108];
+
+  const svg = (fn, pal, size) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block">${fn(pal)}</svg>`;
+
+  document.getElementById('root').innerHTML = VARIANTS.map(([name, fn]) => `
+    <h2>${name}</h2>
+    <div class="row">
+      <div class="plate light">${SIZES.map(s => `<figure>${svg(fn, PAL.light, s)}<figcaption>${s}</figcaption></figure>`).join('')}</div>
+      <div class="plate dark">${SIZES.map(s => `<figure>${svg(fn, PAL.dark, s)}<figcaption>${s}</figcaption></figure>`).join('')}</div>
+    </div>
+  `).join('');
+</script>
+</body>
+</html>

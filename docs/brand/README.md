@@ -39,3 +39,14 @@
 - 最小使用尺寸 16px；小于 24px 只用 mark 不带 wordmark。
 - App 内 wordmark 用 `font-display`（Space Grotesk，OFL）小写 `weftwise`；「织识」并排时约为 wordmark 字号 55%，次级前景色。
 - 标志组件：`src/components/shared/weftwise-mark.tsx`（`<WeftwiseMark size />`，自动亮暗）。
+
+## 提案存档（`proposals/`，浏览器直接打开即可）
+
+| 文件 | 内容 | 线上版 |
+|------|------|--------|
+| `2026-07-17-round1-brand-directions.html` | Round 1 · 七个品牌方向（weft/Banyan/Asterism/Muninn/atoll/Clew/Trellis）| [Artifact](https://claude.ai/code/artifact/230ca5ca-2d24-408e-b47f-791fed2336ad) |
+| `2026-07-17-round2-coined-names.html` | Round 2 · 从「织识」铸词六案（定名 weftwise）| [Artifact](https://claude.ai/code/artifact/2a2eb797-0645-45c1-9bec-68c8373c0acb) |
+| `2026-07-17-brand-sheet.html` | 品牌定稿规格书（含 v2 织纹、核验记录、防御清单）| [Artifact](https://claude.ai/code/artifact/bd2ffe06-6415-4d01-bc8e-4045da3e3077) |
+| `2026-07-17-mark-v2-variants.html` | 标志 v2 选型对比（直纬 vs 三种波纬，6 档尺寸×亮暗）| — |
+
+> 资产 zip 不入库：内容（mark SVG / icon.svg / og.png）已由本目录与 `src/app/` 持有。
