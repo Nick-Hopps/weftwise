@@ -11,41 +11,55 @@ const DEFAULTS: StylePrefs = {
   formality: 'neutral',
 };
 
-const FIELDS: { key: keyof StylePrefs; label: string; options: [string, string][] }[] = [
+export const COGNITIVE_LENS_ONBOARDING_COPY = {
+  title: 'Make every page work for you',
+  description:
+    'Tell us about your background and preferences. Each page will adapt how it explains things, and you can change these settings at any time.',
+  backgroundPlaceholder:
+    'For example: Backend engineer familiar with distributed systems, but new to machine learning',
+  skip: 'Skip',
+  save: 'Save and start',
+} as const;
+
+export const COGNITIVE_LENS_ONBOARDING_FIELDS: {
+  key: keyof StylePrefs;
+  label: string;
+  options: [string, string][];
+}[] = [
   {
     key: 'readingLevel',
-    label: '阅读难度基线',
+    label: 'Reading level',
     options: [
-      ['beginner', '入门'],
-      ['intermediate', '进阶'],
-      ['advanced', '专家'],
+      ['beginner', 'Beginner'],
+      ['intermediate', 'Intermediate'],
+      ['advanced', 'Advanced'],
     ],
   },
   {
     key: 'verbosity',
-    label: '详尽度',
+    label: 'Verbosity',
     options: [
-      ['terse', '精简'],
-      ['balanced', '适中'],
-      ['thorough', '详尽'],
+      ['terse', 'Terse'],
+      ['balanced', 'Balanced'],
+      ['thorough', 'Thorough'],
     ],
   },
   {
     key: 'exampleDensity',
-    label: '举例/类比密度',
+    label: 'Examples & analogies',
     options: [
-      ['few', '少'],
-      ['some', '适量'],
-      ['many', '多'],
+      ['few', 'Few'],
+      ['some', 'Some'],
+      ['many', 'Many'],
     ],
   },
   {
     key: 'formality',
-    label: '语气',
+    label: 'Tone',
     options: [
-      ['casual', '口语'],
-      ['neutral', '中性'],
-      ['formal', '正式'],
+      ['casual', 'Casual'],
+      ['neutral', 'Neutral'],
+      ['formal', 'Formal'],
     ],
   },
 ];
@@ -62,19 +76,21 @@ export function CognitiveLensOnboarding() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl">
-        <h2 className="mb-1 text-lg font-semibold text-foreground">让内容更贴合你</h2>
+        <h2 className="mb-1 text-lg font-semibold text-foreground">
+          {COGNITIVE_LENS_ONBOARDING_COPY.title}
+        </h2>
         <p className="mb-4 text-sm text-foreground-tertiary">
-          告诉我你的背景与喜好，阅读时会按它调整每页的讲法（随时可在设置里改，也会随你的反馈自动微调）。
+          {COGNITIVE_LENS_ONBOARDING_COPY.description}
         </p>
 
         <textarea
           value={bg}
           onChange={(e) => setBg(e.target.value)}
-          placeholder="例如：后端工程师，懂分布式系统，但机器学习是新手"
+          placeholder={COGNITIVE_LENS_ONBOARDING_COPY.backgroundPlaceholder}
           className="mb-4 h-24 w-full rounded-md border border-border bg-canvas p-2 text-sm"
         />
 
-        {FIELDS.map((f) => (
+        {COGNITIVE_LENS_ONBOARDING_FIELDS.map((f) => (
           <label key={f.key} className="mb-2 flex items-center justify-between gap-3 text-sm">
             <span className="text-foreground-secondary">{f.label}</span>
             <select
@@ -99,7 +115,7 @@ export function CognitiveLensOnboarding() {
             disabled={update.isPending}
             onClick={() => update.mutate({ markOnboarded: true })}
           >
-            跳过
+            {COGNITIVE_LENS_ONBOARDING_COPY.skip}
           </Button>
           <Button
             intent="primary"
@@ -107,7 +123,7 @@ export function CognitiveLensOnboarding() {
             disabled={update.isPending}
             onClick={() => update.mutate({ backgroundSummary: bg, stylePrefs: prefs, markOnboarded: true })}
           >
-            保存并开始
+            {COGNITIVE_LENS_ONBOARDING_COPY.save}
           </Button>
         </div>
       </div>
