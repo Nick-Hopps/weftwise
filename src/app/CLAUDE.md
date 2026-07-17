@@ -32,7 +32,7 @@
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
-| `/api/query` | POST | Chat 流式问答：明确的单页 re-enrich 控制命令确定性直达 PendingAction（不等待 Query LLM）；其余问题按 `read/propose` 模式运行。可选 `selection` 携带 canonical/reshape 来源与完整顶层 Markdown 块 offset，`userQuestion` 保留未拼 Passage 的用户原话；有选区时先由结构化 LLM 分类 `image-insert/other`，只有 canonical + `image-insert` 才获得 `wiki.image.insert` 提案工具，分类失败回退 read，Reshape 确定性提示切回 Original。两种模式可显式跨 Subject 只读、读取 active Subject History 与脱敏 workflow status；citation 支持可选 `subjectSlug`。也支持 save-only（202 `jobId`）与 question+save（200 `saveJobId`）两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
+| `/api/query` | POST | Chat 流式问答：每轮先由统一结构化 LLM 分类 `read/propose/direct-reenrich/image-insert/reset-*` 与可选页面目标，服务端再按可信 page/selection/context 收窄能力；明确单页 re-enrich 直接创建 PendingAction，canonical 选区配图才开放专用提案工具，Reshape 确定性拒绝。重置请求以 `reset-confirmation` SSE 进入二次确认，后续 body 用 `intentContext:'reset-confirmation'` 复用同一分类入口；确认后前端仍调用受鉴权/CSRF/Subject 守卫的 `/api/reset`。分类失败时普通请求回退 read、重置确认回退 unclear。两种 Query mode 均可跨 Subject 只读、读取 active Subject History 与脱敏 workflow status；也支持两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
 | `/api/pending-actions/[id]/approve` | POST | 批准服务端持久化的预览；忽略客户端 operation/payload，重新规划后执行页面/move/History Saga，或原子 start/cancel workflow job；选区配图批准时重新验证 canonical 块锚点并启动 `image-insert`，批准前零生图；陈旧预览 409 返回刷新 action |
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
@@ -161,6 +161,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | `/api/query` 统一使用结构化 LLM 分类普通提案、Re-enrich、选区配图与 Wiki 重置；新增 `intentContext:'reset-confirmation'` 和 `reset-confirmation` SSE，删除服务端/客户端自然语言意图正则，失败保持 fail-closed |
 | 2026-07-17 | Subject 导出/导入：新增 `GET /api/subjects/[id]/export`（vault 锁内打 zip：manifest + wiki/raw/assets/sources 侧车）与 `POST /api/subjects/import`（multipart zip，manifest/formatVersion/zip-slip 校验，slug 冲突 409 可换名重试，失败清理回滚）；Subjects 页加 Import 按钮、编辑弹窗加 Export。spec/plan 见 docs/{specs,plans}/2026-07-17-subject-export-import.md |
 | 2026-07-17 | 全站主题色切换 weftwise 双色语法：`globals.css` BASE 层 violet 家族 → weft（纬线朱=动作，UI 主档 `#CC3F27` 白字 4.87:1）+ warp（经线靛=连接）两家族；accent/focus/selection/input-focus → weft，新增 `--color-link(-hover)` → warp，graph 节点 → warp、active → weft；danger 移向绯红 `#DB374F` 拉开色相；亮 canvas 贴品牌纸 `#F6F5F2`，暗色底面/边框整体带品牌蓝调（canvas `#131315`）；暗色主按钮前景改深墨。plan 见 docs/plans/2026-07-17-brand-theme-colors.md |
 | 2026-07-17 | Ask AI 结构化选区支持 canonical 完整 Markdown 块锚点；`wiki.image.insert` 只创建配图 PendingAction，批准后才原子启动 `image-insert` job，Reshape 配图命令拒绝写 canonical |
