@@ -84,6 +84,7 @@ const PROFILES: Record<ToolProfileId, ToolProfile> = {
       'workflow.cancel',
       'wiki.reenrich',
       'wiki.move',
+      'wiki.image.insert',
     ],
     allowedSideEffects: ['none', 'propose'],
     requiresApproval: true,

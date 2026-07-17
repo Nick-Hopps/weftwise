@@ -53,10 +53,11 @@ describe('resolveQueryTools', () => {
       'workflow.cancel',
       'wiki.reenrich',
       'wiki.move',
+      'wiki.image.insert',
     ]);
     expect(propose).not.toEqual(expect.arrayContaining([
       'wiki.create', 'wiki.update', 'wiki.patch', 'wiki.delete', 'wiki.reenrich',
-      'wiki.metadata.patch', 'wiki.link.ensure',
+      'wiki.metadata.patch', 'wiki.link.ensure', 'image.generate',
     ]));
   });
 });

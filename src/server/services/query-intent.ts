@@ -21,16 +21,35 @@ const WRITE_ACTION = /(?:创建|新建|更新|修改|编辑|局部修改|删除|
 const WIKI_TARGET = /(?:wiki|知识库|页面|页|page)/i;
 const HISTORY_REVERT = /(?:(?:回滚|恢复).{0,24}(?:历史|版本|操作)|(?:历史|版本|操作).{0,24}(?:回滚|恢复)|\brevert\b.{0,24}\b(?:wiki|history|operation|version)\b)/i;
 const WORKFLOW_ACTION = /(?:(?:开始|启动).{0,24}(?:研究|research|重新丰富|再丰富)|(?:取消|终止).{0,24}(?:任务|工作流|job)|\bstart\s+(?:a\s+)?research\b|\bcancel\s+(?:the\s+)?(?:job|workflow)\b)/i;
+const IMAGE_INSERT_EXPLANATORY = [
+  /(?:如何|怎么|怎样|能否|(?:你)?能|可以.{0,8}吗|不要|别|假设|如果).{0,40}(?:配图|插图|图片|图像|示意图)/i,
+  /\b(?:how\s+(?:do|can|to)|can\s+you|do\s+not|don't|what\s+(?:would|happens?)\s+if|if\s+i)\b.{0,60}\b(?:image|illustration|diagram)\b/i,
+];
+const IMAGE_INSERT_ACTION = [
+  /(?:生成|画|绘制|添加|插入|放置).{0,40}(?:配图|插图|图片|图像|示意图).{0,60}(?:下方|下面|后面|之后|正文|文章|页面|这段|选中)/i,
+  /(?:在|给).{0,30}(?:这段|选中|正文|文章|页面).{0,40}(?:生成|画|绘制|添加|插入|放置).{0,30}(?:配图|插图|图片|图像|示意图)/i,
+  /\b(?:generate|create|draw|add|insert|place)\b.{0,50}\b(?:image|illustration|diagram)\b.{0,60}\b(?:below|after|under|into|selection|passage|article|page)\b/i,
+];
+
+export function isImageInsertIntent(question: string): boolean {
+  const normalized = question.trim();
+  if (!normalized || IMAGE_INSERT_EXPLANATORY.some((pattern) => pattern.test(normalized))) return false;
+  return IMAGE_INSERT_ACTION.some((pattern) => pattern.test(normalized));
+}
 
 /**
  * 只决定 Query 是否能看到无写入副作用的 preview 工具；真正授权仍由 actionId 审批承担。
  */
-export function resolveQueryMode(question: string): QueryMode {
+export function resolveQueryMode(
+  question: string,
+  options: { hasCanonicalSelection?: boolean } = {},
+): QueryMode {
   const normalized = question.trim();
   if (!normalized) return 'read';
   if (EXPLANATORY_OR_NEGATED.some((pattern) => pattern.test(normalized))) return 'read';
   if (HISTORY_REVERT.test(normalized)) return 'propose';
   if (WORKFLOW_ACTION.test(normalized)) return 'propose';
+  if (options.hasCanonicalSelection && isImageInsertIntent(normalized)) return 'propose';
   return WRITE_ACTION.test(normalized) && WIKI_TARGET.test(normalized) ? 'propose' : 'read';
 }
 
