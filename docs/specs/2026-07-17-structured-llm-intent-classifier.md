@@ -1,7 +1,7 @@
 # Ask AI 统一结构化 LLM 意图分类设计
 
 **日期：** 2026-07-17
-**状态：** 已确认，待实现
+**状态：** 已实现
 
 ## 一、背景与问题
 
@@ -115,4 +115,3 @@ Chat 发送原始 userQuestion + Query 上下文 question
 3. Query route 单测覆盖 read、propose、direct Re-enrich、canonical/reshape 配图和重置三态 SSE。
 4. 前端通过抽出的纯状态转换函数测试重置确认事件和上下文请求构造。
 5. 定向测试通过后运行全量 Vitest、lint、build 与 `git diff --check`。
-

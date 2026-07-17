@@ -55,11 +55,11 @@ worker-entry.ts
 
 - `streamAgenticQuery(opts)` — 流式 agentic 问答：
   1. 调 `createAccessedPages()` 创建访问页收集器；
-  2. 普通请求根据 `resolveQueryMode(question)` 选择 `query:read` 或 `query:propose`；结构化选区请求先由 `classifySelectionIntent` 通过 `query` 结构化 LLM 分类 `image-insert/other`，仅 canonical + `image-insert` 开启配图 propose，失败保守回退 read；
+  2. 每轮先由 `classifyQueryIntent(question, context)` 通过 `query` 结构化 LLM 一次分类 `read/propose/direct-reenrich/image-insert/reset-*` 和页面目标；服务端按可信当前页、选区与 reset phase 收窄结果，普通失败回退 read、确认失败回退 unclear；
   3. read/propose 都有只读 evidence、History list/diff 与 `workflow.status`，只有 propose 额外获得页面/move/History/workflow PendingAction 工具；`wiki.image.insert` 还需 `imageInsertEnabled` 才进入真实 ToolSet，再由必传 `ToolExecutionPolicy` 编译；
   4. 用 `streamTextWithTools('query', { system, messages, tools, maxSteps: QUERY_MAX_STEPS })` 驱动工具循环；system prompt 按真实 mode/配图能力构造，不描述未下发工具；
   5. 返回 `{ stream, accessed }`（`accessed` 供事后 `accessedToContext` 生成引用上下文）。
-- `query-intent::resolveDirectReenrichSlug(question, currentPageSlug?)` — 只识别整句、单动作的 re-enrich 控制命令；`/api/query` 命中后直接调用 `createPendingWorkflowActionPreview` 并发送 `pending-action/answer-delta/done`，不调用 Query LLM、不做 coverage，但仍只生成待批准预览。
+- `query-intent::resolveDirectReenrichTarget(intent, currentPageSlug?)` — 只消费结构化分类器返回的 `current-page/slug` 目标，不再解析自然语言；`/api/query` 命中后直接创建 workflow PendingAction，不运行主 Query 工具循环或 coverage。
 - `runQuery(question, subject, currentPageSlug?)` — 非流式 agentic 问答：
   1. 始终进入 `generateTextWithTools` 工具循环；active Subject 为空时仍可显式查询其他 Subject；
   2. 引用使用**流后确定性解析**（零 LLM 二次调用）：`extractCitationsFromAnswer(answer, accessed, subject.slug)`（`citation-extract.ts`）。
@@ -306,8 +306,9 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | `query-intent` 收口为统一结构化分类器：普通写入、直接 Re-enrich、选区配图和重置共用一次 `query` schema 调用；删除意图正则，增加 request/reset-confirmation 上下文收窄与保守失败回退 |
 | 2026-07-17 | Ask AI canonical 选区新增 `wiki.image.insert` 提案、`workflow-image-insert-start` 审批与 `image-insert` worker；完整块锚点重定位、stable HEAD、取消 rollback、页面/资产同 Changeset 与 applied operation 恢复均已覆盖 |
-| 2026-07-17 | 选区配图意图从正则改为 `classifySelectionIntent` 结构化 LLM 分类；输出仅 `image-insert/other`，失败回退 other，route 再结合可信 canonical selection 决定 `imageInsertEnabled`，普通 propose 不再携带配图工具 |
+| 2026-07-17 | 选区配图最初从正则迁移为结构化 LLM 二分类；现已并入 `classifyQueryIntent` 统一契约，route 仍结合可信 canonical selection 决定 `imageInsertEnabled`，普通 propose 不携带配图工具 |
 | 2026-07-16 | re-enrich 生图可靠性修复：enricher v6 的页面身份改由运行时注入，Unicode slug 可安全关联 asset；视觉主题无现有位图时明确触发生图，已有位图不重复 |
 | 2026-07-16 | enrich 接入 `image.generate` 图片工具；asset 与页面同一 Saga 提交，工具经 `ingest:image` 独立路由调用 Gemini 3.1 Flash Image |
 | 2026-07-16 | Tags 工作台接入 `tag-batch` PendingAction：独立 strict schema、NULL conversation 的 Subject-scoped 恢复和原子在途去重；批准重算 Vault 标签计划并复用 expectedPreHead/Saga/finalizer，Query 工具 schema 保持不变 |
