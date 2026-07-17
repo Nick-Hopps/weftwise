@@ -77,7 +77,7 @@ ingest-service.ts
 - **有 tools + 有 outputSchema → 组合路径**：`compileToolSet` 额外合成 `finish` 工具（`FINISH_TOOL_NAME`）；agent-loop 末步触发 `finish` 时由 `synthesizeFinishTool(schema, capture)` 捕获结构化输出，`experimental_prepareStep` 在最后一步强制结束循环。planner / writer 走此路径，既能在循环中调 `wiki.read/search`，又能在收尾时产出结构化结果。
 - **无 tools + 有 outputSchema → `generateObject` 路径**：verifier 等纯结构化输出 skill 走此路径，`generateStructuredResult` 直接调用，无工具循环；enricher 现为有 `image.generate` 工具的组合路径。（`indexer` 已于 T2.1 移除，不再是 skill——index/log 改由 service 层纯函数确定性渲染）
 - **`createBuiltinToolRegistry()` 进程无关**：ingest worker 与 query runner 各自构造包含 30 个 builtin 的 registry（无参、无全局单例）；`ToolContext` 差异由 `compileToolSet` 调用方注入，不在 registry 工厂层。
-- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装 read/search/inspect/source-page-filter/list 与写上下文，`wiki.link.ensure` 只按 source page 判写 scope，跨主题 target 仅作存在性验证。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/diff/patch 及 metadata 值。Query 按意图使用 `query:read` 或 `query:propose`：read 可脱敏读取 active Subject workflow status，propose 才额外获得页面/History/workflow PendingAction 提案能力，仍不含任何 enqueue/destructive 直接执行工具；`fix:links` 只用 `wiki.link.ensure`，`fix:contradiction` 才额外开放 patch/update；Curate 两种 profile 均可在 allowedSet 内使用 link/metadata 窄写；ingest 只使用 planner/writer 只读 profile。
+- **`ToolProfile + ToolExecutionPolicy` 是运行时授权边界**：所有 runner 先解析 profile，再把必传 policy 交给 `compileToolSet`；编译器过滤 profile 外工具、拒绝未允许 sideEffect、校验 subject，Fix/Curate 写工具还必须有匹配 job type 的 capability；存在 `allowedPageSlugs` 时包装 read/search/inspect/source-page-filter/list 与写上下文，`wiki.link.ensure` 只按 source page 判写 scope，跨主题 target 仅作存在性验证。审计回调记录 profile/sideEffect/subject/目标页，但会递归遮盖 body/content/markdown/text/excerpt/diff/patch 及 metadata 值。Query mode 为 `read/propose/image-insert`：read 使用 `query:read` policy；propose 使用 `query:propose` policy 并获得页面/History/workflow PendingAction 提案能力；image-insert 复用 `query:propose` policy，但实际 ToolDef 只在只读面上增加 `wiki.image.insert`，不携带通用提案工具。三者均不含任何 enqueue/destructive 直接执行工具；`fix:links` 只用 `wiki.link.ensure`，`fix:contradiction` 才额外开放 patch/update；Curate 两种 profile 均可在 allowedSet 内使用 link/metadata 窄写；ingest 只使用 planner/writer 只读 profile。
 
 **暂存提交**：每个内容阶段（writer → enricher → verifier）的页面均由 orchestrator 暂存进 `ctx.pending`；同一 path 的 upsert 采用 **last-write-wins**（后一阶段覆盖前一阶段产出）。`commitPending` 提交 `pending ∪ [index.md, log.md]`（按 path 去重、supplied 覆盖）。`index.md` / `log.md`（meta 页）由 `wiki/meta-pages.ts` 纯函数渲染，所有内容页随 `pending` 自动提交——T2.1 起索引/日志根本不再有 LLM 调用（此前是无 tools 结构化输出，不接触页正文；现在连该调用也去掉了），从根本上杜绝巨量提示词随页数增长与工具循环风险。
 
@@ -243,7 +243,7 @@ src/server/agents/tools/builtin/__tests__/
 - `OverlayVault`：读取命中内存 diff；commit 时 diff 正确合并到真实 vault。
 - `runtime/commit-pending.ts::commitPending`：合并 `pending ∪ supplied` 调用 Saga；重复提交 / 空集报错；它是 service-level 内部函数，不进入模型工具注册表。
 - Orchestrator step 顺序：planner 输出传入 writer context；writer 扁平 entry 累积进 `ctx.pending`。
-- Tool registry/Profile/compile：30 个 builtin 精确注册；Query 当前/跨 Subject/History 只读与选区配图提案面、Fix/Curate 窄写面、job capability、allowedSet 与审计脱敏均有回归；`dispatch.skill` / `commit_changeset` 明确不可达。
+- Tool registry/Profile/compile：30 个 builtin 精确注册；Query 当前/跨 Subject/History 只读、通用提案与独立选区配图 ToolSet、Fix/Curate 窄写面、job capability、allowedSet 与审计脱敏均有回归；配图 ToolSet 的 provider JSON Schema 根节点均锁定为 object，`dispatch.skill` / `commit_changeset` 明确不可达。
 - 窄写 ToolDef：metadata/link schema、成功/缺能力失败、source-only scope、工具活动脱敏与 Query preview operation 均有覆盖。
 
 ---
@@ -330,6 +330,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Query 选区配图采用独立 `image-insert` mode：复用 propose policy，但只编译只读工具与 `wiki.image.insert`；新增 ToolSet JSON Schema 根节点回归，避免无关 union schema 阻断 provider 工具注册 |
 | 2026-07-17 | 新增 `wiki.image.insert` propose builtin 与 Query profile 授权；canonical page/selection 由 ToolContext 绑定，模型不能控制 slug/offset，且 Query 仍不可调用真实 `image.generate` |
 | 2026-07-16 | 修复 re-enrich 生图可靠性：`image.generate` 移除模型提供的 ASCII `pageSlug`，改由运行时绑定 Unicode 页面身份；asset 使用 UUID 文件名；非 Google `ingest:image` 路由 fail-fast；enricher v6 对视觉主题无现有位图时明确生图，并允许未修改 v5 自动升级 |
 | 2026-07-16 | 内置 skill 升级加入 SHA-256 白名单：worker 启动时仅自动替换精确匹配历史原版的 vault 副本，用户改版继续保留；`ingest-enricher` v4 原版可安全迁移到当前 v5 |

@@ -266,9 +266,7 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        const imageInsertEnabled =
-          selection?.sourceKind === 'canonical' && intent.intent === 'image-insert';
-        const mode = imageInsertEnabled ? 'propose' : queryModeForIntent(intent);
+        const mode = queryModeForIntent(intent);
         const { stream: answerStream, accessed } = streamAgenticQuery({
           question: trimmedQuestion,
           subject,
@@ -276,7 +274,6 @@ export async function POST(request: NextRequest) {
           currentPageSlug: pageSlug,
           conversationId: activeConversationId,
           mode,
-          imageInsertEnabled,
           onPendingAction: (action) => emit('pending-action', action),
           selection,
           abortSignal: request.signal,

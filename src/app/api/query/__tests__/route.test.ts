@@ -88,7 +88,11 @@ beforeEach(() => {
     targetPage: { reference: 'none', slug: null },
   });
   mockQueryModeForIntent.mockReset().mockImplementation((result: { intent: string }) =>
-    result.intent === 'propose' || result.intent === 'direct-reenrich' ? 'propose' : 'read',
+    result.intent === 'image-insert'
+      ? 'image-insert'
+      : result.intent === 'propose' || result.intent === 'direct-reenrich'
+        ? 'propose'
+        : 'read',
   );
   mockResolveDirectReenrichTarget.mockReset().mockReturnValue(null);
   mockCreateWorkflowPreview.mockReset();
@@ -409,8 +413,7 @@ describe('POST /api/query 流式持久化', () => {
     expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
       currentPageSlug: 'page-a',
       selection,
-      mode: 'propose',
-      imageInsertEnabled: true,
+      mode: 'image-insert',
     }));
   });
 
@@ -437,7 +440,6 @@ describe('POST /api/query 流式持久化', () => {
     expect(mockQueryModeForIntent).toHaveBeenCalledWith(expect.objectContaining({ intent: 'read' }));
     expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
       mode: 'read',
-      imageInsertEnabled: false,
     }));
   });
 
