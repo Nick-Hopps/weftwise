@@ -2,13 +2,15 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type {
   PendingActionOperation,
-  PersistedMarkdownBlockAnchor,
   PreviewChangeInput,
   TagBatchInput,
   TagBatchPreviewInput,
   WorkflowPreviewInput,
 } from '@/lib/contracts';
-import { ImageGenerateInputSchema } from '@/lib/contracts';
+import {
+  ImageGenerateInputSchema,
+  PersistedMarkdownBlockAnchorSchema,
+} from '@/lib/contracts';
 import { normalizeMetadataPatch } from '@/server/wiki/narrow-write';
 import { isCanonicalPageSlug } from '@/server/wiki/page-identity';
 
@@ -132,18 +134,7 @@ export const WorkflowPreviewInputSchema = z.discriminatedUnion('operation', [
     operation: z.literal('workflow-image-insert-start'),
     payload: z.object({
       slug: CanonicalPageSlugSchema,
-      anchor: z.object({
-        start: z.number().int().nonnegative(),
-        end: z.number().int().positive(),
-        markdown: z.string().min(1),
-        prefix: z.string(),
-        suffix: z.string(),
-        quote: TrimmedTextSchema,
-        section: z.string().trim().min(1).nullable(),
-      }).strict().refine((anchor) => anchor.end > anchor.start, {
-        message: 'anchor end must be after start',
-        path: ['end'],
-      }) satisfies z.ZodType<PersistedMarkdownBlockAnchor>,
+      anchor: PersistedMarkdownBlockAnchorSchema,
       request: ImageGenerateInputSchema,
     }).strict(),
   }).strict(),
