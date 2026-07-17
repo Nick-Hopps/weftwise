@@ -263,6 +263,41 @@ function visitMermaid(node: MdastNode): void {
 }
 
 // ---------------------------------------------------------------------------
+// remarkSelectionBlocks plugin
+// ---------------------------------------------------------------------------
+
+type MdastNodeWithData = MdastNode & {
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, unknown>;
+    [key: string]: unknown;
+  };
+};
+
+/** 把顶层 mdast block 的 UTF-16 offset 透传到 DOM，供 Range 形成可信块级锚点。 */
+function createRemarkSelectionBlocks(): Plugin<[], MdastRoot> {
+  return function () {
+    return function transformer(tree: MdastRoot) {
+      for (const child of tree.children) {
+        if (child.type === 'yaml') continue;
+        const start = child.position?.start.offset;
+        const end = child.position?.end.offset;
+        if (start === undefined || end === undefined || end <= start) continue;
+        const node = child as MdastNodeWithData;
+        node.data = {
+          ...node.data,
+          hProperties: {
+            ...(node.data?.hProperties ?? {}),
+            'data-md-block-start': String(start),
+            'data-md-block-end': String(end),
+          },
+        };
+      }
+    };
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Production JSX runtime options for rehype-react
 // ---------------------------------------------------------------------------
 
@@ -287,7 +322,7 @@ const prodRuntime = prod as unknown as {
 export function renderMarkdown(
   content: string,
   titleSlugMap?: Record<string, string>,
-  options?: { math?: boolean; headingAnchors?: boolean },
+  options?: { math?: boolean; headingAnchors?: boolean; selectionBlocks?: boolean },
 ): React.ReactElement {
   const enableMath = options?.math ?? false;
   const resolver: SlugResolver | undefined = titleSlugMap
@@ -300,6 +335,7 @@ export function renderMarkdown(
   if (enableMath) remark = remark.use(remarkMath);
   if (options?.headingAnchors) remark = remark.use(remarkArticleHeadings);
   remark = remark.use(createRemarkCallouts()).use(createRemarkMermaid()).use(createRemarkWikiLinks(resolver));
+  if (options?.selectionBlocks) remark = remark.use(createRemarkSelectionBlocks());
 
   // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；
   // throwOnError:false 保证非法 LaTeX 不会让同步 processSync 抛错、整页崩溃。

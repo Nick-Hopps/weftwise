@@ -12,6 +12,17 @@ export interface HeadingScanNode {
   readonly parentElement: HeadingScanNode | null;
 }
 
+/** 从 Range 端点向上查找 Markdown 顶层块所需的最小 DOM 子集。 */
+export interface SelectionBlockScanNode {
+  readonly parentElement: SelectionBlockScanNode | null;
+  getAttribute(name: string): string | null;
+}
+
+export interface SelectionBlockRange {
+  blockStart: number;
+  blockEnd: number;
+}
+
 const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4']);
 
 /** trim 选区文本；空或纯空白返回 null（调用方据此不弹按钮）。 */
@@ -49,4 +60,40 @@ export function findNearestHeadingText(start: HeadingScanNode | null): string | 
     node = node.parentElement;
   }
   return null;
+}
+
+function blockOffsets(start: SelectionBlockScanNode | null): SelectionBlockRange | null {
+  let node = start;
+  while (node) {
+    const startRaw = node.getAttribute('data-md-block-start');
+    const endRaw = node.getAttribute('data-md-block-end');
+    if (startRaw !== null && endRaw !== null) {
+      const blockStart = Number(startRaw);
+      const blockEnd = Number(endRaw);
+      if (
+        Number.isSafeInteger(blockStart)
+        && Number.isSafeInteger(blockEnd)
+        && blockStart >= 0
+        && blockEnd > blockStart
+      ) {
+        return { blockStart, blockEnd };
+      }
+      return null;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** 合并 Range 首尾所属顶层块；缺少可信属性或倒置时拒绝生成写入锚点。 */
+export function findSelectionBlockRange(
+  start: SelectionBlockScanNode | null,
+  end: SelectionBlockScanNode | null,
+): SelectionBlockRange | null {
+  const first = blockOffsets(start);
+  const last = blockOffsets(end);
+  if (!first || !last || first.blockStart > last.blockStart || first.blockEnd > last.blockEnd) {
+    return null;
+  }
+  return { blockStart: first.blockStart, blockEnd: last.blockEnd };
 }
