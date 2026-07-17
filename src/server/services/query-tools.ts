@@ -16,6 +16,7 @@ import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-read
 import {
   createPendingActionPreview,
   createPendingHistoryRevertPreview,
+  createPendingImageInsertActionPreview,
   createPendingWorkflowActionPreview,
 } from './pending-action-service';
 import { listHistory, readHistoryDiff } from './history-tools';
@@ -129,6 +130,17 @@ export function buildQueryToolContext(
           subject,
           input: { operation: 'workflow-cancel', payload: { jobId } },
         }),
+        ...(options.currentPageSlug && options.selection
+          ? {
+              previewImageInsert: (request) => createPendingImageInsertActionPreview({
+                conversationId: options.conversationId!,
+                subject,
+                pageSlug: options.currentPageSlug!,
+                selection: options.selection!,
+                request,
+              }),
+            }
+          : {}),
         onPendingAction: options.onPendingAction,
       }
     : {};

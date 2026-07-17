@@ -264,7 +264,7 @@ export interface PageListResult {
 
 export interface Job {
   id: string;
-  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research' | 'research-import';
+  type: 'ingest' | 'lint' | 'save-to-wiki' | 'embed-index' | 'curate' | 're-enrich' | 'fix' | 'research' | 'research-import' | 'image-insert';
   status: 'pending' | 'running' | 'completed' | 'failed';
   paramsJson: string;
   resultJson: string | null;
@@ -820,6 +820,26 @@ export interface SelectionAnchorInput {
   blockEnd: number;
 }
 
+export const ImageGenerateInputSchema = z.object({
+  prompt: z.string().trim().min(1).max(4_000),
+  alt: z.string().trim().min(1).max(240),
+  aspectRatio: z.enum(['1:1', '4:3', '3:4', '16:9', '9:16']).optional(),
+  style: z.string().trim().max(240).optional(),
+}).strict();
+
+export type ImageGenerateInput = z.infer<typeof ImageGenerateInputSchema>;
+
+/** 审批与后台任务持久化的 canonical Markdown 块锚点。 */
+export interface PersistedMarkdownBlockAnchor {
+  start: number;
+  end: number;
+  markdown: string;
+  prefix: string;
+  suffix: string;
+  quote: string;
+  section: string | null;
+}
+
 export type PendingActionOperation =
   | 'create'
   | 'update'
@@ -831,6 +851,7 @@ export type PendingActionOperation =
   | 'history-revert'
   | 'workflow-reenrich-start'
   | 'workflow-research-start'
+  | 'workflow-image-insert-start'
   | 'workflow-cancel'
   | 'move'
   | 'tag-batch';
@@ -885,6 +906,14 @@ export interface MovePageInput {
 export type WorkflowPreviewInput =
   | { operation: 'workflow-reenrich-start'; payload: { slug: string } }
   | { operation: 'workflow-research-start'; payload: { topic: string } }
+  | {
+      operation: 'workflow-image-insert-start';
+      payload: {
+        slug: string;
+        anchor: PersistedMarkdownBlockAnchor;
+        request: ImageGenerateInput;
+      };
+    }
   | { operation: 'workflow-cancel'; payload: { jobId: string } };
 
 export interface PendingActionPreview {
@@ -897,6 +926,13 @@ export interface PendingActionPreview {
   }>;
   diff: string | null;
   warnings: string[];
+  imageInsert?: {
+    selection: string;
+    prompt: string;
+    alt: string;
+    aspectRatio?: string;
+    style?: string;
+  };
 }
 
 export interface PendingActionView extends PendingActionPreview {

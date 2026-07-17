@@ -164,6 +164,24 @@ describe('finalizeWorkflowStartAction', () => {
       status: 'applied', jobId: job.id,
     });
     expect(jobCount(db)).toBe(1);
+
+    repo.createPendingAction({
+      id: 'a-image', conversationId: 'c1', subjectId: 's1',
+      operation: 'workflow-image-insert-start', payloadJson: '{}', payloadHash: 'hash',
+      previewJson: '{}', createdAt: nowIso, updatedAt: nowIso,
+      expiresAt: '2026-07-14T01:30:00.000Z',
+    });
+    repo.claimApproval('a-image', 's1', nowIso);
+    repo.claimExecution('a-image', 's1', null, null, nowIso);
+    const imageJob = finalizeWorkflowStartAction({
+      actionId: 'a-image', subjectId: 's1', type: 'image-insert',
+      params: { subjectId: 's1', slug: 'page-a', anchor: {}, request: {} }, nowIso,
+    });
+    expect(imageJob).toMatchObject({ type: 'image-insert', subjectId: 's1', status: 'pending' });
+    expect(repo.getScoped('a-image', 's1')).toMatchObject({
+      status: 'applied', jobId: imageJob.id,
+    });
+    expect(jobCount(db)).toBe(2);
   });
 });
 
