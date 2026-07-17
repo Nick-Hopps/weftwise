@@ -458,7 +458,10 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
 
     try {
       const subjectId = useUIStore.getState().currentSubjectId;
-      const queryBody: Record<string, unknown> = { question: backendQuestion };
+      const queryBody: Record<string, unknown> = {
+        question: backendQuestion,
+        userQuestion: question,
+      };
       const structuredSelection = sentRefs.find((ref) => ref.selection)?.selection;
       if (structuredSelection) queryBody.selection = structuredSelection;
       if (currentPageSlug) queryBody.pageSlug = currentPageSlug;

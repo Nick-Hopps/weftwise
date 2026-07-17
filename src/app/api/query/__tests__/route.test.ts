@@ -8,7 +8,7 @@ const mockExtractCitations = vi.fn();
 const mockAssessCoverage = vi.fn();
 const mockResolveQueryMode = vi.fn();
 const mockResolveDirectReenrichSlug = vi.fn();
-const mockIsImageInsertIntent = vi.fn();
+const mockClassifySelectionIntent = vi.fn();
 const mockCreateWorkflowPreview = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
@@ -36,7 +36,7 @@ vi.mock('@/server/services/citation-extract', () => ({
 vi.mock('@/server/services/query-intent', () => ({
   resolveQueryMode: (...a: unknown[]) => mockResolveQueryMode(...a),
   resolveDirectReenrichSlug: (...a: unknown[]) => mockResolveDirectReenrichSlug(...a),
-  isImageInsertIntent: (...a: unknown[]) => mockIsImageInsertIntent(...a),
+  classifySelectionIntent: (...a: unknown[]) => mockClassifySelectionIntent(...a),
 }));
 vi.mock('@/server/services/pending-action-service', () => ({
   createPendingWorkflowActionPreview: (...a: unknown[]) => mockCreateWorkflowPreview(...a),
@@ -87,7 +87,7 @@ beforeEach(() => {
     question.includes('删除') ? 'propose' : 'read',
   );
   mockResolveDirectReenrichSlug.mockReset().mockReturnValue(null);
-  mockIsImageInsertIntent.mockReset().mockReturnValue(false);
+  mockClassifySelectionIntent.mockReset().mockResolvedValue('other');
   mockCreateWorkflowPreview.mockReset();
   mockCreate.mockReset();
   mockCreate.mockImplementation((s: string) => ({ id: 'new-conv', subjectId: s, title: 'T', createdAt: 't', updatedAt: 't' }));
@@ -373,7 +373,7 @@ describe('POST /api/query 流式持久化', () => {
     expect(sse).toContain(`data: ${JSON.stringify(action)}`);
   });
 
-  it('canonical 选区作为结构化上下文传给 Query runner', async () => {
+  it('canonical 选区的 LLM 配图意图开启专用 propose 工具', async () => {
     const selection = {
       sourceKind: 'canonical',
       quote: '选中的概念',
@@ -381,31 +381,56 @@ describe('POST /api/query 流式持久化', () => {
       blockStart: 10,
       blockEnd: 40,
     };
-    mockResolveQueryMode.mockReturnValue('propose');
+    mockClassifySelectionIntent.mockResolvedValue('image-insert');
 
     const res = await call({
-      question: '帮我在这段内容下方生成一张配图',
+      question: 'Use these excerpts as context:\n> 坐标系说明\n\nQuestion: 在这下面生成一张图片说明',
+      userQuestion: '在这下面生成一张图片说明',
       pageSlug: 'page-a',
       subjectId: 's1',
       selection,
     });
     await readSSE(res);
 
-    expect(mockResolveQueryMode).toHaveBeenCalledWith(
-      '帮我在这段内容下方生成一张配图',
-      { hasCanonicalSelection: true },
-    );
+    expect(mockClassifySelectionIntent).toHaveBeenCalledWith('在这下面生成一张图片说明');
     expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
       currentPageSlug: 'page-a',
       selection,
       mode: 'propose',
+      imageInsertEnabled: true,
+    }));
+  });
+
+  it('canonical 选区的普通问答保持 read 且不开放配图工具', async () => {
+    mockClassifySelectionIntent.mockResolvedValue('other');
+
+    const res = await call({
+      question: 'Use this excerpt as context:\n> 坐标系说明\n\nQuestion: 解释一下这段内容',
+      userQuestion: '解释一下这段内容',
+      pageSlug: 'page-a',
+      subjectId: 's1',
+      selection: {
+        sourceKind: 'canonical',
+        quote: '坐标系说明',
+        section: null,
+        blockStart: 0,
+        blockEnd: 20,
+      },
+    });
+    await readSSE(res);
+
+    expect(mockResolveQueryMode).toHaveBeenCalledWith('解释一下这段内容');
+    expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'read',
+      imageInsertEnabled: false,
     }));
   });
 
   it('Reshape 选区配图命令确定性提示切回 Original，不调用 Query LLM', async () => {
-    mockIsImageInsertIntent.mockReturnValue(true);
+    mockClassifySelectionIntent.mockResolvedValue('image-insert');
     const res = await call({
-      question: '帮我在这段内容下方生成一张配图',
+      question: 'Use this excerpt as context:\n> 重塑内容\n\nQuestion: 给这里画个图',
+      userQuestion: '给这里画个图',
       pageSlug: 'page-a',
       subjectId: 's1',
       selection: {
@@ -418,6 +443,7 @@ describe('POST /api/query 流式持久化', () => {
     });
     const sse = await readSSE(res);
 
+    expect(mockClassifySelectionIntent).toHaveBeenCalledWith('给这里画个图');
     expect(mockAgentic).not.toHaveBeenCalled();
     expect(sse).toContain('Original');
     expect(sse).toContain('event: done');

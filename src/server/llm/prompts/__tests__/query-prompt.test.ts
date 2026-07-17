@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { buildQueryUserPrompt, QUERY_AGENTIC_SYSTEM_PROMPT, QueryResponseSchema } from '../query-prompt';
+import {
+  buildQueryAgenticSystemPrompt,
+  buildQueryUserPrompt,
+  buildSelectionIntentUserPrompt,
+  QueryResponseSchema,
+  SELECTION_INTENT_SYSTEM_PROMPT,
+  SelectionIntentSchema,
+} from '../query-prompt';
 import type { PromptContext } from '../prompt-context';
 
 const ctxChinese: PromptContext = {
@@ -62,20 +69,22 @@ import {
 } from '../query-prompt';
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT', () => {
+  const prompt = buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false });
+
   it('说明受治理工具与 subject 隔离', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_list');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_search');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_read');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_status');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/other subject/i);
+    expect(prompt).toContain('wiki_list');
+    expect(prompt).toContain('wiki_search');
+    expect(prompt).toContain('wiki_read');
+    expect(prompt).toContain('workflow_status');
+    expect(prompt).toMatch(/other subject/i);
   });
 
   it('明确跨主题列出、搜索、读取与带前缀引用纪律', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('subject_list');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_search_cross_subject');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_read_cross_subject');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('[[subject-slug:page-slug]]');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/never[\s\S]*cross-subject[\s\S]*write/i);
+    expect(prompt).toContain('subject_list');
+    expect(prompt).toContain('wiki_search_cross_subject');
+    expect(prompt).toContain('wiki_read_cross_subject');
+    expect(prompt).toContain('[[subject-slug:page-slug]]');
+    expect(prompt).toMatch(/never[\s\S]*cross-subject[\s\S]*write/i);
   });
 });
 
@@ -127,59 +136,94 @@ describe('QueryResponseSchema — coverage 字段', () => {
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT — web search 纪律', () => {
   it('提到 web_search 工具与来源标注要求', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('web_search');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/not in your wiki/i);
+    const prompt = buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false });
+    expect(prompt).toContain('web_search');
+    expect(prompt).toMatch(/not in your wiki/i);
   });
 });
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
+  const readPrompt = buildQueryAgenticSystemPrompt({ mode: 'read', imageInsertEnabled: false });
+  const proposePrompt = buildQueryAgenticSystemPrompt({ mode: 'propose', imageInsertEnabled: false });
+  const imagePrompt = buildQueryAgenticSystemPrompt({ mode: 'propose', imageInsertEnabled: true });
+
   it('不宣称 Ask AI 可直接执行写操作或口头确认授权', () => {
     for (const tool of ['wiki_create', 'wiki_update', 'wiki_patch', 'wiki_delete']) {
-      expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain(tool);
+      expect(proposePrompt).not.toContain(tool);
     }
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toMatch(/LATER turn|prior turn|confirm before/i);
+    expect(proposePrompt).not.toMatch(/LATER turn|prior turn|confirm before/i);
   });
 
-  it('Phase 3C 启动与取消只走 PendingAction，并说明 Research 二次审批', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_reenrich_start');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_research_start');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('workflow_cancel');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/research candidates[\s\S]*separate approval/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/workflow_status[\s\S]*workflow_cancel/);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/does not enqueue|does not cancel/i);
+  it('read prompt 不描述未下发的 mutation 工具', () => {
+    for (const tool of [
+      'wiki_preview_change',
+      'history_revert',
+      'workflow_reenrich_start',
+      'workflow_research_start',
+      'workflow_cancel',
+      'wiki_move',
+      'wiki_image_insert',
+    ]) {
+      expect(readPrompt).not.toContain(tool);
+    }
   });
 
-  it('选区配图只创建审批提案，要求先读当前页且不得宣称已生成', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_image_insert');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/read the current page first/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/does not call the image model|after the user clicks Approve/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('image_generate');
+  it('propose prompt 的启动与取消只走 PendingAction，并说明 Research 二次审批', () => {
+    expect(proposePrompt).toContain('workflow_reenrich_start');
+    expect(proposePrompt).toContain('workflow_research_start');
+    expect(proposePrompt).toContain('workflow_cancel');
+    expect(proposePrompt).toMatch(/research candidates[\s\S]*separate approval/i);
+    expect(proposePrompt).toMatch(/workflow_status[\s\S]*workflow_cancel/);
+    expect(proposePrompt).toMatch(/does not enqueue|does not cancel/i);
+  });
+
+  it('只有 imageInsertEnabled prompt 描述选区配图工具', () => {
+    expect(proposePrompt).not.toContain('wiki_image_insert');
+    expect(imagePrompt).toContain('wiki_image_insert');
+    expect(imagePrompt).toMatch(/read the current page first/i);
+    expect(imagePrompt).toMatch(/does not call the image model|after the user clicks Approve/i);
+    expect(imagePrompt).not.toContain('image_generate');
   });
 
   it('仅允许通过审批预览工具提案，并明确预览不会直接落盘', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_preview_change');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_list');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_diff');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_revert');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/not applied/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/actionId/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/approval button/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toMatch(/reply.*confirm/i);
+    expect(proposePrompt).toContain('wiki_preview_change');
+    expect(proposePrompt).toContain('history_list');
+    expect(proposePrompt).toContain('history_diff');
+    expect(proposePrompt).toContain('history_revert');
+    expect(proposePrompt).toMatch(/not applied/i);
+    expect(proposePrompt).toMatch(/actionId/i);
+    expect(proposePrompt).toMatch(/approval button/i);
+    expect(proposePrompt).not.toMatch(/reply.*confirm/i);
   });
 
   it('History 回滚要求 list → diff → PendingAction，且禁止猜 operation id', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/history_list[\s\S]*history_diff/);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/Never guess an operation id/i);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/history_diff[\s\S]*history_revert/);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/never applies the revert/i);
+    expect(proposePrompt).toMatch(/history_list[\s\S]*history_diff/);
+    expect(proposePrompt).toMatch(/Never guess an operation id/i);
+    expect(proposePrompt).toMatch(/history_diff[\s\S]*history_revert/);
+    expect(proposePrompt).toMatch(/never applies the revert/i);
   });
 
   it('窄写请求只指导 preview_change 的 operation，不暴露真实窄写工具', () => {
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('metadata-patch');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('link-ensure');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_metadata_patch');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('wiki_link_ensure');
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/wiki_preview_change[\s\S]*metadata-patch/);
-    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/wiki_preview_change[\s\S]*link-ensure/);
+    expect(proposePrompt).toContain('metadata-patch');
+    expect(proposePrompt).toContain('link-ensure');
+    expect(proposePrompt).not.toContain('wiki_metadata_patch');
+    expect(proposePrompt).not.toContain('wiki_link_ensure');
+    expect(proposePrompt).toMatch(/wiki_preview_change[\s\S]*metadata-patch/);
+    expect(proposePrompt).toMatch(/wiki_preview_change[\s\S]*link-ensure/);
+  });
+});
+
+describe('SelectionIntentSchema', () => {
+  it('只接受 image-insert 或 other', () => {
+    expect(SelectionIntentSchema.parse({ intent: 'image-insert' })).toEqual({ intent: 'image-insert' });
+    expect(SelectionIntentSchema.parse({ intent: 'other' })).toEqual({ intent: 'other' });
+    expect(() => SelectionIntentSchema.parse({ intent: 'delete-page' })).toThrow();
+  });
+
+  it('prompt 明确区分执行意图、能力询问、否定与已有图片解释', () => {
+    expect(SELECTION_INTENT_SYSTEM_PROMPT).toMatch(/explicitly asks[\s\S]*now[\s\S]*generate[\s\S]*insert/i);
+    expect(SELECTION_INTENT_SYSTEM_PROMPT).toMatch(/capability|negated|existing image/i);
+    expect(buildSelectionIntentUserPrompt('在这下面生成一张图片说明'))
+      .toContain('<user_input>\n在这下面生成一张图片说明\n</user_input>');
   });
 });
