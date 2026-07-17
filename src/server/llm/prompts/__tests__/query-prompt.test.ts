@@ -149,6 +149,13 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/does not enqueue|does not cancel/i);
   });
 
+  it('选区配图只创建审批提案，要求先读当前页且不得宣称已生成', () => {
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_image_insert');
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/read the current page first/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).toMatch(/does not call the image model|after the user clicks Approve/i);
+    expect(QUERY_AGENTIC_SYSTEM_PROMPT).not.toContain('image_generate');
+  });
+
   it('仅允许通过审批预览工具提案，并明确预览不会直接落盘', () => {
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('wiki_preview_change');
     expect(QUERY_AGENTIC_SYSTEM_PROMPT).toContain('history_list');

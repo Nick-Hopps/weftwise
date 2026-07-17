@@ -51,7 +51,7 @@ describe('createBuiltinToolRegistry', () => {
 
   it('注册 Phase 3C 工作流控制工具并保持启动取消为提案副作用', () => {
     const registry = createBuiltinToolRegistry();
-    expect(registry.resolve(['*'])).toHaveLength(29);
+    expect(registry.resolve(['*'])).toHaveLength(30);
     expect(registry.get('workflow.status')).toMatchObject({ sideEffect: 'none' });
     expect(registry.get('workflow.reenrich.start')).toMatchObject({ sideEffect: 'propose' });
     expect(registry.get('workflow.research.start')).toMatchObject({ sideEffect: 'propose' });
@@ -62,6 +62,12 @@ describe('createBuiltinToolRegistry', () => {
   it('注册 enrich 专用图片生图工具且不产生写副作用', () => {
     expect(createBuiltinToolRegistry().get('image.generate')).toMatchObject({
       sideEffect: 'none',
+    });
+  });
+
+  it('注册 Ask AI 选区配图提案工具且不开放真实生图副作用', () => {
+    expect(createBuiltinToolRegistry().get('wiki.image.insert')).toMatchObject({
+      sideEffect: 'propose',
     });
   });
 
