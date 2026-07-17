@@ -48,7 +48,7 @@ export async function ensureVaultRepo(): Promise<void> {
       fs.mkdirSync(path.dirname(readmePath), { recursive: true });
     }
     if (!fs.existsSync(readmePath)) {
-      fs.writeFileSync(readmePath, '# LLM Wiki Vault\n\nInitialized by agentic-wiki.\n');
+      fs.writeFileSync(readmePath, '# LLM Wiki Vault\n\nInitialized by weftwise.\n');
     }
     await git.add('.');
     await git.commit('Initial vault commit');
