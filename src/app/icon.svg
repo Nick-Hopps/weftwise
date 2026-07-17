@@ -3,14 +3,13 @@
     .w{stroke:#3E4A6D}.f{stroke:#D9482F}.fd{fill:#D9482F}
     @media (prefers-color-scheme:dark){.w{stroke:#93A3CF}.f{stroke:#FF6B4D}.fd{fill:#FF6B4D}}
   </style>
-  <g stroke-width="3.2" stroke-linecap="round" fill="none">
-    <line class="w" x1="13" y1="9" x2="13" y2="39"/>
-    <line class="w" x1="21" y1="9" x2="21" y2="39"/>
-    <line class="w" x1="29" y1="9" x2="29" y2="39"/>
-    <line class="w" x1="37" y1="9" x2="37" y2="39"/>
-    <line class="f" x1="7" y1="24" x2="42" y2="24"/>
-    <line class="w" x1="13" y1="19" x2="13" y2="29"/>
-    <line class="w" x1="29" y1="19" x2="29" y2="29"/>
+  <g stroke-width="3.6" stroke-linecap="round" fill="none">
+    <line class="w" x1="14" y1="11" x2="14" y2="37"/>
+    <line class="w" x1="24" y1="11" x2="24" y2="37"/>
+    <line class="w" x1="34" y1="11" x2="34" y2="37"/>
+    <path class="f" d="M5.6 18.6 C6.7 18.2 7.9 18 9 18 C12.64 18 15.36 30 19 30 C22.64 30 25.36 18 29 18 C32.64 18 35.36 30 39 30 C40.8 30 42.7 28 44 25.8"/>
+    <line class="w" x1="14" y1="17.5" x2="14" y2="30.5"/>
+    <line class="w" x1="34" y1="17.5" x2="34" y2="30.5"/>
   </g>
-  <circle class="fd" cx="45.6" cy="24" r="1.9"/>
+  <circle class="fd" cx="45.8" cy="23.4" r="2.1"/>
 </svg>
