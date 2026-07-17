@@ -15,6 +15,7 @@ export { validateHttpUrl } from './url-safety';
 export const URL_FETCH_TIMEOUT_MS = 10_000;
 export const MAX_URL_BYTES = 5 * 1024 * 1024;
 export const MAX_URL_REDIRECTS = 5;
+export const URL_FETCH_USER_AGENT = 'weftwise/1.0';
 
 export interface UrlTransportResponse {
   status: number;
@@ -221,7 +222,7 @@ const nodeRequestTransport: UrlRequestTransport = async (target) =>
           Host: target.url.host,
           Accept: 'text/html,text/markdown,text/plain;q=0.9,*/*;q=0.1',
           'Accept-Encoding': 'identity',
-          'User-Agent': 'Agentic-Wiki/1.0',
+          'User-Agent': URL_FETCH_USER_AGENT,
         },
         ...(target.url.protocol === 'https:' ? { servername: target.hostname } : {}),
         signal: target.signal,
