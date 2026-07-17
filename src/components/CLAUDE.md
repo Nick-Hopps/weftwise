@@ -188,6 +188,7 @@ src/components/
 | 2026-07-17 | Wiki 正文增加自适应固定目录：宽内容区常驻右侧章节轨道，窄内容区使用粘性入口；普通阅读与 Sources 分栏共享当前章节跟踪和稳定标题锚点 |
 | 2026-07-17 | 阅读页 Reshape 状态扩为 loading/refreshing/ready：保存版可随时查看，Refresh 保留旧内容直至原子替换，生成与刷新均可 Cancel |
 | 2026-07-17 | 阅读页消费 Lens `stale` 协议：canonical 或画像变化后，旧保存版继续可读并在原状态行显示 `Update available`，不增加卡片或弹窗 |
+| 2026-07-17 | 阅读页进入时静默 GET Lens 保存版：命中 saved 立即默认展示，未命中保持 canonical/idle 且不自动触发生成；页面或 Subject 切换会中止旧读取防止串显 |
 | 2026-07-16 | Tasks 面板恢复 queued 快速终态：pending 行仍不提前占用 SSE；若下一次 active 轮询发现任务已离开 pending/running，则转入 SSE 回放并保留 completed/failed 终态与错误详情，不再静默消失 |
 | 2026-07-16 | Ask AI 从 Context 固定侧栏迁为召唤式工作面：桌面正文空白双击/Header/⌘J 打开 fixed 悬浮面板并支持安全区拖动；正文选区以末端锚点携带引用；移动端退化为 Bottom Sheet 并支持下滑关闭；Context 面板收敛为纯页面检查器。 |
 | 2026-07-16 | Health、Tags 与 History 统一为 1080px 知识运维工作区：新增 `workspace-page` 页头/指标带/sticky 工具栏/状态原语；Health 与 Tags 收敛列表边界和状态层级；History 将主从浏览收进标准页面框架并默认选中最新记录，移动端保持行内详情 |
