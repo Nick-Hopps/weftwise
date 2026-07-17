@@ -1,13 +1,17 @@
 'use client';
 
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Layers, Plus, Settings } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Layers, Plus, Settings, Upload } from 'lucide-react';
 import type { SubjectListEntry } from '@/lib/contracts';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useSwitchSubject } from '@/hooks/use-switch-subject';
-import { fetchSubjects } from '@/components/subjects/subjects-api';
+import {
+  fetchSubjects,
+  importSubject,
+  ImportSubjectError,
+} from '@/components/subjects/subjects-api';
 import { augmentationLabel } from '@/lib/augmentation';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
@@ -44,10 +48,13 @@ export default function SubjectsPage() {
             Each subject is an isolated workspace with its own pages, sources, and graph.
           </p>
         </div>
-        <Button intent="primary" onClick={() => openSubjectDialog({ mode: 'create' })}>
-          <Plus className="h-3.5 w-3.5" />
-          New subject
-        </Button>
+        <div className="flex items-center gap-2">
+          <ImportSubjectButton />
+          <Button intent="primary" onClick={() => openSubjectDialog({ mode: 'create' })}>
+            <Plus className="h-3.5 w-3.5" />
+            New subject
+          </Button>
+        </div>
       </header>
 
       {isLoading ? (
@@ -74,6 +81,60 @@ export default function SubjectsPage() {
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * 导入归档 zip：选文件 → POST /api/subjects/import。
+ * slug 冲突（409 slug-conflict）时用 prompt 请求新 slug 重试一次。
+ */
+function ImportSubjectButton() {
+  const queryClient = useQueryClient();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: ({ file, slug }: { file: File; slug?: string }) => importSubject(file, slug),
+    onSuccess: () => {
+      setError(null);
+      queryClient.invalidateQueries({ queryKey: SUBJECTS_QUERY_KEY });
+    },
+    onError: (err: Error, { file }) => {
+      if (err instanceof ImportSubjectError && err.code === 'slug-conflict') {
+        const slug = window.prompt(
+          'A subject with this slug already exists. Import under a different slug:',
+        );
+        if (slug?.trim()) {
+          mutation.mutate({ file, slug: slug.trim() });
+          return;
+        }
+      }
+      setError(err.message);
+    },
+  });
+
+  return (
+    <div className="flex items-center gap-2">
+      {error && <p className="max-w-60 truncate text-xs text-danger" title={error}>{error}</p>}
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".zip,application/zip"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (file) {
+            setError(null);
+            mutation.mutate({ file });
+          }
+        }}
+      />
+      <Button intent="outline" loading={mutation.isPending} onClick={() => inputRef.current?.click()}>
+        <Upload className="h-3.5 w-3.5" />
+        Import
+      </Button>
     </div>
   );
 }
