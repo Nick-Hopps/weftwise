@@ -63,4 +63,19 @@ describe('renditions-repo', () => {
     expect(repo.getRenditionAsset('s1-asset')).toBeNull();
     expect(repo.getLatestRendition('s2', 'a')?.renderedMd).toBe('重塑版');
   });
+
+  it('deleteByPage 原子清空指定页正文与图片，不影响同 Subject 其他页', async () => {
+    const repo = await import('../renditions-repo');
+    repo.replaceRendition({
+      ...base,
+      assets: [{ id: 'page-a-asset', mediaType: 'image/png', dataBase64: 'YQ==' }],
+    });
+    repo.replaceRendition({ ...base, slug: 'b', renderedMd: 'B 版', assets: [] });
+
+    repo.deleteByPage('s1', 'a');
+
+    expect(repo.getLatestRendition('s1', 'a')).toBeNull();
+    expect(repo.getRenditionAsset('page-a-asset')).toBeNull();
+    expect(repo.getLatestRendition('s1', 'b')?.renderedMd).toBe('B 版');
+  });
 });

@@ -100,6 +100,17 @@ export function getRenditionAsset(id: string): { mediaType: string; dataBase64: 
   return row ? { mediaType: row.media_type, dataBase64: row.data_base64 } : null;
 }
 
+export function deleteByPage(subjectId: string, slug: string): void {
+  const sqlite = getRawDb();
+  const remove = sqlite.transaction(() => {
+    sqlite.prepare(`DELETE FROM page_rendition_assets WHERE subject_id = ? AND slug = ?`)
+      .run(subjectId, slug);
+    sqlite.prepare(`DELETE FROM page_renditions WHERE subject_id = ? AND slug = ?`)
+      .run(subjectId, slug);
+  });
+  remove.immediate();
+}
+
 export function deleteBySubject(subjectId: string): void {
   const sqlite = getRawDb();
   const remove = sqlite.transaction(() => {

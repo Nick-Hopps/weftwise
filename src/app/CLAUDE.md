@@ -187,6 +187,7 @@ src/app/
 | 2026-06-28 | 对话触发 Re-enrich：删除 `/api/re-enrich` 路由（`src/app/api/re-enrich/route.ts`）；触发入口改为 Ask AI 对话中的 `wiki.reenrich` 写工具；`POST /api/query` route 导入 `summarizeToolArgs` 从 `@/lib/tool-activity` 共用工具名摘要 |
 | 2026-06-27 | Cognitive Lens：新增顶层 `GET /api/lens/[...slug]`、画像与反馈 API；新增 `middleware/user.ts::resolveUserId` |
 | 2026-07-17 | Lens API 拆为纯读取 GET 与强制刷新 POST：GET 返回 saved/canonical，POST 走 auth+CSRF、生成成功后原子替换持久化版本；新增 `/api/rendition-assets/[id]` 读取重塑专属图片，取消/失败不覆盖旧版本 |
+| 2026-07-17 | Reset 补齐 Reshape 资产清理：单 Subject 与全局 reset 均在清理事务中先删除 `page_rendition_assets` 再删除 `page_renditions`，不再留下不可达图片 |
 | 2026-06-28 | Subject 体验重做：`(app)/subjects/page.tsx` 改可点卡片+gear+空态；创建/编辑/删除迁到全局 `SubjectDialog`（`src/components/subjects/`），切换器 "New subject…" 改唤起弹窗（删 `?new=1`）。零 API 改动 |
 | 2026-06-29 | Subject 级联删除：`DELETE /api/subjects/[id]` 改为级联删除——`subjectsRepo.deleteWithContents(id)` 单事务清全部 subject-scoped 行 + `fs.rmSync` 删 vault `wiki\|raw\|.llm-wiki/sources/<slug>` + `commitVaultChanges`；守卫 `general`→409 `protected`、有入站跨主题引用→409 `has-inbound-refs`、不存在→404；移除旧 `deleteIfEmpty`/`renditions-repo` 调用。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-29-subject-cascade-delete* |
 | 2026-06-30 | `DELETE /api/pages/[...slug]` DRY 重构：改用 `services/page-write.ts::validateDeleteTarget`（守卫单一真实源）+ `executePageDelete`（Saga+embed 回填）；响应新增 `brokenBacklinks: number`（同-subject 内原指向被删页的链接数，供 chat UI 提示清理）。spec/plan 见 docs/superpowers/{specs,plans}/2026-06-30-agentic-wiki-write-tools* |
