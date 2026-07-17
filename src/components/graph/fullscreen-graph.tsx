@@ -45,7 +45,7 @@ export function FullscreenGraph({
           <span className="text-xs text-foreground-tertiary tabular-nums whitespace-nowrap">
             {stats.nodes} nodes
             <span className="mx-1.5 text-foreground-disabled">·</span>
-            {stats.edges} links
+            {stats.edges} relationships
             {stats.orphans > 0 && (
               <>
                 <span className="mx-1.5 text-foreground-disabled">·</span>
