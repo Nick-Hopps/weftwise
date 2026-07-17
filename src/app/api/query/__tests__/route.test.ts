@@ -6,9 +6,9 @@ const mockAgentic = vi.fn();
 const mockAccessedToContext = vi.fn();
 const mockExtractCitations = vi.fn();
 const mockAssessCoverage = vi.fn();
-const mockResolveQueryMode = vi.fn();
-const mockResolveDirectReenrichSlug = vi.fn();
-const mockClassifySelectionIntent = vi.fn();
+const mockClassifyQueryIntent = vi.fn();
+const mockQueryModeForIntent = vi.fn();
+const mockResolveDirectReenrichTarget = vi.fn();
 const mockCreateWorkflowPreview = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
@@ -34,9 +34,9 @@ vi.mock('@/server/services/citation-extract', () => ({
   extractCitationsFromAnswer: (...a: unknown[]) => mockExtractCitations(...a),
 }));
 vi.mock('@/server/services/query-intent', () => ({
-  resolveQueryMode: (...a: unknown[]) => mockResolveQueryMode(...a),
-  resolveDirectReenrichSlug: (...a: unknown[]) => mockResolveDirectReenrichSlug(...a),
-  classifySelectionIntent: (...a: unknown[]) => mockClassifySelectionIntent(...a),
+  classifyQueryIntent: (...a: unknown[]) => mockClassifyQueryIntent(...a),
+  queryModeForIntent: (...a: unknown[]) => mockQueryModeForIntent(...a),
+  resolveDirectReenrichTarget: (...a: unknown[]) => mockResolveDirectReenrichTarget(...a),
 }));
 vi.mock('@/server/services/pending-action-service', () => ({
   createPendingWorkflowActionPreview: (...a: unknown[]) => mockCreateWorkflowPreview(...a),
@@ -83,11 +83,14 @@ beforeEach(() => {
   mockExtractCitations.mockReset();
   mockExtractCitations.mockReturnValue([]);
   mockAssessCoverage.mockReset();
-  mockResolveQueryMode.mockReset().mockImplementation((question: string) =>
-    question.includes('删除') ? 'propose' : 'read',
+  mockClassifyQueryIntent.mockReset().mockResolvedValue({
+    intent: 'read',
+    targetPage: { reference: 'none', slug: null },
+  });
+  mockQueryModeForIntent.mockReset().mockImplementation((result: { intent: string }) =>
+    result.intent === 'propose' || result.intent === 'direct-reenrich' ? 'propose' : 'read',
   );
-  mockResolveDirectReenrichSlug.mockReset().mockReturnValue(null);
-  mockClassifySelectionIntent.mockReset().mockResolvedValue('other');
+  mockResolveDirectReenrichTarget.mockReset().mockReturnValue(null);
   mockCreateWorkflowPreview.mockReset();
   mockCreate.mockReset();
   mockCreate.mockImplementation((s: string) => ({ id: 'new-conv', subjectId: s, title: 'T', createdAt: 't', updatedAt: 't' }));
@@ -360,6 +363,10 @@ describe('POST /api/query 流式持久化', () => {
         accessed: { meta: new Map(), bodies: new Map() },
       };
     });
+    mockClassifyQueryIntent.mockResolvedValue({
+      intent: 'propose',
+      targetPage: { reference: 'none', slug: null },
+    });
 
     const res = await call({ question: '删除旧页面', subjectId: 's1' });
     const sse = await readSSE(res);
@@ -381,7 +388,10 @@ describe('POST /api/query 流式持久化', () => {
       blockStart: 10,
       blockEnd: 40,
     };
-    mockClassifySelectionIntent.mockResolvedValue('image-insert');
+    mockClassifyQueryIntent.mockResolvedValue({
+      intent: 'image-insert',
+      targetPage: { reference: 'none', slug: null },
+    });
 
     const res = await call({
       question: 'Use these excerpts as context:\n> 坐标系说明\n\nQuestion: 在这下面生成一张图片说明',
@@ -392,7 +402,10 @@ describe('POST /api/query 流式持久化', () => {
     });
     await readSSE(res);
 
-    expect(mockClassifySelectionIntent).toHaveBeenCalledWith('在这下面生成一张图片说明');
+    expect(mockClassifyQueryIntent).toHaveBeenCalledWith(
+      '在这下面生成一张图片说明',
+      { phase: 'request', hasSelection: true, hasCurrentPage: true },
+    );
     expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
       currentPageSlug: 'page-a',
       selection,
@@ -402,8 +415,6 @@ describe('POST /api/query 流式持久化', () => {
   });
 
   it('canonical 选区的普通问答保持 read 且不开放配图工具', async () => {
-    mockClassifySelectionIntent.mockResolvedValue('other');
-
     const res = await call({
       question: 'Use this excerpt as context:\n> 坐标系说明\n\nQuestion: 解释一下这段内容',
       userQuestion: '解释一下这段内容',
@@ -419,7 +430,11 @@ describe('POST /api/query 流式持久化', () => {
     });
     await readSSE(res);
 
-    expect(mockResolveQueryMode).toHaveBeenCalledWith('解释一下这段内容');
+    expect(mockClassifyQueryIntent).toHaveBeenCalledWith(
+      '解释一下这段内容',
+      { phase: 'request', hasSelection: true, hasCurrentPage: true },
+    );
+    expect(mockQueryModeForIntent).toHaveBeenCalledWith(expect.objectContaining({ intent: 'read' }));
     expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
       mode: 'read',
       imageInsertEnabled: false,
@@ -427,7 +442,10 @@ describe('POST /api/query 流式持久化', () => {
   });
 
   it('Reshape 选区配图命令确定性提示切回 Original，不调用 Query LLM', async () => {
-    mockClassifySelectionIntent.mockResolvedValue('image-insert');
+    mockClassifyQueryIntent.mockResolvedValue({
+      intent: 'image-insert',
+      targetPage: { reference: 'none', slug: null },
+    });
     const res = await call({
       question: 'Use this excerpt as context:\n> 重塑内容\n\nQuestion: 给这里画个图',
       userQuestion: '给这里画个图',
@@ -443,7 +461,10 @@ describe('POST /api/query 流式持久化', () => {
     });
     const sse = await readSSE(res);
 
-    expect(mockClassifySelectionIntent).toHaveBeenCalledWith('给这里画个图');
+    expect(mockClassifyQueryIntent).toHaveBeenCalledWith(
+      '给这里画个图',
+      { phase: 'request', hasSelection: true, hasCurrentPage: true },
+    );
     expect(mockAgentic).not.toHaveBeenCalled();
     expect(sse).toContain('Original');
     expect(sse).toContain('event: done');
@@ -457,7 +478,12 @@ describe('POST /api/query 流式持久化', () => {
       operation: 'workflow-reenrich-start',
       status: 'pending',
     };
-    mockResolveDirectReenrichSlug.mockReturnValue('page-a');
+    const directIntent = {
+      intent: 'direct-reenrich',
+      targetPage: { reference: 'current-page', slug: null },
+    };
+    mockClassifyQueryIntent.mockResolvedValue(directIntent);
+    mockResolveDirectReenrichTarget.mockReturnValue('page-a');
     mockCreateWorkflowPreview.mockResolvedValue(action);
 
     const res = await call({
@@ -466,6 +492,8 @@ describe('POST /api/query 流式持久化', () => {
       subjectId: 's1',
     });
     const sse = await readSSE(res);
+
+    expect(mockResolveDirectReenrichTarget).toHaveBeenCalledWith(directIntent, 'page-a');
 
     expect(mockCreateWorkflowPreview).toHaveBeenCalledWith({
       conversationId: 'new-conv',
@@ -482,5 +510,49 @@ describe('POST /api/query 流式持久化', () => {
     expect(sse).toContain('event: answer-delta');
     expect(sse).toContain('event: done');
     expect(mockAppend).toHaveBeenCalledTimes(2);
+  });
+
+  it('重置请求返回专用确认事件，不进入 Query 工具循环', async () => {
+    mockClassifyQueryIntent.mockResolvedValue({
+      intent: 'reset-request',
+      targetPage: { reference: 'none', slug: null },
+    });
+
+    const res = await call({ question: '清空这个知识库', subjectId: 's1' });
+    const sse = await readSSE(res);
+
+    expect(sse).toContain('event: reset-confirmation');
+    expect(sse).toContain('"decision":"requested"');
+    expect(sse).toContain('event: done');
+    expect(mockAgentic).not.toHaveBeenCalled();
+    expect(mockAppend).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['reset-confirm', 'confirm'],
+    ['reset-cancel', 'cancel'],
+    ['reset-unclear', 'unclear'],
+  ] as const)('重置确认上下文把 %s 映射为 SSE decision=%s', async (intent, decision) => {
+    mockClassifyQueryIntent.mockResolvedValue({
+      intent,
+      targetPage: { reference: 'none', slug: null },
+    });
+
+    const res = await call({
+      question: '继续',
+      userQuestion: '继续',
+      intentContext: 'reset-confirmation',
+      subjectId: 's1',
+    });
+    const sse = await readSSE(res);
+
+    expect(mockClassifyQueryIntent).toHaveBeenCalledWith(
+      '继续',
+      { phase: 'reset-confirmation', hasSelection: false, hasCurrentPage: false },
+    );
+    expect(sse).toContain('event: reset-confirmation');
+    expect(sse).toContain(`"decision":"${decision}"`);
+    expect(sse).toContain('event: done');
+    expect(mockAgentic).not.toHaveBeenCalled();
   });
 });
