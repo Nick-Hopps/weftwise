@@ -143,6 +143,8 @@ describe('POST /api/reset', () => {
       ) VALUES ('r1', ?, 'research-j1', 'topic', 'hash', 'awaiting-approval', ?, ?)
     `).run(subject.id, now, now);
     sqlite.prepare(`INSERT INTO research_candidates (id, run_id, normalized_url, snapshot_json, rank) VALUES ('c1', 'r1', 'https://example.com', '{}', 0)`).run();
+    sqlite.prepare(`INSERT INTO page_rendition_assets VALUES ('asset-1', ?, 'old-page', 'image/png', 'YQ==', ?)`)
+      .run(subject.id, now);
     mocks.rebuild.mockImplementation(() => {
       expect(existsSync(join(dir, '.vault.lock'))).toBe(true);
     });
@@ -156,9 +158,25 @@ describe('POST /api/reset', () => {
     expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM sources`).get() as { count: number }).count).toBe(0);
     expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM jobs WHERE subject_id = ?`).get(subject.id) as { count: number }).count).toBe(0);
     expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM research_runs`).get() as { count: number }).count).toBe(0);
+    expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM page_rendition_assets`).get() as { count: number }).count).toBe(0);
     expect(existsSync(join(dir, 'vault', 'wiki', 'general', 'index.md'))).toBe(true);
     expect(existsSync(join(dir, 'vault', 'wiki', 'general', 'log.md'))).toBe(true);
     expect(existsSync(join(dir, '.vault.lock'))).toBe(false);
+  });
+
+  it('全局 reset 清空所有 rendition 图片', async () => {
+    const { getRawDb } = await import('@/server/db/client');
+    const sqlite = getRawDb();
+    const subject = sqlite.prepare(`SELECT id FROM subjects WHERE slug = 'general'`).get() as { id: string };
+    sqlite.prepare(`INSERT INTO page_rendition_assets VALUES ('global-asset', ?, 'old-page', 'image/png', 'YQ==', ?)`)
+      .run(subject.id, new Date().toISOString());
+    const { POST } = await import('../route');
+
+    const response = await POST(request({ allSubjects: true }));
+
+    expect(response.status).toBe(200);
+    expect(sqlite.prepare(`SELECT COUNT(*) AS count FROM page_rendition_assets`).get())
+      .toEqual({ count: 0 });
   });
 
   it('维护步骤失败时仍恢复 active，但保留已提升的 epoch', async () => {

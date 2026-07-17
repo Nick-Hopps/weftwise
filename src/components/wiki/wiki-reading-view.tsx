@@ -146,6 +146,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
       <ReshapeStatus
         state={reshapeState}
         showOriginal={showOriginal}
+        stale={lens.data?.stale ?? false}
         onToggle={() => setShowOriginal((v) => !v)}
         onRefresh={() => void lens.refresh()}
         onCancel={lens.cancel}

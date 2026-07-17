@@ -8,6 +8,7 @@ import { readPageInSubject, scanWikiPages } from './wiki-store';
 import { buildWikiPath, META_PAGE_SLUGS } from './page-identity';
 import { parseFrontmatter } from './frontmatter';
 import * as pagesRepo from '../db/repos/pages-repo';
+import * as renditionsRepo from '../db/repos/renditions-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as maturityRepo from '../db/repos/maturity-repo';
 import { getRawDb } from '../db/client';
@@ -136,6 +137,7 @@ export function indexTouchedPages(subjectId: SubjectId, slugs: string[]): void {
     });
 
     if (doc === null) {
+      renditionsRepo.deleteByPage(subjectId, slug);
       pagesRepo.deletePage(subjectId, slug);
       pagesRepo.deletePageAliases(subjectId, slug);
       continue;
