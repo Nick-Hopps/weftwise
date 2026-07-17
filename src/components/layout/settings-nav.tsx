@@ -47,7 +47,7 @@ export function SettingsNav({ active, onSelect }: SettingsNavProps) {
 
       <div className="mt-auto hidden border-t border-border px-2 pt-3 md:block">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="text-xs font-medium text-foreground-secondary">Agentic Wiki</span>
+          <span className="text-xs font-medium text-foreground-secondary">weftwise 织识</span>
           <span className="text-[11px] tabular-nums text-foreground-tertiary">v{APP_VERSION}</span>
         </div>
       </div>

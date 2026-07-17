@@ -155,7 +155,7 @@ export function SettingsContent(props: SettingsContentProps) {
 
           {props.active === 'general' && (
             <div className="flex items-baseline justify-between border-t border-border pt-5 text-xs md:hidden">
-              <span className="font-medium text-foreground-secondary">Agentic Wiki</span>
+              <span className="font-medium text-foreground-secondary">weftwise 织识</span>
               <span className="tabular-nums text-foreground-tertiary">v{APP_VERSION}</span>
             </div>
           )}
