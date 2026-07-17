@@ -19,9 +19,12 @@ describe('ui-store pendingChatReference mailbox', () => {
       pendingChatReference: null,
       askAiOpen: false,
       askAiAnchor: null,
+      askAiAnchorMode: null,
       askAiPosition: null,
+      askAiInvocationId: 0,
       contextPanelOpen: false,
       contextPanelTab: 'context',
+      currentConversationId: 'conversation-old',
     });
   });
 
@@ -55,6 +58,9 @@ describe('ui-store pendingChatReference mailbox', () => {
     });
     expect(s.askAiOpen).toBe(true);
     expect(s.askAiAnchor).toEqual({ x: 320, y: 240 });
+    expect(s.askAiAnchorMode).toBe('selection');
+    expect(s.askAiInvocationId).toBe(1);
+    expect(s.currentConversationId).toBeNull();
     expect(s.contextPanelOpen).toBe(false);
   });
 
@@ -64,7 +70,29 @@ describe('ui-store pendingChatReference mailbox', () => {
     const state = useUIStore.getState();
     expect(state.askAiOpen).toBe(true);
     expect(state.askAiAnchor).toBeNull();
+    expect(state.askAiAnchorMode).toBeNull();
     expect(state.askAiPosition).toEqual({ x: 480, y: 80 });
+    expect(state.currentConversationId).toBeNull();
+  });
+
+  it('opens a new chat invocation at an explicit double-click trigger', () => {
+    useUIStore.getState().openAskAi({ x: 240, y: 180 });
+    const first = useUIStore.getState();
+    expect(first.askAiAnchor).toEqual({ x: 240, y: 180 });
+    expect(first.askAiAnchorMode).toBe('trigger');
+    expect(first.askAiInvocationId).toBe(1);
+
+    useUIStore.getState().setCurrentConversation('conversation-next');
+    useUIStore.getState().openAskAi({ x: 260, y: 200 });
+    const second = useUIStore.getState();
+    expect(second.askAiInvocationId).toBe(2);
+    expect(second.currentConversationId).toBeNull();
+  });
+
+  it('drops a stale unconsumed selection on an ordinary trigger', () => {
+    useUIStore.getState().askAboutSelection({ section: null, text: 'old selection' });
+    useUIStore.getState().openAskAi();
+    expect(useUIStore.getState().pendingChatReference).toBeNull();
   });
 
   it('derives a stable id for identical text', () => {

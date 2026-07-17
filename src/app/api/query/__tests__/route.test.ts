@@ -17,6 +17,7 @@ const mockAppend = vi.fn();
 const mockTouch = vi.fn();
 const mockEnqueue = vi.fn();
 const mockRunQuery = vi.fn();
+const mockGetPageBySlug = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null, requireCsrf: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
@@ -50,6 +51,9 @@ vi.mock('@/server/db/repos/conversations-repo', () => ({
   listMessages: (id: unknown) => mockListMsgs(id),
   appendMessage: (...a: unknown[]) => mockAppend(...a),
   touchConversation: (id: unknown) => mockTouch(id),
+}));
+vi.mock('@/server/db/repos/pages-repo', () => ({
+  getPageBySlug: (...a: unknown[]) => mockGetPageBySlug(...a),
 }));
 
 import { POST } from '../route';
@@ -105,6 +109,7 @@ beforeEach(() => {
   mockTouch.mockReset();
   mockEnqueue.mockReset().mockReturnValue({ id: 'job-x' });
   mockRunQuery.mockReset();
+  mockGetPageBySlug.mockReset().mockReturnValue({ title: 'Page A' });
 });
 
 describe('POST /api/query 保存到 Wiki', () => {
@@ -196,6 +201,43 @@ describe('POST /api/query 流式持久化', () => {
     expect(sse).toContain('new-conv');
     expect(mockAppend).toHaveBeenCalledTimes(2);
     expect(mockTouch).toHaveBeenCalledWith('new-conv');
+  });
+
+  it('用户引用由服务端绑定当前 Subject/page 后随用户消息持久化', async () => {
+    const res = await call({
+      question: 'Use this excerpt as context:\n> 引用原文\n\nQuestion: 解释它',
+      userQuestion: '解释它',
+      pageSlug: 'page-a',
+      subjectId: 's1',
+      messageReferences: [{ section: '原理', excerpt: '引用原文' }],
+    });
+    await readSSE(res);
+
+    expect(mockAppend).toHaveBeenNthCalledWith(
+      1,
+      'new-conv',
+      'user',
+      '解释它',
+      JSON.stringify([{
+        pageSlug: 'page-a',
+        pageTitle: 'Page A',
+        subjectSlug: 'general',
+        section: '原理',
+        excerpt: '引用原文',
+      }]),
+    );
+  });
+
+  it('用户引用缺少当前 pageSlug 时拒绝且不创建会话', async () => {
+    const res = await call({
+      question: '解释它',
+      subjectId: 's1',
+      messageReferences: [{ section: null, excerpt: '引用原文' }],
+    });
+
+    expect(res.status).toBe(400);
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockAppend).not.toHaveBeenCalled();
   });
 
   it('传跨 subject 的 conversationId → 当作新会话（create 被调）', async () => {

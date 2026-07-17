@@ -28,21 +28,27 @@ function mapConv(r: RawConv): Conversation {
 }
 
 function mapMsg(r: RawMsg): ConversationMessage {
-  let citations: ConversationMessage['citations'] = null;
+  let evidence: unknown[] | null = null;
   if (r.citations_json) {
     try {
       const parsed = JSON.parse(r.citations_json);
-      if (Array.isArray(parsed)) citations = parsed;
+      if (Array.isArray(parsed)) evidence = parsed;
     } catch {
-      citations = null;
+      evidence = null;
     }
   }
+  const role = r.role === 'assistant' ? 'assistant' : 'user';
   return {
     id: r.id,
     conversationId: r.conversation_id,
-    role: r.role === 'assistant' ? 'assistant' : 'user',
+    role,
     content: r.content,
-    citations,
+    references: role === 'user'
+      ? evidence as ConversationMessage['references']
+      : null,
+    citations: role === 'assistant'
+      ? evidence as ConversationMessage['citations']
+      : null,
     createdAt: r.created_at,
   };
 }
@@ -95,14 +101,14 @@ export function appendMessage(
   conversationId: string,
   role: 'user' | 'assistant',
   content: string,
-  citationsJson: string | null,
+  evidenceJson: string | null,
 ): ConversationMessage {
   const msg: RawMsg = {
     id: crypto.randomUUID(),
     conversation_id: conversationId,
     role,
     content,
-    citations_json: citationsJson,
+    citations_json: evidenceJson,
     created_at: new Date().toISOString(),
   };
   getRawDb()

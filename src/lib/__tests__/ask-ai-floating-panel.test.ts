@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  centerAskAiPosition,
   clampAskAiPosition,
+  positionAskAiAtTrigger,
   positionAskAiFromAnchor,
   shouldDismissAskAiSheet,
 } from '@/lib/ask-ai-floating-panel';
@@ -17,6 +19,40 @@ describe('clampAskAiPosition', () => {
   it('pins an oversized panel to the safe origin', () => {
     expect(clampAskAiPosition(
       { x: 40, y: 40 },
+      { width: 700, height: 900 },
+      { width: 600, height: 700 },
+    )).toEqual({ x: 16, y: 16 });
+  });
+});
+
+describe('positionAskAiAtTrigger', () => {
+  it('uses the double-click point as the panel top-left when it fits', () => {
+    expect(positionAskAiAtTrigger(
+      { x: 300, y: 200 },
+      { width: 440, height: 500 },
+      { width: 1200, height: 900 },
+    )).toEqual({ x: 300, y: 200 });
+  });
+
+  it('keeps the panel operable when the trigger is near a viewport edge', () => {
+    expect(positionAskAiAtTrigger(
+      { x: 1180, y: 880 },
+      { width: 440, height: 500 },
+      { width: 1200, height: 900 },
+    )).toEqual({ x: 744, y: 384 });
+  });
+});
+
+describe('centerAskAiPosition', () => {
+  it('centers a panel when no previous position exists', () => {
+    expect(centerAskAiPosition(
+      { width: 440, height: 500 },
+      { width: 1200, height: 900 },
+    )).toEqual({ x: 380, y: 200 });
+  });
+
+  it('pins an oversized panel to the safe origin', () => {
+    expect(centerAskAiPosition(
       { width: 700, height: 900 },
       { width: 600, height: 700 },
     )).toEqual({ x: 16, y: 16 });
