@@ -1,5 +1,6 @@
 'use client';
 
+import React from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { PendingActionView } from '@/lib/contracts';
@@ -29,6 +30,13 @@ const WORKFLOW_STATUS_LABELS: Record<PendingActionView['status'], string> = {
   applied: 'Workflow action applied',
 };
 
+const IMAGE_INSERT_STATUS_LABELS: Record<PendingActionView['status'], string> = {
+  ...WORKFLOW_STATUS_LABELS,
+  approved: 'Approved, preparing illustration task',
+  executing: 'Starting illustration task',
+  applied: 'Illustration task started',
+};
+
 function StatusIcon({ status }: { status: PendingActionView['status'] }) {
   if (status === 'applied') return <CheckCircle2 className="h-4 w-4 text-success" aria-hidden />;
   if (status === 'rejected' || status === 'failed' || status === 'expired') {
@@ -48,7 +56,10 @@ export function PendingActionCard({
   const isPending = action.status === 'pending';
   const shownPages = action.affectedPages.slice(0, affectedPageLimit);
   const hiddenPageCount = action.affectedPages.length - shownPages.length;
-  const title = action.operation === 'history-revert'
+  const isImageInsert = action.operation === 'workflow-image-insert-start';
+  const title = isImageInsert
+    ? 'Proposed illustration'
+    : action.operation === 'history-revert'
     ? 'Proposed history revert'
     : action.operation === 'move'
       ? 'Proposed page move'
@@ -105,9 +116,42 @@ export function PendingActionCard({
         </p>
       )}
 
+      {isImageInsert && action.imageInsert && (
+        <div className="mt-3 space-y-2 border-t border-border-subtle pt-3 text-xs">
+          <div>
+            <p className="font-medium text-foreground-secondary">Selected Markdown</p>
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-foreground">
+              {action.imageInsert.selection}
+            </pre>
+          </div>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-foreground-secondary">
+            <dt className="font-medium">Prompt</dt>
+            <dd className="break-words text-foreground">{action.imageInsert.prompt}</dd>
+            <dt className="font-medium">Alt text</dt>
+            <dd className="break-words text-foreground">{action.imageInsert.alt}</dd>
+            {action.imageInsert.aspectRatio && (
+              <>
+                <dt className="font-medium">Aspect ratio</dt>
+                <dd className="text-foreground">{action.imageInsert.aspectRatio}</dd>
+              </>
+            )}
+            {action.imageInsert.style && (
+              <>
+                <dt className="font-medium">Style</dt>
+                <dd className="break-words text-foreground">{action.imageInsert.style}</dd>
+              </>
+            )}
+          </dl>
+          <p className="text-foreground-secondary">
+            One image will be generated after approval and inserted below this selection.
+          </p>
+        </div>
+      )}
+
       {action.kind === 'workflow' && ![
         'workflow-cancel',
         'workflow-research-start',
+        'workflow-image-insert-start',
       ].includes(action.operation) && (
         <p className="mt-2 text-xs text-foreground-secondary">
           Final content will be produced after the background task completes.
@@ -160,7 +204,11 @@ export function PendingActionCard({
         </div>
       ) : (
         <p role="status" className="mt-3 text-xs font-medium text-foreground-secondary">
-          {(action.kind === 'workflow' ? WORKFLOW_STATUS_LABELS : STATUS_LABELS)[action.status]}
+          {(isImageInsert
+            ? IMAGE_INSERT_STATUS_LABELS
+            : action.kind === 'workflow'
+              ? WORKFLOW_STATUS_LABELS
+              : STATUS_LABELS)[action.status]}
         </p>
       )}
     </section>

@@ -219,7 +219,7 @@ export const pendingActions = sqliteTable(
       .on(t.status, t.expiresAt),
     operationCheck: check(
       'pending_actions_operation_check',
-      sql`${t.operation} IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-cancel','move','tag-batch')`,
+      sql`${t.operation} IN ('create','update','patch','delete','reenrich','metadata-patch','link-ensure','history-revert','workflow-reenrich-start','workflow-research-start','workflow-image-insert-start','workflow-cancel','move','tag-batch')`,
     ),
     statusCheck: check(
       'pending_actions_status_check',

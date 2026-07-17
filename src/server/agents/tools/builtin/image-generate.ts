@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { ToolDef } from '../../types';
 import type { ToolContext } from '../tool-context';
+import {
+  ImageGenerateInputSchema,
+  type ImageGenerateInput,
+} from '@/lib/contracts';
 import { getLanguageModel } from '@/server/llm/provider-factory';
 import { resolveTask } from '@/server/llm/task-router';
 import { recordUsage } from '@/server/db/repos/usage-repo';
@@ -10,12 +14,8 @@ import { recordUsage } from '@/server/db/repos/usage-repo';
 const ASSET_MAX_BYTES = 8 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
-export const ImageGenerateInputSchema = z.object({
-  prompt: z.string().trim().min(1).max(4_000),
-  alt: z.string().trim().min(1).max(240),
-  aspectRatio: z.enum(['1:1', '4:3', '3:4', '16:9', '9:16']).optional(),
-  style: z.string().trim().max(240).optional(),
-}).strict();
+export { ImageGenerateInputSchema } from '@/lib/contracts';
+export type { ImageGenerateInput } from '@/lib/contracts';
 
 export const ImageGenerateOutputSchema = z.object({
   type: z.literal('image'),
@@ -24,7 +24,6 @@ export const ImageGenerateOutputSchema = z.object({
   alt: z.string(),
 });
 
-export type ImageGenerateInput = z.infer<typeof ImageGenerateInputSchema>;
 export type ImageGenerateOutput = z.infer<typeof ImageGenerateOutputSchema>;
 
 function extensionForMediaType(mediaType: string): 'png' | 'jpg' | 'webp' {

@@ -42,7 +42,7 @@ import {
 } from '../wiki/page-identity';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { registerHandler } from '../jobs/worker';
-import type { PendingActionView, QueryResult, Job, Subject, WikiCitation } from '@/lib/contracts';
+import type { PendingActionView, QueryResult, Job, Subject, WikiCitation, SelectionAnchorInput } from '@/lib/contracts';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 import type { QueryMode } from './query-intent';
@@ -63,6 +63,8 @@ interface QueryCompileOptions {
   mode?: QueryMode;
   conversationId?: string;
   onPendingAction?: (action: PendingActionView) => void;
+  currentPageSlug?: string;
+  selection?: SelectionAnchorInput;
 }
 
 function compileQueryTools(
@@ -77,6 +79,8 @@ function compileQueryTools(
   return compileToolSet(resolveQueryTools(mode), buildQueryToolContext(subject, accessed, {
     conversationId: options.conversationId,
     onPendingAction: options.onPendingAction,
+    currentPageSlug: options.currentPageSlug,
+    selection: options.selection,
   }), {
     policy: createToolExecutionPolicy(profile, subject.id),
   });
@@ -150,12 +154,15 @@ export function streamAgenticQuery(opts: {
   mode?: QueryMode;
   conversationId?: string;
   onPendingAction?: (action: PendingActionView) => void;
+  selection?: SelectionAnchorInput;
 }): { stream: ReturnType<typeof streamTextWithTools>; accessed: AccessedPages } {
   const accessed = createAccessedPages();
   const tools = compileQueryTools(opts.subject, accessed, {
     mode: opts.mode,
     conversationId: opts.conversationId,
     onPendingAction: opts.onPendingAction,
+    currentPageSlug: opts.currentPageSlug,
+    selection: opts.selection,
   });
   const promptCtx: PromptContext = {
     language: getWikiLanguage(),

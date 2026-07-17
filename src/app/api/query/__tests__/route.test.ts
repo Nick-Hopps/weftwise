@@ -8,6 +8,7 @@ const mockExtractCitations = vi.fn();
 const mockAssessCoverage = vi.fn();
 const mockResolveQueryMode = vi.fn();
 const mockResolveDirectReenrichSlug = vi.fn();
+const mockIsImageInsertIntent = vi.fn();
 const mockCreateWorkflowPreview = vi.fn();
 const mockCreate = vi.fn();
 const mockGet = vi.fn();
@@ -35,6 +36,7 @@ vi.mock('@/server/services/citation-extract', () => ({
 vi.mock('@/server/services/query-intent', () => ({
   resolveQueryMode: (...a: unknown[]) => mockResolveQueryMode(...a),
   resolveDirectReenrichSlug: (...a: unknown[]) => mockResolveDirectReenrichSlug(...a),
+  isImageInsertIntent: (...a: unknown[]) => mockIsImageInsertIntent(...a),
 }));
 vi.mock('@/server/services/pending-action-service', () => ({
   createPendingWorkflowActionPreview: (...a: unknown[]) => mockCreateWorkflowPreview(...a),
@@ -85,6 +87,7 @@ beforeEach(() => {
     question.includes('删除') ? 'propose' : 'read',
   );
   mockResolveDirectReenrichSlug.mockReset().mockReturnValue(null);
+  mockIsImageInsertIntent.mockReset().mockReturnValue(false);
   mockCreateWorkflowPreview.mockReset();
   mockCreate.mockReset();
   mockCreate.mockImplementation((s: string) => ({ id: 'new-conv', subjectId: s, title: 'T', createdAt: 't', updatedAt: 't' }));
@@ -368,6 +371,57 @@ describe('POST /api/query 流式持久化', () => {
     }));
     expect(sse).toContain('event: pending-action');
     expect(sse).toContain(`data: ${JSON.stringify(action)}`);
+  });
+
+  it('canonical 选区作为结构化上下文传给 Query runner', async () => {
+    const selection = {
+      sourceKind: 'canonical',
+      quote: '选中的概念',
+      section: '原理',
+      blockStart: 10,
+      blockEnd: 40,
+    };
+    mockResolveQueryMode.mockReturnValue('propose');
+
+    const res = await call({
+      question: '帮我在这段内容下方生成一张配图',
+      pageSlug: 'page-a',
+      subjectId: 's1',
+      selection,
+    });
+    await readSSE(res);
+
+    expect(mockResolveQueryMode).toHaveBeenCalledWith(
+      '帮我在这段内容下方生成一张配图',
+      { hasCanonicalSelection: true },
+    );
+    expect(mockAgentic).toHaveBeenCalledWith(expect.objectContaining({
+      currentPageSlug: 'page-a',
+      selection,
+      mode: 'propose',
+    }));
+  });
+
+  it('Reshape 选区配图命令确定性提示切回 Original，不调用 Query LLM', async () => {
+    mockIsImageInsertIntent.mockReturnValue(true);
+    const res = await call({
+      question: '帮我在这段内容下方生成一张配图',
+      pageSlug: 'page-a',
+      subjectId: 's1',
+      selection: {
+        sourceKind: 'reshape',
+        quote: '重塑后的概念',
+        section: null,
+        blockStart: 0,
+        blockEnd: 20,
+      },
+    });
+    const sse = await readSSE(res);
+
+    expect(mockAgentic).not.toHaveBeenCalled();
+    expect(sse).toContain('Original');
+    expect(sse).toContain('event: done');
+    expect(mockAppend).toHaveBeenCalledTimes(2);
   });
 
   it('明确 re-enrich 命令直接生成审批预览，不等待 Query LLM', async () => {

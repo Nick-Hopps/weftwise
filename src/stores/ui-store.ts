@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { selectionRefId } from '@/lib/selection-text';
 import type { AskAiPoint } from '@/lib/ask-ai-floating-panel';
+import type { SelectionAnchorInput } from '@/lib/contracts';
 
 export type ContextPanelTab = 'context' | 'chat';
 
@@ -12,6 +13,7 @@ export interface PendingChatReference {
   id: string;
   section: string | null;
   text: string;
+  selection?: SelectionAnchorInput;
 }
 
 export const SIDEBAR_WIDTH_MIN = 200;
@@ -83,7 +85,7 @@ interface UIState {
 
   /** 选中正文文本点「追问」：写入信箱并打开 Ask AI 悬浮工作面。 */
   askAboutSelection: (
-    payload: { section: string | null; text: string },
+    payload: { section: string | null; text: string; selection?: SelectionAnchorInput },
     anchor?: AskAiPoint,
   ) => void;
   /** 读出并清空信箱（chat 挂载后消费一次）。 */
@@ -261,6 +263,7 @@ export const useUIStore = create<UIState>()(
             id: selectionRefId(payload.text),
             section: payload.section,
             text: payload.text,
+            selection: payload.selection,
           },
           askAiOpen: true,
           askAiAnchor: anchor ?? null,

@@ -85,7 +85,7 @@
 
 ### `pending-actions-repo.ts`
 
-审批闭环持久化与原子状态流转：记录服务端规范化 payload/hash、预览、TTL 和执行引用。Chat action 带 `conversation_id`，Tags 工作台 `tag-batch` 使用 NULL conversation；`createTagBatchPendingAction` 以单条 INSERT/NOT EXISTS 原子限制每 Subject 一个进行中治理操作。`claimApproval`/`claimExecution`/`rejectPending`/`markApplied`/`markFailed` 均用条件 UPDATE 防并发双消费；worker 每分钟过期 pending、恢复中断的 approved/executing，并清理 30 天前终态记录。
+审批闭环持久化与原子状态流转：记录服务端规范化 payload/hash、预览、TTL 和执行引用。`workflow-image-insert-start` payload 持久化 canonical 块原文/上下文锚点与图片请求；批准时 `image-insert` job insert 和 action applied 同一 IMMEDIATE transaction。Chat action 带 `conversation_id`，Tags 工作台 `tag-batch` 使用 NULL conversation；状态更新均用条件 UPDATE 防并发双消费。
 
 ### `embeddings-repo.ts` 🆕
 
@@ -218,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | `pending_actions.operation` CHECK 加入 `workflow-image-insert-start`；Drizzle `0010` 与启动期原子重建均保留旧行/索引并继续拒绝未知 operation |
 | 2026-07-16 | pending_actions 支持工作台来源：`conversation_id` 改可空、CHECK 增 `tag-batch`，Drizzle 0008 与启动期结构化 PRAGMA 检测均原子重建并保留历史；repo 增 Subject-scoped TagBatch 创建/恢复/在途去重 |
 | 2026-07-16 | `settings-repo` 新增 `maintenanceScope` JSON key（`all` 或非空 Subject ID 集合，旧配置默认 all）；`maturity-repo.listDue/countDue` 支持同口径 Subject 范围过滤 |
 | 2026-07-15 | `research-provenance-repo` 新增 failed child Ingest 原位重试事务：校验 run/approval/candidate/source/job lineage 后同步恢复 jobs、delivery、run，保留 checkpoint 与 attempt history；取消或 verification 后状态 fail-closed |

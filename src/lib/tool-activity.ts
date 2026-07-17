@@ -15,6 +15,7 @@ export function toolActivityIcon(tool: string): string {
     case 'workflow_research_start': return '🌐';
     case 'workflow_status': return '🧭';
     case 'workflow_cancel': return '⏹️';
+    case 'wiki_image_insert': return '🖼️';
     case 'wiki_create': return '➕';
     case 'wiki_update': return '✏️';
     case 'wiki_patch': return '✏️';
@@ -42,6 +43,7 @@ export function toolActivityVerb(tool: string): string {
     case 'workflow_research_start': return 'Planning research';
     case 'workflow_status': return 'Checking workflow';
     case 'workflow_cancel': return 'Planning cancellation';
+    case 'wiki_image_insert': return 'Planning illustration';
     case 'wiki_create': return 'Creating';
     case 'wiki_update': return 'Editing';
     case 'wiki_patch': return 'Patching';
@@ -80,6 +82,9 @@ export function summarizeToolArgs(tool: string, args: unknown): string {
   if (tool === 'workflow_research_start') return typeof a.topic === 'string' ? a.topic : '';
   if (tool === 'workflow_status' || tool === 'workflow_cancel') {
     return typeof a.jobId === 'string' ? a.jobId : '';
+  }
+  if (tool === 'wiki_image_insert') {
+    return typeof a.prompt === 'string' ? a.prompt.slice(0, 120) : '';
   }
   if (tool === 'wiki_delete') return typeof a.slug === 'string' ? a.slug : '';
   if (tool === 'wiki_move') {

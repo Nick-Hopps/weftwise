@@ -7,6 +7,10 @@ import type {
   TagBatchPreviewInput,
   WorkflowPreviewInput,
 } from '@/lib/contracts';
+import {
+  ImageGenerateInputSchema,
+  PersistedMarkdownBlockAnchorSchema,
+} from '@/lib/contracts';
 import { normalizeMetadataPatch } from '@/server/wiki/narrow-write';
 import { isCanonicalPageSlug } from '@/server/wiki/page-identity';
 
@@ -125,6 +129,14 @@ export const WorkflowPreviewInputSchema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('workflow-research-start'),
     payload: z.object({ topic: TrimmedTextSchema.max(500) }).strict(),
+  }).strict(),
+  z.object({
+    operation: z.literal('workflow-image-insert-start'),
+    payload: z.object({
+      slug: CanonicalPageSlugSchema,
+      anchor: PersistedMarkdownBlockAnchorSchema,
+      request: ImageGenerateInputSchema,
+    }).strict(),
   }).strict(),
   z.object({
     operation: z.literal('workflow-cancel'),

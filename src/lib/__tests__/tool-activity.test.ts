@@ -159,6 +159,21 @@ describe('Phase 3D wiki.move activity', () => {
   });
 });
 
+describe('Ask AI 选区配图 activity', () => {
+  it('使用计划语义并限制 prompt 摘要长度', () => {
+    const prompt = `教育插图：${'细节'.repeat(100)}`;
+    expect(toolActivityIcon('wiki_image_insert')).toBe('🖼️');
+    expect(toolActivityVerb('wiki_image_insert')).toBe('Planning illustration');
+    const summary = summarizeToolArgs('wiki_image_insert', {
+      prompt,
+      alt: '不应展示的 alt',
+      blockStart: 42,
+    });
+    expect(summary).toBe(prompt.slice(0, 120));
+    expect(summary).not.toContain('不应展示的 alt');
+  });
+});
+
 describe('jobActivityTitle', () => {
   it('识别 research-import 事件并优先于通用 Research', () => {
     expect(jobActivityTitle([{ type: 'research-import:start' }])).toBe('Importing research');

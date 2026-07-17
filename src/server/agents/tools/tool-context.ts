@@ -50,6 +50,8 @@ export interface ToolContext {
   previewWorkflowResearch?(topic: string): Promise<PendingActionView>;
   /** Query 专用：为 active Subject job 创建取消审批。 */
   previewWorkflowCancel?(jobId: string): Promise<PendingActionView>;
+  /** Query 专用：为请求中可信 canonical 选区创建单图插入审批。 */
+  previewImageInsert?(input: ImageGenerateInput): Promise<PendingActionView>;
   onPendingAction?(action: PendingActionView): void;
   readPage(slug: string): Promise<{ title: string; markdown: string } | null>;
   search(query: string, limit: number): Promise<Array<{ slug: string; title: string; summary: string }>>;

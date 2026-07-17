@@ -273,6 +273,43 @@ describe('validateChangeset', () => {
   });
 });
 
+describe('applyChangeset cancellation guard', () => {
+  it('在 vault 锁内、任何 operation/fs 写入前执行 assertCanApply', async () => {
+    const cs = makeChangeset([
+      { action: 'update', path: 'wiki/general/a-page.md', content: VALID_CONTENT },
+    ]);
+    const cancelled = new Error('cancelled');
+
+    await expect(applyChangeset(cs, undefined, {
+      assertCanApply: () => { throw cancelled; },
+    })).rejects.toBe(cancelled);
+
+    expect(dbMocks.prepare).not.toHaveBeenCalled();
+    expect(storeMocks.writeVaultFiles).not.toHaveBeenCalled();
+    expect(gitMocks.commitVaultChanges).not.toHaveBeenCalled();
+    expect(mutexMocks.release).toHaveBeenCalledOnce();
+  });
+
+  it('索引后、commit 前取消会触发 Saga rollback', async () => {
+    const cs = makeChangeset([
+      { action: 'update', path: 'wiki/general/a-page.md', content: VALID_CONTENT },
+    ]);
+    const cancelled = new Error('cancelled during apply');
+    const assertCanApply = vi.fn()
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => { throw cancelled; });
+
+    await expect(applyChangeset(cs, undefined, { assertCanApply })).rejects.toBe(cancelled);
+
+    expect(storeMocks.writeVaultFiles).toHaveBeenCalledOnce();
+    expect(indexerMocks.indexTouchedPages).toHaveBeenCalled();
+    expect(gitMocks.commitVaultChanges).not.toHaveBeenCalled();
+    expect(gitMocks.restoreToHead).toHaveBeenCalledWith('pre-sha');
+    expect(mutexMocks.release).toHaveBeenCalledOnce();
+  });
+});
+
 describe('rollbackChangeset', () => {
   it('preHead 为空时不 reset，但仍清理未跟踪文件并重建索引', async () => {
     const cs = makeChangeset([{ action: 'create', path: 'wiki/general/a.md', content: 'x' }]);

@@ -277,6 +277,8 @@ export interface SourceLinkOps {
 
 export interface ApplyChangesetOptions {
   expectedPreHead?: string;
+  /** 在持有 vault 锁、创建 operation 和写入文件前做一次取消/权限复核。 */
+  assertCanApply?: () => void;
 }
 
 export class ActionStalePreviewError extends Error {
@@ -308,6 +310,7 @@ export async function applyChangeset(
   const release = await acquireVaultLock();
 
   try {
+    options.assertCanApply?.();
     const preHead = await getVaultHead();
     if (options.expectedPreHead !== undefined && options.expectedPreHead !== preHead) {
       throw new ActionStalePreviewError(options.expectedPreHead, preHead);
@@ -369,6 +372,7 @@ export async function applyChangeset(
         }
       }
 
+      options.assertCanApply?.();
       writeVaultFiles(writeEntries);
       for (const p of deleteEntries) {
         deleteVaultFile(p);
@@ -405,6 +409,7 @@ export async function applyChangeset(
         sourceOps?.extraStagePaths && sourceOps.extraStagePaths.length > 0
           ? [...affectedPaths, ...sourceOps.extraStagePaths]
           : affectedPaths;
+      options.assertCanApply?.();
       const postHead = await commitVaultChanges(
         `[subject:${working.subjectSlug}] Apply changeset ${working.id} (job: ${working.jobId}) [cs:${working.id}]`,
         stagePaths

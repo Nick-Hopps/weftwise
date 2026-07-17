@@ -82,7 +82,11 @@ worker-entry.ts
 
 ### `pending-action-service.ts` — 持久化写入审批状态机
 
-创建预览时以 strict schema 规范化并哈希服务端 payload，页面/move/History/workflow/TagBatch 均只生成 plan；批准前不创建或取消 job、不写 Vault。Chat action 绑定 conversation，Tags 工作台 action 以 NULL conversation 按 Subject 恢复；TagBatch 使用独立 schema，不扩张 Query 的 `wiki.preview_change` 工具面。批准时原子 claim、复算 hash 与同一 plan，HEAD 变化会刷新 preview 并要求重新批准。页面、move、TagBatch 与 History 仍走 Saga；workflow start 的 job insert + action applied、workflow cancel 的 job 终止 + action applied 分别在同一 SQLite IMMEDIATE transaction 中提交，失败整体回滚。取消提交后再发送 `job:cancelled` 并 best-effort 对账 Research provenance。`pending_actions.operation` CHECK 同步提供 Drizzle 迁移与启动期原子兼容重建，保留历史行并拒绝未知 operation。该能力复用现有 `query` LLM task，不新增模型路由，因此 `llm-config.example.json` 无需更新。
+创建预览时以 strict schema 规范化并哈希服务端 payload，页面/move/History/workflow/TagBatch 均只生成 plan；批准前不创建或取消 job、不写 Vault。Chat action 绑定 conversation，Tags 工作台 action 以 NULL conversation 按 Subject 恢复；TagBatch 使用独立 schema，不扩张 Query 的 `wiki.preview_change` 工具面。选区配图走专用入口：服务端读取 canonical 非 meta 页，把客户端完整块 offset 规范化为原文/prefix/suffix 锚点；Reshape 拒绝。批准时原子 claim、复算 hash 与同一 plan，HEAD 变化会刷新 preview 并要求重新批准；配图会重新定位锚点并原子创建 `image-insert` job。页面、move、TagBatch 与 History 仍走 Saga；workflow start 的 job insert + action applied、workflow cancel 的 job 终止 + action applied 分别在同一 SQLite IMMEDIATE transaction 中提交，失败整体回滚。取消提交后再发送 `job:cancelled` 并 best-effort 对账 Research provenance。`pending_actions.operation` CHECK 同步提供 Drizzle 迁移与启动期原子兼容重建，保留历史行并拒绝未知 operation。该能力复用现有 `query` LLM task，图片生成复用 `ingest:image`，因此 `llm-config.example.json` 无需更新。
+
+### `image-insert-service.ts` — 任务类型 `'image-insert'`
+
+先按 jobId 查 applied operation 做崩溃重试恢复，不重复生图；新执行在生图前后复核 stable HEAD 与块锚点，轮询取消并 abort 模型调用。生成结果只留内存，最终将 stamped 页面 update 与 base64 asset create 放入同一 changeset，以 `expectedPreHead + assertCanApply` 在 vault 锁内复核；取消/验证/apply 失败走 Saga rollback，不留下孤立资产。成功后 best-effort 入队 embedding。图片模型继续复用 `ingest:image`。
 
 ### `lint-service.ts` — 任务类型 `'lint'`
 
@@ -273,6 +277,7 @@ src/server/services/
 ├── ingest-prep.ts       # 预检/预算/常量纯函数
 ├── query-service.ts     # 问答 + save-to-wiki + 多轮记忆（agentic 工具循环）
 ├── query-tools.ts       # current/cross Subject 只读 ToolContext（wiki/source evidence + 可选 web.search）+ 复合身份 AccessedPages
+├── image-insert-service.ts # 已批准 canonical 选区单图生成 + 页面/资产原子 Saga
 ├── workflow-tools.ts    # active Subject job 脱敏状态 + re-enrich/research/cancel 计划与取消通知
 ├── pending-action-payload.ts # 审批 payload strict normalize/canonical hash
 ├── pending-action-service.ts # preview/approve/reject 状态机与 stale 重算
@@ -300,6 +305,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-17 | Ask AI canonical 选区新增 `wiki.image.insert` 提案、`workflow-image-insert-start` 审批与 `image-insert` worker；完整块锚点重定位、stable HEAD、取消 rollback、页面/资产同 Changeset 与 applied operation 恢复均已覆盖 |
 | 2026-07-16 | re-enrich 生图可靠性修复：enricher v6 的页面身份改由运行时注入，Unicode slug 可安全关联 asset；视觉主题无现有位图时明确触发生图，已有位图不重复 |
 | 2026-07-16 | enrich 接入 `image.generate` 图片工具；asset 与页面同一 Saga 提交，工具经 `ingest:image` 独立路由调用 Gemini 3.1 Flash Image |
 | 2026-07-16 | Tags 工作台接入 `tag-batch` PendingAction：独立 strict schema、NULL conversation 的 Subject-scoped 恢复和原子在途去重；批准重算 Vault 标签计划并复用 expectedPreHead/Saga/finalizer，Query 工具 schema 保持不变 |
