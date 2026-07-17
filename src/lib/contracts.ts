@@ -382,6 +382,16 @@ export interface WikiCitation {
   subjectSlug?: string;
 }
 
+/** 用户提问显式携带的正文引用；页面身份由服务端当前 Subject/page 补全。 */
+export interface UserMessageReference {
+  pageSlug: string;
+  /** 发送时的页面标题快照；旧消息缺失时由客户端回退到 slug。 */
+  pageTitle?: string;
+  subjectSlug: string;
+  section: string | null;
+  excerpt: string;
+}
+
 /** research job 输出的单条候选：只发现不写入，批准后由 research-import 协调导入。 */
 export interface ResearchCandidate {
   url: string;
@@ -805,6 +815,7 @@ export interface ConversationMessage {
   conversationId: string;
   role: 'user' | 'assistant';
   content: string;
+  references: UserMessageReference[] | null;
   citations: WikiCitation[] | null;
   createdAt: string;
 }

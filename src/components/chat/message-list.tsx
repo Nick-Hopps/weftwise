@@ -1,21 +1,17 @@
 'use client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, memo, useMemo } from 'react';
-import { ChevronDown, MessageCircleQuestion } from 'lucide-react';
+import React, { useEffect, useRef, useState, memo, useMemo } from 'react';
+import { ChevronDown, MessageCircleQuestion, TextQuote } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import { toolActivityIcon, toolActivityVerb } from '@/lib/tool-activity';
 import { citationHref } from '@/lib/wiki-citation';
-import type { WikiCitation } from '@/lib/contracts';
+import { displayTitleForSlug } from '@/lib/path-display';
+import type { UserMessageReference } from '@/lib/contracts';
+import type { ChatMessage, Citation } from './chat-message';
 
-export type Citation = WikiCitation;
-
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-  citations?: Citation[];
-  activity?: { tool: string; label: string }[];
-}
+export type { ChatMessage, Citation } from './chat-message';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -96,6 +92,37 @@ const MessageCitations = memo(function MessageCitations({ citations }: { citatio
   );
 });
 
+export function UserMessageReferenceCapsule({
+  references,
+}: {
+  references: UserMessageReference[];
+}) {
+  const reference = references[0];
+
+  if (!reference) return null;
+
+  const rawSummary = reference.section?.trim()
+    || reference.excerpt.replace(/\s+/g, ' ').trim();
+  const summaryCharacters = Array.from(rawSummary);
+  const summary = summaryCharacters.length > 36
+    ? `${summaryCharacters.slice(0, 35).join('').trimEnd()}…`
+    : rawSummary;
+  const label = summary
+    ? `${reference.pageTitle?.trim() || displayTitleForSlug(reference.pageSlug)} · ${summary}`
+    : reference.pageTitle?.trim() || displayTitleForSlug(reference.pageSlug);
+
+  return (
+    <Link
+      href={citationHref(reference)}
+      aria-label="Open referenced page"
+      className="mb-2 inline-flex h-6 max-w-full items-center gap-1.5 overflow-hidden rounded-full border border-accent/20 bg-accent-subtle/60 px-2.5 text-[11px] font-medium text-accent-strong transition-colors hover:border-accent/35 hover:bg-accent-subtle focus-ring"
+    >
+      <TextQuote className="h-3 w-3 shrink-0" aria-hidden />
+      <span className="truncate">{label}</span>
+    </Link>
+  );
+}
+
 function StreamingIndicator() {
   return (
     <span className="inline-flex gap-1 items-center ml-2 py-1">
@@ -168,7 +195,12 @@ export function MessageList({ messages, isStreaming = false, onSuggestionClick }
               msg.role === 'user' ? 'border-border-strong' : 'border-accent',
             )}>
               {msg.role === 'user' ? (
-                <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
+                <>
+                  {msg.references && msg.references.length > 0 && (
+                    <UserMessageReferenceCapsule references={msg.references} />
+                  )}
+                  <p className="text-sm text-foreground whitespace-pre-wrap">{msg.content}</p>
+                </>
               ) : (
                 <>
                   {msg.activity && msg.activity.length > 0 && (
@@ -192,7 +224,7 @@ export function MessageList({ messages, isStreaming = false, onSuggestionClick }
               )}
               {showStreaming && <StreamingIndicator />}
 
-              {msg.citations && msg.citations.length > 0 && (
+              {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
                 <MessageCitations citations={msg.citations} />
               )}
             </div>
