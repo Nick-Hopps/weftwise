@@ -5,6 +5,7 @@ import '@uiw/react-md-editor/markdown-editor.css';
 import '@uiw/react-markdown-preview/markdown.css';
 import 'katex/dist/katex.min.css';
 import { Providers } from '@/components/providers';
+import { getServerI18n, getServerLocale } from '@/lib/i18n/server';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -33,23 +34,26 @@ const spaceGrotesk = Space_Grotesk({
   weight: ['500', '600', '700'],
 });
 
-export const metadata: Metadata = {
-  title: {
-    default: 'weftwise 织识',
-    template: '%s · weftwise',
-  },
-  description:
-    'weftwise (织识) — LLM agents weave everything you read into a living, cross-linked personal wiki. Knowledge, woven.',
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const { t } = await getServerI18n();
+  return {
+    title: {
+      default: t('metadata.title'),
+      template: '%s · weftwise',
+    },
+    description: t('metadata.description'),
+  };
+}
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
+  const locale = await getServerLocale();
   return (
     <html
-      lang="en"
+      lang={locale}
       suppressHydrationWarning
       className={`${inter.variable} ${jetbrainsMono.variable} ${lxgwWenKai.variable} ${spaceGrotesk.variable}`}
       data-color-mode="light"
@@ -63,7 +67,7 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers initialLocale={locale}>{children}</Providers>
       </body>
     </html>
   );

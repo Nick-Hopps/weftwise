@@ -16,6 +16,8 @@ import { ContextPanelSheet } from '@/components/layout/context-panel-sheet';
 import { SettingsDialog } from '@/components/layout/settings-dialog';
 import { SubjectDialog } from '@/components/subjects/subject-dialog';
 import { CognitiveLensOnboarding } from '@/components/layout/cognitive-lens-onboarding';
+import { I18nProvider } from '@/components/i18n-provider';
+import type { Locale } from '@/lib/i18n/config';
 
 // Create QueryClient inside component to avoid cross-request sharing in SSR.
 function makeQueryClient() {
@@ -129,22 +131,24 @@ function SubjectsBootstrap() {
   return null;
 }
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children, initialLocale }: { children: React.ReactNode; initialLocale: Locale }) {
   const [queryClient] = useState(makeQueryClient);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <DarkModeInitializer />
-      <ScrollbarAutohide />
-      <GlobalHotkeys />
-      <SubjectsBootstrap />
-      {children}
-      <CommandPalette />
-      <ContextPanelSheet />
-      <SettingsDialog />
-      <SubjectDialog />
-      <CognitiveLensOnboarding />
-      <GlobalJobTracker />
-    </QueryClientProvider>
+    <I18nProvider initialLocale={initialLocale}>
+      <QueryClientProvider client={queryClient}>
+        <DarkModeInitializer />
+        <ScrollbarAutohide />
+        <GlobalHotkeys />
+        <SubjectsBootstrap />
+        {children}
+        <CommandPalette />
+        <ContextPanelSheet />
+        <SettingsDialog />
+        <SubjectDialog />
+        <CognitiveLensOnboarding />
+        <GlobalJobTracker />
+      </QueryClientProvider>
+    </I18nProvider>
   );
 }
