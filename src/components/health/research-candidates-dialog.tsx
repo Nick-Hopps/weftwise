@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import type { ResearchRunView } from '@/lib/contracts';
 import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
+import { useI18n } from '@/components/i18n-provider';
 
 const RUN_STATUS_LABEL: Record<ResearchRunView['status'], string> = {
   'awaiting-approval': 'Awaiting approval',
@@ -48,6 +49,7 @@ export function ResearchCandidatesDialog({
   onRetry: () => void;
   acting: boolean;
 }) {
+  const { t } = useI18n();
   const [checked, setChecked] = useState<Set<string>>(
     () => defaultResearchCandidateIds(run),
   );
@@ -99,7 +101,7 @@ export function ResearchCandidatesDialog({
             onClick={onClose}
             disabled={acting}
             className="text-foreground-tertiary hover:text-foreground"
-            aria-label="Close"
+            aria-label={t('health.close')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -145,7 +147,7 @@ export function ResearchCandidatesDialog({
                         score {candidate.score}
                       </Tag>
                     ) : (
-                      <Tag tone="neutral" size="sm">unscored</Tag>
+                      <Tag tone="neutral" size="sm">{t('health.unscored')}</Tag>
                     )}
                     {candidate.decision !== 'pending' && (
                       <Tag tone={candidate.decision === 'approved' ? 'success' : 'neutral'} size="sm">
@@ -211,7 +213,7 @@ export function ResearchCandidatesDialog({
                     Retry failed imports
                   </Button>
                 )}
-                <Button intent="secondary" onClick={onClose} disabled={acting}>Close</Button>
+                <Button intent="secondary" onClick={onClose} disabled={acting}>{t('health.close')}</Button>
               </>
             )}
           </div>

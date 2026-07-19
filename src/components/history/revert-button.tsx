@@ -8,8 +8,10 @@ import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
 import type { HistoryEntry } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 export function RevertButton({ entry }: { entry: HistoryEntry }) {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -38,14 +40,14 @@ export function RevertButton({ entry }: { entry: HistoryEntry }) {
   });
 
   if (entry.status === 'reverted') {
-    return <span className="text-xs text-foreground-tertiary">该操作已回滚</span>;
+    return <span className="text-xs text-foreground-tertiary">{t('history.alreadyReverted')}</span>;
   }
 
   if (!confirming) {
     return (
       <Button intent="ghost" size="sm" onClick={() => setConfirming(true)}>
         <Undo2 className="h-3.5 w-3.5" />
-        回滚
+        {t('history.revert')}
       </Button>
     );
   }
@@ -53,7 +55,7 @@ export function RevertButton({ entry }: { entry: HistoryEntry }) {
   return (
     <div className="flex flex-col gap-2 rounded-md border border-border bg-subtle p-3 text-xs">
       <p className="text-foreground-secondary">
-        将把这些页恢复到该操作之前的内容（作为一次新提交）。该操作之后对这些页的修改会被覆盖。
+        {t('history.revertDescription')}
       </p>
       {revert.isError && (
         <p className="text-red-600 dark:text-red-400">{(revert.error as Error).message}</p>
@@ -65,7 +67,7 @@ export function RevertButton({ entry }: { entry: HistoryEntry }) {
           disabled={revert.isPending}
           onClick={() => revert.mutate()}
         >
-          {revert.isPending ? '回滚中…' : '确认回滚'}
+          {revert.isPending ? t('history.reverting') : t('history.confirmRevert')}
         </Button>
         <Button intent="ghost" size="sm" disabled={revert.isPending} onClick={() => setConfirming(false)}>
           取消

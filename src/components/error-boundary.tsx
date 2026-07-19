@@ -3,6 +3,7 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/components/i18n-provider';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -12,6 +13,24 @@ interface ErrorBoundaryProps {
 interface ErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
+}
+
+function DefaultErrorFallback({ error, onRetry }: { error: Error | null; onRetry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div className="flex min-h-[200px] flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-danger-bg">
+        <AlertTriangle className="h-5 w-5 text-danger" aria-hidden />
+      </div>
+      <div className="space-y-1">
+        <h2 className="text-base font-semibold text-foreground">{t('errorBoundary.title')}</h2>
+        <p className="max-w-md text-sm text-foreground-secondary">
+          {error?.message || t('errorBoundary.description')}
+        </p>
+      </div>
+      <Button intent="primary" size="base" onClick={onRetry}>{t('errorBoundary.retry')}</Button>
+    </div>
+  );
 }
 
 export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
@@ -31,26 +50,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
-      return (
-        <div className="flex flex-col items-center justify-center min-h-[200px] p-8 text-center gap-3">
-          <div className="h-10 w-10 rounded-full bg-danger-bg flex items-center justify-center">
-            <AlertTriangle className="h-5 w-5 text-danger" aria-hidden />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-foreground">Something went wrong</h2>
-            <p className="text-sm text-foreground-secondary max-w-md">
-              {this.state.error?.message || 'An unexpected error occurred.'}
-            </p>
-          </div>
-          <Button
-            intent="primary"
-            size="base"
-            onClick={() => this.setState({ hasError: false, error: null })}
-          >
-            Try again
-          </Button>
-        </div>
-      );
+      return <DefaultErrorFallback error={this.state.error} onRetry={() => this.setState({ hasError: false, error: null })} />;
     }
 
     return this.props.children;

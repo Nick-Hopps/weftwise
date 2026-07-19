@@ -4,8 +4,10 @@ import { useQuery } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
 
 export function OperationDiff({ operationId }: { operationId: string }) {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const { id: subjectId } = useCurrentSubject();
 
@@ -22,7 +24,7 @@ export function OperationDiff({ operationId }: { operationId: string }) {
 
   if (isLoading) return <div className="h-24 animate-pulse rounded bg-subtle" />;
   const diff = data?.diff ?? '';
-  if (!diff.trim()) return <p className="text-xs italic text-foreground-tertiary">No diff.</p>;
+  if (!diff.trim()) return <p className="text-xs italic text-foreground-tertiary">{t('history.noDiff')}</p>;
 
   return (
     <pre className="overflow-x-auto rounded-md border border-border bg-surface p-3 font-mono text-xs leading-relaxed">

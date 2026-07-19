@@ -7,12 +7,14 @@ import { Header } from './header';
 import { Sidebar } from './sidebar';
 import { ContextPanel } from './context-panel';
 import { AskAiFloatingPanel } from './ask-ai-floating-panel';
+import { useI18n } from '@/components/i18n-provider';
 
 interface ShellProps {
   children: React.ReactNode;
 }
 
 export function Shell({ children }: ShellProps) {
+  const { t } = useI18n();
   const pathname = usePathname();
   const isWikiRoute = pathname?.startsWith('/wiki/') ?? false;
   const {
@@ -85,7 +87,7 @@ export function Shell({ children }: ShellProps) {
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize sidebar"
+          aria-label={t('nav.resizeSidebar')}
           onPointerDown={handleSidebarResizeStart}
           onDoubleClick={() => useUIStore.getState().resetSidebarWidth()}
           className="group hidden w-1 shrink-0 cursor-col-resize items-center justify-center transition-colors hover:bg-accent/20 active:bg-accent/40 lg:flex"
@@ -100,7 +102,7 @@ export function Shell({ children }: ShellProps) {
               type="button"
               className="absolute inset-0 bg-overlay/35 backdrop-blur-[2px] motion-safe:animate-fade-in"
               onClick={toggleSidebar}
-              aria-label="Close sidebar"
+              aria-label={t('nav.closeSidebar')}
               tabIndex={-1}
             />
             <div className="relative z-10 flex h-full w-[min(86vw,304px)] shadow-lg motion-safe:animate-slide-left">

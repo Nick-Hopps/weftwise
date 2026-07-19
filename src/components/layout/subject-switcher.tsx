@@ -13,6 +13,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { Kbd } from '@/components/ui/kbd';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
 
 async function fetchSubjects(): Promise<SubjectListEntry[]> {
   const res = await apiFetch('/api/subjects');
@@ -21,6 +22,7 @@ async function fetchSubjects(): Promise<SubjectListEntry[]> {
 }
 
 export function SubjectSwitcher() {
+  const { t } = useI18n();
   const router = useRouter();
   const switchSubject = useSwitchSubject();
   const openSubjectDialog = useUIStore((s) => s.openSubjectDialog);
@@ -88,7 +90,7 @@ export function SubjectSwitcher() {
         onClick={() => setOpen((prev) => !prev)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`Switch subject (current: ${currentName})`}
+        aria-label={t('subjects.switch', { name: currentName })}
         className={cn(
           'inline-flex items-center gap-2 h-8 px-2.5 rounded-md text-xs',
           'bg-canvas border border-border text-foreground',
@@ -105,24 +107,24 @@ export function SubjectSwitcher() {
       {open && (
         <div
           role="dialog"
-          aria-label="Subjects"
+          aria-label={t('subjects.label')}
           className={cn(
             'absolute left-0 top-full mt-1.5 z-tooltip w-72',
             'bg-surface border border-border rounded-md shadow-lg overflow-hidden',
             'animate-fade-in',
           )}
         >
-          <Command label="Subjects" shouldFilter>
+          <Command label={t('subjects.label')} shouldFilter>
             <div className="px-3 h-10 flex items-center border-b border-border">
               <Command.Input
                 autoFocus
-                placeholder="Search subjects…"
+                placeholder={t('subjects.search')}
                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none"
               />
             </div>
             <Command.List className="max-h-72 overflow-y-auto py-1">
               <Command.Empty className="px-3 py-6 text-center text-xs text-foreground-tertiary">
-                No subjects.
+                {t('subjects.emptyShort')}
               </Command.Empty>
               {subjects.map((subject) => (
                 <Command.Item
@@ -154,7 +156,7 @@ export function SubjectSwitcher() {
                 className="flex items-center gap-2 px-3 h-9 mx-1 rounded-md cursor-pointer aria-selected:bg-subtle text-sm text-foreground-secondary"
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span className="flex-1">New subject…</span>
+                <span className="flex-1">{t('subjects.newEllipsis')}</span>
               </Command.Item>
               <Command.Item
                 value="action-manage-subjects"
@@ -165,7 +167,7 @@ export function SubjectSwitcher() {
                 className="flex items-center gap-2 px-3 h-9 mx-1 rounded-md cursor-pointer aria-selected:bg-subtle text-sm text-foreground-secondary"
               >
                 <Settings className="h-3.5 w-3.5" />
-                <span className="flex-1">Manage subjects</span>
+                <span className="flex-1">{t('subjects.manage')}</span>
               </Command.Item>
             </Command.List>
           </Command>

@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/keyboard';
 import { dispatchJobStarted } from '@/lib/job-started-event';
 import type { Citation } from './message-list';
+import { useI18n } from '@/components/i18n-provider';
 
 interface SaveToWikiButtonProps {
   answer: string | null;
@@ -17,6 +18,7 @@ interface SaveToWikiButtonProps {
 }
 
 export function SaveToWikiButton({ answer, citations, disabled = false }: SaveToWikiButtonProps) {
+  const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -41,7 +43,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
   const handleSave = async () => {
     if (!title.trim() || !answer) return;
     if (!subjectId) {
-      setError('Subject is still loading. Please retry in a moment.');
+      setError(t('chat.save.subjectLoading'));
       return;
     }
     setIsLoading(true);
@@ -74,7 +76,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(err instanceof Error ? err.message : t('chat.save.failed'));
     } finally {
       setIsLoading(false);
     }
@@ -90,7 +92,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
     return (
       <IconButton
         size="sm"
-        aria-label="Saving last answer to Wiki"
+        aria-label={t('chat.save.savingLabel')}
         data-tip={`Saving… ${savedJobId.slice(0, 8)}`}
         className="tip tip-b text-success"
         disabled
@@ -104,10 +106,10 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
     <div className="relative">
       <IconButton
         size="sm"
-        aria-label="Save last answer to Wiki"
+        aria-label={t('chat.save.label')}
         aria-expanded={isOpen}
         aria-haspopup="dialog"
-        data-tip="Save to Wiki"
+        data-tip={t('chat.save.tip')}
         className="tip tip-b"
         disabled={disabled || !answer}
         onClick={() => setIsOpen((current) => !current)}
@@ -119,24 +121,24 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
         <>
           <button
             type="button"
-            aria-label="Close Save to Wiki form"
+            aria-label={t('chat.save.close')}
             tabIndex={-1}
             className="fixed inset-0 z-overlay cursor-default"
             onClick={() => setIsOpen(false)}
           />
           <div
             role="dialog"
-            aria-label="Save last answer to Wiki"
+            aria-label={t('chat.save.label')}
             className="absolute right-0 top-full z-command mt-2 flex w-72 flex-col gap-2 rounded-md border border-border bg-surface p-3 shadow-md"
           >
-            <p className="text-xs font-medium text-foreground-secondary">Save last answer as a Wiki page</p>
+            <p className="text-xs font-medium text-foreground-secondary">{t('chat.save.title')}</p>
             <Input
               ref={inputRef}
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Page title…"
+              placeholder={t('chat.save.placeholder')}
             />
             {error && <p className="text-xs text-danger">{error}</p>}
             <div className="flex gap-2">
@@ -147,10 +149,10 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
                 disabled={isLoading || !title.trim()}
                 className="flex-1"
               >
-                {isLoading ? 'Saving…' : 'Save'}
+                {isLoading ? t('chat.save.saving') : t('common.save')}
               </Button>
               <Button intent="outline" size="sm" onClick={() => setIsOpen(false)}>
-                Cancel
+                {t('common.cancel')}
               </Button>
             </div>
           </div>

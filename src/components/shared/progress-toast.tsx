@@ -9,6 +9,7 @@ import { JobDetailDialog } from './job-detail-dialog';
 import { jobActivityTitle } from '@/lib/tool-activity';
 import { latestToolName, stripLegacyToolActivityIcon } from '@/lib/tool-activity';
 import { ToolActivityIcon } from './tool-activity-icon';
+import { useI18n } from '@/components/i18n-provider';
 
 interface ProgressToastProps {
   jobId: string | null;
@@ -32,6 +33,7 @@ function extractFiles(events: { type: string; data: Record<string, unknown> }[])
 }
 
 export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
+  const { t } = useI18n();
   const { events, status, latestMessage } = useJobStream(jobId);
   const [visible, setVisible] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -117,8 +119,8 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
             <StatusIcon status={status} />
             <span className="flex-1 text-sm font-medium text-foreground">
               {jobType}
-              {status === 'completed' && ' — Done'}
-              {status === 'failed' && (wasCancelled ? ' — Cancelled' : ' — Failed')}
+              {status === 'completed' && ` — ${t('jobs.done')}`}
+              {status === 'failed' && ` — ${wasCancelled ? t('jobs.cancelled') : t('jobs.failed')}`}
             </span>
             {/* Stop a running job, or end a failed one (clears checkpoints so it can't resume). */}
             {(status === 'streaming' || (status === 'failed' && !wasCancelled)) && (
@@ -126,9 +128,9 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
                 size="sm"
                 onClick={handleCancel}
                 disabled={cancelling}
-                aria-label={status === 'failed' ? 'End ingest' : 'Stop job'}
+                aria-label={status === 'failed' ? t('jobs.endIngest') : t('jobs.stop')}
                 className="tip tip-l"
-                data-tip={status === 'failed' ? 'End ingest — clears checkpoints' : 'Stop job'}
+                data-tip={status === 'failed' ? t('jobs.endIngestTip') : t('jobs.stop')}
               >
                 {status === 'failed' ? <Ban /> : <Square />}
               </IconButton>
@@ -136,9 +138,9 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
             <IconButton
               size="sm"
               onClick={() => setCollapsed(true)}
-              aria-label="Collapse progress"
+              aria-label={t('jobs.collapseProgress')}
               className="tip tip-l"
-              data-tip="Collapse progress"
+              data-tip={t('jobs.collapseProgress')}
             >
               <ChevronRight />
             </IconButton>
@@ -146,9 +148,9 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
               <IconButton
                 size="sm"
                 onClick={handleClose}
-                aria-label="Close"
+                aria-label={t('jobs.close')}
                 className="tip tip-l"
-                data-tip="Close"
+                data-tip={t('jobs.close')}
               >
                 <X />
               </IconButton>
@@ -195,7 +197,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
 
             {!isFinished && (
               <p className="text-xs text-foreground-tertiary">
-                {events.length} event{events.length !== 1 ? 's' : ''} received
+                {t('jobs.eventsReceived', { count: events.length })}
               </p>
             )}
 
@@ -207,7 +209,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
                 status === 'failed' ? 'text-danger' : 'text-accent',
               )}
             >
-              {status === 'failed' && !wasCancelled ? 'View error →' : 'View details →'}
+              {status === 'failed' && !wasCancelled ? t('jobs.viewError') : t('jobs.viewDetails')}
             </button>
           </div>
         </div>
@@ -219,8 +221,8 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
         <button
           type="button"
           onClick={() => setCollapsed(false)}
-          aria-label="Expand progress"
-          data-tip="Expand progress"
+          aria-label={t('jobs.expandProgress')}
+          data-tip={t('jobs.expandProgress')}
           inert={!collapsed}
           className={cn(
             'tip tip-l !absolute right-0 top-0 flex flex-col items-center gap-1 rounded-l-lg border border-r-0 bg-surface px-1.5 py-2 shadow-lg focus-ring transition-all duration-base ease-standard',

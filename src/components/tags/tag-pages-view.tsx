@@ -18,6 +18,7 @@ import { Select } from '@/components/ui/select';
 import { Tag } from '@/components/ui/tag';
 import type { WikiPage } from '@/lib/contracts';
 import { useTagSearchParams } from './use-tag-search-params';
+import { useI18n } from '@/components/i18n-provider';
 
 type PageSort = 'recent' | 'title';
 
@@ -33,6 +34,7 @@ function formatDate(value: string): string {
 }
 
 export function TagPagesView({ tag }: { tag: string }) {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
   const { searchParams, updateSearchParams } = useTagSearchParams();
@@ -113,7 +115,7 @@ export function TagPagesView({ tag }: { tag: string }) {
               value={mode}
               options={MODE_OPTIONS}
               onChange={(value) => updateSearchParams({ mode: value === 'and' ? null : value })}
-              aria-label="Tag matching mode"
+              aria-label={t('tags.matchMode')}
             />
           )}
         </div>
@@ -148,12 +150,12 @@ export function TagPagesView({ tag }: { tag: string }) {
 
       <div className="sticky top-0 z-10 -mx-2 flex flex-col gap-3 border-y border-border-subtle bg-canvas/95 px-2 py-3 backdrop-blur sm:flex-row sm:items-center">
         <label className="relative min-w-0 flex-1">
-          <span className="sr-only">Search matching pages</span>
+          <span className="sr-only">{t('tags.searchMatching')}</span>
           <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-foreground-tertiary" aria-hidden />
           <Input
             value={query}
             onChange={(event) => updateQuery(event.target.value)}
-            placeholder="Search matching pages…"
+            placeholder={t('tags.searchMatchingPlaceholder')}
             className="pl-8"
           />
         </label>
@@ -162,11 +164,11 @@ export function TagPagesView({ tag }: { tag: string }) {
           onChange={(event) => updateSearchParams({
             sort: event.target.value === 'recent' ? null : event.target.value,
           })}
-          aria-label="Sort matching pages"
+          aria-label={t('tags.sortMatching')}
           className="h-8 self-end sm:self-auto"
         >
-          <option value="recent">Recently updated</option>
-          <option value="title">Title</option>
+          <option value="recent">{t('tags.recent')}</option>
+          <option value="title">{t('tags.titleSort')}</option>
         </Select>
       </div>
 
@@ -179,8 +181,8 @@ export function TagPagesView({ tag }: { tag: string }) {
       ) : isError ? (
         <div className="flex min-h-40 flex-col items-center justify-center gap-3 text-center">
           <AlertTriangle className="h-5 w-5 text-warning" aria-hidden />
-          <p className="text-sm text-foreground-secondary">Pages could not be loaded.</p>
-          <Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>
+          <p className="text-sm text-foreground-secondary">{t('tags.pagesLoadError')}</p>
+          <Button intent="outline" size="sm" onClick={() => void refetch()}>{t('tags.retry')}</Button>
         </div>
       ) : (
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_14rem]">
@@ -193,7 +195,7 @@ export function TagPagesView({ tag }: { tag: string }) {
             </div>
             {matched.length === 0 ? (
               <div className="border-y border-border-subtle py-10 text-center">
-                <p className="text-sm text-foreground-secondary">No pages match these filters.</p>
+                <p className="text-sm text-foreground-secondary">{t('tags.noPagesMatch')}</p>
                 {(query || extraTags.length > 0) && (
                   <Button
                     intent="ghost"
@@ -261,7 +263,7 @@ export function TagPagesView({ tag }: { tag: string }) {
               <span className="text-xs tabular-nums text-foreground-tertiary">{related.length}</span>
             </div>
             {related.length === 0 ? (
-              <p className="border-t border-border-subtle py-3 text-xs italic text-foreground-tertiary">No related tags.</p>
+              <p className="border-t border-border-subtle py-3 text-xs italic text-foreground-tertiary">{t('tags.noRelated')}</p>
             ) : (
               <ul className="divide-y divide-border-subtle border-y border-border-subtle">
                 {related.map((item) => (

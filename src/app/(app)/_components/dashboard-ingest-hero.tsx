@@ -28,15 +28,17 @@ import {
   JOB_STARTED_EVENT,
   type JobStartedEventDetail,
 } from '@/lib/job-started-event';
+import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 /** The real ingest pipeline's six phases, in order. */
-const PHASES: ReadonlyArray<{ label: string; verb: string; Icon: LucideIcon }> = [
-  { label: 'Parse', verb: 'Parsing source', Icon: ScanText },
-  { label: 'Plan', verb: 'Planning changes', Icon: ListChecks },
-  { label: 'Write', verb: 'Writing pages', Icon: PenLine },
-  { label: 'Enrich', verb: 'Enriching pages', Icon: Wand2 },
-  { label: 'Verify', verb: 'Verifying claims', Icon: ShieldCheck },
-  { label: 'Commit', verb: 'Committing changeset', Icon: GitCommitHorizontal },
+const PHASES: ReadonlyArray<{ labelKey: MessageKey; verbKey: MessageKey; Icon: LucideIcon }> = [
+  { labelKey: 'jobs.phase.parse', verbKey: 'ingest.phase.parsing', Icon: ScanText },
+  { labelKey: 'jobs.phase.plan', verbKey: 'ingest.phase.planning', Icon: ListChecks },
+  { labelKey: 'jobs.phase.write', verbKey: 'ingest.phase.writing', Icon: PenLine },
+  { labelKey: 'jobs.phase.enrich', verbKey: 'ingest.phase.enriching', Icon: Wand2 },
+  { labelKey: 'jobs.phase.verify', verbKey: 'ingest.phase.verifying', Icon: ShieldCheck },
+  { labelKey: 'jobs.phase.commit', verbKey: 'ingest.phase.committing', Icon: GitCommitHorizontal },
 ];
 
 /** Accepted source file types — mirrors the ingest workbench. */
@@ -95,6 +97,7 @@ function currentPhase(events: JobStreamEvent[]): number {
  * is running.
  */
 export function DashboardIngestHero() {
+  const { t } = useI18n();
   const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(null);
   const { events, status, latestMessage } = useJobStream(jobId);
@@ -167,24 +170,24 @@ export function DashboardIngestHero() {
     const pct = Math.min(97, Math.round(((idx + 0.5) / PHASES.length) * 100));
     const phase = PHASES[idx];
     const pages = pagesWritten(events);
-    const status = latestMessage ? latestMessage.replace(/\[\[|\]\]/g, '') : 'Starting…';
+    const status = latestMessage ? latestMessage.replace(/\[\[|\]\]/g, '') : t('ingest.starting');
     return (
       <button
         type="button"
         onClick={() => router.push('/ingest')}
-        aria-label="Open the running ingest"
+        aria-label={t('ingest.openRunning')}
         className="ig-sheen group relative w-full overflow-hidden rounded-lg border border-accent/35 bg-surface p-5 text-left shadow-sm transition-colors hover:bg-subtle/40 focus-ring"
       >
         <div className="relative z-[1] flex items-center gap-3">
           <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent" aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground">Ingest in progress</p>
+            <p className="text-sm font-semibold text-foreground">{t('ingest.inProgress')}</p>
             <p className="mt-0.5 truncate text-xs text-foreground-secondary">
-              <span className="font-semibold text-accent-strong">{phase.verb}…</span>
+              <span className="font-semibold text-accent-strong">{t(phase.verbKey)}…</span>
             </p>
           </div>
           <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-accent group-hover:bg-accent/10">
-            <Maximize2 className="h-3.5 w-3.5" /> Watch live
+            <Maximize2 className="h-3.5 w-3.5" /> {t('ingest.watchLive')}
           </span>
         </div>
 
@@ -192,7 +195,7 @@ export function DashboardIngestHero() {
         <div className="relative z-[1] mt-3.5 flex gap-1">
           {PHASES.map((p, i) => (
             <span
-              key={p.label}
+              key={p.labelKey}
               className={cn(
                 'h-1 flex-1 rounded-full transition-colors',
                 i < idx ? 'bg-success' : i === idx ? 'bg-accent' : 'bg-subtle',
@@ -240,26 +243,25 @@ export function DashboardIngestHero() {
       {/* invitation */}
       <div className="flex min-w-0 flex-col gap-3.5">
         <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-normal text-accent-strong">
-          <Sparkles className="h-3 w-3" /> Start here
+          <Sparkles className="h-3 w-3" /> {t('ingest.startHere')}
         </span>
         <div className="flex items-center gap-3.5">
           <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-accent/12 text-accent">
             <UploadCloud className="h-6 w-6" aria-hidden />
           </span>
           <div className="min-w-0">
-            <h2 id="dashboard-ingest-title" className="text-[20px] font-semibold tracking-normal text-foreground">Ingest a source</h2>
+            <h2 id="dashboard-ingest-title" className="text-[20px] font-semibold tracking-normal text-foreground">{t('ingest.title')}</h2>
             <p className="mt-0.5 text-sm leading-relaxed text-foreground-secondary text-pretty">
-              Drop a document or paste text. The agent reads, writes, links, and lints it into your
-              vault — and runs in the background while you keep working.
+              {t('ingest.dashboardDescription')}
             </p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           <Button intent="primary" size="lg" onClick={() => fileRef.current?.click()}>
-            <FileUp className="h-[15px] w-[15px]" /> Choose a file
+            <FileUp className="h-[15px] w-[15px]" /> {t('ingest.chooseFile')}
           </Button>
           <Button intent="ghost" size="lg" onClick={() => router.push('/ingest')}>
-            <Maximize2 className="h-[15px] w-[15px]" /> Open workspace
+            <Maximize2 className="h-[15px] w-[15px]" /> {t('ingest.openWorkspace')}
             <Kbd className="ml-1">⌘I</Kbd>
           </Button>
         </div>
@@ -268,14 +270,14 @@ export function DashboardIngestHero() {
       {/* pipeline preview */}
       <div className="flex flex-col gap-1 border-l border-border-subtle pl-5">
         <span className="mb-1 text-[11px] font-medium uppercase tracking-normal text-foreground-tertiary">
-          What the agent does
+          {t('ingest.whatAgentDoes')}
         </span>
-        {PHASES.map(({ label, Icon }, i) => (
-          <div key={label} className="flex h-[26px] items-center gap-2.5">
+        {PHASES.map(({ labelKey, Icon }, i) => (
+          <div key={labelKey} className="flex h-[26px] items-center gap-2.5">
             <span className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent">
               <Icon className="h-3 w-3" aria-hidden />
             </span>
-            <span className="text-xs font-medium text-foreground-secondary">{label}</span>
+            <span className="text-xs font-medium text-foreground-secondary">{t(labelKey)}</span>
             <span className="flex-1" />
             <span className="font-mono text-[11px] text-foreground-tertiary/70">
               {String(i + 1).padStart(2, '0')}

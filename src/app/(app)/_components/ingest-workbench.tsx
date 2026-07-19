@@ -37,15 +37,17 @@ import { IngestLiveView } from './ingest-live-view';
 import { IngestTaskSwitcher } from './ingest-task-switcher';
 import type { CheckpointProgress, Job } from '@/lib/contracts';
 import { dispatchJobStarted } from '@/lib/job-started-event';
+import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 /** The real ingest pipeline's six phases — shown as a "what happens" preview. */
-const PIPELINE: ReadonlyArray<{ label: string; Icon: LucideIcon }> = [
-  { label: 'Parse', Icon: ScanText },
-  { label: 'Plan', Icon: ListChecks },
-  { label: 'Write', Icon: PenLine },
-  { label: 'Enrich', Icon: Wand2 },
-  { label: 'Verify', Icon: ShieldCheck },
-  { label: 'Commit', Icon: GitCommitHorizontal },
+const PIPELINE: ReadonlyArray<{ labelKey: MessageKey; Icon: LucideIcon }> = [
+  { labelKey: 'jobs.phase.parse', Icon: ScanText },
+  { labelKey: 'jobs.phase.plan', Icon: ListChecks },
+  { labelKey: 'jobs.phase.write', Icon: PenLine },
+  { labelKey: 'jobs.phase.enrich', Icon: Wand2 },
+  { labelKey: 'jobs.phase.verify', Icon: ShieldCheck },
+  { labelKey: 'jobs.phase.commit', Icon: GitCommitHorizontal },
 ];
 
 const ACCEPT = '.md,.mdx,.txt,.html,.htm,.pdf';
@@ -211,6 +213,7 @@ function IngestTaskDetail({
  * if the user navigates away; returning here reflects its current state.
  */
 export function IngestWorkbench() {
+  const { t } = useI18n();
   const router = useRouter();
   const { slug: subjectSlug } = useCurrentSubject();
 
@@ -594,23 +597,22 @@ export function IngestWorkbench() {
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-accent/12 text-accent">
               <UploadCloud className="h-[18px] w-[18px]" aria-hidden />
             </span>
-            <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Ingest a source</h1>
+            <h1 className="text-[22px] font-semibold tracking-tight text-foreground">{t('ingest.title')}</h1>
           </div>
           <p className="max-w-[560px] text-sm leading-relaxed text-foreground-secondary">
-            Drop a document or paste text — the agent plans, writes, links, and lints the vault for
-            you. It runs in the background, so you can keep reading while it works.
+            {t('ingest.description')}
           </p>
         </header>
 
         {/* card */}
         <div className="overflow-hidden rounded-lg border border-border bg-surface shadow-sm">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
-            <span className="text-sm font-semibold text-foreground">New ingest</span>
+            <span className="text-sm font-semibold text-foreground">{t('ingest.new')}</span>
             <Tabs value={mode} onValueChange={(v) => setMode(v as 'file' | 'text' | 'url')}>
               <TabsList>
-                <TabsTrigger value="file">File</TabsTrigger>
-                <TabsTrigger value="text">Text</TabsTrigger>
-                <TabsTrigger value="url">URL</TabsTrigger>
+                <TabsTrigger value="file">{t('ingest.file')}</TabsTrigger>
+                <TabsTrigger value="text">{t('ingest.text')}</TabsTrigger>
+                <TabsTrigger value="url">{t('ingest.url')}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -642,22 +644,21 @@ export function IngestWorkbench() {
                       <span className="font-mono">
                         {selectedFiles.length === 1
                           ? selectedFiles[0].name
-                          : `${selectedFiles.length} files selected`}
+                          : t('ingest.filesSelected', { count: selectedFiles.length })}
                       </span>
                     </span>
                     <span className="font-mono text-xs text-foreground-tertiary">
-                      {formatBytes(selectedFiles.reduce((sum, f) => sum + f.size, 0))} · click to
-                      choose again
+                      {t('ingest.chooseAgain', { size: formatBytes(selectedFiles.reduce((sum, f) => sum + f.size, 0)) })}
                     </span>
                   </>
                 ) : (
                   <>
                     <FileUp className="h-6 w-6 text-foreground-tertiary" aria-hidden />
                     <span className="text-sm font-medium text-foreground">
-                      Drag &amp; drop, or click to browse
+                      {t('ingest.drop')}
                     </span>
                     <span className="font-mono text-xs text-foreground-tertiary">
-                      .md · .txt · .html · .pdf — up to 50 MB each, multiple files OK
+                      {t('ingest.fileLimits')}
                     </span>
                   </>
                 )}
@@ -667,28 +668,28 @@ export function IngestWorkbench() {
                 <Textarea
                   rows={7}
                   autoFocus
-                  placeholder={'One URL per line, e.g.\nhttps://example.com/article\nhttps://docs.example.com/guide'}
+                  placeholder={t('ingest.urlPlaceholder')}
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  aria-label="URLs to ingest, one per line"
+                  aria-label={t('ingest.urlsLabel')}
                 />
                 <span className="font-mono text-xs text-foreground-tertiary">
-                  Up to 20 URLs · fetched server-side · 5 MB per page
+                  {t('ingest.urlLimits')}
                 </span>
               </div>
             ) : (
               <div className="flex flex-col gap-3">
                 <Input
                   type="text"
-                  placeholder="Filename (optional, e.g. my-notes.md)"
+                  placeholder={t('ingest.filenamePlaceholder')}
                   value={filenameInput}
                   onChange={(e) => setFilenameInput(e.target.value)}
-                  aria-label="Filename for the pasted content"
+                  aria-label={t('ingest.filenameLabel')}
                 />
                 <Textarea
                   rows={7}
                   autoFocus
-                  placeholder="Paste Markdown, notes, or any text — the agent will file it into the right pages…"
+                  placeholder={t('ingest.textPlaceholder')}
                   value={textInput}
                   onChange={(e) => setTextInput(e.target.value)}
                 />
@@ -704,7 +705,7 @@ export function IngestWorkbench() {
             {urlResults && (
               <div className="flex flex-col gap-1.5 rounded-md border border-border bg-canvas p-3">
                 <span className="text-xs font-semibold text-foreground">
-                  {urlResults.filter((r) => r.jobId).length}/{urlResults.length} URLs queued
+                  {t('ingest.urlsQueued', { queued: urlResults.filter((r) => r.jobId).length, total: urlResults.length })}
                 </span>
                 <ul className="flex flex-col gap-1">
                   {urlResults.map((r) => (
@@ -773,12 +774,12 @@ export function IngestWorkbench() {
 
         {/* pipeline preview */}
         <div className="flex flex-wrap gap-2">
-          {PIPELINE.map(({ label, Icon }) => (
+          {PIPELINE.map(({ labelKey, Icon }) => (
             <span
-              key={label}
+              key={labelKey}
               className="flex items-center gap-1.5 rounded-full border border-border-subtle bg-surface px-2.5 py-1 text-xs text-foreground-tertiary"
             >
-              <Icon className="h-3 w-3" aria-hidden /> {label}
+              <Icon className="h-3 w-3" aria-hidden /> {t(labelKey)}
             </span>
           ))}
         </div>

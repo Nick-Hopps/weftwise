@@ -13,6 +13,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import type { TagReviewQueue } from '@/lib/tags';
+import { useI18n } from '@/components/i18n-provider';
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -55,11 +56,12 @@ export function TagReviewQueueView({
   actionDisabled: boolean;
   onManageTag(sourceTag: string, suggestedTarget?: string): void;
 }) {
+  const { t } = useI18n();
   if (queue.issueCount === 0) {
     return (
       <div className="flex min-h-48 flex-col items-center justify-center border-y border-border-subtle px-4 text-center">
         <CheckCircle2 className="h-5 w-5 text-success" aria-hidden />
-        <h2 className="mt-3 text-sm font-medium text-foreground">Review clear</h2>
+        <h2 className="mt-3 text-sm font-medium text-foreground">{t('tags.reviewClear')}</h2>
         <p className="mt-1 max-w-sm text-xs leading-5 text-foreground-tertiary">
           No format variants, single-use tags, or untagged pages need attention.
         </p>
@@ -73,7 +75,7 @@ export function TagReviewQueueView({
         <section aria-labelledby="format-variants-heading">
           <SectionHeading
             id="format-variants-heading"
-            title="Format variants"
+            title={t('tags.formatVariants')}
             count={queue.variantGroups.reduce((sum, group) => sum + group.variants.length, 0)}
             description="Merge alternate spellings into the recommended target."
           />
@@ -114,7 +116,7 @@ export function TagReviewQueueView({
         <section aria-labelledby="single-use-tags-heading">
           <SectionHeading
             id="single-use-tags-heading"
-            title="Single-use tags"
+            title={t('tags.singleUse')}
             count={queue.singletonTags.length}
             description="Check whether these tags should be kept, renamed, or removed."
           />
@@ -164,7 +166,7 @@ export function TagReviewQueueView({
         <section aria-labelledby="untagged-pages-heading">
           <SectionHeading
             id="untagged-pages-heading"
-            title="Untagged pages"
+            title={t('tags.untagged')}
             count={queue.untaggedPages.length}
             description="Open these pages to add useful classification."
           />

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Layers, Plus, Settings, Upload } from 'lucide-react';
-import type { SubjectListEntry } from '@/lib/contracts';
+import type { AugmentationLevel, SubjectListEntry } from '@/lib/contracts';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useSwitchSubject } from '@/hooks/use-switch-subject';
@@ -12,15 +12,24 @@ import {
   importSubject,
   ImportSubjectError,
 } from '@/components/subjects/subjects-api';
-import { augmentationLabel } from '@/lib/augmentation';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
+
+const AUGMENTATION_LABEL_KEYS: Record<AugmentationLevel, MessageKey> = {
+  off: 'augmentation.off.label',
+  light: 'augmentation.light.label',
+  standard: 'augmentation.standard.label',
+  deep: 'augmentation.deep.label',
+};
 
 const SUBJECTS_QUERY_KEY = ['subjects'] as const;
 
 export default function SubjectsPage() {
+  const { t } = useI18n();
   const { id: currentSubjectId } = useCurrentSubject();
   const openSubjectDialog = useUIStore((s) => s.openSubjectDialog);
   const switchSubject = useSwitchSubject();
@@ -42,17 +51,17 @@ export default function SubjectsPage() {
         <div>
           <h1 className="flex items-center gap-2 text-xl font-semibold text-foreground">
             <Layers className="h-5 w-5 text-foreground-tertiary" />
-            Subjects
+            {t('subjects.page.title')}
           </h1>
           <p className="mt-1 text-sm text-foreground-secondary">
-            Each subject is an isolated workspace with its own pages, sources, and graph.
+            {t('subjects.page.description')}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <ImportSubjectButton />
           <Button intent="primary" onClick={() => openSubjectDialog({ mode: 'create' })}>
             <Plus className="h-3.5 w-3.5" />
-            New subject
+            {t('subjects.new')}
           </Button>
         </div>
       </header>
@@ -90,6 +99,7 @@ export default function SubjectsPage() {
  * slug 冲突（409 slug-conflict）时用 prompt 请求新 slug 重试一次。
  */
 function ImportSubjectButton() {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -103,7 +113,7 @@ function ImportSubjectButton() {
     onError: (err: Error, { file }) => {
       if (err instanceof ImportSubjectError && err.code === 'slug-conflict') {
         const slug = window.prompt(
-          'A subject with this slug already exists. Import under a different slug:',
+          t('subjects.importConflict'),
         );
         if (slug?.trim()) {
           mutation.mutate({ file, slug: slug.trim() });
@@ -133,26 +143,26 @@ function ImportSubjectButton() {
       />
       <Button intent="outline" loading={mutation.isPending} onClick={() => inputRef.current?.click()}>
         <Upload className="h-3.5 w-3.5" />
-        Import
+        {t('subjects.import')}
       </Button>
     </div>
   );
 }
 
 function EmptyState({ onCreate }: { onCreate: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex flex-col items-center rounded-lg border border-dashed border-border bg-surface px-6 py-14 text-center">
       <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-subtle">
         <Layers className="h-6 w-6 text-foreground-tertiary" />
       </div>
-      <h2 className="text-sm font-semibold text-foreground">No subjects yet</h2>
+      <h2 className="text-sm font-semibold text-foreground">{t('subjects.empty.title')}</h2>
       <p className="mt-1 max-w-sm text-sm text-foreground-secondary">
-        A subject is an isolated workspace for one area of knowledge. Create your first one to start
-        adding content.
+        {t('subjects.empty.description')}
       </p>
       <Button intent="primary" className="mt-4" onClick={onCreate}>
         <Plus className="h-3.5 w-3.5" />
-        Create your first subject
+        {t('subjects.empty.action')}
       </Button>
     </div>
   );
@@ -169,6 +179,7 @@ function SubjectCard({
   onOpen: () => void;
   onSettings: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <div
       className={cn(
@@ -181,7 +192,7 @@ function SubjectCard({
       {/* gear：编辑入口，浮于卡片之上，阻止冒泡到主体按钮。*/}
       <IconButton
         size="sm"
-        aria-label={`Settings for ${subject.name}`}
+        aria-label={t('subjects.settingsFor', { name: subject.name })}
         onClick={(e) => {
           e.stopPropagation();
           onSettings();
@@ -202,17 +213,17 @@ function SubjectCard({
           <span className="truncate text-sm font-semibold text-foreground">{subject.name}</span>
           {isActive && (
             <Tag tone="accent" size="sm">
-              Active
+              {t('subjects.active')}
             </Tag>
           )}
         </div>
 
         <div className="flex items-center gap-1.5 text-[11px] text-foreground-tertiary">
           <span className="tabular-nums">
-            {subject.pageCount} {subject.pageCount === 1 ? 'page' : 'pages'}
+            {t('subjects.pages', { count: subject.pageCount })}
           </span>
           <span>·</span>
-          <span>{augmentationLabel(subject.augmentationLevel)}</span>
+          <span>{t(AUGMENTATION_LABEL_KEYS[subject.augmentationLevel])}</span>
         </div>
 
         <code className="truncate font-mono text-xs text-foreground-secondary">{subject.slug}</code>

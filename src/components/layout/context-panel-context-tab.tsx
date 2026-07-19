@@ -8,16 +8,22 @@ import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { SectionLabel } from '@/components/ui/panel';
 import { TagLink } from '@/components/wiki/tag-link';
+import { useI18n } from '@/components/i18n-provider';
+
+function GraphLoading() {
+  const { t } = useI18n();
+  return (
+    <div className="w-full h-48 rounded-md border border-border bg-canvas flex items-center justify-center text-xs text-foreground-tertiary">
+      {t('context.loadingGraph')}
+    </div>
+  );
+}
 
 const MiniGraphView = dynamic(
   () => import('@/components/graph/mini-graph-view').then((m) => ({ default: m.MiniGraphView })),
   {
     ssr: false,
-    loading: () => (
-      <div className="w-full h-48 rounded-md border border-border bg-canvas flex items-center justify-center text-xs text-foreground-tertiary">
-        Loading graph…
-      </div>
-    ),
+    loading: GraphLoading,
   },
 );
 
@@ -35,23 +41,12 @@ interface PageDetail {
   backlinks: { slug: string; title: string }[];
 }
 
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  } catch {
-    return iso || '—';
-  }
-}
-
 interface ContextTabProps {
   slug: string | null;
 }
 
 export function ContextPanelContextTab({ slug }: ContextTabProps) {
+  const { t, formatDate } = useI18n();
   const apiFetch = useApiFetch();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
   const { data: pageDetail, isLoading } = useQuery({
@@ -70,9 +65,9 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
     return (
       <div className="flex flex-col items-center justify-center text-center px-6 py-12 gap-2 h-full">
         <FileText className="h-6 w-6 text-foreground-tertiary" aria-hidden />
-        <p className="text-sm font-medium text-foreground">No page selected</p>
+        <p className="text-sm font-medium text-foreground">{t('context.noPage.title')}</p>
         <p className="text-xs text-foreground-secondary max-w-[240px]">
-          Navigate to a wiki page to see its metadata, backlinks, and neighborhood graph here.
+          {t('context.noPage.description')}
         </p>
       </div>
     );
@@ -90,7 +85,7 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
         {/* Metadata as property list */}
         <section aria-labelledby="ctx-meta">
           <SectionLabel id="ctx-meta" className="mb-2">
-            Properties
+            {t('context.properties')}
           </SectionLabel>
           {isLoading || !pageDetail ? (
             <div className="space-y-2">
@@ -100,19 +95,19 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
             </div>
           ) : (
             <dl className="grid grid-cols-[88px_1fr] gap-y-1.5 text-sm">
-              <dt className="text-foreground-secondary">Created</dt>
+              <dt className="text-foreground-secondary">{t('context.created')}</dt>
               <dd className="font-mono text-xs text-foreground">
-                {fm?.created ? formatDate(fm.created) : '—'}
+                {fm?.created ? formatDate(fm.created, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
               </dd>
-              <dt className="text-foreground-secondary">Updated</dt>
+              <dt className="text-foreground-secondary">{t('context.updated')}</dt>
               <dd className="font-mono text-xs text-foreground">
-                {fm?.updated ? formatDate(fm.updated) : '—'}
+                {fm?.updated ? formatDate(fm.updated, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
               </dd>
-              <dt className="text-foreground-secondary">Words</dt>
+              <dt className="text-foreground-secondary">{t('context.words')}</dt>
               <dd className="font-mono text-xs text-foreground tabular-nums">{wordCount}</dd>
               {fm?.tags && fm.tags.filter((t) => t !== 'meta').length > 0 && (
                 <>
-                  <dt className="text-foreground-secondary pt-0.5">Tags</dt>
+                  <dt className="text-foreground-secondary pt-0.5">{t('context.tags')}</dt>
                   <dd className="flex flex-wrap gap-1">
                     {fm.tags.filter((t) => t !== 'meta').map((t) => (
                       <TagLink key={t} tag={t} subjectSlug={subjectSlug} />
@@ -127,10 +122,10 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
         {/* Backlinks */}
         <section aria-labelledby="ctx-backlinks">
           <SectionLabel id="ctx-backlinks" className="mb-2">
-            Backlinks ({backlinks.length})
+            {t('context.backlinks', { count: backlinks.length })}
           </SectionLabel>
           {backlinks.length === 0 ? (
-            <p className="text-xs text-foreground-tertiary italic">No backlinks yet.</p>
+            <p className="text-xs text-foreground-tertiary italic">{t('context.noBacklinks')}</p>
           ) : (
             <ul className="space-y-0.5">
               {backlinks.map((link) => (
@@ -151,7 +146,7 @@ export function ContextPanelContextTab({ slug }: ContextTabProps) {
         {/* Graph — compact, interactive neighborhood view */}
         <section aria-labelledby="ctx-graph" className="flex-1 min-h-0">
           <div className="mb-2 flex items-baseline justify-between">
-            <SectionLabel id="ctx-graph">Graph</SectionLabel>
+            <SectionLabel id="ctx-graph">{t('context.graph')}</SectionLabel>
           </div>
           <MiniGraphView key={subjectId ?? 'no-subject'} currentSlug={slug} />
         </section>

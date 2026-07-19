@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { GripHorizontal, Sparkles, X } from 'lucide-react';
 import { IconButton } from '@/components/ui/icon-button';
 import { ContextPanelChatTab } from './context-panel-chat-tab';
+import { useI18n } from '@/components/i18n-provider';
 import { useUIStore } from '@/stores/ui-store';
 import {
   centerAskAiPosition,
@@ -39,6 +40,7 @@ function useMatchesMobile(): boolean {
 }
 
 export function AskAiFloatingPanel() {
+  const { t } = useI18n();
   const open = useUIStore((state) => state.askAiOpen);
   const anchor = useUIStore((state) => state.askAiAnchor);
   const anchorMode = useUIStore((state) => state.askAiAnchorMode);
@@ -289,7 +291,7 @@ export function AskAiFloatingPanel() {
         ref={panelRef}
         role="dialog"
         aria-modal={isMobile ? 'true' : undefined}
-        aria-label="Ask AI"
+        aria-label={t('chat.askAI')}
         style={{
           '--ask-ai-width': `${panelSize.width}px`,
           '--ask-ai-height': `${panelSize.height}px`,
@@ -329,10 +331,10 @@ export function AskAiFloatingPanel() {
             <Sparkles className="h-3.5 w-3.5" />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-foreground">Ask AI</p>
-            <p className="truncate text-[11px] text-foreground-tertiary">Current subject and page context</p>
+            <p className="text-sm font-semibold text-foreground">{t('chat.askAI')}</p>
+            <p className="truncate text-[11px] text-foreground-tertiary">{t('chat.currentContext')}</p>
           </div>
-          <IconButton size="sm" aria-label="Close Ask AI" onClick={close}>
+          <IconButton size="sm" aria-label={t('chat.closeAI')} onClick={close}>
             <X />
           </IconButton>
         </header>
@@ -343,7 +345,7 @@ export function AskAiFloatingPanel() {
 
         <div
           role="separator"
-          aria-label="Resize Ask AI width"
+          aria-label={t('chat.resizeWidth')}
           aria-orientation="vertical"
           tabIndex={0}
           data-ask-ai-resize-handle="width"
@@ -353,7 +355,7 @@ export function AskAiFloatingPanel() {
         />
         <div
           role="separator"
-          aria-label="Resize Ask AI height"
+          aria-label={t('chat.resizeHeight')}
           aria-orientation="horizontal"
           tabIndex={0}
           data-ask-ai-resize-handle="height"
@@ -363,7 +365,7 @@ export function AskAiFloatingPanel() {
         />
         <div
           role="separator"
-          aria-label="Resize Ask AI width and height"
+          aria-label={t('chat.resizeBoth')}
           tabIndex={0}
           data-ask-ai-resize-handle="both"
           className="group absolute bottom-0 right-0 z-30 hidden h-4 w-4 cursor-nwse-resize rounded-br-xl focus-ring lg:block"

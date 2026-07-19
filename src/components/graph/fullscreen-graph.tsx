@@ -9,6 +9,7 @@ import { Compass, Minimize2, Target } from 'lucide-react';
 import { IconButton } from '@/components/ui/icon-button';
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
 
 interface FullscreenGraphProps {
   fullscreenRef: React.RefObject<HTMLDivElement | null>;
@@ -25,11 +26,12 @@ export function FullscreenGraph({
   onRecenter,
   onClose,
 }: FullscreenGraphProps) {
+  const { t } = useI18n();
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Wiki graph fullscreen"
+      aria-label={t('graph.fullscreen')}
       className="theme-graph fixed inset-0 z-overlay flex flex-col bg-canvas animate-fade-in"
       style={{
         backgroundImage:
@@ -40,16 +42,16 @@ export function FullscreenGraph({
       <header className="relative z-10 flex items-center justify-between gap-4 px-5 h-12 border-b border-border/60 bg-surface/40 backdrop-blur-[1px]">
         <div className="flex items-baseline gap-3 min-w-0">
           <h2 className="text-sm font-semibold text-foreground tracking-tight">
-            Wiki Graph
+            {t('graph.title')}
           </h2>
           <span className="text-xs text-foreground-tertiary tabular-nums whitespace-nowrap">
-            {stats.nodes} nodes
+            {t('graph.nodes', { count: stats.nodes })}
             <span className="mx-1.5 text-foreground-disabled">·</span>
-            {stats.edges} relationships
+            {t('graph.relationships', { count: stats.edges })}
             {stats.orphans > 0 && (
               <>
                 <span className="mx-1.5 text-foreground-disabled">·</span>
-                <span className="text-foreground-tertiary">{stats.orphans} orphan{stats.orphans === 1 ? '' : 's'}</span>
+                <span className="text-foreground-tertiary">{t('graph.orphans', { count: stats.orphans })}</span>
               </>
             )}
           </span>
@@ -58,8 +60,8 @@ export function FullscreenGraph({
           <IconButton
             size="base"
             onClick={onRecenter}
-            aria-label={hasCurrent ? 'Center on current page' : 'Fit graph to view'}
-            data-tip={hasCurrent ? 'Center on current page' : 'Fit to view'}
+            aria-label={hasCurrent ? t('graph.centerCurrent') : t('graph.fit')}
+            data-tip={hasCurrent ? t('graph.centerCurrent') : t('graph.fitTip')}
             className="tip tip-l"
           >
             {hasCurrent ? <Target /> : <Compass />}
@@ -67,8 +69,8 @@ export function FullscreenGraph({
           <IconButton
             size="base"
             onClick={onClose}
-            aria-label="Close fullscreen (Esc)"
-            data-tip="Exit fullscreen"
+            aria-label={t('graph.closeFullscreen')}
+            data-tip={t('graph.exitFullscreen')}
             className="tip tip-l"
           >
             <Minimize2 />
@@ -81,25 +83,25 @@ export function FullscreenGraph({
 
       {/* Floating legend — top-right of canvas area (avoids dev overlay + profile badge) */}
       <div className="pointer-events-none absolute top-16 right-5 z-10 flex flex-col gap-1.5 px-3 py-2 rounded-md bg-surface/90 ring-1 ring-border/60 shadow-sm text-[11px]">
-        <span className="text-[9px] uppercase tracking-wider font-medium text-foreground-tertiary">Legend</span>
-        <LegendRow color="var(--color-graph-active)" label={hasCurrent ? 'Current page' : 'Active'} ring />
-        <LegendRow color="var(--color-graph-node)" label="Linked page" />
-        <LegendRow color="var(--color-graph-orphan)" label="Orphan (no links)" />
+        <span className="text-[9px] uppercase tracking-wider font-medium text-foreground-tertiary">{t('graph.legend')}</span>
+        <LegendRow color="var(--color-graph-active)" label={hasCurrent ? t('graph.currentPage') : t('graph.active')} ring />
+        <LegendRow color="var(--color-graph-node)" label={t('graph.linkedPage')} />
+        <LegendRow color="var(--color-graph-orphan)" label={t('graph.orphan')} />
       </div>
 
       {/* Operation hint — bottom-right */}
       <div className="pointer-events-none absolute bottom-4 right-5 z-10 flex items-center gap-3 text-[11px] text-foreground-tertiary">
         <HintChip>
           <Kbd>Drag</Kbd>
-          <span>rearrange</span>
+          <span>{t('graph.drag')}</span>
         </HintChip>
         <HintChip>
           <Kbd>Click</Kbd>
-          <span>open page</span>
+          <span>{t('graph.click')}</span>
         </HintChip>
         <HintChip>
           <Kbd>Esc</Kbd>
-          <span>close</span>
+          <span>{t('graph.close')}</span>
         </HintChip>
       </div>
     </div>

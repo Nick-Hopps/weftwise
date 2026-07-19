@@ -6,6 +6,7 @@ import { ArrowUp, Check, StopCircle, TextQuote, X } from 'lucide-react';
 import { IconButton } from '@/components/ui/icon-button';
 import { MessageList } from './message-list';
 import { ChatToolbar } from './chat-toolbar';
+import { useI18n } from '@/components/i18n-provider';
 import { ConversationSwitcher } from './conversation-switcher';
 import {
   createMessageStreamBatcher,
@@ -129,6 +130,7 @@ interface ChatInterfaceProps {
 }
 
 export function ChatInterface({ variant = 'standalone', hideHeader = false }: ChatInterfaceProps = {}) {
+  const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
@@ -297,7 +299,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       // would clear every subject in the database.
       const subjectId = useUIStore.getState().currentSubjectId;
       if (!subjectId) {
-        throw new Error('Subject is still loading. Please retry in a moment.');
+        throw new Error(t('chat.save.subjectLoading'));
       }
       const res = await apiFetch('/api/reset', {
         method: 'POST',
@@ -315,16 +317,15 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
       router.refresh();
       updateLastAssistant((msg) => ({
         ...msg,
-        content:
-          '当前 subject 已重置。该 subject 的页面、数据源与任务记录都已清空，你可以重新摄入内容了。',
+        content: t('chat.reset.completed'),
       }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      updateLastAssistant((m) => ({ ...m, content: `重置失败：${msg}` }));
+      updateLastAssistant((m) => ({ ...m, content: t('chat.reset.failed', { error: msg }) }));
     } finally {
       setIsLoading(false);
     }
-  }, [queryClient, router]);
+  }, [queryClient, router, t]);
 
   const handlePendingAction = useCallback(async (
     actionId: string,
@@ -578,7 +579,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
     <div className={containerClass}>
       {!hideHeader && (
         <div className="flex h-10 shrink-0 items-center px-4 border-b border-border">
-          <h2 className="text-sm font-semibold text-foreground">Ask your Wiki</h2>
+          <h2 className="text-sm font-semibold text-foreground">{t('chat.title')}</h2>
         </div>
       )}
 
@@ -660,7 +661,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
                   <button
                     type="button"
                     onClick={() => setRefs((rs) => rs.filter((x) => x.id !== r.id))}
-                    aria-label="Remove reference"
+                    aria-label={t('chat.removeReference')}
                     className="inline-flex rounded-sm p-0.5 text-accent-strong hover:bg-accent/10"
                   >
                     <X className="h-3 w-3" />
@@ -681,7 +682,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             onKeyDown={handleKeyDown}
             onFocus={() => setComposerFocused(true)}
             onBlur={() => setComposerFocused(false)}
-            placeholder="Ask a question…"
+            placeholder={t('chat.placeholder')}
             rows={2}
             className="block w-full resize-none border-0 bg-transparent px-3 pb-1 pt-2.5 text-sm leading-5 text-foreground placeholder:text-input-placeholder focus:outline-none"
           />
@@ -691,7 +692,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               type="button"
               onClick={() => canRef && setPickerOpen((o) => !o)}
               disabled={!canRef}
-              title={canRef ? undefined : 'Open a page to reference its content'}
+              title={canRef ? undefined : t('chat.referenceUnavailable')}
               className={cn(
                 'inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs transition-colors focus-ring',
                 canRef
@@ -701,14 +702,14 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               )}
             >
               <TextQuote className="h-3.5 w-3.5" />
-              <span>Reference</span>
+              <span>{t('chat.reference')}</span>
             </button>
 
             {isLoading ? (
               <IconButton
                 intent="danger"
-                aria-label="Stop generating"
-                data-tip="Stop"
+                aria-label={t('chat.stopGenerating')}
+                data-tip={t('chat.stop')}
                 onClick={handleStop}
                 className="tip tip-l rounded-full"
               >
@@ -717,8 +718,8 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
             ) : (
               <IconButton
                 intent="primary"
-                aria-label="Send"
-                data-tip="Send · Enter"
+                aria-label={t('chat.send')}
+                data-tip={t('chat.sendShortcut')}
                 onClick={sendMessage}
                 disabled={!input.trim()}
                 className="tip tip-l rounded-full"
@@ -745,12 +746,13 @@ function ReferencePicker({
   onPick: (p: Passage) => void;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <>
       <div onClick={onClose} className="fixed inset-0 z-overlay" aria-hidden />
       <div className="absolute bottom-[calc(100%-8px)] left-3 right-3 z-sheet animate-slide-down overflow-hidden rounded-lg border border-border bg-surface shadow-md">
         <div className="border-b border-border px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-foreground-tertiary">
-          Reference from this page
+          {t('chat.referenceFromPage')}
         </div>
         <div className="max-h-56 overflow-y-auto p-1">
           {passages.map((p) => {

@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
 import { IconButton } from '@/components/ui/icon-button';
 import { blockImeEnterSubmit } from '@/lib/keyboard';
+import { useI18n } from '@/components/i18n-provider';
 
 const SUBJECTS_QUERY_KEY = ['subjects'] as const;
 
@@ -70,12 +71,13 @@ export function SubjectDialog() {
 }
 
 function DialogHeader({ title, onClose }: { title: string; onClose: () => void }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center justify-between h-12 shrink-0 px-4 border-b border-border">
       <h2 id="subject-dialog-title" className="text-sm font-semibold text-foreground">
         {title}
       </h2>
-      <IconButton size="sm" onClick={onClose} aria-label="Close">
+      <IconButton size="sm" onClick={onClose} aria-label={t('subjects.dialog.close')}>
         <X />
       </IconButton>
     </div>
@@ -103,6 +105,7 @@ function Field({
 }
 
 function CreateSubjectBody({ onClose }: { onClose: () => void }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const switchSubject = useSwitchSubject();
 
@@ -140,11 +143,11 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     setError(null);
     if (!name.trim()) {
-      setError('Name is required.');
+      setError(t('subjects.dialog.nameRequired'));
       return;
     }
     if (!effectiveSlug) {
-      setError('Could not derive a URL slug from the name — customize it below.');
+      setError(t('subjects.dialog.slugError'));
       setCustomizeOpen(true);
       return;
     }
@@ -158,9 +161,9 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <DialogHeader title="New subject" onClose={onClose} />
+      <DialogHeader title={t('subjects.dialog.createTitle')} onClose={onClose} />
       <form onSubmit={handleSubmit} onKeyDown={blockImeEnterSubmit} className="p-4 space-y-4">
-        <Field label="Name">
+        <Field label={t('subjects.dialog.name')}>
           <Input
             autoFocus
             value={name}
@@ -168,13 +171,13 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
               setName(e.target.value);
               if (!slugTouched) setSlug(normalizeSubjectSlug(e.target.value));
             }}
-            placeholder="e.g. Frontend Architecture"
+            placeholder={t('subjects.dialog.namePlaceholder')}
           />
         </Field>
 
         <div>
           <p className="text-xs text-foreground-secondary">
-            URL: <code className="font-mono text-foreground">{effectiveSlug || 'subject'}</code>
+            URL: <code className="font-mono text-foreground">{effectiveSlug || t('subjects.dialog.slugFallback')}</code>
           </p>
           {!customizeOpen ? (
             <button
@@ -183,7 +186,7 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
               className="mt-1 inline-flex items-center gap-1 rounded text-[11px] text-foreground-tertiary hover:text-foreground focus-ring"
             >
               <ChevronRight className="h-3 w-3" />
-              Customize slug
+              {t('subjects.dialog.customizeSlug')}
             </button>
           ) : (
             <div className="mt-2">
@@ -196,21 +199,22 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
                 }}
                 placeholder="frontend-architecture"
                 className="font-mono text-xs"
-                aria-label="Slug"
+                aria-label={t('subjects.dialog.slug')}
               />
               <p className="mt-1 text-[11px] text-foreground-tertiary">
-                Used in URLs and cross-subject links:{' '}
-                <code className="font-mono">[[{effectiveSlug || 'subject'}:page]]</code>
+                {t('subjects.dialog.slugDescription', {
+                  example: `[[${effectiveSlug || t('subjects.dialog.slugFallback')}:page]]`,
+                })}
               </p>
             </div>
           )}
         </div>
 
-        <Field label="Description" hint="optional">
+        <Field label={t('subjects.dialog.description')} hint={t('subjects.dialog.optional')}>
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
         </Field>
 
-        <Field label="Augmentation">
+        <Field label={t('subjects.dialog.augmentation')}>
           <AugmentationField
             value={augmentation}
             onChange={setAugmentation}
@@ -222,10 +226,10 @@ function CreateSubjectBody({ onClose }: { onClose: () => void }) {
 
         <div className="flex justify-end gap-2">
           <Button intent="ghost" type="button" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button intent="primary" type="submit" loading={mutation.isPending}>
-            Create
+            {t('subjects.dialog.create')}
           </Button>
         </div>
       </form>
@@ -240,6 +244,7 @@ function EditSubjectBody({
   subjectId: string | null;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const router = useRouter();
   const { id: currentSubjectId } = useCurrentSubject();
@@ -296,8 +301,8 @@ function EditSubjectBody({
   if (!subject) {
     return (
       <>
-        <DialogHeader title="Subject settings" onClose={onClose} />
-        <div className="p-4 text-sm text-foreground-tertiary">Loading…</div>
+        <DialogHeader title={t('subjects.dialog.settingsTitle')} onClose={onClose} />
+        <div className="p-4 text-sm text-foreground-tertiary">{t('common.loading')}</div>
       </>
     );
   }
@@ -310,7 +315,7 @@ function EditSubjectBody({
     e.preventDefault();
     setError(null);
     if (!name.trim()) {
-      setError('Name is required.');
+      setError(t('subjects.dialog.nameRequired'));
       return;
     }
     patchMutation.mutate({
@@ -323,26 +328,26 @@ function EditSubjectBody({
 
   return (
     <>
-      <DialogHeader title="Subject settings" onClose={onClose} />
+      <DialogHeader title={t('subjects.dialog.settingsTitle')} onClose={onClose} />
       <form onSubmit={handleSubmit} onKeyDown={blockImeEnterSubmit} className="p-4 space-y-4">
-        <Field label="Name">
+        <Field label={t('subjects.dialog.name')}>
           <Input autoFocus value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
 
-        <Field label="Slug">
+        <Field label={t('subjects.dialog.slug')}>
           <code className="block rounded-md bg-subtle px-2 py-1.5 font-mono text-xs text-foreground-secondary">
             {subject.slug}
           </code>
           <p className="mt-1 text-[11px] text-foreground-tertiary">
-            The slug can&apos;t be changed after creation.
+            {t('subjects.dialog.slugImmutable')}
           </p>
         </Field>
 
-        <Field label="Description" hint="optional">
+        <Field label={t('subjects.dialog.description')} hint={t('subjects.dialog.optional')}>
           <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
         </Field>
 
-        <Field label="Augmentation">
+        <Field label={t('subjects.dialog.augmentation')}>
           <AugmentationField
             value={augmentation}
             onChange={setAugmentation}
@@ -354,22 +359,21 @@ function EditSubjectBody({
 
         <div className="flex justify-end gap-2">
           <Button intent="ghost" type="button" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button intent="primary" type="submit" loading={patchMutation.isPending}>
-            Save
+            {t('subjects.dialog.save')}
           </Button>
         </div>
       </form>
 
       <div className="border-t border-border px-4 py-3">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-foreground-tertiary">
-          Export
+          {t('subjects.dialog.export')}
         </p>
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-foreground-tertiary">
-            Download this subject&apos;s pages, sources and assets as a zip archive. It can be
-            imported on the Subjects page.
+            {t('subjects.dialog.exportDescription')}
           </p>
           {/* cookie 鉴权下浏览器直接下载；不用 fetch，避免手动组装 Blob。 */}
           <Button
@@ -379,21 +383,20 @@ function EditSubjectBody({
             onClick={() => window.location.assign(subjectExportUrl(subject.id))}
           >
             <Download className="h-3.5 w-3.5" />
-            Export
+            {t('subjects.dialog.export')}
           </Button>
         </div>
       </div>
 
       <div className="border-t border-border bg-subtle/40 px-4 py-3">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-foreground-tertiary">
-          Danger zone
+          {t('subjects.dialog.dangerZone')}
         </p>
         {canDelete ? (
           <>
             {confirmArmed && (
               <p className="mb-2 text-xs text-danger">
-                This permanently deletes &ldquo;{subject.name}&rdquo; and its {subject.pageCount}{' '}
-                {subject.pageCount === 1 ? 'page' : 'pages'} and all sources. This can&apos;t be undone.
+                {t('subjects.dialog.deleteWarning', { name: subject.name, count: subject.pageCount })}
               </p>
             )}
             <Button
@@ -410,14 +413,14 @@ function EditSubjectBody({
               }}
             >
               <Trash2 className="h-3.5 w-3.5" />
-              {confirmArmed ? 'Click again to confirm' : 'Delete subject'}
+              {confirmArmed ? t('subjects.dialog.confirmDelete') : t('subjects.dialog.delete')}
             </Button>
           </>
         ) : (
           <p className="text-xs text-foreground-tertiary">
             {subject.slug === 'general'
-              ? "The general subject can't be deleted."
-              : 'This subject is currently active. Switch to another subject before deleting.'}
+              ? t('subjects.dialog.generalProtected')
+              : t('subjects.dialog.activeProtected')}
           </p>
         )}
       </div>

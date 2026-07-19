@@ -3,7 +3,8 @@
 /** 四个任务导向入口：桌面为侧栏，移动端为横向分类导航。 */
 
 import { cn } from '@/lib/cn';
-import { APP_VERSION, SETTINGS_CATEGORIES, type CategoryId } from './settings-categories';
+import { APP_VERSION, getSettingsCategories, type CategoryId } from './settings-categories';
+import { useI18n } from '@/components/i18n-provider';
 
 interface SettingsNavProps {
   active: CategoryId;
@@ -11,16 +12,18 @@ interface SettingsNavProps {
 }
 
 export function SettingsNav({ active, onSelect }: SettingsNavProps) {
+  const { t } = useI18n();
+  const categories = getSettingsCategories(t);
   return (
     <nav
-      aria-label="Settings categories"
+      aria-label={t('settings.categories.label')}
       className={cn(
         'flex shrink-0 flex-col border-b border-border bg-subtle/40 px-2 py-1.5',
         'md:w-48 md:border-b-0 md:border-r md:p-3',
       )}
     >
       <ul className="flex gap-0.5 overflow-x-auto md:block md:space-y-1 md:overflow-visible">
-        {SETTINGS_CATEGORIES.map((category) => {
+        {categories.map((category) => {
           const Icon = category.icon;
           const isActive = category.id === active;
           return (

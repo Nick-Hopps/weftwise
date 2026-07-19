@@ -14,6 +14,7 @@ import { IngestPill } from './ingest-pill';
 import { WeftwiseMark } from '@/components/shared/weftwise-mark';
 import { cn } from '@/lib/cn';
 import { displayTitleForSlug } from '@/lib/path-display';
+import { useI18n } from '@/components/i18n-provider';
 
 interface PageLite {
   slug: string;
@@ -21,6 +22,7 @@ interface PageLite {
 }
 
 function Breadcrumb({ pathname }: { pathname: string }) {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const { id: subjectId } = useCurrentSubject();
   const { data: pages } = useQuery({
@@ -36,17 +38,17 @@ function Breadcrumb({ pathname }: { pathname: string }) {
 
   const segments: Array<{ label: string; href?: string }> = [];
   if (pathname === '/' || pathname === '') {
-    segments.push({ label: 'Dashboard' });
+    segments.push({ label: t('nav.dashboard') });
   } else if (pathname.startsWith('/wiki/')) {
     const slug = pathname.replace(/^\/wiki\//, '');
-    segments.push({ label: 'Wiki', href: '/' });
+    segments.push({ label: t('nav.wiki'), href: '/' });
     segments.push({ label: displayTitleForSlug(slug, pages) });
   } else {
     segments.push({ label: pathname.replace(/^\/+/, ''), href: pathname });
   }
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 min-w-0">
+    <nav aria-label={t('nav.breadcrumb')} className="flex items-center gap-1.5 min-w-0">
       {segments.map((seg, idx) => {
         const last = idx === segments.length - 1;
         return (
@@ -79,6 +81,7 @@ function Breadcrumb({ pathname }: { pathname: string }) {
 }
 
 export function Header() {
+  const { t } = useI18n();
   const pathname = usePathname() ?? '/';
   const {
     toggleSidebar,
@@ -100,8 +103,8 @@ export function Header() {
         <IconButton
           size="base"
           onClick={toggleSidebar}
-          aria-label="Open navigation"
-          data-tip="Open navigation"
+          aria-label={t('nav.openNavigation')}
+          data-tip={t('nav.openNavigation')}
           className="tip tip-b lg:hidden"
         >
           <Menu />
@@ -109,7 +112,7 @@ export function Header() {
 
         <Link
           href="/"
-          aria-label="weftwise — home"
+          aria-label={t('nav.home')}
           className="flex items-center gap-2 rounded-sm px-1 focus-ring"
         >
           <WeftwiseMark size={26} />
@@ -133,11 +136,11 @@ export function Header() {
       <button
         type="button"
         onClick={toggleCommandPalette}
-        aria-label="Open search (Ctrl+K)"
+        aria-label={t('nav.openSearch')}
         className="hidden h-8 w-[300px] max-w-[34vw] items-center gap-2 rounded-md border border-border bg-canvas/80 px-3 text-xs text-foreground-tertiary shadow-xs transition-colors hover:border-border-strong hover:bg-subtle focus-ring sm:flex"
       >
         <Search className="h-3.5 w-3.5" />
-        <span className="flex-1 text-left">Search pages, ask AI…</span>
+        <span className="flex-1 text-left">{t('nav.searchPrompt')}</span>
         <Kbd>⌘K</Kbd>
       </button>
 
@@ -149,8 +152,8 @@ export function Header() {
         <IconButton
           size="base"
           onClick={toggleCommandPalette}
-          aria-label="Search"
-          data-tip="Search"
+          aria-label={t('nav.search')}
+          data-tip={t('nav.search')}
           className="tip tip-b sm:hidden"
         >
           <Search />
@@ -159,8 +162,8 @@ export function Header() {
         <IconButton
           size="base"
           onClick={() => openAskAi()}
-          aria-label="Ask your wiki (⌘J)"
-          data-tip="Ask your wiki"
+          aria-label={t('nav.askWikiShortcut')}
+          data-tip={t('nav.askWiki')}
           className="tip tip-b text-accent hover:text-accent-hover"
         >
           <Sparkles />
@@ -169,8 +172,8 @@ export function Header() {
         <IconButton
           size="base"
           onClick={toggleDarkMode}
-          aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          data-tip={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+          aria-label={darkMode ? t('nav.lightMode') : t('nav.darkMode')}
+          data-tip={darkMode ? t('nav.lightMode') : t('nav.darkMode')}
           className="tip tip-b"
         >
           {darkMode ? <Sun /> : <Moon />}
@@ -180,12 +183,12 @@ export function Header() {
           <IconButton
             size="base"
             onClick={toggleContextPanel}
-            aria-label={contextPanelOpen ? 'Close context panel' : 'Open context panel'}
-            data-tip={contextPanelOpen ? 'Hide context panel' : 'Show context panel'}
+            aria-label={contextPanelOpen ? t('nav.closeContext') : t('nav.openContext')}
+            data-tip={contextPanelOpen ? t('nav.hideContext') : t('nav.showContext')}
             className={cn('tip tip-b', contextPanelOpen && 'bg-subtle text-foreground')}
           >
             <PanelRight />
-            <span className="sr-only">context</span>
+            <span className="sr-only">{t('nav.context')}</span>
           </IconButton>
         )}
       </div>

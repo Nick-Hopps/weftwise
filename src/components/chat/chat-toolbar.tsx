@@ -3,6 +3,7 @@
 import React from 'react';
 import { MessageSquarePlus, Trash2 } from 'lucide-react';
 import { iconButtonVariants } from '@/components/ui/icon-button';
+import { useI18n } from '@/components/i18n-provider';
 
 interface ChatToolbarProps {
   conversationSwitcher: React.ReactNode;
@@ -20,6 +21,7 @@ export function ChatToolbar({
   onClear,
   onNewConversation,
 }: ChatToolbarProps) {
+  const { t } = useI18n();
   return (
     <div
       data-ask-ai-toolbar
@@ -29,8 +31,8 @@ export function ChatToolbar({
       <div className="flex shrink-0 items-center gap-0.5 border-l border-border-subtle pl-1.5">
         <button
           type="button"
-          aria-label="New conversation"
-          data-tip="New conversation"
+          aria-label={t('chat.newConversation')}
+          data-tip={t('chat.newConversation')}
           className={`${iconButtonVariants({ size: 'sm' })} tip tip-b`}
           onClick={onNewConversation}
         >
@@ -38,8 +40,8 @@ export function ChatToolbar({
         </button>
         <button
           type="button"
-          aria-label="Clear conversation view"
-          data-tip="Clear"
+          aria-label={t('chat.clearConversation')}
+          data-tip={t('common.clear')}
           className={`${iconButtonVariants({ size: 'sm' })} tip tip-b`}
           disabled={!canClear}
           onClick={onClear}

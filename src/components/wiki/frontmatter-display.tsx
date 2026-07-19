@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { Tag } from '@/components/ui/tag';
 import { TagLink } from '@/components/wiki/tag-link';
+import { useI18n } from '@/components/i18n-provider';
 interface FrontmatterDisplayProps {
   title: string;
   tags: string[];
@@ -11,19 +12,6 @@ interface FrontmatterDisplayProps {
   updated: string;
   actions?: ReactNode;
   subjectSlug?: string;
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return '';
-  try {
-    return new Date(dateStr).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return dateStr;
-  }
 }
 
 /**
@@ -39,6 +27,7 @@ export default function FrontmatterDisplay({
   actions,
   subjectSlug,
 }: FrontmatterDisplayProps) {
+  const { t, formatDate } = useI18n();
   const hasProps = tags.length > 0 || sources.length > 0 || created || updated;
 
   return (
@@ -54,7 +43,7 @@ export default function FrontmatterDisplay({
         <dl className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-foreground-tertiary">
           {tags.filter((t) => t !== 'meta').length > 0 && (
             <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
-              <dt className="sr-only">Tags</dt>
+              <dt className="sr-only">{t('wiki.frontmatter.tags')}</dt>
               <dd className="flex flex-wrap gap-1.5">
                 {tags.filter((t) => t !== 'meta').map((t) =>
                   subjectSlug ? (
@@ -68,7 +57,7 @@ export default function FrontmatterDisplay({
           )}
           {sources.length > 0 && (
             <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto">
-              <dt>Sources</dt>
+              <dt>{t('wiki.frontmatter.sources')}</dt>
               <dd className="max-w-[320px] truncate text-foreground-secondary" title={sources.join(', ')}>
                 {sources.join(', ')}
               </dd>
@@ -76,20 +65,20 @@ export default function FrontmatterDisplay({
           )}
           {created && (
             <div className="flex items-center gap-1.5">
-              <dt>Created</dt>
+              <dt>{t('wiki.frontmatter.created')}</dt>
               <dd>
                 <time dateTime={created} className="font-mono text-foreground-secondary">
-                  {formatDate(created)}
+                  {formatDate(created, { year: 'numeric', month: 'short', day: 'numeric' })}
                 </time>
               </dd>
             </div>
           )}
           {updated && (
             <div className="flex items-center gap-1.5">
-              <dt>Updated</dt>
+              <dt>{t('wiki.frontmatter.updated')}</dt>
               <dd>
                 <time dateTime={updated} className="font-mono text-foreground-secondary">
-                  {formatDate(updated)}
+                  {formatDate(updated, { year: 'numeric', month: 'short', day: 'numeric' })}
                 </time>
               </dd>
             </div>

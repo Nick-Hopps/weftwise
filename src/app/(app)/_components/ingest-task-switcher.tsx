@@ -4,13 +4,15 @@ import React from 'react';
 import { Check, Clock3, Loader2, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { IngestTask } from '@/lib/ingest-task-list';
+import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
-const STATUS_LABEL = {
-  pending: 'Queued',
-  running: 'Running',
-  completed: 'Complete',
-  failed: 'Failed',
-} as const;
+const STATUS_LABEL: Record<IngestTask['queueStatus'], MessageKey> = {
+  pending: 'ingest.status.pending',
+  running: 'ingest.status.running',
+  completed: 'ingest.status.completed',
+  failed: 'ingest.status.failed',
+};
 
 function TaskStatusIcon({ status }: { status: IngestTask['queueStatus'] }) {
   if (status === 'completed') return <Check className="h-3.5 w-3.5 text-success" aria-hidden />;
@@ -34,6 +36,7 @@ export function IngestTaskSwitcher({
   error?: string | null;
   children?: React.ReactNode;
 }) {
+  const { t } = useI18n();
   const handleTaskKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -54,14 +57,14 @@ export function IngestTaskSwitcher({
       <div className="shrink-0 border-b border-border bg-surface px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="shrink-0">
-            <p className="text-sm font-semibold text-foreground">Ingest tasks</p>
+            <p className="text-sm font-semibold text-foreground">{t('ingest.tasks')}</p>
             <p className="font-mono text-[11px] text-foreground-tertiary">
               {tasks.length} {tasks.length === 1 ? 'source' : 'sources'}
             </p>
           </div>
           <div
             role="tablist"
-            aria-label="Ingest tasks"
+            aria-label={t('ingest.tasks')}
             className="flex h-auto min-w-0 flex-1 justify-start gap-1 overflow-x-auto bg-transparent p-0"
           >
             {tasks.map((task) => (
@@ -90,7 +93,7 @@ export function IngestTaskSwitcher({
                       task.queueStatus === 'failed' && 'text-danger',
                     )}
                   >
-                    {STATUS_LABEL[task.queueStatus]}
+                    {t(STATUS_LABEL[task.queueStatus])}
                   </span>
                 </span>
               </button>

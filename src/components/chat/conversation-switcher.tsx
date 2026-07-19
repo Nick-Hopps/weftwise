@@ -8,8 +8,10 @@ import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 import type { Conversation } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 export function ConversationSwitcher() {
+  const { t } = useI18n();
   const apiFetchClient = useApiFetch();
   const queryClient = useQueryClient();
   const { id: subjectId } = useCurrentSubject();
@@ -81,7 +83,7 @@ export function ConversationSwitcher() {
         onClick={() => setOpen((v) => !v)}
         className="flex h-7 w-full min-w-0 items-center gap-1 rounded-md px-2 text-left text-xs text-foreground hover:bg-subtle focus-ring"
       >
-        <span className="truncate">{current?.title ?? 'New conversation'}</span>
+        <span className="truncate">{current?.title ?? t('chat.newConversation')}</span>
         <ChevronDown className={cn(
           'h-3.5 w-3.5 shrink-0 text-foreground-tertiary transition-transform',
           open && 'rotate-180',
@@ -94,7 +96,7 @@ export function ConversationSwitcher() {
           className="absolute left-0 top-full z-command mt-1 max-h-72 w-[min(320px,calc(100vw-32px))] overflow-y-auto rounded-md border border-border bg-surface p-1 shadow-lg"
         >
           {conversations.length === 0 ? (
-            <p className="px-3 py-2 text-xs italic text-foreground-tertiary">No past conversations</p>
+            <p className="px-3 py-2 text-xs italic text-foreground-tertiary">{t('chat.noConversations')}</p>
           ) : (
             conversations.map((c) => (
               <div
@@ -115,10 +117,10 @@ export function ConversationSwitcher() {
                 <button
                   type="button"
                   role="menuitem"
-                  aria-label="Rename"
-                  data-tip="Rename"
+                  aria-label={t('common.rename')}
+                  data-tip={t('common.rename')}
                   onClick={() => {
-                    const next = window.prompt('Rename conversation', c.title);
+                    const next = window.prompt(t('chat.renamePrompt'), c.title);
                     if (next && next.trim()) rename.mutate({ id: c.id, title: next.trim() });
                   }}
                   className="tip tip-l rounded p-1 text-foreground-tertiary hover:text-foreground"
@@ -128,9 +130,9 @@ export function ConversationSwitcher() {
                 <button
                   type="button"
                   role="menuitem"
-                  aria-label="Delete"
-                  data-tip="Delete"
-                  onClick={() => { if (window.confirm('Delete this conversation?')) remove.mutate(c.id); }}
+                  aria-label={t('common.delete')}
+                  data-tip={t('common.delete')}
+                  onClick={() => { if (window.confirm(t('chat.deleteConfirm'))) remove.mutate(c.id); }}
                   className="tip tip-l rounded p-1 text-foreground-tertiary hover:text-red-600 dark:hover:text-red-400"
                 >
                   <Trash2 className="h-3.5 w-3.5" />

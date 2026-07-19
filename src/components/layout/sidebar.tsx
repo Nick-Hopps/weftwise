@@ -24,6 +24,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { cn } from '@/lib/cn';
 import { Tag } from '@/components/ui/tag';
 import { useLintSummary } from '@/hooks/use-lint-summary';
+import { useI18n } from '@/components/i18n-provider';
 
 interface PageItem {
   slug: string;
@@ -73,6 +74,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onNavigate }: SidebarProps = {}) {
+  const { t } = useI18n();
   const pathname = usePathname();
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [sourcesOpen, setSourcesOpen] = useState(true);
@@ -137,7 +139,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
   };
 
   return (
-    <aside className="flex h-full w-full flex-col overflow-hidden border-r border-border-subtle bg-canvas" aria-label="Wiki navigation">
+    <aside className="flex h-full w-full flex-col overflow-hidden border-r border-border-subtle bg-canvas" aria-label={t('nav.wikiNavigation')}>
       {/* Top quick action (primary CTA) — opens the dedicated ingest workspace */}
       <div className="shrink-0 px-3 py-2.5">
         <Link
@@ -151,7 +153,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           )}
         >
           <Plus className="h-3.5 w-3.5" />
-          <span>New Ingest</span>
+          <span>{t('nav.newIngest')}</span>
         </Link>
       </div>
 
@@ -163,9 +165,9 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           <div className="px-2 mb-3">
             <SectionLabel className="px-2 py-1 flex items-center gap-1.5">
               <Pin className="h-3 w-3" />
-              Meta
+              {t('nav.meta')}
             </SectionLabel>
-            <nav aria-label="Meta pages">
+            <nav aria-label={t('nav.metaPages')}>
               {metaPages.map((page) => (
                 <Link
                   key={page.slug}
@@ -194,7 +196,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           </div>
         ) : totalAll === 0 ? (
           <p className="px-4 py-6 text-xs text-foreground-tertiary italic text-center">
-            No pages yet. Ingest a source to get started.
+            {t('nav.noPages')}
           </p>
         ) : (
           <div className="px-2 space-y-2">
@@ -212,14 +214,14 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                       <ChevronDown
                         className={cn('h-3 w-3 transition-transform', collapsed && '-rotate-90')}
                       />
-                      {formatGroupName(groupKey)}
+                      {groupKey === 'Uncategorized' ? t('nav.uncategorized') : formatGroupName(groupKey)}
                     </span>
                     <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
                       {items.length}
                     </span>
                   </button>
                   {!collapsed && (
-                    <nav aria-label={`${groupKey} pages`} className="mt-0.5">
+                    <nav aria-label={t('nav.groupPages', { group: groupKey })} className="mt-0.5">
                       {items.map((page) => (
                         <Link
                           key={page.slug}
@@ -257,20 +259,20 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                 <ChevronDown
                   className={cn('h-3 w-3 transition-transform', !sourcesOpen && '-rotate-90')}
                 />
-                Sources
+                {t('nav.sources')}
               </span>
               <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
                 {sources.length}
               </span>
             </button>
             {sourcesOpen && (
-              <nav aria-label="Ingested sources" className="mt-0.5">
+              <nav aria-label={t('nav.ingestedSources')} className="mt-0.5">
                 {sources.map((source) => (
                   <Link
                     key={source.id}
                     href={`/sources/${source.id}`}
                     onClick={onNavigate}
-                    title={`Open ${source.filename}`}
+                    title={t('nav.openSource', { name: source.filename })}
                     className={cn(
                       'relative flex h-8 items-center gap-2 rounded-md pl-5 pr-2 text-sm transition-colors focus-ring',
                       pathname === `/sources/${source.id}`
@@ -302,7 +304,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
         >
           <span className="flex items-center gap-2">
             <Activity className="h-3.5 w-3.5 text-foreground-tertiary" />
-            Health
+            {t('nav.health')}
           </span>
           {criticalCount > 0 && (
             <Tag tone="danger" size="sm">
@@ -321,7 +323,7 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           )}
         >
           <Hash className="h-3.5 w-3.5 text-foreground-tertiary" />
-          Tags
+          {t('nav.tags')}
         </Link>
         <Link
           href="/history"
@@ -334,16 +336,16 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           )}
         >
           <History className="h-3.5 w-3.5 text-foreground-tertiary" />
-          History
+          {t('nav.history')}
         </Link>
         <div className="flex items-center justify-between px-1">
           <span className="text-xs text-foreground-tertiary">
-            {totalAll} {totalAll === 1 ? 'page' : 'pages'}
+            {t('nav.pageCount', { count: totalAll })}
           </span>
           <IconButton
             size="sm"
-            aria-label="Open settings"
-            data-tip="Settings"
+            aria-label={t('nav.openSettings')}
+            data-tip={t('settings.title')}
             className="tip tip-l"
             onClick={openSettingsDialog}
           >

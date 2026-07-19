@@ -21,6 +21,7 @@ import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
 import { eventLogLine, parseJobError } from '@/lib/job-log';
 import { jobActivityTitle } from '@/lib/tool-activity';
 import { ToolActivityIcon } from './tool-activity-icon';
+import { useI18n } from '@/components/i18n-provider';
 
 interface JobDetailDialogProps {
   jobId: string;
@@ -31,6 +32,7 @@ interface JobDetailDialogProps {
 }
 
 export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDetailDialogProps) {
+  const { t } = useI18n();
   const logRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
   const [copied, setCopied] = useState(false);
@@ -109,15 +111,15 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
         <div className="flex items-center justify-between h-12 shrink-0 px-4 border-b border-border">
           <h2 id={`job-detail-title-${jobId}`} className="text-sm font-semibold text-foreground">
             {title}
-            {status === 'completed' && ' — Done'}
-            {status === 'failed' && ' — Failed'}
+            {status === 'completed' && ` — ${t('jobs.done')}`}
+            {status === 'failed' && ` — ${t('jobs.failed')}`}
           </h2>
           <IconButton
             size="sm"
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t('jobs.close')}
             className="tip tip-l"
-            data-tip="Close · Esc"
+            data-tip={t('jobs.closeShortcut')}
           >
             <X />
           </IconButton>
@@ -126,7 +128,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
         <div className="flex min-h-0 flex-1 flex-col">
           {/* 日志区 */}
           <div className="px-4 py-2 text-xs font-medium text-foreground-secondary border-b border-border">
-            Log · {lines.length}
+            {t('jobs.log', { count: lines.length })}
           </div>
           <div
             ref={logRef}
@@ -134,7 +136,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
             className="min-h-0 flex-1 overflow-y-auto px-4 py-2 space-y-0.5 font-mono text-xs"
           >
             {lines.length === 0 ? (
-              <p className="text-foreground-tertiary">No logs yet</p>
+              <p className="text-foreground-tertiary">{t('jobs.noLogs')}</p>
             ) : (
               lines.map((line, idx) => (
                 <div
@@ -160,21 +162,21 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
           {status === 'failed' && (
             <div className="shrink-0 border-t border-border bg-danger/5 max-h-[45%] overflow-y-auto">
               <div className="flex items-center justify-between px-4 py-2">
-                <span className="text-xs font-medium text-danger">Error</span>
+                <span className="text-xs font-medium text-danger">{t('common.error')}</span>
                 {jobError && (
                   <IconButton
                     size="sm"
                     onClick={copyError}
-                    aria-label="Copy error"
+                    aria-label={t('jobs.copyError')}
                     className="tip tip-l"
-                    data-tip={copied ? 'Copied' : 'Copy error details'}
+                    data-tip={copied ? t('jobs.copied') : t('jobs.copyErrorDetails')}
                   >
                     {copied ? <Check /> : <Copy />}
                   </IconButton>
                 )}
               </div>
               <div className="px-4 pb-3 space-y-2">
-                {jobQuery.isLoading && <p className="text-xs text-foreground-tertiary">Loading error details…</p>}
+                {jobQuery.isLoading && <p className="text-xs text-foreground-tertiary">{t('jobs.loadingError')}</p>}
                 {jobError ? (
                   <>
                     <p className="text-sm font-medium text-foreground whitespace-pre-wrap break-words">
@@ -184,7 +186,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
                       type="button"
                       onClick={() => setErrorExpanded((v) => !v)}
                       aria-expanded={errorExpanded}
-                      data-tip={errorExpanded ? 'Hide technical details' : 'Show technical details'}
+                      data-tip={errorExpanded ? t('jobs.hideTechnical') : t('jobs.showTechnical')}
                       className="tip tip-b flex items-center gap-1 text-xs text-foreground-secondary focus-ring"
                     >
                       {errorExpanded ? (
@@ -192,7 +194,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
                       ) : (
                         <ChevronRight className="h-3 w-3" />
                       )}
-                      Technical details
+                      {t('jobs.technicalDetails')}
                     </button>
                     {errorExpanded && (
                       <div className="space-y-2 font-mono text-xs text-foreground-tertiary">
@@ -215,7 +217,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
                 ) : (
                   !jobQuery.isLoading && (
                     <p className="text-sm text-foreground-secondary whitespace-pre-wrap break-words">
-                      {lines.filter((l) => l.isError).slice(-1)[0]?.text ?? 'Job failed with no further details.'}
+                      {lines.filter((l) => l.isError).slice(-1)[0]?.text ?? t('jobs.noFailureDetails')}
                     </p>
                   )
                 )}

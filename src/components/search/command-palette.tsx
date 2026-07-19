@@ -9,8 +9,10 @@ import { useWikiSearch } from '@/hooks/use-wiki-search';
 import { Kbd } from '@/components/ui/kbd';
 import { cn } from '@/lib/cn';
 import { parseSearchSnippet } from '@/lib/search-snippet';
+import { useI18n } from '@/components/i18n-provider';
 
 export function CommandPalette() {
+  const { t } = useI18n();
   const router = useRouter();
   const isOpen = useUIStore((s) => s.commandPaletteOpen);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
@@ -63,10 +65,10 @@ export function CommandPalette() {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Search pages"
+        aria-label={t('search.dialog')}
         className="w-full max-w-xl mx-4 bg-surface rounded-lg shadow-lg border border-border overflow-hidden animate-slide-down"
       >
-        <Command label="Search pages" shouldFilter={false}>
+        <Command label={t('search.dialog')} shouldFilter={false}>
           <div className="flex items-center gap-3 px-4 h-12 border-b border-border">
             <Search className="h-4 w-4 text-foreground-tertiary shrink-0" />
             <Command.Input
@@ -74,7 +76,7 @@ export function CommandPalette() {
               value={query}
               onValueChange={setQuery}
               onKeyDown={handleKeyDown}
-              placeholder="Search pages…"
+              placeholder={t('search.placeholder')}
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-foreground-tertiary focus:outline-none"
             />
             <Kbd>ESC</Kbd>
@@ -83,16 +85,16 @@ export function CommandPalette() {
           <Command.List className="max-h-80 overflow-y-auto py-1">
             {!q ? (
               <p className="px-4 py-6 text-center text-sm text-foreground-tertiary">
-                Type to search your pages
+                {t('search.start')}
               </p>
             ) : results.length === 0 && !isLoading ? (
               <p className="px-4 py-6 text-center text-sm text-foreground-tertiary">
-                No pages found for &quot;{query}&quot;
+                {t('search.empty', { query })}
               </p>
             ) : (
               results.length > 0 && (
                 <Command.Group
-                  heading="Pages"
+                  heading={t('search.pages')}
                   className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-foreground-tertiary"
                 >
                   {results.map((result) => (

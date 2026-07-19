@@ -10,10 +10,12 @@ import type { WikiPage } from '@/lib/contracts';
 import { Button } from '@/components/ui/button';
 import { MdEditor } from './md-editor';
 import { EditorPreview } from './editor-preview';
+import { useI18n } from '@/components/i18n-provider';
 
 const INVALIDATE_KEYS = ['pages', 'page-detail', 'graph', 'search', 'jobs', 'backlinks', 'context', 'frontmatter'];
 
 export function PageEditor({ slug }: { slug: string }) {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -70,7 +72,7 @@ export function PageEditor({ slug }: { slug: string }) {
       await Promise.all(INVALIDATE_KEYS.map((k) => queryClient.invalidateQueries({ queryKey: [k] })));
       if (referencesUpdated > 0) {
         // 跳转前用 sessionStorage 把提示带到阅读页（push 后本组件即卸载）。
-        sessionStorage.setItem('wiki:retitle-notice', `Updated ${referencesUpdated} reference(s) to the new title`);
+        sessionStorage.setItem('wiki:retitle-notice', t('wiki.editor.referencesUpdated', { count: referencesUpdated }));
       }
       router.push(readHref);
       router.refresh();
@@ -79,7 +81,7 @@ export function PageEditor({ slug }: { slug: string }) {
   });
 
   function cancel() {
-    if (dirty && typeof window !== 'undefined' && !window.confirm('Discard unsaved changes?')) return;
+    if (dirty && typeof window !== 'undefined' && !window.confirm(t('wiki.editor.discard'))) return;
     router.push(readHref);
   }
 
@@ -97,8 +99,8 @@ export function PageEditor({ slug }: { slug: string }) {
   if (isError) {
     return (
       <div className="flex flex-col h-full items-start gap-3 px-6 py-8">
-        <p className="text-sm text-danger">Failed to load page for editing.</p>
-        <Button intent="outline" onClick={() => router.push(readHref)}>Back to page</Button>
+        <p className="text-sm text-danger">{t('wiki.editor.loadError')}</p>
+        <Button intent="outline" onClick={() => router.push(readHref)}>{t('wiki.editor.back')}</Button>
       </div>
     );
   }
@@ -109,18 +111,18 @@ export function PageEditor({ slug }: { slug: string }) {
     <div className="flex flex-col h-full">
       <header className="shrink-0 flex items-center justify-between gap-3 border-b border-border px-6 py-3">
         <div className="min-w-0">
-          <p className="text-xs text-foreground-tertiary">Editing</p>
+          <p className="text-xs text-foreground-tertiary">{t('wiki.editor.editing')}</p>
           <h1 className="text-base font-semibold text-foreground truncate">{data?.title ?? slug}</h1>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Button intent="ghost" onClick={cancel} disabled={save.isPending}>Cancel</Button>
+          <Button intent="ghost" onClick={cancel} disabled={save.isPending}>{t('common.cancel')}</Button>
           <Button
             intent="primary"
             onClick={() => { setErrorText(null); save.mutate(); }}
             loading={save.isPending}
             disabled={!canSave}
           >
-            Save
+            {t('common.save')}
           </Button>
         </div>
       </header>

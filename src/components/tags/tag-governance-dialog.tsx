@@ -8,6 +8,7 @@ import { IconButton } from '@/components/ui/icon-button';
 import { Input } from '@/components/ui/input';
 import { Segmented } from '@/components/ui/segmented';
 import type { PendingActionView, TagBatchAction } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 const ACTION_OPTIONS = [
   { value: 'merge' as const, label: 'Merge' },
@@ -30,6 +31,7 @@ export function TagGovernanceDialog({
   onClose(): void;
   onCreated(action: PendingActionView): void;
 }) {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const listId = useId();
   const [action, setAction] = useState<TagBatchAction>(suggestedTarget ? 'merge' : 'rename');
@@ -95,7 +97,7 @@ export function TagGovernanceDialog({
             </h2>
             <p className="mt-0.5 truncate text-xs text-foreground-tertiary">#{sourceTag}</p>
           </div>
-          <IconButton size="sm" onClick={onClose} disabled={busy} aria-label="Close" title="Close">
+          <IconButton size="sm" onClick={onClose} disabled={busy} aria-label={t('tags.close')} title={t('tags.close')}>
             <X aria-hidden />
           </IconButton>
         </header>
@@ -109,12 +111,12 @@ export function TagGovernanceDialog({
               setError(null);
             }}
             columns={3}
-            aria-label="Tag action"
+            aria-label={t('tags.action')}
           />
 
           {targetRequired ? (
             <label className="block space-y-1.5">
-              <span className="text-xs font-medium text-foreground-secondary">Target tag</span>
+              <span className="text-xs font-medium text-foreground-secondary">{t('tags.target')}</span>
               <Input
                 autoFocus
                 list={listId}
@@ -143,7 +145,7 @@ export function TagGovernanceDialog({
         </div>
 
         <footer className="flex justify-end gap-2 border-t border-border px-4 py-3">
-          <Button intent="ghost" size="sm" disabled={busy} onClick={onClose}>Cancel</Button>
+          <Button intent="ghost" size="sm" disabled={busy} onClick={onClose}>{t('tags.cancel')}</Button>
           <Button
             size="sm"
             loading={busy}

@@ -22,6 +22,7 @@ import { cn } from '@/lib/cn';
 import { prefersReducedMotion } from './graph-layout';
 import { useWikiGraph } from './use-wiki-graph';
 import { FullscreenGraph } from './fullscreen-graph';
+import { useI18n } from '@/components/i18n-provider';
 import { EmptyGraphState } from './empty-graph-state';
 
 interface ViewportSnapshot {
@@ -37,6 +38,7 @@ interface MiniGraphViewProps {
 }
 
 export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps) {
+  const { t } = useI18n();
   const compactRef = useRef<HTMLDivElement | null>(null);
   const fullscreenRef = useRef<HTMLDivElement | null>(null);
   // Snapshot captured on entering fullscreen, consumed on exiting. Restoring
@@ -193,7 +195,7 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
               <span className="absolute inset-0 rounded-full bg-accent motion-safe:animate-ping opacity-60" />
               <span className="relative inline-block h-2 w-2 rounded-full bg-accent" />
             </span>
-            <span className="tracking-wide">Drawing graph</span>
+            <span className="tracking-wide">{t('graph.drawing')}</span>
           </div>
         )}
 
@@ -222,8 +224,8 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
               <IconButton
                 size="sm"
                 onClick={openFullscreen}
-                aria-label="Expand graph to fullscreen"
-                data-tip="Expand"
+                aria-label={t('graph.expand')}
+                data-tip={t('graph.expand')}
                 className="tip tip-l"
               >
                 <Maximize2 />

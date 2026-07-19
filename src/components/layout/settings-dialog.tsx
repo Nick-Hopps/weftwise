@@ -16,6 +16,7 @@ import type { AppSettings } from '@/lib/contracts';
 import { SettingsContent } from './settings-content';
 import { SettingsNav } from './settings-nav';
 import { DEFAULT_CATEGORY, type CategoryId } from './settings-categories';
+import { useI18n } from '@/components/i18n-provider';
 
 /** PUT /api/settings 的共用请求体逻辑（部分字段更新）。 */
 async function putSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
@@ -32,6 +33,7 @@ async function putSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
 }
 
 export function SettingsDialog() {
+  const { t } = useI18n();
   const isOpen = useUIStore((s) => s.settingsDialogOpen);
   const close = useUIStore((s) => s.closeSettingsDialog);
   const darkMode = useUIStore((s) => s.darkMode);
@@ -110,9 +112,9 @@ export function SettingsDialog() {
       >
         <div className="flex items-center justify-between h-12 shrink-0 px-4 border-b border-border">
           <h2 id="settings-dialog-title" className="text-sm font-semibold text-foreground">
-            Settings
+            {t('settings.title')}
           </h2>
-          <IconButton size="sm" onClick={close} aria-label="Close settings">
+          <IconButton size="sm" onClick={close} aria-label={t('settings.close')}>
             <X />
           </IconButton>
         </div>

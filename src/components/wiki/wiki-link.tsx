@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { apiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
 
 interface WikiLinkProps {
   href: string;
@@ -37,6 +38,7 @@ export default function WikiLink({
   children,
   broken = false,
 }: WikiLinkProps) {
+  const { t } = useI18n();
   const [preview, setPreview] = useState<PagePreview | null>(null);
   const [showPeek, setShowPeek] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -94,7 +96,7 @@ export default function WikiLink({
   if (broken) {
     return (
       <span
-        title="Page not found"
+        title={t('wiki.link.notFound')}
         className="text-danger underline decoration-dashed underline-offset-4 cursor-help"
       >
         {children}
@@ -140,7 +142,7 @@ export default function WikiLink({
                 )}
               </>
             ) : (
-              <p className="text-xs text-foreground-tertiary italic">No preview available</p>
+              <p className="text-xs text-foreground-tertiary italic">{t('wiki.link.noPreview')}</p>
             )}
           </div>
         </div>
