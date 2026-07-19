@@ -12,6 +12,7 @@ import WikiReadingView from '@/components/wiki/wiki-reading-view';
 import { RetitleNotice } from '@/components/wiki/retitle-notice';
 import { decodeRouteSegments } from '@/lib/route-params';
 import type { Subject } from '@/lib/contracts';
+import { getServerI18n } from '@/lib/i18n/server';
 
 const SUBJECT_COOKIE = 'wiki_subject';
 
@@ -50,6 +51,7 @@ export async function generateMetadata({ params, searchParams }: WikiPageProps):
 }
 
 export default async function WikiPage({ params, searchParams }: WikiPageProps) {
+  const { t } = await getServerI18n();
   const { slug: slugParts } = await params;
   const slug = decodeRouteSegments(slugParts);
   const sp = (await searchParams) ?? {};
@@ -125,7 +127,7 @@ interface ElsewhereHint {
   page: { slug: string; title: string; subjectId: string };
 }
 
-function WikiPageElsewhere({
+async function WikiPageElsewhere({
   slug,
   hints,
   activeSubjectName,
@@ -134,9 +136,10 @@ function WikiPageElsewhere({
   hints: ElsewhereHint[];
   activeSubjectName: string;
 }) {
+  const { t } = await getServerI18n();
   return (
     <div className="max-w-content mx-auto px-6 py-12 w-full">
-      <h1 className="text-xl font-semibold text-foreground">Page not found</h1>
+      <h1 className="text-xl font-semibold text-foreground">{t('page.notFound')}</h1>
       <p className="mt-2 text-sm text-foreground-secondary">
         <code className="font-mono text-xs px-1.5 py-0.5 rounded bg-subtle">{slug}</code>{' '}
         does not exist in <span className="font-medium">{activeSubjectName}</span>, but it

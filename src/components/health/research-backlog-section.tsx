@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
 import type { ResearchBacklogEntry } from '@/lib/contracts';
 import { researchBacklogPatchBody } from './remediation-ui';
+import { useI18n } from '@/components/i18n-provider';
 
 /**
  * T3.2 Health 页 "Research backlog" 区块：列出本 subject 的待研究问题（Ask AI 未命中信号 +
@@ -22,6 +23,7 @@ export function ResearchBacklogSection({
   researchBusy: boolean;
   onResearch: (topic: string) => Promise<string | null>;
 }) {
+  const { t, formatDate } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const { id: subjectId } = useCurrentSubject();
@@ -89,8 +91,8 @@ export function ResearchBacklogSection({
     <section>
       <div className="mb-3 flex items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold text-foreground">Research backlog</h2>
-          <p className="mt-0.5 text-xs text-foreground-tertiary">Open questions from Ask AI and manual review.</p>
+          <h2 className="text-sm font-semibold text-foreground">{t('health.backlog')}</h2>
+          <p className="mt-0.5 text-xs text-foreground-tertiary">{t('health.backlogDescription')}</p>
         </div>
         <span className="text-xs text-foreground-tertiary">{entries.length} open</span>
       </div>
@@ -113,7 +115,7 @@ export function ResearchBacklogSection({
                     {entry.source === 'ask-ai' ? 'Ask AI' : 'Manual'}
                   </Tag>
                   <span className="text-xs text-foreground-tertiary">
-                    {new Date(entry.createdAt).toLocaleString()}
+                    {formatDate(entry.createdAt, { dateStyle: 'medium', timeStyle: 'short' })}
                   </span>
                 </div>
                 <p className="mt-1 line-clamp-2 text-sm text-foreground-secondary">{entry.question}</p>

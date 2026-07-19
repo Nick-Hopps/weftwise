@@ -7,6 +7,7 @@ import { analyzeHtmlSafety } from '@/server/sources/html-safety';
 import { SourceViewer } from '../../_components/source-viewer';
 import { decodeRouteSegment } from '@/lib/route-params';
 import type { PageSourceFormat } from '@/lib/contracts';
+import { getServerI18n } from '@/lib/i18n/server';
 
 export const runtime = 'nodejs';
 
@@ -19,6 +20,7 @@ function formatFor(filename: string): PageSourceFormat {
 }
 
 export default async function SourcePage({ params }: { params: Promise<{ id: string }> }) {
+  const { t } = await getServerI18n();
   const { id: rawId } = await params;
   const id = decodeRouteSegment(rawId);
   const source = getSource(id);
@@ -27,12 +29,12 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
   if (!source || !subject) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm font-medium text-foreground">Source not found</p>
+        <p className="text-sm font-medium text-foreground">{t('source.notFound')}</p>
         <p className="max-w-sm text-xs text-foreground-secondary">
-          This source may have been removed, or it belongs to another subject.
+          {t('source.missingDescription')}
         </p>
         <Link href="/" className="text-xs font-medium text-accent hover:underline">
-          Back to dashboard
+          {t('source.backDashboard')}
         </Link>
       </div>
     );

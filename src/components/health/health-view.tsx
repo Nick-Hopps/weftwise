@@ -16,6 +16,7 @@ import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { useJobStream } from '@/hooks/use-job-stream';
 import { useLintSummary } from '@/hooks/use-lint-summary';
+import { useI18n } from '@/components/i18n-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
@@ -116,6 +117,7 @@ function PostconditionBanner({
 }
 
 export function HealthView() {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
@@ -991,7 +993,7 @@ export function HealthView() {
     <WorkspacePage>
       <WorkspacePageHeader
         icon={<Activity className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
-        title="Health"
+        title={t('health.title')}
         description={(
           <span className="block truncate">
             {allSubjects ? 'All subjects' : subjectSlug}
@@ -1005,7 +1007,7 @@ export function HealthView() {
         actions={<div className="flex flex-wrap items-center gap-2">
           <div
             role="radiogroup"
-            aria-label="Health check scope"
+            aria-label={t('health.scope')}
             className="inline-flex h-8 rounded-md border border-border bg-surface p-0.5"
           >
             <button
@@ -1045,7 +1047,7 @@ export function HealthView() {
       />
 
       <WorkspaceSummary
-        aria-label="Health summary"
+        aria-label={t('health.summary')}
         className="grid-cols-2 sm:grid-cols-4 lg:grid-cols-[1.15fr_repeat(3,0.85fr)_1.5fr]"
       >
         <WorkspaceMetric
@@ -1076,20 +1078,20 @@ export function HealthView() {
           className="col-span-2 border-t border-border-subtle sm:col-span-4 lg:col-span-1 lg:border-t-0"
           detail={recentTerminalCount > 0 ? (
             <span className="flex flex-wrap gap-x-3 gap-y-1">
-              <span><strong className="text-success">{recentOutcomeSummary.fixed}</strong> fixed</span>
-              <span><strong className="text-danger">{recentOutcomeSummary.failed}</strong> failed</span>
-              <span><strong className="text-foreground-secondary">{recentOutcomeSummary.skipped}</strong> skipped</span>
+              <span><strong className="text-success">{recentOutcomeSummary.fixed}</strong> {t('health.fixed')}</span>
+              <span><strong className="text-danger">{recentOutcomeSummary.failed}</strong> {t('health.failed')}</span>
+              <span><strong className="text-foreground-secondary">{recentOutcomeSummary.skipped}</strong> {t('health.skipped')}</span>
             </span>
           ) : 'No recent results'}
         />
       </WorkspaceSummary>
 
-      <WorkspaceToolbar aria-label="Health controls">
+      <WorkspaceToolbar aria-label={t('health.controls')}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-2">
             <ListFilter className="h-3.5 w-3.5 text-foreground-tertiary" aria-hidden />
             <Select
-              aria-label="Filter findings by type"
+              aria-label={t('health.filterType')}
               value={typeFilter ?? ''}
               onChange={(event) => {
                 setTypeFilter(event.target.value
@@ -1098,7 +1100,7 @@ export function HealthView() {
               }}
               className="min-w-[170px]"
             >
-              <option value="">All finding types</option>
+              <option value="">{t('health.allTypes')}</option>
               {presentTypes.map((type) => (
                 <option key={type} value={type}>{findingTypeLabel(type)}</option>
               ))}
@@ -1135,7 +1137,7 @@ export function HealthView() {
                   || fixing
                   || effectiveBusyActions.has('curate')
                 }
-                title="Curate orphaned pages"
+                title={t('health.curate')}
               >
                 {!curating && <Wand2 className="h-3.5 w-3.5" />}
                 Tidy {curateFindingIds.length > 0 && `(${curateFindingIds.length})`}
@@ -1151,7 +1153,7 @@ export function HealthView() {
                   || curating
                   || effectiveBusyActions.has('fix')
                 }
-                title="Fix deterministic findings"
+                title={t('health.fix')}
               >
                 {!fixing && <Wrench className="h-3.5 w-3.5" />}
                 Fix {fixFindingIds.length > 0 && `(${fixFindingIds.length})`}
@@ -1165,7 +1167,7 @@ export function HealthView() {
                   || researchFindingIds.length === 0
                   || effectiveBusyActions.has('research')
                 }
-                title="Research coverage gaps"
+                title={t('health.research')}
               >
                 {!researching && <Search className="h-3.5 w-3.5" />}
                 Research {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}
@@ -1190,8 +1192,8 @@ export function HealthView() {
             <Input
               value={topicInput}
               onChange={(event) => setTopicInput(event.target.value)}
-              placeholder="Topic or question"
-              aria-label="Research topic"
+              placeholder={t('health.topicPlaceholder')}
+              aria-label={t('health.researchTopic')}
               className="max-w-md"
             />
             <Button
@@ -1225,7 +1227,7 @@ export function HealthView() {
         )}
         {!allSubjects && activeJobsHydrationError && (
           <div className="flex items-center justify-between gap-3 border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
-            <span>Could not restore active jobs. Actions remain disabled while retrying.</span>
+            <span>{t('health.restoreError')}</span>
             <Button
               intent="secondary"
               size="sm"
@@ -1289,21 +1291,21 @@ export function HealthView() {
         ) : neverRun ? (
           <WorkspaceState
             icon={<Activity className="h-6 w-6 text-foreground-tertiary" aria-hidden />}
-            title="No health check yet"
-            description="Run a check to inspect links, sources, coverage, and structure."
-            action={<Button intent="primary" onClick={() => void runLint()} loading={running}>Run check</Button>}
+            title={t('health.empty.title')}
+            description={t('health.empty.description')}
+            action={<Button intent="primary" onClick={() => void runLint()} loading={running}>{t('health.runCheck')}</Button>}
           />
         ) : total === 0 ? (
           <WorkspaceState
             icon={<CheckCircle2 className="h-6 w-6 text-success" aria-hidden />}
-            title="No open findings"
-            description="This scope passed the latest health check."
+            title={t('health.noFindings.title')}
+            description={t('health.noFindings.description')}
           />
         ) : (
           <div>
             <div className="mb-3 flex items-end justify-between gap-3">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">Open findings</h2>
+                <h2 className="text-sm font-semibold text-foreground">{t('health.openFindings')}</h2>
                 <p className="mt-0.5 text-xs text-foreground-tertiary">
                   Ordered by severity, then finding type.
                 </p>

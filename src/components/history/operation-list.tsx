@@ -17,46 +17,34 @@ import {
 import type { HistoryEntry } from '@/lib/contracts';
 import { OperationDiff } from './operation-diff';
 import { RevertButton } from './revert-button';
+import { useI18n } from '@/components/i18n-provider';
+import type { TranslationFunction } from '@/lib/i18n/translator';
 
-const TYPE_LABELS: Record<string, string> = {
-  ingest: '摄入',
-  'save-to-wiki': '保存',
-  curate: '整理',
-  merge: '合并',
-  split: '拆分',
-  edit: '编辑',
-  delete: '删除',
-};
+function operationTypeLabel(type: string, t: TranslationFunction): string {
+  const keys = {
+    ingest: 'history.type.ingest',
+    'save-to-wiki': 'history.type.save',
+    curate: 'history.type.curate',
+    merge: 'history.type.merge',
+    split: 'history.type.split',
+    edit: 'history.type.edit',
+    delete: 'history.type.delete',
+  } as const;
+  return type in keys ? t(keys[type as keyof typeof keys]) : type;
+}
 
-function entrySummary(entry: HistoryEntry) {
+function entrySummary(entry: HistoryEntry, t: TranslationFunction) {
   const shown = entry.affectedPages.slice(0, 5);
   const extra = entry.affectedPages.length - shown.length;
-  return `${shown.map((page) => page.slug).join(', ') || '（无页面变更）'}${extra > 0 ? ` +${extra}` : ''}`;
-}
-
-function entryWhen(entry: HistoryEntry) {
-  if (!entry.date) return '—';
-  const date = new Date(entry.date);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function latestWhen(entry: HistoryEntry | undefined) {
-  if (!entry?.date) return '—';
-  const date = new Date(entry.date);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return `${shown.map((page) => page.slug).join(', ') || t('history.noPageChanges')}${extra > 0 ? ` +${extra}` : ''}`;
 }
 
 /** 窄屏使用行内详情，保持单手滚动上下文。 */
 function MobileRow({ entry }: { entry: HistoryEntry }) {
+  const { t, formatDate } = useI18n();
   const [open, setOpen] = useState(false);
-  const typeLabel = TYPE_LABELS[entry.type] ?? entry.type;
+  const typeLabel = operationTypeLabel(entry.type, t);
+  const when = entry.date ? formatDate(entry.date, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
   return (
     <li>
@@ -72,12 +60,12 @@ function MobileRow({ entry }: { entry: HistoryEntry }) {
               {typeLabel}
             </Tag>
             {entry.status === 'reverted' && (
-              <span className="text-xs text-foreground-tertiary">已回滚</span>
+              <span className="text-xs text-foreground-tertiary">{t('history.reverted')}</span>
             )}
           </span>
-          <span className="mt-1.5 block truncate text-sm text-foreground">{entrySummary(entry)}</span>
+          <span className="mt-1.5 block truncate text-sm text-foreground">{entrySummary(entry, t)}</span>
           <span className="mt-1 block text-xs tabular-nums text-foreground-tertiary">
-            {entryWhen(entry)}
+            {when}
           </span>
         </span>
         <ChevronDown
@@ -107,7 +95,8 @@ function ListItem({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const typeLabel = TYPE_LABELS[entry.type] ?? entry.type;
+  const { t, formatDate } = useI18n();
+  const typeLabel = operationTypeLabel(entry.type, t);
 
   return (
     <li>
@@ -127,14 +116,14 @@ function ListItem({
             {typeLabel}
           </Tag>
           {entry.status === 'reverted' && (
-            <span className="text-xs text-foreground-tertiary">已回滚</span>
+            <span className="text-xs text-foreground-tertiary">{t('history.reverted')}</span>
           )}
           <span className="ml-auto shrink-0 text-xs tabular-nums text-foreground-tertiary">
-            {entryWhen(entry)}
+            {entry.date ? formatDate(entry.date, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
           </span>
         </span>
         <span className="mt-1.5 block truncate text-sm font-medium text-foreground">
-          {entrySummary(entry)}
+          {entrySummary(entry, t)}
         </span>
         <span className="mt-1 block truncate text-xs text-foreground-tertiary">
           {entry.message}
@@ -145,7 +134,8 @@ function ListItem({
 }
 
 function DetailPane({ entry }: { entry: HistoryEntry }) {
-  const typeLabel = TYPE_LABELS[entry.type] ?? entry.type;
+  const { t, formatDate } = useI18n();
+  const typeLabel = operationTypeLabel(entry.type, t);
 
   return (
     <div className="space-y-5">
@@ -157,13 +147,13 @@ function DetailPane({ entry }: { entry: HistoryEntry }) {
                 {typeLabel}
               </Tag>
               {entry.status === 'reverted' && (
-                <span className="text-xs text-foreground-tertiary">已回滚</span>
+                <span className="text-xs text-foreground-tertiary">{t('history.reverted')}</span>
               )}
               <time className="text-xs tabular-nums text-foreground-tertiary" dateTime={entry.date ?? undefined}>
-                {entryWhen(entry)}
+                {entry.date ? formatDate(entry.date, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
               </time>
             </div>
-            <h2 className="mt-3 text-sm font-semibold text-foreground">Change details</h2>
+            <h2 className="mt-3 text-sm font-semibold text-foreground">{t('history.changeDetails')}</h2>
             <p className="mt-1 break-words text-sm leading-5 text-foreground-secondary">
               {entry.message}
             </p>
@@ -189,6 +179,7 @@ function DetailPane({ entry }: { entry: HistoryEntry }) {
 }
 
 export function OperationList() {
+  const { t, formatDate } = useI18n();
   const apiFetch = useApiFetch();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -211,26 +202,26 @@ export function OperationList() {
     <WorkspacePage>
       <WorkspacePageHeader
         icon={<HistoryIcon className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
-        title="History"
-        description={<>Change history for <span className="text-foreground">{subjectSlug || 'current subject'}</span></>}
-        meta={!isLoading ? `${entries.length} operation${entries.length === 1 ? '' : 's'}` : undefined}
+        title={t('history.title')}
+        description={t('history.description', { subject: subjectSlug || t('history.currentSubject') })}
+        meta={!isLoading ? t('history.operationCount', { count: entries.length }) : undefined}
       />
 
       {!isLoading && entries.length > 0 && (
-        <WorkspaceSummary aria-label="History summary" className="grid-cols-2 sm:grid-cols-3">
+        <WorkspaceSummary aria-label={t('history.summary')} className="grid-cols-2 sm:grid-cols-3">
           <WorkspaceMetric
-            label="Operations"
+            label={t('history.operations')}
             value={entries.length}
             className="border-b border-r border-border-subtle sm:border-b-0"
           />
           <WorkspaceMetric
-            label="Reverted"
+            label={t('history.reverted')}
             value={revertedCount}
             className="border-b border-border-subtle sm:border-b-0 sm:border-r"
           />
           <WorkspaceMetric
-            label="Latest change"
-            value={latestWhen(entries[0])}
+            label={t('history.latestChange')}
+            value={entries[0]?.date ? formatDate(entries[0].date, { month: 'short', day: 'numeric' }) : '—'}
             className="col-span-2 sm:col-span-1"
           />
         </WorkspaceSummary>
@@ -245,8 +236,8 @@ export function OperationList() {
       ) : entries.length === 0 ? (
         <WorkspaceState
           icon={<HistoryIcon className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
-          title="No operations yet"
-          description="Wiki changes in this subject will appear here."
+          title={t('history.empty.title')}
+          description={t('history.empty.description')}
         />
       ) : (
         <>
@@ -255,10 +246,10 @@ export function OperationList() {
           </ul>
 
           <div className="hidden border-y border-border-subtle md:grid md:grid-cols-[320px_minmax(0,1fr)]">
-            <aside className="min-h-0 overflow-y-auto border-r border-border-subtle" aria-label="Operations">
+            <aside className="min-h-0 overflow-y-auto border-r border-border-subtle" aria-label={t('history.operations')}>
               <div className="sticky top-0 z-[1] flex items-center justify-between border-b border-border-subtle bg-surface/95 px-4 py-3 backdrop-blur-sm">
-                <h2 className="text-xs font-semibold text-foreground-secondary">Operations</h2>
-                <span className="text-xs tabular-nums text-foreground-tertiary">Newest first</span>
+                <h2 className="text-xs font-semibold text-foreground-secondary">{t('history.operations')}</h2>
+                <span className="text-xs tabular-nums text-foreground-tertiary">{t('history.newestFirst')}</span>
               </div>
               <ul className="divide-y divide-border-subtle">
                 {entries.map((entry) => (
@@ -271,7 +262,7 @@ export function OperationList() {
                 ))}
               </ul>
             </aside>
-            <section className="min-w-0 overflow-y-auto px-5 py-5 sm:px-6" aria-label="Operation detail">
+            <section className="min-w-0 overflow-y-auto px-5 py-5 sm:px-6" aria-label={t('history.operationDetail')}>
               <DetailPane entry={selected} />
             </section>
           </div>

@@ -13,6 +13,7 @@ import { SectionLabel } from '@/components/ui/panel';
 import { Tag } from '@/components/ui/tag';
 import type { Subject } from '@/lib/contracts';
 import { ArrowUpRight, BookOpenText, Database, Link2 } from 'lucide-react';
+import { getServerI18n } from '@/lib/i18n/server';
 
 const SUBJECT_COOKIE = 'wiki_subject';
 
@@ -73,6 +74,7 @@ function getStats(subjectId: string) {
 }
 
 export default async function DashboardPage() {
+  const { t } = await getServerI18n();
   const subject = await resolveActiveSubject();
   const stats = getStats(subject.id);
   const recentPages = getRecentPages(subject.id);
@@ -93,9 +95,9 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-7 lg:flex-row lg:items-end lg:justify-between">
         <DashboardHero pageCount={stats.pageCount} compact />
         <dl className="grid grid-cols-3 divide-x divide-border-subtle border-y border-border-subtle py-3 lg:min-w-[410px] lg:border-y-0 lg:py-0">
-          <DashboardStat icon={BookOpenText} label="Pages" value={stats.pageCount} />
-          <DashboardStat icon={Link2} label="Links" value={stats.linkCount} />
-          <DashboardStat icon={Database} label="Sources" value={stats.sourceCount} />
+          <DashboardStat icon={BookOpenText} label={t('dashboard.pages')} value={stats.pageCount} />
+          <DashboardStat icon={Link2} label={t('dashboard.links')} value={stats.linkCount} />
+          <DashboardStat icon={Database} label={t('dashboard.sources')} value={stats.sourceCount} />
         </dl>
       </div>
 
@@ -106,7 +108,7 @@ export default async function DashboardPage() {
       <section aria-labelledby="recent-pages-heading">
         <div className="mb-3 flex items-center justify-between">
           <SectionLabel id="recent-pages-heading">
-            Recent Pages — <span className="font-mono normal-case">{subject.slug}</span>
+            {t('dashboard.recentPages')} — <span className="font-mono normal-case">{subject.slug}</span>
           </SectionLabel>
           <span className="text-xs text-foreground-tertiary font-mono">{recentPages.length}</span>
         </div>

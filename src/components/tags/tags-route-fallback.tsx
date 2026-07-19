@@ -1,4 +1,7 @@
+'use client';
+
 import { Hash } from 'lucide-react';
+import { useI18n } from '@/components/i18n-provider';
 import {
   WorkspacePage,
   WorkspacePageHeader,
@@ -7,11 +10,12 @@ import {
 } from '@/components/ui/workspace-page';
 
 export function TagsRouteFallback() {
+  const { t } = useI18n();
   return (
     <WorkspacePage>
       <WorkspacePageHeader
         icon={<Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
-        title="Tags"
+        title={t('tags.title')}
         description={<span className="inline-block h-4 w-44 animate-pulse rounded-sm bg-subtle" />}
       />
       <WorkspaceSummary className="grid-cols-2 gap-px bg-border-subtle sm:grid-cols-4">

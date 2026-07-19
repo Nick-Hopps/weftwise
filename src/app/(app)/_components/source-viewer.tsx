@@ -8,6 +8,7 @@ import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
 import { HtmlSourceFrame } from '@/components/wiki/html-source-frame';
 import type { PageSourceFormat, HtmlSafety } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 const PROSE_CLASS = cn(
   'text-[15px] leading-7 text-prose-body',
@@ -42,6 +43,7 @@ const FORMAT_LABEL: Record<PageSourceFormat, string> = {
 };
 
 export function SourceViewer({ id, filename, format, content, htmlSafety }: SourceViewerProps) {
+  const { t } = useI18n();
   const rawUrl = `/api/sources/${id}/raw`;
   const rendered = useMemo(
     () => (format === 'markdown' && content ? renderMarkdown(content) : null),
@@ -54,8 +56,8 @@ export function SourceViewer({ id, filename, format, content, htmlSafety }: Sour
       <div className="flex shrink-0 items-center gap-3 border-b border-border bg-surface px-4 py-3 sm:px-6">
         <Link
           href="/"
-          aria-label="Back"
-          data-tip="Back"
+          aria-label={t('source.back')}
+          data-tip={t('source.back')}
           className="tip tip-b inline-flex h-8 w-8 items-center justify-center rounded-md text-foreground-secondary hover:bg-subtle hover:text-foreground transition-colors focus-ring"
         >
           <ArrowLeft className="h-4 w-4" />

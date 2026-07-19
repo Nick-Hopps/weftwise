@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/workspace-page';
 import type { PendingActionView, WikiPage } from '@/lib/contracts';
 import { PendingActionCard } from '@/components/chat/pending-action-card';
+import { useI18n } from '@/components/i18n-provider';
 import { TagGovernanceDialog } from './tag-governance-dialog';
 import { selectActiveTagAction } from './tag-governance-state';
 import { TagReviewQueueView } from './tag-review-queue';
@@ -46,6 +47,7 @@ function formatDate(value: string | null): string {
 }
 
 export function TagsIndexView() {
+  const { t } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -110,9 +112,9 @@ export function TagsIndexView() {
     return sortTagSummaries(filterTagSummaries(summaries, query), sort);
   }, [query, sort, summaries]);
   const scopeOptions = useMemo(() => [
-    { value: 'all' as const, label: 'All' },
-    { value: 'review' as const, label: `Review ${reviewQueue.issueCount}` },
-  ], [reviewQueue.issueCount]);
+    { value: 'all' as const, label: t('tags.all') },
+    { value: 'review' as const, label: t('tags.review', { count: reviewQueue.issueCount }) },
+  ], [reviewQueue.issueCount, t]);
   const recommendedTargetBySource = useMemo(() => {
     const targets = new Map<string, string>();
     for (const group of reviewQueue.variantGroups) {
@@ -167,22 +169,22 @@ export function TagsIndexView() {
     <WorkspacePage>
       <WorkspacePageHeader
         icon={<Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
-        title="Tags"
-        description={<>Tag coverage for <span className="text-foreground">{subjectSlug || 'current subject'}</span></>}
-        meta={stats.pageCount > 0 ? `${stats.taggedPageCount}/${stats.pageCount} pages tagged` : undefined}
+        title={t('tags.title')}
+        description={t('tags.description', { subject: subjectSlug || t('tags.currentSubject') })}
+        meta={stats.pageCount > 0 ? t('tags.taggedMeta', { tagged: stats.taggedPageCount, total: stats.pageCount }) : undefined}
       />
 
       {!isLoading && !isError && summaries.length > 0 && (
-        <WorkspaceSummary aria-label="Tag summary" className="grid-cols-2 sm:grid-cols-4">
-          <WorkspaceMetric label="Tags" value={stats.tagCount} className="border-b border-r border-border-subtle sm:border-b-0" />
-          <WorkspaceMetric label="Pages" value={stats.pageCount} className="border-b border-border-subtle sm:border-b-0 sm:border-r" />
-          <WorkspaceMetric label="Single-use" value={stats.singletonCount} className="border-r border-border-subtle" />
-          <WorkspaceMetric label="Format variants" value={stats.duplicateGroups.length} />
+        <WorkspaceSummary aria-label={t('tags.summary')} className="grid-cols-2 sm:grid-cols-4">
+          <WorkspaceMetric label={t('tags.title')} value={stats.tagCount} className="border-b border-r border-border-subtle sm:border-b-0" />
+          <WorkspaceMetric label={t('tags.pages')} value={stats.pageCount} className="border-b border-border-subtle sm:border-b-0 sm:border-r" />
+          <WorkspaceMetric label={t('tags.singleUse')} value={stats.singletonCount} className="border-r border-border-subtle" />
+          <WorkspaceMetric label={t('tags.formatVariants')} value={stats.duplicateGroups.length} />
         </WorkspaceSummary>
       )}
 
       {currentAction && (
-        <section aria-label="Tag action approval" className="space-y-2">
+        <section aria-label={t('tags.actionApproval')} className="space-y-2">
           <PendingActionCard
             action={currentAction}
             busy={actionBusy}
@@ -199,20 +201,20 @@ export function TagsIndexView() {
                 setActionError(null);
               }}
             >
-              Dismiss
+              {t('tags.dismiss')}
             </Button>
           )}
         </section>
       )}
 
-      <WorkspaceToolbar aria-label="Tag directory controls" className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <WorkspaceToolbar aria-label={t('tags.directoryControls')} className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <label className="relative min-w-0 flex-1">
-          <span className="sr-only">Search tags or pages</span>
+          <span className="sr-only">{t('tags.search')}</span>
           <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-foreground-tertiary" aria-hidden />
           <Input
             value={query}
             onChange={(event) => updateQuery(event.target.value)}
-            placeholder="Search tags or pages…"
+            placeholder={t('tags.searchPlaceholder')}
             className="pl-8"
           />
         </label>
@@ -221,7 +223,7 @@ export function TagsIndexView() {
             value={scope}
             options={scopeOptions}
             onChange={(value) => updateSearchParams({ scope: value === 'all' ? null : value })}
-            aria-label="Tag directory scope"
+            aria-label={t('tags.scope')}
           />
           {scope === 'all' && (
             <Select
@@ -229,12 +231,12 @@ export function TagsIndexView() {
               onChange={(event) => updateSearchParams({
                 sort: event.target.value === 'count' ? null : event.target.value,
               })}
-              aria-label="Sort tags"
+              aria-label={t('tags.sort')}
               className="h-8"
             >
-              <option value="count">Most used</option>
-              <option value="name">Name</option>
-              <option value="recent">Recently updated</option>
+              <option value="count">{t('tags.mostUsed')}</option>
+              <option value="name">{t('tags.name')}</option>
+              <option value="recent">{t('tags.recent')}</option>
             </Select>
           )}
         </div>
@@ -250,13 +252,13 @@ export function TagsIndexView() {
         <WorkspaceState
           role="alert"
           icon={<AlertTriangle className="h-5 w-5 text-warning" aria-hidden />}
-          title="Tags could not be loaded"
-          description="Retry the request without changing the current filters."
-          action={<Button intent="outline" size="sm" onClick={() => void refetch()}>Retry</Button>}
+          title={t('tags.loadError')}
+          description={t('tags.loadErrorDescription')}
+          action={<Button intent="outline" size="sm" onClick={() => void refetch()}>{t('tags.retry')}</Button>}
         />
       ) : scope === 'review' && visibleReviewQueue.issueCount === 0 && reviewQueue.issueCount > 0 ? (
         <div className="py-10 text-center">
-          <p className="text-sm text-foreground-secondary">No review items match this search.</p>
+          <p className="text-sm text-foreground-secondary">{t('tags.reviewEmpty')}</p>
           <Button
             intent="ghost"
             size="sm"
@@ -279,13 +281,13 @@ export function TagsIndexView() {
       ) : summaries.length === 0 ? (
         <WorkspaceState
           icon={<Hash className="h-5 w-5 text-foreground-tertiary" aria-hidden />}
-          title="No tags yet"
-          description="Tags added to pages in this subject will appear here."
+          title={t('tags.empty.title')}
+          description={t('tags.empty.description')}
         />
       ) : visibleTags.length === 0 ? (
         <WorkspaceState
-          title="No tags match this view"
-          description="Adjust the search or clear the active filters."
+          title={t('tags.noMatch.title')}
+          description={t('tags.noMatch.description')}
           action={query ? (
             <Button
               intent="ghost"
@@ -302,11 +304,11 @@ export function TagsIndexView() {
       ) : (
         <section aria-labelledby="tag-directory-heading">
           <div className="grid grid-cols-[minmax(0,1fr)_4rem_2rem] gap-3 border-b border-border-subtle px-2 pb-2 text-xs text-foreground-tertiary sm:grid-cols-[minmax(0,1fr)_5rem_5rem_6rem_2rem]">
-            <h2 id="tag-directory-heading" className="font-normal">Tag</h2>
-            <span className="text-right">Pages</span>
-            <span className="hidden text-right sm:block">Coverage</span>
-            <span className="hidden text-right sm:block">Updated</span>
-            <span className="sr-only">Actions</span>
+            <h2 id="tag-directory-heading" className="font-normal">{t('tags.tag')}</h2>
+            <span className="text-right">{t('tags.pages')}</span>
+            <span className="hidden text-right sm:block">{t('tags.coverage')}</span>
+            <span className="hidden text-right sm:block">{t('tags.updated')}</span>
+            <span className="sr-only">{t('tags.actions')}</span>
           </div>
           <ul className="divide-y divide-border-subtle border-b border-border-subtle">
             {visibleTags.map((summary) => {

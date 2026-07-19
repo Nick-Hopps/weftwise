@@ -26,6 +26,7 @@ import type {
 import { Tag } from '@/components/ui/tag';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
 import { findingHref, SEVERITY_TONE } from './lint-findings';
 import { nextDeleteArmed, type ExecutableRemediationAction } from './remediation-ui';
 
@@ -106,6 +107,7 @@ export function FindingRow({
   onAction?: (action: RemediationAction) => void;
   onDeleteSource?: () => void;
 }) {
+  const { t } = useI18n();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
   const Icon = TYPE_ICON[finding.type];
@@ -158,7 +160,7 @@ export function FindingRow({
                 <span className="inline-flex max-w-full items-center gap-2 text-sm font-semibold text-foreground">
                   <span className="truncate">{finding.pageSlug}</span>
                   <span className="shrink-0 text-xs font-normal text-foreground-tertiary">
-                    Suggested page
+                    {t('health.suggestedPage')}
                   </span>
                 </span>
               )}
@@ -184,8 +186,8 @@ export function FindingRow({
               </>
             ) : (
               <>
-                <span className="text-xs font-medium text-foreground-secondary">Check required</span>
-                <span className="mt-0.5 block text-xs text-foreground-tertiary">Plan unavailable</span>
+                <span className="text-xs font-medium text-foreground-secondary">{t('health.checkRequired')}</span>
+                <span className="mt-0.5 block text-xs text-foreground-tertiary">{t('health.planUnavailable')}</span>
               </>
             )}
           </div>
@@ -234,9 +236,9 @@ export function FindingRow({
                 intent="ghost"
                 size="sm"
                 className="w-6 px-0"
-                aria-label={detailsOpen ? 'Hide finding details' : 'Show finding details'}
+                aria-label={detailsOpen ? t('health.hideDetails') : t('health.showDetails')}
                 aria-expanded={detailsOpen}
-                title={detailsOpen ? 'Hide details' : 'Show details'}
+                title={detailsOpen ? t('health.hideDetails') : t('health.showDetails')}
                 onClick={() => setDetailsOpen((current) => !current)}
               >
                 <ChevronDown
@@ -253,13 +255,13 @@ export function FindingRow({
         <div className="animate-slide-down border-t border-border-subtle bg-canvas/60 px-4 py-3 pl-16 sm:grid sm:grid-cols-2 sm:gap-8">
           {finding.suggestedFix && (
             <div>
-              <h3 className="text-xs font-medium text-foreground">Recommended change</h3>
+              <h3 className="text-xs font-medium text-foreground">{t('health.recommended')}</h3>
               <p className="mt-1 text-xs leading-5 text-foreground-secondary">{finding.suggestedFix}</p>
             </div>
           )}
           {plan?.reason && (
             <div className={cn(finding.suggestedFix && 'mt-3 sm:mt-0')}>
-              <h3 className="text-xs font-medium text-foreground">Why this action</h3>
+              <h3 className="text-xs font-medium text-foreground">{t('health.why')}</h3>
               <p className="mt-1 text-xs leading-5 text-foreground-secondary">{plan.reason}</p>
             </div>
           )}

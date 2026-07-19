@@ -26,6 +26,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
 import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
+import { useI18n } from '@/components/i18n-provider';
 
 interface IngestLiveViewProps {
   jobId: string;
@@ -157,6 +158,7 @@ export function IngestLiveView({
   terminating = false,
   queued = false,
 }: IngestLiveViewProps) {
+  const { t } = useI18n();
   const done = status === 'completed';
   const failed = status === 'failed';
   const running = !queued && (status === 'streaming' || status === 'idle');
@@ -271,7 +273,7 @@ export function IngestLiveView({
               ) : failed ? (
                 <span className="text-danger">{latestMessage || 'Ingest failed'}</span>
               ) : queued ? (
-                <strong className="font-semibold text-foreground">Queued · waiting for a worker</strong>
+                <strong className="font-semibold text-foreground">{t('ingest.queued')}</strong>
               ) : (
                 <>
                   <strong className="font-semibold text-foreground">{phase.verb}…</strong> · phase {curPhase + 1} of {PHASES.length}
@@ -299,7 +301,7 @@ export function IngestLiveView({
                     onClick={onTerminate}
                     loading={terminating}
                     disabled={terminating}
-                    data-tip="Abandon this ingest and clear its checkpoints"
+                    data-tip={t('ingest.abandon')}
                   >
                     <Ban className="h-3.5 w-3.5" /> End ingest
                   </Button>
@@ -325,7 +327,7 @@ export function IngestLiveView({
                     intent="ghost"
                     onClick={onTerminate}
                     disabled={terminating}
-                    data-tip="Stop this ingest"
+                    data-tip={t('ingest.stop')}
                   >
                     <Square className="h-3.5 w-3.5" /> Stop
                   </Button>
@@ -452,6 +454,7 @@ function IngestTimeline({
   queued: boolean;
   createdPages: string[];
 }) {
+  const { t } = useI18n();
   // Bucket events into phases for the rail.
   const byPhase = useMemo(() => {
     const buckets: JobStreamEvent[][] = PHASES.map(() => []);
@@ -519,7 +522,7 @@ function IngestTimeline({
                 >
                   {p.label}
                 </span>
-                {state === 'active' && <span className="text-[11px] font-medium text-accent-strong">running</span>}
+                {state === 'active' && <span className="text-[11px] font-medium text-accent-strong">{t('ingest.running')}</span>}
               </div>
 
               {entries.length > 0 && (
