@@ -45,6 +45,33 @@ describe('General 设置内容', () => {
     expect(html).not.toContain('Dark mode');
     expect(html).not.toContain('Sidebar width');
   });
+
+  it('语言设置合并进单一卡片 section，不再拆「界面 / 内容语言」两组', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SettingsContent, {
+        active: 'general',
+        settings: undefined,
+        settingsLoading: true,
+        saveLanguage: {
+          mutate: vi.fn(),
+          isPending: false,
+          isError: false,
+          error: undefined,
+        },
+        savePartial: {
+          mutate: vi.fn(),
+          isPending: false,
+          isError: false,
+          error: undefined,
+        },
+      }),
+    );
+
+    // 旧的独立 section 标题已删除。
+    expect(html).not.toContain('Content language');
+    // 两行同处一个 divide-y 卡片容器。
+    expect(html.match(/divide-y/g)).toHaveLength(1);
+  });
 });
 
 describe('Usage 项目过滤', () => {

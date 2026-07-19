@@ -21,8 +21,7 @@ export const en = {
   'settings.category.automation.description': 'Agents, grounding, and upkeep',
   'settings.category.usage.label': 'Usage',
   'settings.category.usage.description': 'LLM activity and tokens',
-  'settings.section.appearance': 'Interface',
-  'settings.section.contentLanguage': 'Content language',
+  'settings.section.language': 'Language',
   'settings.section.cognitiveLens': 'Cognitive Lens',
   'settings.section.agentBehavior': 'Agent behavior',
   'settings.section.webGrounding': 'Web grounding',
@@ -72,10 +71,9 @@ export const en = {
     'How many ingest jobs run at once; other job types always run alone',
   'settings.web.description':
     'Used by the ingest verifier to fact-check augmentation callouts and import cited pages as sources. Leave the API key empty to disable (verifier falls back to self-check).',
-  'settings.web.provider': 'Provider',
-  'settings.web.providerDescription': 'Only Tavily is supported for now',
   'settings.web.apiKey': 'API key',
-  'settings.web.apiKeyDescription': 'Stored in app settings; empty disables web grounding',
+  'settings.web.apiKeyDescription':
+    'Tavily API key, stored in app settings; empty disables web grounding',
   'settings.web.maxResults': 'Max results per query',
   'settings.maintenance.enabled': 'Periodic maintenance',
   'settings.maintenance.enabledDescription': 'Revisit & deepen pages over time (off by default)',

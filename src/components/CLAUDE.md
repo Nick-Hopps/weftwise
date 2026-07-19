@@ -26,9 +26,9 @@
 | `context-panel-chat-tab.tsx` | Ask AI 工作面 memo 边界：尺寸拖动时保持聊天子树稳定，内部复用 `chat-interface`，发问 body 含 subjectId |
 | `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
 | `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
-| `settings-content.tsx` | 按一级入口组合原有设置 section；Automation 同页收纳 Agents / Web search / Maintenance；Usage 支持按时间窗口与项目筛选，复用 `settings-rows` 即时保存原语 |
+| `settings-content.tsx` | 按一级入口组合设置 section：小标签 + 组描述 + `divide-y` 边框卡片；General 语言合并单卡，Automation 同页收纳 Agents / Web search / Maintenance 三卡，Usage 为工具栏（时间 segmented + 项目 select）+ 表格卡片 |
 | `settings-categories.ts` | 一级入口与 section 映射单一来源：`SETTINGS_CATEGORIES` + `SETTINGS_SECTIONS` + `DEFAULT_CATEGORY`，避免导航和内容漂移 |
-| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow；窄屏自动切换为上下布局 |
+| `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow；行自持 `px-4 py-3` 供卡片 `divide-y` 分组，保存指示内联在行标签旁，textarea 行上下布局全宽；窄屏自动切换为上下布局 |
 
 ### `ui/` — 设计系统
 
@@ -188,6 +188,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | 设置界面卡片分组重构：section 改「小标签 + 组描述 + 边框卡片 divide-y」修正标题层级；General 界面/内容语言合并单卡；保存指示器移到行标签旁不再在控件侧占位；控件宽度规范化（text w-56 / select min-w-36）、textarea 全宽；Usage 筛选收敛为工具栏 + 表格卡片；删「提供方」静态行并入 API key 描述。spec/plan 见 `docs/{specs,plans}/2026-07-20-settings-ui-redesign.md` |
 | 2026-07-20 | 全站正常操作主色从纬线朱切换为经线靛：主按钮、开关、选中态、焦点环、进度与图谱激活态统一使用 warp；纬线朱仅保留品牌识别，danger 红色独占删除、失败与错误语义 |
 | 2026-07-20 | 阅读页按 Subject + slug 记忆原文/重塑展示偏好；Mermaid Diagram 增加可缩放全屏预览；Settings Usage 增加项目筛选并明确历史未归因用量仅计入全部项目 |
 | 2026-07-20 | 阅读页正文图片选择器从无效的直接子节点匹配改为真实 Markdown 后代匹配；图片保持原比例居中，并限制最大正文宽度与可视高度，避免大图打断阅读 |

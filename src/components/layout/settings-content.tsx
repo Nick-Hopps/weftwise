@@ -2,7 +2,8 @@
 
 /**
  * Settings 的右侧内容区：四个一级入口按用户任务组织，原有设置模块作为
- * section 组合渲染。
+ * section 组合渲染。section = 小标签 + 可选组描述 + 边框卡片，卡片内行
+ * 由 divide-y 分隔（行原语自持 padding，见 settings-rows.tsx）。
  * query / mutation 由 SettingsDialog 持有并通过 props 注入，
  * 本文件只负责渲染与本地交互。服务端 app_settings 表是唯一真实源，不写 Zustand。
  */
@@ -10,7 +11,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Segmented } from '@/components/ui/segmented';
+import { Select } from '@/components/ui/select';
+import { SectionLabel } from '@/components/ui/panel';
 import { apiFetch } from '@/lib/api-fetch';
+import { cn } from '@/lib/cn';
 import { formatTokenCount } from '@/lib/format';
 import type {
   AppSettings,
@@ -92,23 +96,18 @@ export function SettingsContent(props: SettingsContentProps) {
   const sections: readonly SettingsSectionId[] = SETTINGS_SECTIONS[props.active];
 
   return (
-    <div className="flex-1 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto bg-subtle/30">
       <div key={props.active} className="animate-fade-in p-5 md:p-7">
-        <header className="mb-7">
+        <header className="mb-6">
           <h3 className="text-base font-semibold text-foreground">{category?.label}</h3>
           <p className="mt-1 text-xs text-foreground-tertiary">{category?.description}</p>
         </header>
 
-        <div className="space-y-7">
-          {sections.includes('appearance') && (
-            <SettingsSection title={t('settings.section.appearance')}>
-              <AppearancePanel />
-            </SettingsSection>
-          )}
-
+        <div className="space-y-6">
           {sections.includes('language') && (
-            <SettingsSection title={t('settings.section.contentLanguage')}>
-              <LanguagePanel
+            <SettingsSection title={t('settings.section.language')}>
+              <InterfaceLanguageRow />
+              <WikiLanguageRow
                 settings={props.settings}
                 settingsLoading={props.settingsLoading}
                 saveLanguage={props.saveLanguage}
@@ -117,7 +116,10 @@ export function SettingsContent(props: SettingsContentProps) {
           )}
 
           {sections.includes('cognitive-lens') && (
-            <SettingsSection title={t('settings.section.cognitiveLens')}>
+            <SettingsSection
+              title={t('settings.section.cognitiveLens')}
+              description={t('settings.lens.description')}
+            >
               <CognitiveLensPanel />
             </SettingsSection>
           )}
@@ -129,7 +131,10 @@ export function SettingsContent(props: SettingsContentProps) {
           )}
 
           {sections.includes('web-search') && (
-            <SettingsSection title={t('settings.section.webGrounding')}>
+            <SettingsSection
+              title={t('settings.section.webGrounding')}
+              description={t('settings.web.description')}
+            >
               <WebSearchPanel settings={props.settings} savePartial={props.savePartial} />
             </SettingsSection>
           )}
@@ -141,7 +146,7 @@ export function SettingsContent(props: SettingsContentProps) {
           )}
 
           {sections.includes('usage') && (
-            <SettingsSection title={t('settings.section.usage')}>
+            <SettingsSection title={t('settings.section.usage')} variant="plain">
               <UsagePanel />
             </SettingsSection>
           )}
@@ -158,31 +163,53 @@ export function SettingsContent(props: SettingsContentProps) {
   );
 }
 
-function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+function SettingsSection({
+  title,
+  description,
+  variant = 'card',
+  children,
+}: {
+  title: string;
+  description?: string;
+  /** card：行进边框卡片、divide-y 分组；plain：内容自带容器（如 Usage 表格）。*/
+  variant?: 'card' | 'plain';
+  children: React.ReactNode;
+}) {
   return (
-    <section className="border-t border-border pt-6 first:border-t-0 first:pt-0">
-      <h4 className="mb-4 text-xs font-semibold text-foreground-secondary">{title}</h4>
-      {children}
+    <section>
+      <SectionLabel>{title}</SectionLabel>
+      {description && (
+        <p className="mt-1.5 max-w-prose text-xs leading-relaxed text-foreground-tertiary">
+          {description}
+        </p>
+      )}
+      <div
+        className={cn(
+          'mt-2.5',
+          variant === 'card' &&
+            'divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface',
+        )}
+      >
+        {children}
+      </div>
     </section>
   );
 }
 
-function AppearancePanel() {
+function InterfaceLanguageRow() {
   const { locale, setLocale, isLocalePending, t } = useI18n();
   return (
-    <div className="space-y-4">
-      <SegmentedRow<Locale>
-        label={t('settings.interfaceLanguage.label')}
-        description={t('settings.interfaceLanguage.description')}
-        value={locale}
-        options={[
-          { value: 'en', label: t('settings.interfaceLanguage.english') },
-          { value: 'zh-CN', label: t('settings.interfaceLanguage.chinese') },
-        ]}
-        onSave={setLocale}
-        save={{ pending: isLocalePending, error: undefined }}
-      />
-    </div>
+    <SegmentedRow<Locale>
+      label={t('settings.interfaceLanguage.label')}
+      description={t('settings.interfaceLanguage.description')}
+      value={locale}
+      options={[
+        { value: 'en', label: t('settings.interfaceLanguage.english') },
+        { value: 'zh-CN', label: t('settings.interfaceLanguage.chinese') },
+      ]}
+      onSave={setLocale}
+      save={{ pending: isLocalePending, error: undefined }}
+    />
   );
 }
 
@@ -225,7 +252,7 @@ function CognitiveLensPanel() {
   const update = useUpdateProfile();
 
   if (isLoading || !data) {
-    return <p className="text-xs text-foreground-tertiary">{t('common.loading')}</p>;
+    return <p className="px-4 py-3 text-xs text-foreground-tertiary">{t('common.loading')}</p>;
   }
   const profile = data.profile;
   const save = toSave(update);
@@ -237,9 +264,7 @@ function CognitiveLensPanel() {
     });
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-foreground-tertiary">{t('settings.lens.description')}</p>
-
+    <>
       {LENS_KEYS.map((key) => (
         <SegmentedRow
           key={key}
@@ -262,11 +287,11 @@ function CognitiveLensPanel() {
         onSave={(v) => update.mutate({ backgroundSummary: v })}
         save={save}
       />
-    </div>
+    </>
   );
 }
 
-function LanguagePanel({
+function WikiLanguageRow({
   settings,
   settingsLoading,
   saveLanguage,
@@ -282,17 +307,15 @@ function LanguagePanel({
     languageOptions.unshift({ value: savedLanguage, label: t('common.custom', { value: savedLanguage }) });
   }
   return (
-    <div className="space-y-4">
-      <SelectRow
-        label={t('settings.wikiLanguage.label')}
-        description={t('settings.wikiLanguage.description')}
-        value={savedLanguage}
-        options={languageOptions}
-        disabled={settingsLoading}
-        onSave={(v) => saveLanguage.mutate(v)}
-        save={toSave(saveLanguage)}
-      />
-    </div>
+    <SelectRow
+      label={t('settings.wikiLanguage.label')}
+      description={t('settings.wikiLanguage.description')}
+      value={savedLanguage}
+      options={languageOptions}
+      disabled={settingsLoading}
+      onSave={(v) => saveLanguage.mutate(v)}
+      save={toSave(saveLanguage)}
+    />
   );
 }
 
@@ -303,7 +326,7 @@ function AgentsPanel({
   const { t } = useI18n();
   const save = toSave(savePartial);
   return (
-    <div className="space-y-4">
+    <>
       <NumberRow
         label={t('settings.agent.maxSteps')}
         value={settings?.agentMaxSteps ?? 25}
@@ -359,7 +382,7 @@ function AgentsPanel({
         onSave={(v) => savePartial.mutate({ ingestConcurrency: v })}
         save={save}
       />
-    </div>
+    </>
   );
 }
 
@@ -370,11 +393,7 @@ function WebSearchPanel({
   const { t } = useI18n();
   const save = toSave(savePartial);
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-foreground-tertiary">{t('settings.web.description')}</p>
-      <SettingRow label={t('settings.web.provider')} description={t('settings.web.providerDescription')}>
-        <span className="text-xs text-foreground-secondary">Tavily</span>
-      </SettingRow>
+    <>
       <TextRow
         label={t('settings.web.apiKey')}
         description={t('settings.web.apiKeyDescription')}
@@ -392,7 +411,7 @@ function WebSearchPanel({
         onSave={(v) => savePartial.mutate({ webSearchMaxResults: v })}
         save={save}
       />
-    </div>
+    </>
   );
 }
 
@@ -433,7 +452,7 @@ function MaintenancePanel({
   const scope = settings?.maintenanceScope ?? { mode: 'all' };
 
   return (
-    <div className="space-y-4">
+    <>
       <SwitchRow
         label={t('settings.maintenance.enabled')}
         description={t('settings.maintenance.enabledDescription')}
@@ -463,7 +482,7 @@ function MaintenancePanel({
       />
 
       <SettingRow label={t('settings.maintenance.status')} description={t('settings.maintenance.statusDescription')}>
-        <div className="text-xs text-foreground-secondary tabular-nums space-y-0.5 text-right">
+        <div className="text-xs text-foreground-secondary tabular-nums space-y-0.5 sm:text-right">
           {statusQuery.isError ? (
             <span className="text-danger">{t('common.unavailable')}</span>
           ) : (
@@ -491,7 +510,7 @@ function MaintenancePanel({
         onSave={(v) => savePartial.mutate({ maintenanceMaxPagesPerSweep: v })}
         save={save}
       />
-    </div>
+    </>
   );
 }
 
@@ -500,7 +519,7 @@ export function usageQueryPath(window: UsageWindow, projectId: 'all' | string): 
   return projectId === 'all' ? base : `${base}&subjectId=${encodeURIComponent(projectId)}`;
 }
 
-/** Usage 面板：按时间和项目查看 LLM 用量；弹窗打开时取数，无轮询。 */
+/** Usage 面板：工具栏（时间窗口 + 项目筛选）+ 表格卡片；弹窗打开时取数，无轮询。 */
 function UsagePanel() {
   const { t } = useI18n();
   const usageWindowOptions = [
@@ -536,77 +555,83 @@ function UsagePanel() {
   );
 
   return (
-    <div className="space-y-4">
-      <SelectRow
-        label={t('settings.usage.project')}
-        description={t('settings.usage.projectDescription')}
-        value={projectId}
-        options={[
-          { value: 'all', label: t('settings.usage.allProjects') },
-          ...(subjectsQuery.data ?? []).map((subject) => ({
-            value: subject.id,
-            label: subject.name,
-          })),
-        ]}
-        disabled={subjectsQuery.isLoading}
-        onSave={setProjectId}
-      />
-      <Segmented
-        value={timeWindow}
-        options={usageWindowOptions}
-        onChange={setTimeWindow}
-        aria-label={t('settings.usage.windowLabel')}
-      />
-      {isLoading ? (
-        <p className="text-xs text-foreground-tertiary">{t('common.loading')}</p>
-      ) : rows.length === 0 ? (
-        <p className="text-xs text-foreground-tertiary">{t('settings.usage.empty')}</p>
-      ) : (
-        <div className="-mx-1 overflow-x-auto px-1">
-          <table className="w-full min-w-[34rem] text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs text-foreground-tertiary">
-                <th className="py-1.5 pr-2 font-medium">{t('settings.usage.task')}</th>
-                <th className="py-1.5 pr-2 font-medium">{t('settings.usage.model')}</th>
-                <th className="py-1.5 pr-2 text-right font-medium">{t('settings.usage.calls')}</th>
-                <th className="py-1.5 pr-2 text-right font-medium">{t('settings.usage.input')}</th>
-                <th className="py-1.5 text-right font-medium">{t('settings.usage.output')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={`${r.task}:${r.model}`} className="border-b border-border/50">
-                  <td className="py-1.5 pr-2 font-mono text-xs">{r.task}</td>
-                  <td
-                    className="max-w-[10rem] truncate py-1.5 pr-2 text-xs text-foreground-secondary"
-                    title={r.model}
-                  >
-                    {r.model}
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Segmented
+          value={timeWindow}
+          options={usageWindowOptions}
+          onChange={setTimeWindow}
+          aria-label={t('settings.usage.windowLabel')}
+        />
+        <Select
+          value={projectId}
+          aria-label={t('settings.usage.project')}
+          disabled={subjectsQuery.isLoading}
+          className="min-w-36"
+          onChange={(e) => setProjectId(e.target.value)}
+        >
+          <option value="all">{t('settings.usage.allProjects')}</option>
+          {(subjectsQuery.data ?? []).map((subject) => (
+            <option key={subject.id} value={subject.id}>
+              {subject.name}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-border bg-surface">
+        {isLoading ? (
+          <p className="px-4 py-6 text-center text-xs text-foreground-tertiary">{t('common.loading')}</p>
+        ) : rows.length === 0 ? (
+          <p className="px-4 py-6 text-center text-xs text-foreground-tertiary">{t('settings.usage.empty')}</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] text-sm">
+              <thead>
+                <tr className="border-b border-border bg-subtle/60 text-left text-xs text-foreground-tertiary">
+                  <th className="py-2 pl-4 pr-2 font-medium">{t('settings.usage.task')}</th>
+                  <th className="py-2 pr-2 font-medium">{t('settings.usage.model')}</th>
+                  <th className="py-2 pr-2 text-right font-medium">{t('settings.usage.calls')}</th>
+                  <th className="py-2 pr-2 text-right font-medium">{t('settings.usage.input')}</th>
+                  <th className="py-2 pr-4 text-right font-medium">{t('settings.usage.output')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={`${r.task}:${r.model}`} className="border-b border-border/50">
+                    <td className="py-1.5 pl-4 pr-2 font-mono text-xs">{r.task}</td>
+                    <td
+                      className="max-w-[10rem] truncate py-1.5 pr-2 text-xs text-foreground-secondary"
+                      title={r.model}
+                    >
+                      {r.model}
+                    </td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">{r.calls}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums">
+                      {formatTokenCount(r.inputTokens)}
+                    </td>
+                    <td className="py-1.5 pr-4 text-right tabular-nums">
+                      {formatTokenCount(r.outputTokens)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="bg-subtle/40 font-medium">
+                  <td className="py-2 pl-4 pr-2 text-xs">{t('settings.usage.total')}</td>
+                  <td className="py-2 pr-2" />
+                  <td className="py-2 pr-2 text-right tabular-nums">{totals.calls}</td>
+                  <td className="py-2 pr-2 text-right tabular-nums">
+                    {formatTokenCount(totals.inputTokens)}
                   </td>
-                  <td className="py-1.5 pr-2 text-right tabular-nums">{r.calls}</td>
-                  <td className="py-1.5 pr-2 text-right tabular-nums">
-                    {formatTokenCount(r.inputTokens)}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums">
-                    {formatTokenCount(r.outputTokens)}
+                  <td className="py-2 pr-4 text-right tabular-nums">
+                    {formatTokenCount(totals.outputTokens)}
                   </td>
                 </tr>
-              ))}
-              <tr className="font-medium">
-                <td className="py-1.5 pr-2 text-xs">{t('settings.usage.total')}</td>
-                <td className="py-1.5 pr-2" />
-                <td className="py-1.5 pr-2 text-right tabular-nums">{totals.calls}</td>
-                <td className="py-1.5 pr-2 text-right tabular-nums">
-                  {formatTokenCount(totals.inputTokens)}
-                </td>
-                <td className="py-1.5 text-right tabular-nums">
-                  {formatTokenCount(totals.outputTokens)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <p className="text-xs text-foreground-tertiary">{t('settings.usage.retention')}</p>
     </div>
   );

@@ -10,7 +10,6 @@ import type { TranslationFunction } from '@/lib/i18n/translator';
 export type CategoryId = 'general' | 'personalization' | 'automation' | 'usage';
 
 export type SettingsSectionId =
-  | 'appearance'
   | 'language'
   | 'cognitive-lens'
   | 'agents'
@@ -70,7 +69,7 @@ export function getSettingsCategories(t: TranslationFunction): SettingsCategory[
 }
 
 export const SETTINGS_SECTIONS = {
-  general: ['appearance', 'language'],
+  general: ['language'],
   personalization: ['cognitive-lens'],
   automation: ['agents', 'web-search', 'maintenance'],
   usage: ['usage'],
