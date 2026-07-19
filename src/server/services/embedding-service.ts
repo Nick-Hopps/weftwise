@@ -42,7 +42,7 @@ export async function runEmbedIndex(subjectId: string): Promise<void> {
       metas.push({ slug: p.slug, contentHash: p.contentHash });
     }
     if (texts.length === 0) continue;
-    const vectors = await generateEmbeddings(texts);
+    const vectors = await generateEmbeddings(texts, subjectId);
     vectors.forEach((vec, idx) => {
       const m = metas[idx];
       embeddingsRepo.upsertEmbedding({

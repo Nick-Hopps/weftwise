@@ -149,6 +149,7 @@ describe('runImageInsertJob', () => {
       subject.slug,
       undefined,
       expect.any(AbortSignal),
+      subject.id,
     );
     expect(mocks.readPage).toHaveBeenCalledTimes(2);
     expect(mocks.getHead).toHaveBeenCalledTimes(2);

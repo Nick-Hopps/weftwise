@@ -77,7 +77,13 @@ describe('reshapePageBody', () => {
 
     expect(result.body).toBe('![图解](/api/rendition-assets/image-1)');
     expect(result.assets).toEqual([{ id: 'image-1', mediaType: 'image/png', dataBase64: 'AQID' }]);
-    expect(mocks.generateImage).toHaveBeenCalledWith(expect.anything(), 'general', undefined, signal);
+    expect(mocks.generateImage).toHaveBeenCalledWith(
+      expect.anything(),
+      'general',
+      undefined,
+      signal,
+      's1',
+    );
   });
 
   it('最终正文为空时判定生成失败', async () => {

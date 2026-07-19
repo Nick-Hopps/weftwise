@@ -68,6 +68,8 @@ export async function executePageMerge(
         subject: { slug: subject.slug, name: subject.name, description: subject.description },
       },
     ),
+    {},
+    { usageSubjectId: subject.id },
   );
 
   const mergedFrontmatter: WikiFrontmatter = {
@@ -143,6 +145,8 @@ export async function executePageSplit(
         subject: { slug: subject.slug, name: subject.name, description: subject.description },
       },
     ),
+    {},
+    { usageSubjectId: subject.id },
   );
   if (llm.pages.length < 2) throw new Error('split must produce at least 2 pages');
 

@@ -479,12 +479,20 @@ export const researchCandidateIngests = sqliteTable(
   }),
 );
 
-// LLM 用量明细：一次 LLM 调用一行（app 级资源，非 subject-scoped，无 FK）。
-export const llmUsage = sqliteTable('llm_usage', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  task: text('task').notNull(),
-  model: text('model').notNull(),
-  inputTokens: integer('input_tokens').notNull().default(0),
-  outputTokens: integer('output_tokens').notNull().default(0),
-  createdAt: integer('created_at').notNull(), // epoch ms
-});
+// LLM 用量明细：一次 LLM 调用一行；subjectId 可空以保留全局/旧版未归因调用。
+export const llmUsage = sqliteTable(
+  'llm_usage',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    subjectId: text('subject_id').references(() => subjects.id, { onDelete: 'set null' }),
+    task: text('task').notNull(),
+    model: text('model').notNull(),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    createdAt: integer('created_at').notNull(), // epoch ms
+  },
+  (t) => ({
+    createdIdx: index('idx_llm_usage_created_at').on(t.createdAt),
+    subjectCreatedIdx: index('idx_llm_usage_subject_created_at').on(t.subjectId, t.createdAt),
+  }),
+);

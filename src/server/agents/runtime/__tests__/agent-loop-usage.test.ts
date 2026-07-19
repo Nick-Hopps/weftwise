@@ -107,6 +107,7 @@ describe('runAgentLoop 用量记账', () => {
       model: 'test-model',
       inputTokens: 100,
       outputTokens: 40,
+      subjectId: 's1',
     });
   });
 

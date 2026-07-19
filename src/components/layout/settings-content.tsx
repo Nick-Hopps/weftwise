@@ -495,7 +495,12 @@ function MaintenancePanel({
   );
 }
 
-/** Usage 面板：LLM 用量统计（app 级，不随 subject；弹窗打开时取数，无轮询）。 */
+export function usageQueryPath(window: UsageWindow, projectId: 'all' | string): string {
+  const base = `/api/usage?window=${window}`;
+  return projectId === 'all' ? base : `${base}&subjectId=${encodeURIComponent(projectId)}`;
+}
+
+/** Usage 面板：按时间和项目查看 LLM 用量；弹窗打开时取数，无轮询。 */
 function UsagePanel() {
   const { t } = useI18n();
   const usageWindowOptions = [
@@ -504,10 +509,16 @@ function UsagePanel() {
     { value: 'all', label: t('settings.usage.allTime') },
   ] satisfies Array<{ value: UsageWindow; label: string }>;
   const [timeWindow, setTimeWindow] = useState<UsageWindow>('30d');
+  const [projectId, setProjectId] = useState<'all' | string>('all');
+  const subjectsQuery = useQuery<SubjectListEntry[]>({
+    queryKey: ['subjects'],
+    queryFn: fetchSubjects,
+    staleTime: 30_000,
+  });
   const { data, isLoading } = useQuery({
-    queryKey: ['usage', timeWindow],
+    queryKey: ['usage', timeWindow, projectId],
     queryFn: async () => {
-      const res = await apiFetch(`/api/usage?window=${timeWindow}`);
+      const res = await apiFetch(usageQueryPath(timeWindow, projectId));
       if (!res.ok) throw new Error('Failed to load usage');
       return (await res.json()) as { window: UsageWindow; rows: UsageSummaryRow[] };
     },
@@ -526,6 +537,20 @@ function UsagePanel() {
 
   return (
     <div className="space-y-4">
+      <SelectRow
+        label={t('settings.usage.project')}
+        description={t('settings.usage.projectDescription')}
+        value={projectId}
+        options={[
+          { value: 'all', label: t('settings.usage.allProjects') },
+          ...(subjectsQuery.data ?? []).map((subject) => ({
+            value: subject.id,
+            label: subject.name,
+          })),
+        ]}
+        disabled={subjectsQuery.isLoading}
+        onSave={setProjectId}
+      />
       <Segmented
         value={timeWindow}
         options={usageWindowOptions}

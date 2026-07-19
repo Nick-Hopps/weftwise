@@ -763,17 +763,28 @@ function dedupeSourcesForUniqueIdentity(): void {
 // LLM 用量明细表（设置页 Usage 统计）。
 function migrateLlmUsage(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('llm_usage')) return;
+  if (!tableExists('llm_usage')) {
+    sqlite.exec(`
+      CREATE TABLE llm_usage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject_id TEXT REFERENCES subjects(id) ON DELETE SET NULL,
+        task TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  } else if (!tableColumns('llm_usage').includes('subject_id')) {
+    sqlite.exec(`
+      ALTER TABLE llm_usage
+      ADD COLUMN subject_id TEXT REFERENCES subjects(id) ON DELETE SET NULL;
+    `);
+  }
   sqlite.exec(`
-    CREATE TABLE llm_usage (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task TEXT NOT NULL,
-      model TEXT NOT NULL,
-      input_tokens INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX idx_llm_usage_created_at ON llm_usage(created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_created_at ON llm_usage(created_at);
+    CREATE INDEX IF NOT EXISTS idx_llm_usage_subject_created_at
+      ON llm_usage(subject_id, created_at);
   `);
 }
 

@@ -353,6 +353,7 @@ export async function runFixJob(
       messages: [{ role: 'user', content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx) }],
       tools,
       maxSteps: FIX_MAX_STEPS,
+      usageSubjectId: subject.id,
       shouldCancel: () => queue.isCancelRequested(job.id),
       onToolCall: (info) => emit('fix:tool', toolActivityLine(info.tool, info.args), { tool: info.tool }),
     });

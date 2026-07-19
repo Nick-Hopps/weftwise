@@ -37,6 +37,7 @@ export async function generateImageAsset(
   subjectSlug: string,
   onUsage?: (usage: { inputTokens?: number; outputTokens?: number }) => void,
   abortSignal?: AbortSignal,
+  subjectId?: string,
 ): Promise<{ output: ImageGenerateOutput; asset: { path: string; content: string; mediaType: string } }> {
   const route = resolveTask('ingest:image');
   if (route.provider.provider !== 'google') {
@@ -69,7 +70,13 @@ export async function generateImageAsset(
 
   onUsage?.(result.usage ?? {});
   try {
-    recordUsage({ task: route.task, model: route.model, inputTokens: result.usage?.inputTokens, outputTokens: result.usage?.outputTokens });
+    recordUsage({
+      task: route.task,
+      model: route.model,
+      inputTokens: result.usage?.inputTokens,
+      outputTokens: result.usage?.outputTokens,
+      ...(subjectId ? { subjectId } : {}),
+    });
   } catch (err) {
     console.warn('[usage] image generation record failed (ignored)', err);
   }

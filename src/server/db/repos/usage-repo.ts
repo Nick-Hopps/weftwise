@@ -1,4 +1,4 @@
-import { asc, count, gte, lt, sql } from 'drizzle-orm';
+import { and, asc, count, eq, gte, lt, sql } from 'drizzle-orm';
 import { getDb } from '../client';
 import { llmUsage } from '../schema';
 import type { UsageSummaryRow } from '@/lib/contracts';
@@ -21,6 +21,7 @@ export function recordUsage(entry: {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
+  subjectId?: string;
 }): boolean {
   const input = normalizeTokens(entry.inputTokens);
   const output = normalizeTokens(entry.outputTokens);
@@ -29,6 +30,7 @@ export function recordUsage(entry: {
     getDb()
       .insert(llmUsage)
       .values({
+        subjectId: entry.subjectId ?? null,
         task: entry.task,
         model: entry.model,
         inputTokens: input ?? 0,
@@ -43,8 +45,11 @@ export function recordUsage(entry: {
   }
 }
 
-/** 按 (task, model) 聚合；sinceMs 含边界（created_at >= sinceMs）。 */
-export function summarizeUsage(sinceMs?: number): UsageSummaryRow[] {
+/** 按 (task, model) 聚合；sinceMs 含边界，subjectId 为精确项目过滤。 */
+export function summarizeUsage(options: {
+  sinceMs?: number;
+  subjectId?: string;
+} = {}): UsageSummaryRow[] {
   const db = getDb();
   const base = db
     .select({
@@ -55,7 +60,11 @@ export function summarizeUsage(sinceMs?: number): UsageSummaryRow[] {
       outputTokens: sql<number>`sum(${llmUsage.outputTokens})`,
     })
     .from(llmUsage);
-  const filtered = sinceMs !== undefined ? base.where(gte(llmUsage.createdAt, sinceMs)) : base;
+  const predicates = [
+    options.sinceMs !== undefined ? gte(llmUsage.createdAt, options.sinceMs) : undefined,
+    options.subjectId !== undefined ? eq(llmUsage.subjectId, options.subjectId) : undefined,
+  ].filter((predicate): predicate is NonNullable<typeof predicate> => predicate !== undefined);
+  const filtered = predicates.length > 0 ? base.where(and(...predicates)) : base;
   return filtered
     .groupBy(llmUsage.task, llmUsage.model)
     .orderBy(asc(llmUsage.task), asc(llmUsage.model))

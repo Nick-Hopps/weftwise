@@ -213,6 +213,8 @@ export async function runResearchJob(
     ResearchQueriesSchema,
     RESEARCH_QUERIES_SYSTEM_PROMPT,
     buildResearchQueriesUserPrompt(topics, promptCtx),
+    {},
+    { usageSubjectId: subject.id },
   );
   const queries = dedupeQueries(queriesResult.queries);
   if (queries.length === 0) {
@@ -247,6 +249,8 @@ export async function runResearchJob(
         ResearchTriageSchema,
         RESEARCH_TRIAGE_SYSTEM_PROMPT,
         buildResearchTriageUserPrompt(topics, candidates, promptCtx),
+        {},
+        { usageSubjectId: subject.id },
       );
       results = applyTriage(candidates, triage.results);
     } catch (error) {

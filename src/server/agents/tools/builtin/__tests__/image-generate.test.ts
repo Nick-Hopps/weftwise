@@ -52,7 +52,7 @@ describe('image.generate', () => {
     const usage = vi.fn();
     const result = await generateImageAsset({
       prompt: 'show the geometric intuition', alt: 'Geometric intuition',
-    }, 'general', usage);
+    }, 'general', usage, undefined, 's1');
     expect(mocks.generateText).toHaveBeenCalledWith(expect.objectContaining({
       providerOptions: { google: { imageConfig: { imageSize: '1K' }, responseModalities: ['IMAGE'] } },
     }));
@@ -61,6 +61,13 @@ describe('image.generate', () => {
     expect(result.asset.content).toBe(Buffer.from(bytes).toString('base64'));
     expect(result.asset.mediaType).toBe('image/png');
     expect(usage).toHaveBeenCalledWith({ inputTokens: 12, outputTokens: 3 });
+    expect(mocks.recordUsage).toHaveBeenCalledWith({
+      task: 'ingest:image',
+      model: 'gemini-3.1-flash-image-preview',
+      inputTokens: 12,
+      outputTokens: 3,
+      subjectId: 's1',
+    });
   });
 
   it('把调用方 abort signal 传给图片模型', async () => {

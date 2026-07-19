@@ -139,6 +139,8 @@ export function assessCoverageInBackground(
     CoverageSchema,
     COVERAGE_SYSTEM_PROMPT,
     buildCoverageUserPrompt(question, answer, promptCtx),
+    {},
+    { usageSubjectId: subject.id },
   )
     .then((r) => {
       if (!r.coverageSufficient) {
@@ -192,6 +194,7 @@ export function streamAgenticQuery(opts: {
     tools,
     maxSteps: QUERY_MAX_STEPS,
     abortSignal: opts.abortSignal,
+    usageSubjectId: opts.subject.id,
   });
   return { stream, accessed };
 }
@@ -214,6 +217,7 @@ export async function runQuery(
     messages: [{ role: 'user', content: userContent }],
     tools,
     maxSteps: QUERY_MAX_STEPS,
+    usageSubjectId: subject.id,
   });
 
   const answer = text.trim().length > 0 ? text : NO_QUERY_CONTEXT_ANSWER;

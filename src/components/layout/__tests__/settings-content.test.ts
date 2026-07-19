@@ -16,7 +16,7 @@ vi.mock('@/components/i18n-provider', () => {
   };
 });
 
-import { SettingsContent } from '../settings-content';
+import { SettingsContent, usageQueryPath } from '../settings-content';
 
 describe('General 设置内容', () => {
   it('只显示语言设置，不再显示深色模式和侧栏宽度', () => {
@@ -44,5 +44,13 @@ describe('General 设置内容', () => {
     expect(html).toContain('Wiki language');
     expect(html).not.toContain('Dark mode');
     expect(html).not.toContain('Sidebar width');
+  });
+});
+
+describe('Usage 项目过滤', () => {
+  it('项目筛选进入请求 URL，全部项目不附带 subjectId', () => {
+    expect(usageQueryPath('30d', 'all')).toBe('/api/usage?window=30d');
+    expect(usageQueryPath('7d', 'subject/a'))
+      .toBe('/api/usage?window=7d&subjectId=subject%2Fa');
   });
 });
