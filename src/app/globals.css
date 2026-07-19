@@ -653,6 +653,10 @@
   height: auto;
   overflow: visible;
 }
+.mermaid-diagram-preview svg {
+  max-width: none;
+  flex: none;
+}
 .mermaid-diagram .node .label-container {
   rx: 7px;
   ry: 7px;

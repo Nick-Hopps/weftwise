@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useEffect, useId, useRef, useState } from 'react';
-import { cn } from '@/lib/cn';
-import { createMermaidConfig } from './mermaid-theme';
+import React, { useCallback, useRef, useState } from 'react';
+import { Maximize2 } from 'lucide-react';
+import { IconButton } from '@/components/ui/icon-button';
+import { useI18n } from '@/components/i18n-provider';
+import { MermaidPreview } from './mermaid-preview';
+import { MermaidSvg } from './mermaid-svg';
 
 /**
  * 渲染单个 mermaid 图。mermaid 仅在浏览器可用，故：
@@ -16,61 +19,38 @@ import { createMermaidConfig } from './mermaid-theme';
  * render 失败只抛异常、不注入占位图，交由下方 catch 走 <pre> 源码回退。
  */
 export default function MermaidDiagram({ code }: { code: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const reactId = useId();
-  const [failed, setFailed] = useState(false);
+  const { t } = useI18n();
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const [ready, setReady] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
-
-  // Mermaid 把颜色写进 SVG；主题变化时必须重新渲染，不能只依赖外层 CSS。
-  useEffect(() => {
-    const root = document.documentElement;
-    const sync = () => setDarkMode(root.classList.contains('dark'));
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const closePreview = useCallback(() => {
+    setPreviewOpen(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    setFailed(false);
-    setReady(false);
-    (async () => {
-      try {
-        const mermaid = (await import('mermaid')).default;
-        mermaid.initialize(createMermaidConfig(darkMode));
-        const id = `mermaid-${reactId.replace(/[^a-zA-Z0-9_-]/g, '')}`;
-        const { svg } = await mermaid.render(id, code);
-        if (!cancelled && ref.current) {
-          ref.current.innerHTML = svg;
-          const svgElement = ref.current.querySelector('svg');
-          svgElement?.setAttribute('role', 'img');
-          svgElement?.setAttribute('aria-label', 'Diagram');
-          setReady(true);
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [code, darkMode, reactId]);
-
-  if (failed) {
-    return (
-      <pre className="bg-prose-code-bg text-prose-code rounded-md p-4 overflow-x-auto my-4 text-sm font-mono">
-        {code}
-      </pre>
-    );
-  }
-
   return (
-    <div
-      ref={ref}
-      data-mermaid-src={code}
-      data-ready={ready ? 'true' : 'false'}
-      aria-busy={!ready}
-      className={cn('mermaid-diagram my-5 flex min-h-24 w-full justify-center overflow-x-auto py-2')}
-    />
+    <div className="group/diagram relative my-5 w-full">
+      <MermaidSvg
+        code={code}
+        ariaLabel={t('wiki.diagram.ariaLabel')}
+        onReadyChange={setReady}
+        className="w-full overflow-x-auto"
+      />
+      {ready && (
+        <IconButton
+          ref={triggerRef}
+          type="button"
+          intent="outline"
+          size="base"
+          onClick={() => setPreviewOpen(true)}
+          aria-label={t('wiki.diagram.openPreview')}
+          data-tip={t('wiki.diagram.openPreview')}
+          className="tip tip-l absolute right-1 top-1 z-10 bg-surface/90 opacity-100 shadow-xs backdrop-blur-sm sm:opacity-0 sm:group-hover/diagram:opacity-100 sm:focus:opacity-100"
+        >
+          <Maximize2 aria-hidden />
+        </IconButton>
+      )}
+      <MermaidPreview code={code} open={previewOpen} onClose={closePreview} />
+    </div>
   );
 }
