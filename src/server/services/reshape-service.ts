@@ -74,9 +74,10 @@ async function collect(
   task: 'reshape:page' | 'reshape:section',
   system: string,
   user: string,
+  subjectId: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const res = streamTextResponse(task, system, user, signal);
+  const res = streamTextResponse(task, system, user, signal, {}, subjectId);
   let out = '';
   for await (const chunk of res.textStream) out += chunk;
   return out.trim();
@@ -106,6 +107,7 @@ export async function reshapePageBody(input: {
         input.subject.slug,
         undefined,
         input.abortSignal,
+        input.subject.id,
       );
       const id = assetIdFromPath(generated.asset.path);
       assets.push({ id, mediaType: generated.asset.mediaType, dataBase64: generated.asset.content });
@@ -118,6 +120,7 @@ export async function reshapePageBody(input: {
     tools: { image_generate: imageGenerate },
     maxSteps: 4,
     abortSignal: input.abortSignal,
+    usageSubjectId: input.subject.id,
   });
   let body = '';
   for await (const chunk of response.textStream) body += chunk;
@@ -136,6 +139,11 @@ export async function reshapeSection(input: {
 }): Promise<{ block: string; fallback: boolean }> {
   const ctx = ctxFor(input.subject);
   const user = buildReshapeSectionUserPrompt(input.block, input.direction, input.profile, ctx, input.context);
-  const out = await collect('reshape:section', RESHAPE_SECTION_SYSTEM_PROMPT, user);
+  const out = await collect(
+    'reshape:section',
+    RESHAPE_SECTION_SYSTEM_PROMPT,
+    user,
+    input.subject.id,
+  );
   return { block: out, fallback: false };
 }

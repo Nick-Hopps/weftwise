@@ -104,6 +104,28 @@ describe('provider-registry usage 记账', () => {
     });
   });
 
+  it('把调用方提供的 subjectId 写入用量归因', async () => {
+    mocks.generateObject.mockResolvedValue({
+      object: { ok: true },
+      usage: { inputTokens: 12, outputTokens: 4 },
+    });
+    await generateStructuredOutput(
+      'query',
+      z.object({ ok: z.boolean() }),
+      'sys',
+      'user',
+      {},
+      { usageSubjectId: 's1' },
+    );
+    expect(mocks.recordUsage).toHaveBeenCalledWith({
+      task: 'query',
+      model: 'test-model',
+      inputTokens: 12,
+      outputTokens: 4,
+      subjectId: 's1',
+    });
+  });
+
   it('usage 缺失时仍调用 recordUsage（缺失守卫在 repo 层）且不抛错', async () => {
     mocks.generateObject.mockResolvedValue({ object: { ok: true }, usage: undefined });
     await expect(

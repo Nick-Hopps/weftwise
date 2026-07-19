@@ -205,7 +205,13 @@ export async function runImageInsertJob(
   cancelPoll.unref?.();
   let generated: Awaited<ReturnType<typeof generateImageAsset>>;
   try {
-    generated = await generateImageAsset(params.request, subject.slug, undefined, controller.signal);
+    generated = await generateImageAsset(
+      params.request,
+      subject.slug,
+      undefined,
+      controller.signal,
+      subject.id,
+    );
   } catch (error) {
     if (queue.isCancelRequested(job.id)) throw new AgentCancelled();
     throw error;

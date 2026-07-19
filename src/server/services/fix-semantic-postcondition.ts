@@ -229,6 +229,8 @@ export async function recheckFixSemanticPostconditions(input: {
       SemanticDecisionSchema,
       FIX_POSTCONDITION_SYSTEM_PROMPT,
       prompt,
+      {},
+      { usageSubjectId: input.subject.id },
     );
     if (input.shouldCancel()) return failedResult(semanticFindings);
 

@@ -27,6 +27,7 @@ const CANCEL_POLL_INTERVAL_MS = 2000;
 function recordCallUsage(
   route: { task: string; model: string },
   usage: { inputTokens?: number; outputTokens?: number } | undefined,
+  subjectId?: string,
 ): void {
   try {
     recordUsage({
@@ -34,6 +35,7 @@ function recordCallUsage(
       model: route.model,
       inputTokens: usage?.inputTokens,
       outputTokens: usage?.outputTokens,
+      ...(subjectId ? { subjectId } : {}),
     });
   } catch (err) {
     console.warn('[usage] record failed (ignored)', err);
@@ -86,6 +88,8 @@ export function withAnthropicStructuredOutputDefault(
 export interface StructuredOutputOptions {
   /** 仅在 JSON 解析或 schema 校验失败时重试；上限 2 次。 */
   schemaRetries?: number;
+  /** Usage 项目归因；已知 Subject 的调用必须传入。 */
+  usageSubjectId?: string;
 }
 
 function schemaRetrySystemPrompt(systemPrompt: string, detail: string | undefined): string {
@@ -150,7 +154,7 @@ export async function generateStructuredOutput<T>(
         console.log(
           `${prefix} done in ${elapsed}s | tokens: in=${result.usage?.inputTokens ?? 'n/a'} out=${result.usage?.outputTokens ?? 'n/a'}`,
         );
-        recordCallUsage(route, result.usage);
+        recordCallUsage(route, result.usage, options.usageSubjectId);
         return result.object;
       } catch (err) {
         if (attempt >= schemaRetries || !NoObjectGeneratedError.isInstance(err)) throw err;
@@ -197,6 +201,7 @@ export function streamTextResponse(
   userPrompt: string,
   abortSignal?: AbortSignal,
   overrides: LLMRouteOverride = {},
+  usageSubjectId?: string,
 ): ReturnType<typeof streamText> {
   const route = resolveTask(task, overrides);
   const prefix = `[LLM][Task: ${route.task}][Model: ${route.logLabel}]`;
@@ -231,7 +236,7 @@ export function streamTextResponse(
     providerOptions: route.providerOptions,
     abortSignal: mergedSignal,
     onFinish: ({ usage, totalUsage }) => {
-      recordCallUsage(route, totalUsage ?? usage);
+      recordCallUsage(route, totalUsage ?? usage, usageSubjectId);
     },
   });
 }
@@ -250,6 +255,7 @@ export function streamTextWithTools(
     maxSteps: number;
     abortSignal?: AbortSignal;
     overrides?: LLMRouteOverride;
+    usageSubjectId?: string;
   },
 ): ReturnType<typeof streamText> {
   // 注：本函数暂无可取消 job 调用方（query 走 streamTextWithTools 但 query 本身
@@ -290,7 +296,7 @@ export function streamTextWithTools(
     providerOptions: route.providerOptions,
     abortSignal: mergedSignal,
     onFinish: ({ usage, totalUsage }) => {
-      recordCallUsage(route, totalUsage ?? usage);
+      recordCallUsage(route, totalUsage ?? usage, opts.usageSubjectId);
     },
   });
 }
@@ -306,6 +312,7 @@ export async function generateTextWithTools(
     tools: Record<string, Tool>;
     maxSteps: number;
     overrides?: LLMRouteOverride;
+    usageSubjectId?: string;
     /** 每 2s 轮询一次；返回 true 时 abort 当前请求并抛出 AgentCancelled。 */
     shouldCancel?: () => boolean;
     /** 每步结束时对该步每个 tool call 回调一次；回调抛错被吞掉，不影响主流程。 */
@@ -354,7 +361,7 @@ export async function generateTextWithTools(
       abortSignal: controller.signal,
     });
     if (cancelledRef.current) throw new AgentCancelled();
-    recordCallUsage(route, result.totalUsage ?? result.usage);
+    recordCallUsage(route, result.totalUsage ?? result.usage, opts.usageSubjectId);
     return { text: result.text };
   } catch (err) {
     if (cancelledRef.current) throw new AgentCancelled();
@@ -396,7 +403,7 @@ export function embeddingModelId(): string {
 }
 
 /** 批量生成文本 embedding，返回 number[][] 向量数组。 */
-export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
+export async function generateEmbeddings(texts: string[], usageSubjectId?: string): Promise<number[][]> {
   if (!isEmbeddingConfigured()) {
     throw new LLMConfigError('Embedding model not configured (set tasks.embedding.model in llm-config.json)');
   }
@@ -405,6 +412,6 @@ export async function generateEmbeddings(texts: string[]): Promise<number[][]> {
     model: getEmbeddingModel(route),
     values: texts,
   });
-  recordCallUsage(route, { inputTokens: usage?.tokens, outputTokens: 0 });
+  recordCallUsage(route, { inputTokens: usage?.tokens, outputTokens: 0 }, usageSubjectId);
   return embeddings;
 }

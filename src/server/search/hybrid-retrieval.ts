@@ -15,7 +15,7 @@ export async function hybridRankSlugs(
   const ftsSlugs = pagesRepo.searchPages(subjectId, question).map((r) => r.page.slug);
   if (!isEmbeddingConfigured()) return ftsSlugs.slice(0, topN);
   try {
-    const [qVec] = await generateEmbeddings([question]);
+    const [qVec] = await generateEmbeddings([question], subjectId);
     const vecSlugs = semanticSearch(subjectId, qVec, VEC_K).map((r) => r.slug);
     return rrfMerge(ftsSlugs, vecSlugs, RRF_K, topN);
   } catch {

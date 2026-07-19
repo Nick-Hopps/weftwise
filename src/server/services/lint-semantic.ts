@@ -73,7 +73,7 @@ export async function runSemanticChecksForSubject(subject: Subject): Promise<Lin
       LINT_SYSTEM_PROMPT,
       userPrompt,
       { temperature: 0 },
-      { schemaRetries: 1 },
+      { schemaRetries: 1, usageSubjectId: subject.id },
     );
 
     allFindings.push(

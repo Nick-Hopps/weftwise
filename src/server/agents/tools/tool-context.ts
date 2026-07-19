@@ -132,7 +132,7 @@ export function agentToolContext(agentCtx: AgentContext, currentPageSlug?: strin
     context.generateImage = async (input) => {
       const { output, asset } = await generateImageAsset(input, subjectSlug, (usage) => {
         agentCtx.budget?.chargeTokens((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0));
-      });
+      }, undefined, agentCtx.subject.id);
       const assetEntry = {
         action: 'create' as const,
         path: asset.path,

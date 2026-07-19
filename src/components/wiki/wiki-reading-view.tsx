@@ -24,6 +24,11 @@ import { useLens } from '@/hooks/use-lens';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import { extractArticleToc } from '@/lib/article-toc';
+import {
+  readPageViewPreference,
+  writePageViewPreference,
+  type PageViewPreference,
+} from '@/lib/page-view-preference';
 import type { PageSourceDoc, PageSourceFormat } from '@/lib/contracts';
 import { useI18n } from '@/components/i18n-provider';
 
@@ -62,7 +67,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const [docs, setDocs] = useState<PageSourceDoc[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showOriginal, setShowOriginal] = useState(false);
+  const [viewPreference, setViewPreference] = useState<PageViewPreference>('reshape');
 
   const canSplit = sourceCount > 0;
   const showSplit = split && canSplit;
@@ -83,13 +88,12 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     if (!canSplit) setSplit(false);
   }, [canSplit]);
 
-  // Drop cached sources when navigating to a different page.
-  // 同时把透镜重置回"未触发/原文"——换页后默认仍显示 canonical，需重新点按钮。
+  // Drop cached sources and restore this page's canonical/reshape preference.
   useEffect(() => {
     setDocs(null);
     setError(null);
-    setShowOriginal(false);
-  }, [slug]);
+    setViewPreference(readPageViewPreference(window.localStorage, props.subjectSlug, slug));
+  }, [props.subjectSlug, slug]);
 
   // Fetch source documents lazily, the first time the panel is opened.
   // Deps are intentionally minimal: including `loading`/`apiFetch` here would
@@ -120,7 +124,8 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const lens = useLens(props.subjectSlug, slug);
   const reshaped = lens.data?.renderedMd;
   const reshapeUsable = reshaped != null && lens.data?.source !== 'canonical';
-  const usingReshaped = reshapeUsable && !showOriginal;
+  const showOriginal = viewPreference === 'canonical';
+  const usingReshaped = reshapeUsable && viewPreference === 'reshape';
   const displayContent = usingReshaped ? reshaped : props.content;
   const tocHeadings = useMemo(() => extractArticleToc(displayContent), [displayContent]);
 
@@ -136,7 +141,8 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
       onToggleSplit={() => setSplit((s) => !s)}
       reshapeState={reshapeState}
       onRequestReshape={() => {
-        setShowOriginal(false);
+        setViewPreference('reshape');
+        writePageViewPreference(window.localStorage, props.subjectSlug, slug, 'reshape');
         void lens.request();
       }}
     />
@@ -148,7 +154,11 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
         state={reshapeState}
         showOriginal={showOriginal}
         stale={lens.data?.stale ?? false}
-        onToggle={() => setShowOriginal((v) => !v)}
+        onToggle={() => {
+          const next = showOriginal ? 'reshape' : 'canonical';
+          setViewPreference(next);
+          writePageViewPreference(window.localStorage, props.subjectSlug, slug, next);
+        }}
         onRefresh={() => void lens.refresh()}
         onCancel={lens.cancel}
       />

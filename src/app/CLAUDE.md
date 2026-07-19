@@ -31,6 +31,7 @@
 |------|------|------|
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
+| `/api/usage` | GET | app 级 LLM 用量统计；`window=7d\|30d\|all` 控制时间范围，可选 `subjectId` 精确筛选项目；未知项目返回 400，缺省项目包含历史/全局未归因记录 |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20，路由内同步抓取），每 URL 独立 ingest job；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
 | `/api/query` | POST | Chat 流式问答：每轮先由统一结构化 LLM 分类 `read/propose/direct-reenrich/image-insert/reset-*` 与可选页面目标，服务端再按可信 page/selection/context 收窄能力；可选 `messageReferences` 只接收章节/摘录，必须同时提供 `pageSlug`，服务端用当前 Subject/page 补全身份并从页面仓库读取标题快照后随用户消息持久化。明确单页 re-enrich 直接创建 PendingAction，canonical 选区配图才进入独立 `image-insert` mode，工具面仅为只读工具加 `wiki.image.insert`，Reshape 确定性拒绝。重置请求以 `reset-confirmation` SSE 进入二次确认，后续 body 用 `intentContext:'reset-confirmation'` 复用同一分类入口；确认后前端仍调用受鉴权/CSRF/Subject 守卫的 `/api/reset`。分类失败时普通请求回退 read、重置确认回退 unclear。三种 Query mode 均可跨 Subject 只读、读取 active Subject History 与脱敏 workflow status；也支持两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
 | `/api/pending-actions` | GET | 按 `conversationId` 列出当前 subject 审批操作，供聊天刷新恢复；会话不存在/跨 subject 统一 404 |
@@ -161,6 +162,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `GET /api/usage` 新增可选 `subjectId` 项目筛选与存在性校验；不传项目时保持全局统计，旧版未归因用量不会被错误归入任一项目 |
 | 2026-07-17 | `/api/query` 流式分支接收有界 `messageReferences`；非空时要求当前 `pageSlug`，并由服务端当前 Subject/page 补全用户引用身份后随问题持久化，客户端不能用该字段伪造跨 Subject 来源 |
 | 2026-07-17 | 标志 v2：`icon.svg`/`apple-icon.png`/`opengraph-image.png` 随织纹 mark 改版重生成（三经 + 波形纬线，小尺寸可读），几何与 `shared/weftwise-mark.tsx` 保持一致 |
 | 2026-07-17 | canonical 选区配图改用独立 `image-insert` Query mode，只注册只读工具与 `wiki.image.insert`，避免无关 `wiki.preview_change` union schema 导致 provider 拒绝整批工具 |

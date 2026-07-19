@@ -109,7 +109,13 @@ export async function runAgentLoop(opts: {
 
   // 用量统计（设置页 Usage 面板）：ingest 各阶段绕过 provider-registry，这里单独记账。
   try {
-    recordUsage({ task: route.task, model: route.model, inputTokens, outputTokens });
+    recordUsage({
+      task: route.task,
+      model: route.model,
+      inputTokens,
+      outputTokens,
+      subjectId: ctx.subject.id,
+    });
   } catch (err) {
     console.warn('[usage] record failed (ignored)', err);
   }

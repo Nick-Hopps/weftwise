@@ -263,6 +263,7 @@ export async function runCurateJob(
     messages: [{ role: 'user', content: buildCurateAgenticUserPrompt(metas, promptCtx, { auto: seedSet !== null }) }],
     tools,
     maxSteps: CURATE_MAX_STEPS,
+    usageSubjectId: subject.id,
     shouldCancel: () => queue.isCancelRequested(job.id),
     onToolCall: (info) => emit('curate:tool', toolActivityLine(info.tool, info.args), { tool: info.tool }),
   });

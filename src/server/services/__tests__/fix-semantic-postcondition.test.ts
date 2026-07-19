@@ -115,7 +115,8 @@ describe('recheckFixSemanticPostconditions', () => {
 
     expect(generateMock).toHaveBeenCalledTimes(1);
     expect(generateMock.mock.calls[0][0]).toBe('lint');
-    expect(generateMock.mock.calls[0]).toHaveLength(4);
+    expect(generateMock.mock.calls[0]).toHaveLength(6);
+    expect(generateMock.mock.calls[0][5]).toEqual({ usageSubjectId: subject.id });
     expect(result).toEqual({
       status: 'residual',
       residualFindings: [
