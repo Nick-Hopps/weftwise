@@ -9,7 +9,7 @@ import { buildTitleSlugMap } from '@/lib/title-slug-map';
 import type { WikiPage } from '@/lib/contracts';
 import { Button } from '@/components/ui/button';
 import { MdEditor } from './md-editor';
-import { EditorPreview } from './editor-preview';
+import { DeferredEditorPreview } from './deferred-editor-preview';
 import { useI18n } from '@/components/i18n-provider';
 
 const INVALIDATE_KEYS = ['pages', 'page-detail', 'graph', 'search', 'jobs', 'backlinks', 'context', 'frontmatter'];
@@ -138,7 +138,7 @@ export function PageEditor({ slug }: { slug: string }) {
           value={current}
           onChange={setValue}
           previewRenderer={(source) => (
-            <EditorPreview source={source} titleSlugMap={titleSlugMap} slug={slug} />
+            <DeferredEditorPreview source={source} titleSlugMap={titleSlugMap} slug={slug} />
           )}
         />
       </div>

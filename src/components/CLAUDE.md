@@ -56,8 +56,8 @@
 - `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行右侧 `actions` 插槽渲染统一动作条（Edit 已移入 `PageActions`，不再有内置 `editHref`/Edit 按钮）
 - `page-skeleton.tsx` —— loading skeleton
 - `page-editor.tsx` —— 🆕 在线编辑容器：根/loading/error **全高 flex 布局**（`flex flex-col h-full`，去掉旧 `max-w-content` 居中收窄）；拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；额外拉 `['pages',subjectId]` 经 `buildTitleSlugMap` 构建 titleSlugMap 传入预览；错误内联、dirty 守卫
-- `md-editor.tsx` —— 🆕 `@uiw/react-md-editor` 的 `dynamic(ssr:false)` 封装；`height="100%"` 撑满父高，`components.preview` 接 `previewRenderer` 自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
-- `editor-preview.tsx` —— 🆕 编辑器实时预览：复用 `PageRenderer`（**不传 title**→跳过 FrontmatterDisplay、仅正文），与阅读页同管线（wikilink/callout/mermaid/数学公式一致），`renderMarkdown` 的 `remarkFrontmatter` 自动剥离 `---` 块
+- `md-editor.tsx` —— `@uiw/react-md-editor/nohighlight` 的 `dynamic(ssr:false)` 轻量封装；动态加载有全高 skeleton，默认 `preview="edit"` 且关闭全文 Prism 高亮，用户仍可用内置工具栏按需切换 Live / Preview；`height="100%"` 撑满父高，`components.preview` 接自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
+- `editor-preview.tsx` / `deferred-editor-preview.tsx` —— 编辑器按需富预览：后者把连续输入合并为 400ms 停顿后的一次更新，再由前者复用 `PageRenderer`（**不传 title**→跳过 FrontmatterDisplay、仅正文），与阅读页同管线（wikilink/callout/mermaid/数学公式一致），避免逐键执行完整渲染
 - `retitle-notice.tsx` —— 🆕 阅读页一次性 banner：读 sessionStorage `wiki:retitle-notice`（编辑器改标题保存后写入），展示「已同步更新 N 处引用」5s 后消失；`page-editor` 保存 onSuccess 据 PUT 返回的 `referencesUpdated` 写入
 - `selection-ask-button.tsx` —— 正文选区末端浮出的「Ask AI」按钮：消费 `hooks/use-text-selection`（选区限定在阅读正文，并组合首尾完整顶层 Markdown 块 offset）；点击调 `ui-store.askAboutSelection`，结构化信箱保留 canonical/reshape、quote、section 和块范围；滚动/折叠/落在容器外自动隐藏
 

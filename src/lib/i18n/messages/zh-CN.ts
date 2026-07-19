@@ -243,6 +243,7 @@ export const zhCN = {
   'wiki.lens.loggedHard': '已记录“太难”，后续页面会据此调整',
   'wiki.lens.loggedEasy': '已记录“太浅”，后续页面会据此调整',
   'wiki.editor.loadError': '无法加载页面进行编辑。',
+  'wiki.editor.loading': '正在加载编辑器…',
   'wiki.editor.back': '返回页面',
   'wiki.editor.editing': '正在编辑',
   'wiki.editor.discard': '放弃尚未保存的更改？',
