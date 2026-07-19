@@ -13,8 +13,8 @@
  * ============================================================================= */
 
 :root {
-  /* ─── BASE · Brand weft (纬线朱 — 动作/交互强调) ────────────────────────── */
-  /* UI 主档 500 比 logo 原色略深（#CC3F27，白字 4.87:1）；300/400 供暗色模式。 */
+  /* ─── BASE · Brand weft (纬线朱 — 标志/品牌强调) ────────────────────────── */
+  /* 保留完整品牌色阶；默认产品交互改由 warp 承担，避免正常操作呈现为错误。 */
   --base-weft-50:  252 240 236;   /* #FCF0EC */
   --base-weft-100: 249 224 216;   /* #F9E0D8 */
   --base-weft-200: 242 195 181;   /* #F2C3B5 */
@@ -24,7 +24,7 @@
   --base-weft-600: 178  53  32;   /* #B23520 */
   --base-weft-700: 145  44  27;   /* #912C1B */
 
-  /* ─── BASE · Brand warp (经线靛 — 连接/结构：链接、图谱) ────────────────── */
+  /* ─── BASE · Brand warp (经线靛 — 产品交互/连接/结构) ───────────────────── */
   --base-warp-50:  238 241 247;   /* #EEF1F7 */
   --base-warp-100: 223 228 240;   /* #DFE4F0 */
   --base-warp-200: 190 200 223;   /* #BEC8DF */
@@ -120,15 +120,15 @@
   --color-border-default: var(--base-neutral-200);
   --color-border-subtle:  var(--base-neutral-150);
   --color-border-strong:  var(--base-neutral-300);
-  --color-border-accent:  var(--base-weft-500);
+  --color-border-accent:  var(--base-warp-500);
 
-  /* ─── SEMANTIC · Accent（weft 纬线朱 = 动作） ───────────────────────────── */
-  --color-accent-primary:        var(--base-weft-500);
-  --color-accent-primary-hover:  var(--base-weft-600);
-  --color-accent-primary-active: var(--base-weft-700);
-  --color-accent-subtle:         var(--base-weft-50);
+  /* ─── SEMANTIC · Accent（warp 经线靛 = 正常操作/当前状态） ──────────────── */
+  --color-accent-primary:        var(--base-warp-500);
+  --color-accent-primary-hover:  var(--base-warp-600);
+  --color-accent-primary-active: var(--base-warp-700);
+  --color-accent-subtle:         var(--base-warp-50);
   --color-accent-fg:             var(--base-neutral-0);
-  --color-accent-strong-fg:      var(--base-weft-700);
+  --color-accent-strong-fg:      var(--base-warp-700);
 
   /* ─── SEMANTIC · State ──────────────────────────────────────────────────── */
   --color-success-fg:     var(--base-success-600);
@@ -145,10 +145,10 @@
   /* ─── SEMANTIC · Input & Focus ──────────────────────────────────────────── */
   --color-input-bg:           var(--base-neutral-0);
   --color-input-border:       var(--base-neutral-200);
-  --color-input-border-focus: var(--base-weft-500);
+  --color-input-border-focus: var(--base-warp-500);
   --color-input-placeholder:  var(--base-neutral-500);
-  --color-focus-ring:         var(--base-weft-500);
-  --color-selection-bg:       var(--base-weft-100);
+  --color-focus-ring:         var(--base-warp-500);
+  --color-selection-bg:       var(--base-warp-100);
 
   /* ─── SEMANTIC · Link（warp 经线靛 = 连接：wikilink 等结构性链接） ──────── */
   --color-link:       var(--base-warp-500);
@@ -162,14 +162,14 @@
   --color-code-fg:       var(--base-neutral-900);
   --color-quote-border:  var(--base-neutral-300);
 
-  /* ─── SEMANTIC · Graph (Cytoscape)（节点=warp 结构，触碰=weft 亮起） ────── */
+  /* ─── SEMANTIC · Graph (Cytoscape)（节点与交互均归于 warp 结构语义） ───── */
   --color-graph-canvas:      var(--base-neutral-50);
   --color-graph-node:        var(--base-warp-500);
   --color-graph-node-border: var(--base-warp-700);
   --color-graph-orphan:      var(--base-neutral-400);
   --color-graph-edge:        var(--base-neutral-300);
   --color-graph-label:       var(--base-neutral-900);
-  --color-graph-active:      var(--base-weft-500);
+  --color-graph-active:      var(--base-warp-500);
 
   /* ─── SEMANTIC · Scrollbar ──────────────────────────────────────────────── */
   /* 默认透明（隐藏），滚动时渐显（见下方 [data-scrolling] 规则）。 */
@@ -215,18 +215,21 @@
   --color-border-subtle:   36  36  41;
   --color-border-strong:   60  60  68;
 
-  /* 暗色主按钮：weft-400 上用深墨前景（白字仅 2.6:1，深墨 6.7:1）。 */
-  --color-accent-primary:        var(--base-weft-400);
-  --color-accent-primary-hover:  var(--base-weft-300);
-  --color-accent-primary-active: var(--base-weft-500);
-  --color-accent-subtle:          54  32  27;
+  --color-border-accent:         var(--base-warp-400);
+
+  /* 暗色主按钮：warp-400 配深墨前景，保持清晰的非危险操作语义。 */
+  --color-accent-primary:        var(--base-warp-400);
+  --color-accent-primary-hover:  var(--base-warp-200);
+  --color-accent-primary-active: var(--base-warp-500);
+  --color-accent-subtle:          31  35  47;
   --color-accent-fg:             var(--base-neutral-950);
-  --color-accent-strong-fg:      var(--base-weft-200);
+  --color-accent-strong-fg:      var(--base-warp-200);
 
   --color-input-bg:          26 26 29;
   --color-input-border:       var(--color-border-default);
+  --color-input-border-focus: var(--base-warp-400);
   --color-input-placeholder:  var(--base-neutral-600);
-  --color-focus-ring:         var(--base-weft-400);
+  --color-focus-ring:         var(--base-warp-400);
   --color-selection-bg:       var(--color-accent-subtle);
 
   --color-link:       var(--base-warp-400);
@@ -245,7 +248,7 @@
   --color-graph-orphan:      var(--base-neutral-700);
   --color-graph-edge:        var(--color-border-strong);
   --color-graph-label:       var(--color-fg-primary);
-  --color-graph-active:      var(--base-weft-400);
+  --color-graph-active:      var(--base-warp-400);
 
   --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.35);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.45);
