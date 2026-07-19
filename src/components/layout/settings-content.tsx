@@ -26,6 +26,10 @@ import type {
 } from '@/lib/contracts';
 import { fetchSubjects } from '@/components/subjects/subjects-api';
 import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
+import { useI18n } from '@/components/i18n-provider';
+import type { Locale } from '@/lib/i18n/config';
+import type { MessageKey } from '@/lib/i18n/messages';
+import type { I18n } from '@/lib/i18n/translator';
 import {
   SettingRow,
   SwitchRow,
@@ -39,8 +43,8 @@ import {
 } from './settings-rows';
 import {
   APP_VERSION,
-  SETTINGS_CATEGORIES,
   SETTINGS_SECTIONS,
+  getSettingsCategories,
   type CategoryId,
   type SettingsSectionId,
 } from './settings-categories';
@@ -90,7 +94,8 @@ interface SettingsContentProps {
 }
 
 export function SettingsContent(props: SettingsContentProps) {
-  const category = SETTINGS_CATEGORIES.find((c) => c.id === props.active);
+  const { t } = useI18n();
+  const category = getSettingsCategories(t).find((c) => c.id === props.active);
   const sections: readonly SettingsSectionId[] = SETTINGS_SECTIONS[props.active];
 
   return (
@@ -103,7 +108,7 @@ export function SettingsContent(props: SettingsContentProps) {
 
         <div className="space-y-7">
           {sections.includes('appearance') && (
-            <SettingsSection title="Appearance">
+            <SettingsSection title={t('settings.section.appearance')}>
               <AppearancePanel
                 darkMode={props.darkMode}
                 toggleDarkMode={props.toggleDarkMode}
@@ -114,7 +119,7 @@ export function SettingsContent(props: SettingsContentProps) {
           )}
 
           {sections.includes('language') && (
-            <SettingsSection title="Content language">
+            <SettingsSection title={t('settings.section.contentLanguage')}>
               <LanguagePanel
                 settings={props.settings}
                 settingsLoading={props.settingsLoading}
@@ -124,31 +129,31 @@ export function SettingsContent(props: SettingsContentProps) {
           )}
 
           {sections.includes('cognitive-lens') && (
-            <SettingsSection title="Cognitive Lens">
+            <SettingsSection title={t('settings.section.cognitiveLens')}>
               <CognitiveLensPanel />
             </SettingsSection>
           )}
 
           {sections.includes('agents') && (
-            <SettingsSection title="Agent behavior">
+            <SettingsSection title={t('settings.section.agentBehavior')}>
               <AgentsPanel settings={props.settings} savePartial={props.savePartial} />
             </SettingsSection>
           )}
 
           {sections.includes('web-search') && (
-            <SettingsSection title="Web grounding">
+            <SettingsSection title={t('settings.section.webGrounding')}>
               <WebSearchPanel settings={props.settings} savePartial={props.savePartial} />
             </SettingsSection>
           )}
 
           {sections.includes('maintenance') && (
-            <SettingsSection title="Periodic maintenance">
+            <SettingsSection title={t('settings.section.maintenance')}>
               <MaintenancePanel settings={props.settings} savePartial={props.savePartial} />
             </SettingsSection>
           )}
 
           {sections.includes('usage') && (
-            <SettingsSection title="LLM usage">
+            <SettingsSection title={t('settings.section.usage')}>
               <UsagePanel />
             </SettingsSection>
           )}
@@ -183,17 +188,32 @@ function AppearancePanel({
   SettingsContentProps,
   'darkMode' | 'toggleDarkMode' | 'sidebarWidth' | 'resetSidebarWidth'
 >) {
+  const { locale, setLocale, isLocalePending, t } = useI18n();
   return (
     <div className="space-y-4">
+      <SegmentedRow<Locale>
+        label={t('settings.interfaceLanguage.label')}
+        description={t('settings.interfaceLanguage.description')}
+        value={locale}
+        options={[
+          { value: 'en', label: t('settings.interfaceLanguage.english') },
+          { value: 'zh-CN', label: t('settings.interfaceLanguage.chinese') },
+        ]}
+        onSave={setLocale}
+        save={{ pending: isLocalePending, error: undefined }}
+      />
       <SwitchRow
-        label="Dark mode"
-        description="Toggle between light and dark theme"
+        label={t('settings.darkMode.label')}
+        description={t('settings.darkMode.description')}
         checked={darkMode}
         onSave={() => toggleDarkMode()}
       />
       <SettingRow
-        label="Sidebar width"
-        description={`${Math.round(sidebarWidth)}px (default ${SIDEBAR_WIDTH_DEFAULT}px)`}
+        label={t('settings.sidebarWidth.label')}
+        description={t('settings.sidebarWidth.description', {
+          width: Math.round(sidebarWidth),
+          defaultWidth: SIDEBAR_WIDTH_DEFAULT,
+        })}
       >
         <Button
           intent="outline"
@@ -203,52 +223,53 @@ function AppearancePanel({
           className="gap-1.5"
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          Reset
+          {t('common.reset')}
         </Button>
       </SettingRow>
     </div>
   );
 }
 
-const LENS_LABELS: Record<keyof StylePrefs, string> = {
-  readingLevel: 'Reading level',
-  verbosity: 'Verbosity',
-  exampleDensity: 'Examples & analogies',
-  formality: 'Tone',
+const LENS_LABEL_KEYS: Record<keyof StylePrefs, MessageKey> = {
+  readingLevel: 'settings.lens.readingLevel',
+  verbosity: 'settings.lens.verbosity',
+  exampleDensity: 'settings.lens.examples',
+  formality: 'settings.lens.tone',
 };
 
 const LENS_OPTIONS = {
   readingLevel: [
-    ['beginner', 'Beginner'],
-    ['intermediate', 'Intermediate'],
-    ['advanced', 'Advanced'],
+    ['beginner', 'settings.lens.beginner'],
+    ['intermediate', 'settings.lens.intermediate'],
+    ['advanced', 'settings.lens.advanced'],
   ],
   verbosity: [
-    ['terse', 'Terse'],
-    ['balanced', 'Balanced'],
-    ['thorough', 'Thorough'],
+    ['terse', 'settings.lens.terse'],
+    ['balanced', 'settings.lens.balanced'],
+    ['thorough', 'settings.lens.thorough'],
   ],
   exampleDensity: [
-    ['few', 'Few'],
-    ['some', 'Some'],
-    ['many', 'Many'],
+    ['few', 'settings.lens.few'],
+    ['some', 'settings.lens.some'],
+    ['many', 'settings.lens.many'],
   ],
   formality: [
-    ['casual', 'Casual'],
-    ['neutral', 'Neutral'],
-    ['formal', 'Formal'],
+    ['casual', 'settings.lens.casual'],
+    ['neutral', 'settings.lens.neutral'],
+    ['formal', 'settings.lens.formal'],
   ],
-} satisfies Record<keyof StylePrefs, [string, string][]>;
+} satisfies Record<keyof StylePrefs, [string, MessageKey][]>;
 
 const LENS_KEYS: (keyof StylePrefs)[] = ['readingLevel', 'verbosity', 'exampleDensity', 'formality'];
 
 // 认知画像设置：走 /api/profile（独立 user_profiles 表，非 app_settings），不写 Zustand。
 function CognitiveLensPanel() {
+  const { t } = useI18n();
   const { data, isLoading } = useProfile();
   const update = useUpdateProfile();
 
   if (isLoading || !data) {
-    return <p className="text-xs text-foreground-tertiary">Loading…</p>;
+    return <p className="text-xs text-foreground-tertiary">{t('common.loading')}</p>;
   }
   const profile = data.profile;
   const save = toSave(update);
@@ -261,20 +282,16 @@ function CognitiveLensPanel() {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-foreground-tertiary">
-        Adapts how each page is explained to your background and preferences (rephrasing only — facts
-        never change, and the original is always one click away; it also fine-tunes itself from your
-        “too hard / too shallow” feedback).
-      </p>
+      <p className="text-xs text-foreground-tertiary">{t('settings.lens.description')}</p>
 
       {LENS_KEYS.map((key) => (
         <SegmentedRow
           key={key}
-          label={LENS_LABELS[key]}
+          label={t(LENS_LABEL_KEYS[key])}
           value={profile.stylePrefs[key]}
-          options={LENS_OPTIONS[key].map(([value, label]) => ({
+          options={LENS_OPTIONS[key].map(([value, labelKey]) => ({
             value: value as StylePrefs[typeof key],
-            label,
+            label: t(labelKey),
           }))}
           onSave={(v) => savePrefs({ [key]: v } as Partial<StylePrefs>)}
           save={save}
@@ -282,10 +299,10 @@ function CognitiveLensPanel() {
       ))}
 
       <TextareaRow
-        label="Background"
-        description="Your background and goals (free text)"
+        label={t('settings.lens.background.label')}
+        description={t('settings.lens.background.description')}
         value={profile.backgroundSummary}
-        placeholder="e.g. Backend engineer, comfortable with distributed systems but new to machine learning"
+        placeholder={t('settings.lens.background.placeholder')}
         onSave={(v) => update.mutate({ backgroundSummary: v })}
         save={save}
       />
@@ -298,6 +315,7 @@ function LanguagePanel({
   settingsLoading,
   saveLanguage,
 }: Pick<SettingsContentProps, 'settings' | 'settingsLoading' | 'saveLanguage'>) {
+  const { t } = useI18n();
   const savedLanguage = settings?.wikiLanguage ?? '';
   const presetValues = new Set<string>(WIKI_LANGUAGE_PRESETS.map((p) => p.value));
   const languageOptions: { value: string; label: string }[] = WIKI_LANGUAGE_PRESETS.map((p) => ({
@@ -305,13 +323,13 @@ function LanguagePanel({
     label: p.label,
   }));
   if (savedLanguage && !presetValues.has(savedLanguage)) {
-    languageOptions.unshift({ value: savedLanguage, label: `${savedLanguage} (custom)` });
+    languageOptions.unshift({ value: savedLanguage, label: t('common.custom', { value: savedLanguage }) });
   }
   return (
     <div className="space-y-4">
       <SelectRow
-        label="Wiki language"
-        description="Language LLM uses for new wiki content (slugs and wikilinks stay verbatim)"
+        label={t('settings.wikiLanguage.label')}
+        description={t('settings.wikiLanguage.description')}
         value={savedLanguage}
         options={languageOptions}
         disabled={settingsLoading}
@@ -326,11 +344,12 @@ function AgentsPanel({
   settings,
   savePartial,
 }: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  const { t } = useI18n();
   const save = toSave(savePartial);
   return (
     <div className="space-y-4">
       <NumberRow
-        label="Max steps per agent"
+        label={t('settings.agent.maxSteps')}
         value={settings?.agentMaxSteps ?? 25}
         min={1}
         max={200}
@@ -338,8 +357,8 @@ function AgentsPanel({
         save={save}
       />
       <NumberRow
-        label="Total token budget per task"
-        description="Default 500k handles sources up to ~200k tokens; raise to 1-1.5M for book-sized files"
+        label={t('settings.agent.tokenBudget')}
+        description={t('settings.agent.tokenBudgetDescription')}
         value={settings?.agentMaxTokensPerJob ?? 500_000}
         min={10_000}
         max={5_000_000}
@@ -347,7 +366,7 @@ function AgentsPanel({
         save={save}
       />
       <NumberRow
-        label="Parallel sub-agents"
+        label={t('settings.agent.parallel')}
         value={settings?.agentMaxParallelSubAgents ?? 3}
         min={1}
         max={10}
@@ -355,11 +374,11 @@ function AgentsPanel({
         save={save}
       />
       <SegmentedRow
-        label="LLM selection mode"
+        label={t('settings.agent.selectionMode')}
         value={settings?.agentTaskRouterMode ?? 'frontmatter-override'}
         options={[
-          { value: 'task-router-only', label: 'Task router only' },
-          { value: 'frontmatter-override', label: 'Frontmatter override' },
+          { value: 'task-router-only', label: t('settings.agent.taskRouterOnly') },
+          { value: 'frontmatter-override', label: t('settings.agent.frontmatterOverride') },
         ]}
         onSave={(v) =>
           savePartial.mutate({
@@ -369,15 +388,15 @@ function AgentsPanel({
         save={save}
       />
       <SwitchRow
-        label="Auto-curate after ingest"
-        description="Automatically tidy touched pages after each ingest"
+        label={t('settings.agent.autoCurate')}
+        description={t('settings.agent.autoCurateDescription')}
         checked={settings?.agentAutoCurate ?? true}
         onSave={(v) => savePartial.mutate({ agentAutoCurate: v })}
         save={save}
       />
       <NumberRow
-        label="Ingest concurrency"
-        description="How many ingest jobs run at once; other job types always run alone"
+        label={t('settings.agent.ingestConcurrency')}
+        description={t('settings.agent.ingestConcurrencyDescription')}
         value={settings?.ingestConcurrency ?? 2}
         min={1}
         max={4}
@@ -392,19 +411,17 @@ function WebSearchPanel({
   settings,
   savePartial,
 }: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  const { t } = useI18n();
   const save = toSave(savePartial);
   return (
     <div className="space-y-4">
-      <p className="text-xs text-foreground-tertiary">
-        Used by the ingest verifier to fact-check augmentation callouts and import cited pages as
-        sources. Leave the API key empty to disable (verifier falls back to self-check).
-      </p>
-      <SettingRow label="Provider" description="Only Tavily is supported for now">
+      <p className="text-xs text-foreground-tertiary">{t('settings.web.description')}</p>
+      <SettingRow label={t('settings.web.provider')} description={t('settings.web.providerDescription')}>
         <span className="text-xs text-foreground-secondary">Tavily</span>
       </SettingRow>
       <TextRow
-        label="API key"
-        description="Stored in app settings; empty disables web grounding"
+        label={t('settings.web.apiKey')}
+        description={t('settings.web.apiKeyDescription')}
         type="password"
         placeholder="tvly-…"
         value={settings?.webSearchApiKey ?? ''}
@@ -412,7 +429,7 @@ function WebSearchPanel({
         save={save}
       />
       <NumberRow
-        label="Max results per query"
+        label={t('settings.web.maxResults')}
         value={settings?.webSearchMaxResults ?? 5}
         min={1}
         max={10}
@@ -423,21 +440,23 @@ function WebSearchPanel({
   );
 }
 
-function formatSweepTime(iso: string | null): string {
-  if (!iso) return 'Never';
+function formatSweepTime(iso: string | null, i18n: Pick<I18n, 't' | 'formatDate'>): string {
+  if (!iso) return i18n.t('common.never');
   const then = new Date(iso).getTime();
   const mins = Math.max(0, Math.round((Date.now() - then) / 60_000));
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return i18n.t('settings.relative.justNow');
+  if (mins < 60) return i18n.t('settings.relative.minutesAgo', { count: mins });
   const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} h ago`;
-  return new Date(iso).toLocaleString();
+  if (hrs < 24) return i18n.t('settings.relative.hoursAgo', { count: hrs });
+  return i18n.formatDate(iso, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 function MaintenancePanel({
   settings,
   savePartial,
 }: Pick<SettingsContentProps, 'settings' | 'savePartial'>) {
+  const i18n = useI18n();
+  const { t } = i18n;
   // 只读运行态：上次 sweep + 当前到期页数（与设置分离，走 /api/maintenance/status）。
   const statusQuery = useQuery<MaintenanceStatus>({
     queryKey: ['maintenance-status'],
@@ -460,17 +479,17 @@ function MaintenancePanel({
   return (
     <div className="space-y-4">
       <SwitchRow
-        label="Periodic maintenance"
-        description="Revisit & deepen pages over time (off by default)"
+        label={t('settings.maintenance.enabled')}
+        description={t('settings.maintenance.enabledDescription')}
         checked={settings?.maintenanceEnabled ?? false}
         onSave={(v) => savePartial.mutate({ maintenanceEnabled: v })}
         save={save}
       />
 
       <MultiSelectRow
-        label="Maintenance scope"
-        description="Projects eligible for periodic maintenance"
-        allLabel="All projects"
+        label={t('settings.maintenance.scope')}
+        description={t('settings.maintenance.scopeDescription')}
+        allLabel={t('settings.maintenance.allProjects')}
         value={scope.mode === 'all' ? 'all' : scope.subjectIds}
         options={(subjectsQuery.data ?? []).map((subject) => ({
           value: subject.id,
@@ -487,20 +506,20 @@ function MaintenancePanel({
         save={save}
       />
 
-      <SettingRow label="Status" description="Read-only — refreshes when this panel opens">
+      <SettingRow label={t('settings.maintenance.status')} description={t('settings.maintenance.statusDescription')}>
         <div className="text-xs text-foreground-secondary tabular-nums space-y-0.5 text-right">
           {statusQuery.isError ? (
-            <span className="text-danger">unavailable</span>
+            <span className="text-danger">{t('common.unavailable')}</span>
           ) : (
             <>
-              <div>Last sweep: {status ? formatSweepTime(status.lastSweepAt) : '…'}</div>
-              <div>Pages due now: {status ? status.dueCount : '…'}</div>
+              <div>{t('settings.maintenance.lastSweep', { time: status ? formatSweepTime(status.lastSweepAt, i18n) : '…' })}</div>
+              <div>{t('settings.maintenance.pagesDue', { count: status ? status.dueCount : '…' })}</div>
             </>
           )}
         </div>
       </SettingRow>
       <NumberRow
-        label="Sweep interval (hours)"
+        label={t('settings.maintenance.interval')}
         value={settings?.maintenanceSweepIntervalHours ?? 24}
         min={1}
         max={168}
@@ -508,8 +527,8 @@ function MaintenancePanel({
         save={save}
       />
       <NumberRow
-        label="Max pages per sweep"
-        description="Caps re-enrich jobs enqueued each cycle (cost guardrail)"
+        label={t('settings.maintenance.maxPages')}
+        description={t('settings.maintenance.maxPagesDescription')}
         value={settings?.maintenanceMaxPagesPerSweep ?? 5}
         min={1}
         max={50}
@@ -520,14 +539,14 @@ function MaintenancePanel({
   );
 }
 
-const USAGE_WINDOW_OPTIONS = [
-  { value: '7d', label: '7 days' },
-  { value: '30d', label: '30 days' },
-  { value: 'all', label: 'All time' },
-] as const;
-
 /** Usage 面板：LLM 用量统计（app 级，不随 subject；弹窗打开时取数，无轮询）。 */
 function UsagePanel() {
+  const { t } = useI18n();
+  const usageWindowOptions = [
+    { value: '7d', label: t('settings.usage.sevenDays') },
+    { value: '30d', label: t('settings.usage.thirtyDays') },
+    { value: 'all', label: t('settings.usage.allTime') },
+  ] satisfies Array<{ value: UsageWindow; label: string }>;
   const [timeWindow, setTimeWindow] = useState<UsageWindow>('30d');
   const { data, isLoading } = useQuery({
     queryKey: ['usage', timeWindow],
@@ -553,24 +572,24 @@ function UsagePanel() {
     <div className="space-y-4">
       <Segmented
         value={timeWindow}
-        options={[...USAGE_WINDOW_OPTIONS]}
+        options={usageWindowOptions}
         onChange={setTimeWindow}
-        aria-label="Usage time window"
+        aria-label={t('settings.usage.windowLabel')}
       />
       {isLoading ? (
-        <p className="text-xs text-foreground-tertiary">Loading…</p>
+        <p className="text-xs text-foreground-tertiary">{t('common.loading')}</p>
       ) : rows.length === 0 ? (
-        <p className="text-xs text-foreground-tertiary">No usage recorded yet.</p>
+        <p className="text-xs text-foreground-tertiary">{t('settings.usage.empty')}</p>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
           <table className="w-full min-w-[34rem] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-foreground-tertiary">
-                <th className="py-1.5 pr-2 font-medium">Task</th>
-                <th className="py-1.5 pr-2 font-medium">Model</th>
-                <th className="py-1.5 pr-2 text-right font-medium">Calls</th>
-                <th className="py-1.5 pr-2 text-right font-medium">Input</th>
-                <th className="py-1.5 text-right font-medium">Output</th>
+                <th className="py-1.5 pr-2 font-medium">{t('settings.usage.task')}</th>
+                <th className="py-1.5 pr-2 font-medium">{t('settings.usage.model')}</th>
+                <th className="py-1.5 pr-2 text-right font-medium">{t('settings.usage.calls')}</th>
+                <th className="py-1.5 pr-2 text-right font-medium">{t('settings.usage.input')}</th>
+                <th className="py-1.5 text-right font-medium">{t('settings.usage.output')}</th>
               </tr>
             </thead>
             <tbody>
@@ -593,7 +612,7 @@ function UsagePanel() {
                 </tr>
               ))}
               <tr className="font-medium">
-                <td className="py-1.5 pr-2 text-xs">Total</td>
+                <td className="py-1.5 pr-2 text-xs">{t('settings.usage.total')}</td>
                 <td className="py-1.5 pr-2" />
                 <td className="py-1.5 pr-2 text-right tabular-nums">{totals.calls}</td>
                 <td className="py-1.5 pr-2 text-right tabular-nums">
@@ -607,7 +626,7 @@ function UsagePanel() {
           </table>
         </div>
       )}
-      <p className="text-xs text-foreground-tertiary">Usage data is retained for 90 days.</p>
+      <p className="text-xs text-foreground-tertiary">{t('settings.usage.retention')}</p>
     </div>
   );
 }

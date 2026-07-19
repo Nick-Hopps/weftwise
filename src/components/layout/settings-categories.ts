@@ -4,6 +4,8 @@
  */
 
 import { BarChart3, Bot, Brain, Settings2, type LucideIcon } from 'lucide-react';
+import type { MessageKey } from '@/lib/i18n/messages';
+import type { TranslationFunction } from '@/lib/i18n/translator';
 
 export type CategoryId = 'general' | 'personalization' | 'automation' | 'usage';
 
@@ -23,34 +25,49 @@ export interface SettingsCategory {
   icon: LucideIcon;
 }
 
+interface SettingsCategoryDefinition {
+  id: CategoryId;
+  labelKey: MessageKey;
+  descriptionKey: MessageKey;
+  icon: LucideIcon;
+}
+
 export const APP_VERSION = '0.1.0';
 
-export const SETTINGS_CATEGORIES: SettingsCategory[] = [
+export const SETTINGS_CATEGORY_DEFINITIONS: SettingsCategoryDefinition[] = [
   {
     id: 'general',
-    label: 'General',
-    description: 'Appearance and content defaults',
+    labelKey: 'settings.category.general.label',
+    descriptionKey: 'settings.category.general.description',
     icon: Settings2,
   },
   {
     id: 'personalization',
-    label: 'Personalization',
-    description: 'How pages adapt to you',
+    labelKey: 'settings.category.personalization.label',
+    descriptionKey: 'settings.category.personalization.description',
     icon: Brain,
   },
   {
     id: 'automation',
-    label: 'Automation',
-    description: 'Agents, grounding, and upkeep',
+    labelKey: 'settings.category.automation.label',
+    descriptionKey: 'settings.category.automation.description',
     icon: Bot,
   },
   {
     id: 'usage',
-    label: 'Usage',
-    description: 'LLM activity and tokens',
+    labelKey: 'settings.category.usage.label',
+    descriptionKey: 'settings.category.usage.description',
     icon: BarChart3,
   },
 ];
+
+export function getSettingsCategories(t: TranslationFunction): SettingsCategory[] {
+  return SETTINGS_CATEGORY_DEFINITIONS.map(({ labelKey, descriptionKey, ...category }) => ({
+    ...category,
+    label: t(labelKey),
+    description: t(descriptionKey),
+  }));
+}
 
 export const SETTINGS_SECTIONS = {
   general: ['appearance', 'language'],

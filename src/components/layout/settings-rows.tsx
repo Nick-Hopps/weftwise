@@ -16,6 +16,7 @@ import { Input, Textarea } from '@/components/ui/input';
 import { validateIntInRange } from '@/lib/settings-validation';
 import { cn } from '@/lib/cn';
 import { isImeComposing } from '@/lib/keyboard';
+import { useI18n } from '@/components/i18n-provider';
 
 export interface RowSaveState {
   pending: boolean;
@@ -101,10 +102,11 @@ function SaveIndicator({ saving, saved }: { saving: boolean; saved: boolean }) {
 
 /** 行下方红色错误文案。*/
 function RowError({ error }: { error: unknown }) {
+  const { t } = useI18n();
   if (!error) return null;
   return (
     <p role="alert" className="mt-1 text-xs text-danger">
-      Failed to save: {error instanceof Error ? error.message : String(error)}
+      {t('settings.rows.failedToSave', { error: error instanceof Error ? error.message : String(error) })}
     </p>
   );
 }
@@ -221,6 +223,7 @@ export function MultiSelectRow<T extends string>(props: {
   save?: RowSaveState;
   loading?: boolean;
 }) {
+  const { t } = useI18n();
   const status = useRowSaveStatus(props.save);
   const [open, setOpen] = useState(false);
   const validValues = new Set(props.options.map((option) => option.value));
@@ -230,7 +233,7 @@ export function MultiSelectRow<T extends string>(props: {
   const disabled = status.saving || props.loading;
   const summary = props.value === 'all'
     ? props.allLabel
-    : `${selected.size} project${selected.size === 1 ? '' : 's'}`;
+    : t('settings.rows.projectsSelected', { count: selected.size });
 
   const commit = (value: 'all' | T[]) => {
     status.markSaving();
@@ -280,9 +283,9 @@ export function MultiSelectRow<T extends string>(props: {
 
           <div className="mx-2 border-t border-border" />
           {props.loading ? (
-            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">Loading projects…</div>
+            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">{t('settings.rows.loadingProjects')}</div>
           ) : props.options.length === 0 ? (
-            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">No projects available</div>
+            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">{t('settings.rows.noProjects')}</div>
           ) : (
             props.options.map((option) => {
               const checked = selected.has(option.value);
@@ -290,7 +293,7 @@ export function MultiSelectRow<T extends string>(props: {
               return (
                 <label
                   key={option.value}
-                  title={isLastSelected ? 'Select another project before removing this one' : undefined}
+                  title={isLastSelected ? t('settings.rows.selectAnotherProject') : undefined}
                   className={cn(
                     'flex min-h-9 items-center gap-2 px-2.5 text-xs hover:bg-subtle',
                     isLastSelected || disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
@@ -335,6 +338,7 @@ export function NumberRow(props: {
   onSave: (v: number) => void;
   save?: RowSaveState;
 }) {
+  const { t } = useI18n();
   const status = useRowSaveStatus(props.save);
   const [draft, setDraft] = useState(String(props.value));
   const [invalid, setInvalid] = useState(false);
@@ -383,7 +387,7 @@ export function NumberRow(props: {
       </SettingRow>
       {invalid && (
         <p className="mt-1 text-xs text-danger text-right">
-          Must be an integer between {props.min} and {props.max}
+          {t('settings.rows.integerRange', { min: props.min, max: props.max })}
         </p>
       )}
       <RowError error={status.rowError} />

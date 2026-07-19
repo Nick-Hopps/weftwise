@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
 import { ContextPanel } from './context-panel';
+import { useI18n } from '@/components/i18n-provider';
 
 const MOBILE_QUERY = '(max-width: 1023.98px)';
 
@@ -30,6 +31,7 @@ function useMatchesMobile(): boolean {
  *  - Initial focus on first interactive child
  */
 export function ContextPanelSheet() {
+  const { t } = useI18n();
   const open = useUIStore((s) => s.contextPanelOpen);
   const close = useUIStore((s) => s.closeContextPanel);
   const isMobile = useMatchesMobile();
@@ -64,11 +66,11 @@ export function ContextPanelSheet() {
       className="lg:hidden fixed inset-0 z-sheet flex justify-end"
       role="dialog"
       aria-modal="true"
-      aria-label="Context panel"
+      aria-label={t('context.panel')}
     >
       <button
         type="button"
-        aria-label="Close context panel"
+        aria-label={t('context.close')}
         className="absolute inset-0 bg-overlay/40 backdrop-blur-sm"
         onClick={close}
         tabIndex={-1}

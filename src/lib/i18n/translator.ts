@@ -2,6 +2,7 @@ import type { Locale } from './config';
 import { messages, type MessageKey } from './messages';
 
 export type MessageValues = Record<string, string | number>;
+export type TranslationFunction = (key: MessageKey, values?: MessageValues) => string;
 
 export function extractPlaceholders(message: string): string[] {
   return [...new Set(Array.from(message.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g), (match) => match[1]))].sort();
