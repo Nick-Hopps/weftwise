@@ -60,8 +60,8 @@ function newlineCountAtStart(value: string): number {
   return match ? match[0].length : 0;
 }
 
-/** 纯函数：在 anchor 的完整顶层块之后插入一个 diagram callout。 */
-export function insertDiagramAfterAnchor(
+/** 纯函数：在 anchor 的完整顶层块之后插入一张标准 Markdown 图片。 */
+export function insertImageAfterAnchor(
   body: string,
   anchor: PersistedMarkdownBlockAnchor,
   image: InsertedImage,
@@ -71,8 +71,8 @@ export function insertDiagramAfterAnchor(
   const after = body.slice(resolved.end);
   const beforeGap = Math.max(0, 2 - newlineCountAtEnd(before));
   const afterGap = Math.max(0, 2 - newlineCountAtStart(after));
-  const callout = `> [!diagram]\n> ![${escapeMarkdownAlt(image.alt)}](${image.url})`;
-  return `${before}${'\n'.repeat(beforeGap)}${callout}${'\n'.repeat(afterGap)}${after}`;
+  const markdownImage = `![${escapeMarkdownAlt(image.alt)}](${image.url})`;
+  return `${before}${'\n'.repeat(beforeGap)}${markdownImage}${'\n'.repeat(afterGap)}${after}`;
 }
 
 function assertNotCancelled(jobId: string): void {
@@ -228,7 +228,7 @@ export async function runImageInsertJob(
   if (generated.output.url !== expectedUrl) {
     throw new Error('Generated image output URL does not match its asset path.');
   }
-  const insertedBody = insertDiagramAfterAnchor(current.body, params.anchor, {
+  const insertedBody = insertImageAfterAnchor(current.body, params.anchor, {
     url: expectedUrl,
     alt: generated.output.alt,
   });

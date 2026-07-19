@@ -47,7 +47,7 @@ vi.mock('../embedding-enqueue', () => ({ enqueueEmbedIndex: mocks.enqueueEmbedIn
 vi.mock('../../jobs/worker', () => ({ registerHandler: mocks.registerHandler }));
 
 import {
-  insertDiagramAfterAnchor,
+  insertImageAfterAnchor,
   runImageInsertJob,
 } from '../image-insert-service';
 
@@ -116,9 +116,9 @@ beforeEach(() => {
   mocks.isCancelRequested.mockReturnValue(false);
 });
 
-describe('insertDiagramAfterAnchor', () => {
+describe('insertImageAfterAnchor', () => {
   it('严格插在最后一个选中完整块之后，并转义 Markdown alt', () => {
-    expect(insertDiagramAfterAnchor(body, anchor, {
+    expect(insertImageAfterAnchor(body, anchor, {
       url: '/api/assets/general/image-1.png',
       alt: 'Explanation [diagram]',
     })).toBe([
@@ -126,17 +126,16 @@ describe('insertDiagramAfterAnchor', () => {
       '',
       'Selected paragraph.',
       '',
-      '> [!diagram]',
-      '> ![Explanation [diagram\\]](/api/assets/general/image-1.png)',
+      '![Explanation [diagram\\]](/api/assets/general/image-1.png)',
       '',
       'Next paragraph.',
       '',
     ].join('\n'));
 
     const shifted = `Intro.\n\n${body}`;
-    expect(insertDiagramAfterAnchor(shifted, anchor, {
+    expect(insertImageAfterAnchor(shifted, anchor, {
       url: '/api/assets/general/image-1.png', alt: 'Diagram',
-    })).toContain('Selected paragraph.\n\n> [!diagram]');
+    })).toContain('Selected paragraph.\n\n![Diagram](/api/assets/general/image-1.png)');
   });
 });
 
@@ -159,9 +158,10 @@ describe('runImageInsertJob', () => {
       action: 'update',
       path: 'wiki/general/page-a.md',
       content: expect.stringContaining(
-        '> [!diagram]\n> ![Explanation [diagram\\]](/api/assets/general/image-1.png)',
+        '![Explanation [diagram\\]](/api/assets/general/image-1.png)',
       ),
     });
+    expect(entries[0]!.content).not.toContain('[!diagram]');
     expect(entries[1]).toEqual({
       action: 'create',
       path: 'assets/general/image-1.png',
@@ -251,7 +251,7 @@ describe('runImageInsertJob', () => {
     }]);
     mocks.readPage.mockReturnValue({
       frontmatter: { title: 'Page A' },
-      body: '> [!diagram]\n> ![Explanation](/api/assets/general/image-1.png)',
+      body: '![Explanation](/api/assets/general/image-1.png)',
     });
 
     await expect(runImageInsertJob(job(), vi.fn())).resolves.toEqual({
