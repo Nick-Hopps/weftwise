@@ -36,10 +36,6 @@ export function SettingsDialog() {
   const { t } = useI18n();
   const isOpen = useUIStore((s) => s.settingsDialogOpen);
   const close = useUIStore((s) => s.closeSettingsDialog);
-  const darkMode = useUIStore((s) => s.darkMode);
-  const toggleDarkMode = useUIStore((s) => s.toggleDarkMode);
-  const sidebarWidth = useUIStore((s) => s.sidebarWidth);
-  const resetSidebarWidth = useUIStore((s) => s.resetSidebarWidth);
 
   const queryClient = useQueryClient();
 
@@ -124,10 +120,6 @@ export function SettingsDialog() {
 
           <SettingsContent
             active={active}
-            darkMode={darkMode}
-            toggleDarkMode={toggleDarkMode}
-            sidebarWidth={sidebarWidth}
-            resetSidebarWidth={resetSidebarWidth}
             settings={settingsQuery.data}
             settingsLoading={settingsQuery.isLoading}
             saveLanguage={saveLanguage}

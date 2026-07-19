@@ -115,7 +115,7 @@
 - `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态；`image-insert` 显示 `Illustrating`，成功后失效页面缓存并 `router.refresh()`
 - `progress-toast.tsx` / `tool-activity-icon.tsx` —— SSE 进度表面与共享 Lucide 工具图标适配；任务摘要和详情日志消费事件 `data.tool`，历史 emoji 只在展示层兼容清理
 
-> Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。所有设置项走 `GET/PUT /api/settings`、服务端 `app_settings` 表唯一真实源、**不写 Zustand**（dark mode/sidebar width 两项仍来自 Zustand）。
+> Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。设置项走各自服务端接口，持久化配置不写 Zustand；主题切换与侧栏拖拽保留在应用骨架中，不再作为 General 设置项展示。
 
 ### `providers.tsx`
 

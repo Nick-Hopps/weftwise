@@ -8,10 +8,7 @@
  */
 
 import { useState } from 'react';
-import { RotateCcw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { SIDEBAR_WIDTH_DEFAULT } from '@/stores/ui-store';
-import { Button } from '@/components/ui/button';
 import { Segmented } from '@/components/ui/segmented';
 import { apiFetch } from '@/lib/api-fetch';
 import { formatTokenCount } from '@/lib/format';
@@ -83,10 +80,6 @@ interface SavePartialMutation {
 
 interface SettingsContentProps {
   active: CategoryId;
-  darkMode: boolean;
-  toggleDarkMode: () => void;
-  sidebarWidth: number;
-  resetSidebarWidth: () => void;
   settings: AppSettings | undefined;
   settingsLoading: boolean;
   saveLanguage: SaveLanguageMutation;
@@ -109,12 +102,7 @@ export function SettingsContent(props: SettingsContentProps) {
         <div className="space-y-7">
           {sections.includes('appearance') && (
             <SettingsSection title={t('settings.section.appearance')}>
-              <AppearancePanel
-                darkMode={props.darkMode}
-                toggleDarkMode={props.toggleDarkMode}
-                sidebarWidth={props.sidebarWidth}
-                resetSidebarWidth={props.resetSidebarWidth}
-              />
+              <AppearancePanel />
             </SettingsSection>
           )}
 
@@ -179,15 +167,7 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   );
 }
 
-function AppearancePanel({
-  darkMode,
-  toggleDarkMode,
-  sidebarWidth,
-  resetSidebarWidth,
-}: Pick<
-  SettingsContentProps,
-  'darkMode' | 'toggleDarkMode' | 'sidebarWidth' | 'resetSidebarWidth'
->) {
+function AppearancePanel() {
   const { locale, setLocale, isLocalePending, t } = useI18n();
   return (
     <div className="space-y-4">
@@ -202,30 +182,6 @@ function AppearancePanel({
         onSave={setLocale}
         save={{ pending: isLocalePending, error: undefined }}
       />
-      <SwitchRow
-        label={t('settings.darkMode.label')}
-        description={t('settings.darkMode.description')}
-        checked={darkMode}
-        onSave={() => toggleDarkMode()}
-      />
-      <SettingRow
-        label={t('settings.sidebarWidth.label')}
-        description={t('settings.sidebarWidth.description', {
-          width: Math.round(sidebarWidth),
-          defaultWidth: SIDEBAR_WIDTH_DEFAULT,
-        })}
-      >
-        <Button
-          intent="outline"
-          size="sm"
-          onClick={resetSidebarWidth}
-          disabled={Math.round(sidebarWidth) === SIDEBAR_WIDTH_DEFAULT}
-          className="gap-1.5"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          {t('common.reset')}
-        </Button>
-      </SettingRow>
     </div>
   );
 }
