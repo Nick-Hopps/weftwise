@@ -87,7 +87,7 @@ worker-entry.ts
 
 ### `image-insert-service.ts` — 任务类型 `'image-insert'`
 
-先按 jobId 查 applied operation 做崩溃重试恢复，不重复生图；新执行在生图前后复核 stable HEAD 与块锚点，轮询取消并 abort 模型调用。生成结果只留内存，最终将 stamped 页面 update 与 base64 asset create 放入同一 changeset，以 `expectedPreHead + assertCanApply` 在 vault 锁内复核；取消/验证/apply 失败走 Saga rollback，不留下孤立资产。成功后 best-effort 入队 embedding。图片模型继续复用 `ingest:image`。
+先按 jobId 查 applied operation 做崩溃重试恢复，不重复生图；新执行在生图前后复核 stable HEAD 与块锚点，轮询取消并 abort 模型调用。生成结果只留内存，以标准 Markdown 图片直接插在锚点后（不包空 `[!diagram]` callout），最终将 stamped 页面 update 与 base64 asset create 放入同一 changeset，以 `expectedPreHead + assertCanApply` 在 vault 锁内复核；取消/验证/apply 失败走 Saga rollback，不留下孤立资产。成功后 best-effort 入队 embedding。图片模型继续复用 `ingest:image`。
 
 ### `lint-service.ts` — 任务类型 `'lint'`
 
@@ -306,6 +306,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `image-insert` 改为在可信锚点后直接写标准 Markdown 图片，不再用无标题 `[!diagram]` callout 包装，Saga、恢复与取消边界保持不变 |
 | 2026-07-17 | Query mode 增加独立 `image-insert` 工具面并删除 `imageInsertEnabled` 平行开关；配图请求不再携带 `wiki.preview_change`，避免 provider 因其顶层 union schema 拒绝工具注册 |
 | 2026-07-17 | `query-intent` 收口为统一结构化分类器：普通写入、直接 Re-enrich、选区配图和重置共用一次 `query` schema 调用；删除意图正则，增加 request/reset-confirmation 上下文收窄与保守失败回退 |
 | 2026-07-17 | Ask AI canonical 选区新增 `wiki.image.insert` 提案、`workflow-image-insert-start` 审批与 `image-insert` worker；完整块锚点重定位、stable HEAD、取消 rollback、页面/资产同 Changeset 与 applied operation 恢复均已覆盖 |

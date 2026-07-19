@@ -51,7 +51,7 @@ const proseClassName = `
   [&>table]:my-6 [&>table]:block [&>table]:w-full [&>table]:overflow-x-auto [&>table]:border-collapse [&>table]:text-sm
   [&_th]:border [&_th]:border-border [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:font-semibold [&_th]:bg-subtle
   [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2
-  [&>img]:my-8 [&>img]:max-w-full [&>img]:rounded-md
+  [&_img]:mx-auto [&_img]:my-8 [&_img]:h-auto [&_img]:w-auto [&_img]:max-h-[min(32rem,70vh)] [&_img]:max-w-full [&_img]:rounded-md [&_img]:object-contain
   [&_strong]:font-semibold [&_strong]:text-prose-heading
   [&_em]:italic
   [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden

@@ -45,7 +45,7 @@
 
 ### `wiki/` — wiki 页面渲染
 
-- `page-renderer.tsx` / `callout-icon.tsx` —— 把 markdown + frontmatter + titleSlugMap → React；callout 类型统一渲染 Lucide 语义图标并兼容历史标题 emoji；标题行 `actions` 与 `headerExtra` 插槽保持不变
+- `page-renderer.tsx` / `callout-icon.tsx` —— 把 markdown + frontmatter + titleSlugMap → React；callout 类型统一渲染 Lucide 语义图标并兼容历史标题 emoji；正文位图按原比例居中，并受正文宽度与 `min(32rem, 70vh)` 高度双重约束；标题行 `actions` 与 `headerExtra` 插槽保持不变
 - `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped，保存版 stale 时显示行内 Update available 提示
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `article-toc.tsx` —— 阅读页固定目录：宽内容区显示右侧 sticky 目录轨道，窄内容区收敛为 sticky 入口/浮层；跟踪普通主滚动区与 Sources 左栏的当前章节并复用稳定 heading anchors
@@ -188,6 +188,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | 阅读页正文图片选择器从无效的直接子节点匹配改为真实 Markdown 后代匹配；图片保持原比例居中，并限制最大正文宽度与可视高度，避免大图打断阅读 |
 | 2026-07-18 | Ask AI、Tasks 摘要与任务详情日志统一使用 `ToolActivityIcon` 的 Lucide 语义图标；正文 callout 按类型注入 `CalloutIcon`，历史 Markdown 的标题 emoji 在渲染期清理，普通正文 emoji 不受影响 |
 | 2026-07-17 | Ask AI 桌面工作面支持右/下/右下受控 resize 与键盘微调；会话选择、New/Clear/Save 合并为稳定功能区；流式 delta 按动画帧合并，消息仅在贴底时跟随并按行 memo，修复滚动争用与表格高频重排 |
 | 2026-07-17 | Ask AI 外部触发新增代次边界，每次打开进入新空白会话；双击点直接作为候选左上角，Header 等无锚点入口首次居中、其后复用末位置；用户消息引用在发送与历史恢复后显示单个“页面标题 · 章节/短摘要”胶囊，不展开完整选中文字 |
