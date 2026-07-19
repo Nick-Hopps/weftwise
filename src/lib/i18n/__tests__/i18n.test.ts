@@ -38,6 +38,11 @@ describe('locale resolution', () => {
 });
 
 describe('message catalogs', () => {
+  it('describes the header search trigger as page search only', () => {
+    expect(messages.en['nav.searchPrompt']).toBe('Search pages…');
+    expect(messages['zh-CN']['nav.searchPrompt']).toBe('搜索页面…');
+  });
+
   it('keeps English and Chinese keys and placeholders in lockstep', () => {
     expect(assertCatalogIntegrity(messages.en, messages['zh-CN'])).toEqual([]);
   });

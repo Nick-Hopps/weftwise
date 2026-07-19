@@ -123,7 +123,7 @@ export const en = {
   'nav.resizeSidebar': 'Resize sidebar',
   'nav.home': 'weftwise — home',
   'nav.openSearch': 'Open search (Ctrl+K)',
-  'nav.searchPrompt': 'Search pages, ask AI…',
+  'nav.searchPrompt': 'Search pages…',
   'nav.search': 'Search',
   'nav.askWiki': 'Ask your wiki',
   'nav.askWikiShortcut': 'Ask your wiki (⌘J)',

@@ -118,7 +118,7 @@ export const zhCN = {
   'nav.resizeSidebar': '调整侧栏宽度',
   'nav.home': 'weftwise — 首页',
   'nav.openSearch': '打开搜索（Ctrl+K）',
-  'nav.searchPrompt': '搜索页面或询问 AI…',
+  'nav.searchPrompt': '搜索页面…',
   'nav.search': '搜索',
   'nav.askWiki': '询问 Wiki',
   'nav.askWikiShortcut': '询问 Wiki（⌘J）',
