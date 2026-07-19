@@ -51,7 +51,6 @@ export async function generateMetadata({ params, searchParams }: WikiPageProps):
 }
 
 export default async function WikiPage({ params, searchParams }: WikiPageProps) {
-  const { t } = await getServerI18n();
   const { slug: slugParts } = await params;
   const slug = decodeRouteSegments(slugParts);
   const sp = (await searchParams) ?? {};

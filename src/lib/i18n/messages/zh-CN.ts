@@ -299,6 +299,8 @@ export const zhCN = {
   'chat.save.saving': '正在保存…',
   'chat.save.failed': '保存失败',
   'chat.save.subjectLoading': '主题仍在加载，请稍后重试。',
+  'chat.reset.completed': '当前主题已重置。该主题的页面、数据源与任务记录都已清空，你可以重新采集内容。',
+  'chat.reset.failed': '重置失败：{error}',
   'chat.action.selectedMarkdown': '选中的 Markdown',
   'chat.action.prompt': '提示词',
   'chat.action.altText': '替代文本',

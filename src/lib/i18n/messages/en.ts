@@ -308,6 +308,8 @@ export const en = {
   'chat.save.saving': 'Saving…',
   'chat.save.failed': 'Failed to save',
   'chat.save.subjectLoading': 'Subject is still loading. Please retry in a moment.',
+  'chat.reset.completed': 'The current subject has been reset. Its pages, sources, and job records were cleared, so you can ingest content again.',
+  'chat.reset.failed': 'Reset failed: {error}',
   'chat.action.selectedMarkdown': 'Selected Markdown',
   'chat.action.prompt': 'Prompt',
   'chat.action.altText': 'Alt text',
