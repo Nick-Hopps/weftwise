@@ -1,10 +1,13 @@
 'use client';
 
 /**
- * 设置弹窗行级原语 —— 统一「标签+描述在左、控件在右」布局，全部即时自动保存。
+ * 设置弹窗行级原语 —— 行自持 px-4 py-3，由外层卡片容器以 divide-y 分隔成组。
+ * 布局默认「标签+描述在左、控件在右」，layout="stack" 时控件全宽置于下方
+ * （长文本输入用）。全部即时自动保存。
  * 行级保存状态：panel 级 mutation 的 pending/error 经 RowSaveState 传入；
  * 每行本地记录「本行是否发起了最近一次保存」（touched），只有发起行显示
- * spinner/成功/错误，避免共享 pending 让全 panel 一起转圈。
+ * spinner/成功/错误，避免共享 pending 让全 panel 一起转圈。保存指示随行
+ * 标签内联显示，不在控件侧占位。
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
@@ -26,25 +29,51 @@ export interface RowSaveState {
 interface SettingRowProps {
   label: string;
   description?: string;
+  /** 行标签右侧的内联状态（保存 spinner / ✓）。*/
+  indicator?: React.ReactNode;
+  /** 控件下方的行内附注（错误、校验提示、弹出列表）。*/
+  footer?: React.ReactNode;
+  /** row：控件右对齐；stack：控件全宽置于标签下方。*/
+  layout?: 'row' | 'stack';
   children: React.ReactNode;
   className?: string;
 }
 
-export function SettingRow({ label, description, children, className }: SettingRowProps) {
+export function SettingRow({
+  label,
+  description,
+  indicator,
+  footer,
+  layout = 'row',
+  children,
+  className,
+}: SettingRowProps) {
   return (
-    <div
-      className={cn(
-        'flex flex-col items-stretch justify-between gap-2 sm:flex-row sm:items-center sm:gap-5',
-        className,
-      )}
-    >
-      <div className="min-w-0">
-        <div className="text-sm font-medium text-foreground">{label}</div>
-        {description && (
-          <div className="text-xs text-foreground-tertiary mt-0.5">{description}</div>
+    <div className={cn('px-4 py-3', className)}>
+      <div
+        className={cn(
+          'flex flex-col items-stretch gap-2',
+          layout === 'row' && 'justify-between sm:flex-row sm:items-center sm:gap-5',
         )}
+      >
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-medium text-foreground">{label}</span>
+            {indicator}
+          </div>
+          {description && (
+            <div className="mt-0.5 text-xs text-foreground-tertiary">{description}</div>
+          )}
+        </div>
+        <div
+          className={
+            layout === 'row' ? 'max-w-full shrink-0 self-start sm:self-auto' : 'w-full'
+          }
+        >
+          {children}
+        </div>
       </div>
-      <div className="max-w-full shrink-0 self-start sm:self-auto">{children}</div>
+      {footer}
     </div>
   );
 }
@@ -90,22 +119,23 @@ function useRowSaveStatus(save: RowSaveState | undefined) {
   };
 }
 
-/** 控件旁的保存状态小标记：spinner / 成功标记（1.5s 淡出）。*/
+/** 行标签旁的保存状态小标记：spinner / 成功标记（1.5s 淡出）；空闲时不渲染、不占位。*/
 function SaveIndicator({ saving, saved }: { saving: boolean; saved: boolean }) {
+  if (!saving && !saved) return null;
   return (
-    <span className="inline-flex w-4 justify-center" aria-hidden={!saving && !saved}>
+    <span className="inline-flex shrink-0" aria-hidden>
       {saving && <Loader2 className="h-3.5 w-3.5 animate-spin text-foreground-tertiary" />}
       {!saving && saved && <Check className="h-3.5 w-3.5 text-success" />}
     </span>
   );
 }
 
-/** 行下方红色错误文案。*/
+/** 行内红色错误文案。*/
 function RowError({ error }: { error: unknown }) {
   const { t } = useI18n();
   if (!error) return null;
   return (
-    <p role="alert" className="mt-1 text-xs text-danger">
+    <p role="alert" className="mt-1.5 text-xs text-danger">
       {t('settings.rows.failedToSave', { error: error instanceof Error ? error.message : String(error) })}
     </p>
   );
@@ -120,23 +150,22 @@ export function SwitchRow(props: {
 }) {
   const status = useRowSaveStatus(props.save);
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description}>
-        <div className="flex items-center gap-2">
-          <SaveIndicator saving={status.saving} saved={status.saved} />
-          <Switch
-            checked={props.checked}
-            aria-label={props.label}
-            disabled={status.saving}
-            onCheckedChange={(v) => {
-              status.markSaving();
-              props.onSave(v);
-            }}
-          />
-        </div>
-      </SettingRow>
-      <RowError error={status.rowError} />
-    </div>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={<RowError error={status.rowError} />}
+    >
+      <Switch
+        checked={props.checked}
+        aria-label={props.label}
+        disabled={status.saving}
+        onCheckedChange={(v) => {
+          status.markSaving();
+          props.onSave(v);
+        }}
+      />
+    </SettingRow>
   );
 }
 
@@ -150,25 +179,24 @@ export function SegmentedRow<T extends string>(props: {
 }) {
   const status = useRowSaveStatus(props.save);
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description}>
-        <div className="flex items-center gap-2">
-          <SaveIndicator saving={status.saving} saved={status.saved} />
-          <Segmented<T>
-            value={props.value}
-            options={props.options}
-            aria-label={props.label}
-            disabled={status.saving}
-            onChange={(v) => {
-              if (v === props.value) return;
-              status.markSaving();
-              props.onSave(v);
-            }}
-          />
-        </div>
-      </SettingRow>
-      <RowError error={status.rowError} />
-    </div>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={<RowError error={status.rowError} />}
+    >
+      <Segmented<T>
+        value={props.value}
+        options={props.options}
+        aria-label={props.label}
+        disabled={status.saving}
+        onChange={(v) => {
+          if (v === props.value) return;
+          status.markSaving();
+          props.onSave(v);
+        }}
+      />
+    </SettingRow>
   );
 }
 
@@ -184,32 +212,32 @@ export function SelectRow<T extends string>(props: {
   const selectId = useId();
   const status = useRowSaveStatus(props.save);
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description}>
-        <div className="flex items-center gap-2">
-          <SaveIndicator saving={status.saving} saved={status.saved} />
-          <Select
-            id={selectId}
-            value={props.value}
-            aria-label={props.label}
-            disabled={props.disabled || status.saving}
-            onChange={(e) => {
-              const v = e.target.value as T;
-              if (v === props.value) return;
-              status.markSaving();
-              props.onSave(v);
-            }}
-          >
-            {props.options.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </SettingRow>
-      <RowError error={status.rowError} />
-    </div>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={<RowError error={status.rowError} />}
+    >
+      <Select
+        id={selectId}
+        value={props.value}
+        aria-label={props.label}
+        disabled={props.disabled || status.saving}
+        className="min-w-36 max-w-full"
+        onChange={(e) => {
+          const v = e.target.value as T;
+          if (v === props.value) return;
+          status.markSaving();
+          props.onSave(v);
+        }}
+      >
+        {props.options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </Select>
+    </SettingRow>
   );
 }
 
@@ -241,91 +269,93 @@ export function MultiSelectRow<T extends string>(props: {
   };
 
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description}>
-        <div className="flex items-center gap-2">
-          <SaveIndicator saving={status.saving} saved={status.saved} />
-          <button
-            type="button"
-            aria-expanded={open}
-            disabled={disabled}
-            onClick={() => setOpen((current) => !current)}
-            className={cn(
-              'inline-flex h-7 min-w-32 items-center justify-between gap-2 rounded-md border border-input-border',
-              'bg-input-bg px-2 text-xs text-foreground transition-colors',
-              'hover:border-border-strong focus-ring disabled:cursor-not-allowed disabled:opacity-50',
-            )}
-          >
-            <span className="truncate">{summary}</span>
-            <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
-          </button>
-        </div>
-      </SettingRow>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={
+        <>
+          {open && (
+            <div className="mt-2 ml-auto max-h-48 w-full max-w-sm overflow-y-auto rounded-md border border-border bg-surface py-1">
+              <label className="flex min-h-8 cursor-pointer items-center gap-2 px-2.5 text-xs text-foreground hover:bg-subtle">
+                <input
+                  type="checkbox"
+                  checked={props.value === 'all'}
+                  disabled={disabled || props.options.length === 0}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      commit('all');
+                    } else {
+                      commit(props.options.map((option) => option.value));
+                    }
+                  }}
+                  className="h-3.5 w-3.5 rounded border-input-border accent-accent"
+                />
+                <span className="font-medium">{props.allLabel}</span>
+              </label>
 
-      {open && (
-        <div className="mt-2 ml-auto max-h-48 w-full max-w-sm overflow-y-auto rounded-md border border-border bg-surface py-1">
-          <label className="flex min-h-8 cursor-pointer items-center gap-2 px-2.5 text-xs text-foreground hover:bg-subtle">
-            <input
-              type="checkbox"
-              checked={props.value === 'all'}
-              disabled={disabled || props.options.length === 0}
-              onChange={(event) => {
-                if (event.target.checked) {
-                  commit('all');
-                } else {
-                  commit(props.options.map((option) => option.value));
-                }
-              }}
-              className="h-3.5 w-3.5 rounded border-input-border accent-accent"
-            />
-            <span className="font-medium">{props.allLabel}</span>
-          </label>
-
-          <div className="mx-2 border-t border-border" />
-          {props.loading ? (
-            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">{t('settings.rows.loadingProjects')}</div>
-          ) : props.options.length === 0 ? (
-            <div className="px-2.5 py-3 text-xs text-foreground-tertiary">{t('settings.rows.noProjects')}</div>
-          ) : (
-            props.options.map((option) => {
-              const checked = selected.has(option.value);
-              const isLastSelected = props.value !== 'all' && checked && selected.size === 1;
-              return (
-                <label
-                  key={option.value}
-                  title={isLastSelected ? t('settings.rows.selectAnotherProject') : undefined}
-                  className={cn(
-                    'flex min-h-9 items-center gap-2 px-2.5 text-xs hover:bg-subtle',
-                    isLastSelected || disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={disabled || isLastSelected}
-                    onChange={(event) => {
-                      const next = props.options
-                        .map((item) => item.value)
-                        .filter((value) => value !== option.value && selected.has(value));
-                      if (event.target.checked) next.push(option.value);
-                      if (next.length > 0) commit(next);
-                    }}
-                    className="h-3.5 w-3.5 rounded border-input-border accent-accent"
-                  />
-                  <span className="min-w-0">
-                    <span className="block truncate font-medium text-foreground">{option.label}</span>
-                    {option.description && (
-                      <span className="block truncate text-[11px] text-foreground-tertiary">{option.description}</span>
-                    )}
-                  </span>
-                </label>
-              );
-            })
+              <div className="mx-2 border-t border-border" />
+              {props.loading ? (
+                <div className="px-2.5 py-3 text-xs text-foreground-tertiary">{t('settings.rows.loadingProjects')}</div>
+              ) : props.options.length === 0 ? (
+                <div className="px-2.5 py-3 text-xs text-foreground-tertiary">{t('settings.rows.noProjects')}</div>
+              ) : (
+                props.options.map((option) => {
+                  const checked = selected.has(option.value);
+                  const isLastSelected = props.value !== 'all' && checked && selected.size === 1;
+                  return (
+                    <label
+                      key={option.value}
+                      title={isLastSelected ? t('settings.rows.selectAnotherProject') : undefined}
+                      className={cn(
+                        'flex min-h-9 items-center gap-2 px-2.5 text-xs hover:bg-subtle',
+                        isLastSelected || disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled || isLastSelected}
+                        onChange={(event) => {
+                          const next = props.options
+                            .map((item) => item.value)
+                            .filter((value) => value !== option.value && selected.has(value));
+                          if (event.target.checked) next.push(option.value);
+                          if (next.length > 0) commit(next);
+                        }}
+                        className="h-3.5 w-3.5 rounded border-input-border accent-accent"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-foreground">{option.label}</span>
+                        {option.description && (
+                          <span className="block truncate text-[11px] text-foreground-tertiary">{option.description}</span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
           )}
-        </div>
-      )}
-      <RowError error={status.rowError} />
-    </div>
+          <RowError error={status.rowError} />
+        </>
+      }
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={() => setOpen((current) => !current)}
+        className={cn(
+          'inline-flex h-7 min-w-32 items-center justify-between gap-2 rounded-md border border-input-border',
+          'bg-input-bg px-2 text-xs text-foreground transition-colors',
+          'hover:border-border-strong focus-ring disabled:cursor-not-allowed disabled:opacity-50',
+        )}
+      >
+        <span className="truncate">{summary}</span>
+        <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-foreground-tertiary transition-transform', open && 'rotate-180')} />
+      </button>
+    </SettingRow>
   );
 }
 
@@ -361,37 +391,40 @@ export function NumberRow(props: {
   };
 
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description}>
-        <div className="flex items-center gap-2">
-          <SaveIndicator saving={status.saving} saved={status.saved} />
-          <Input
-            type="number"
-            value={draft}
-            min={props.min}
-            max={props.max}
-            disabled={status.saving}
-            aria-label={props.label}
-            aria-invalid={invalid}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setInvalid(validateIntInRange(e.target.value, props.min, props.max) === null);
-            }}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isImeComposing(e)) e.currentTarget.blur();
-            }}
-            className={cn('h-7 w-24 px-2 text-xs text-right', invalid && 'border-danger')}
-          />
-        </div>
-      </SettingRow>
-      {invalid && (
-        <p className="mt-1 text-xs text-danger text-right">
-          {t('settings.rows.integerRange', { min: props.min, max: props.max })}
-        </p>
-      )}
-      <RowError error={status.rowError} />
-    </div>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={
+        <>
+          {invalid && (
+            <p className="mt-1.5 text-xs text-danger sm:text-right">
+              {t('settings.rows.integerRange', { min: props.min, max: props.max })}
+            </p>
+          )}
+          <RowError error={status.rowError} />
+        </>
+      }
+    >
+      <Input
+        type="number"
+        value={draft}
+        min={props.min}
+        max={props.max}
+        disabled={status.saving}
+        aria-label={props.label}
+        aria-invalid={invalid}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          setInvalid(validateIntInRange(e.target.value, props.min, props.max) === null);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !isImeComposing(e)) e.currentTarget.blur();
+        }}
+        className={cn('h-7 w-24 px-2 text-xs text-right', invalid && 'border-danger')}
+      />
+    </SettingRow>
   );
 }
 
@@ -417,27 +450,26 @@ export function TextRow(props: {
   };
 
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description}>
-        <div className="flex items-center gap-2">
-          <SaveIndicator saving={status.saving} saved={status.saved} />
-          <Input
-            type={props.type ?? 'text'}
-            value={draft}
-            placeholder={props.placeholder}
-            disabled={status.saving}
-            aria-label={props.label}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !isImeComposing(e)) e.currentTarget.blur();
-            }}
-            className="h-7 w-44 px-2 text-xs"
-          />
-        </div>
-      </SettingRow>
-      <RowError error={status.rowError} />
-    </div>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={<RowError error={status.rowError} />}
+    >
+      <Input
+        type={props.type ?? 'text'}
+        value={draft}
+        placeholder={props.placeholder}
+        disabled={status.saving}
+        aria-label={props.label}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && !isImeComposing(e)) e.currentTarget.blur();
+        }}
+        className="h-7 w-56 max-w-full px-2 text-xs"
+      />
+    </SettingRow>
   );
 }
 
@@ -463,25 +495,23 @@ export function TextareaRow(props: {
   };
 
   return (
-    <div>
-      <SettingRow label={props.label} description={props.description} className="items-start">
-        <div className="flex items-start gap-2">
-          <span className="mt-2 inline-flex">
-            <SaveIndicator saving={status.saving} saved={status.saved} />
-          </span>
-          <Textarea
-            value={draft}
-            rows={props.rows ?? 3}
-            placeholder={props.placeholder}
-            disabled={status.saving}
-            aria-label={props.label}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            className="w-60 p-2 text-sm"
-          />
-        </div>
-      </SettingRow>
-      <RowError error={status.rowError} />
-    </div>
+    <SettingRow
+      label={props.label}
+      description={props.description}
+      layout="stack"
+      indicator={<SaveIndicator saving={status.saving} saved={status.saved} />}
+      footer={<RowError error={status.rowError} />}
+    >
+      <Textarea
+        value={draft}
+        rows={props.rows ?? 3}
+        placeholder={props.placeholder}
+        disabled={status.saving}
+        aria-label={props.label}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        className="w-full p-2 text-sm"
+      />
+    </SettingRow>
   );
 }
