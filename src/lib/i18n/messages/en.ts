@@ -252,6 +252,7 @@ export const en = {
   'wiki.lens.loggedHard': 'Logged “too hard” — we’ll tune future pages',
   'wiki.lens.loggedEasy': 'Logged “too easy” — we’ll tune future pages',
   'wiki.editor.loadError': 'Failed to load page for editing.',
+  'wiki.editor.loading': 'Loading editor…',
   'wiki.editor.back': 'Back to page',
   'wiki.editor.editing': 'Editing',
   'wiki.editor.discard': 'Discard unsaved changes?',
