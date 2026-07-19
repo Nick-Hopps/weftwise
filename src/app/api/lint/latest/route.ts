@@ -8,7 +8,8 @@ import {
   MAX_REMEDIATION_JOBS,
 } from '@/server/services/remediation-status';
 import { getResearchRunsByJobIds } from '@/server/services/research-approval-service';
-import type { Job, ResearchRunView } from '@/lib/contracts';
+import * as sourcesRepo from '@/server/db/repos/sources-repo';
+import type { Job, LintLatestResult, ResearchRunView } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
@@ -26,9 +27,9 @@ export async function GET(request: NextRequest) {
 
   if (allSubjects) {
     const latestLint = queue.listLatestCompletedLint(null);
-    const lint = selectLatestFindings(
+    const lint = projectCurrentOrphanSources(selectLatestFindings(
       latestLint ? [latestLint] : [],
-    );
+    ));
     const recentJobs = queue.listRecent(undefined, MAX_REMEDIATION_JOBS);
     return NextResponse.json(
       buildHealthSnapshot(
@@ -43,9 +44,9 @@ export async function GET(request: NextRequest) {
   if (resolution.error) return resolution.error;
 
   const latestLint = queue.listLatestCompletedLint(resolution.subject.id);
-  const lint = selectLatestFindings(
+  const lint = projectCurrentOrphanSources(selectLatestFindings(
     latestLint ? [latestLint] : [],
-  );
+  ));
   const recentJobs = queue.listRecent(
     { subjectId: resolution.subject.id },
     MAX_REMEDIATION_JOBS,
@@ -57,6 +58,43 @@ export async function GET(request: NextRequest) {
       { researchRuns: readResearchRuns(recentJobs) },
     ),
   );
+}
+
+/**
+ * lint job 是历史快照；orphan-source 则取决于当前 sources/page_sources 状态。
+ * 删除或重新关联 source 后，读取 Health 时立即投影掉已失效 finding，避免刷新后复活。
+ */
+function projectCurrentOrphanSources(lint: LintLatestResult): LintLatestResult {
+  const subjectIds = new Set(
+    lint.findings
+      .filter((finding) => finding.type === 'orphan-source' && finding.sourceId)
+      .map((finding) => finding.subjectId),
+  );
+  if (subjectIds.size === 0) return lint;
+
+  const currentOrphanKeys = new Set<string>();
+  for (const subjectId of subjectIds) {
+    for (const source of sourcesRepo.listUnreferencedSources(subjectId)) {
+      currentOrphanKeys.add(`${subjectId}\u0000${source.id}`);
+    }
+  }
+
+  const findings = lint.findings.filter((finding) => (
+    finding.type !== 'orphan-source'
+    || !finding.sourceId
+    || currentOrphanKeys.has(`${finding.subjectId}\u0000${finding.sourceId}`)
+  ));
+  if (findings.length === lint.findings.length) return lint;
+
+  return {
+    ...lint,
+    findings,
+    bySeverity: {
+      critical: findings.filter((finding) => finding.severity === 'critical').length,
+      warning: findings.filter((finding) => finding.severity === 'warning').length,
+      info: findings.filter((finding) => finding.severity === 'info').length,
+    },
+  };
 }
 
 /** route 层按 subject 批量读取，保持 snapshot builder 纯函数并避免逐 finding 查询。 */

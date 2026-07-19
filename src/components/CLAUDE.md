@@ -97,7 +97,7 @@
 - `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可操作，持久展示 importing/verifying/terminal 与 child delivery
 - `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
 
-**Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API。
+**Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API；404 按已删除幂等收敛，409/500 在工作区显示可操作错误。
 
 **刷新恢复与 subject 隔离**：当前 subject 以 React Query 严格按 `pending → running` 顺序读取 active jobs，避免 claim 窗口遗漏；首次成功 hydrate 前四类 action 安全禁用。合法 Fix/Curate/Research 按 job type 恢复，Re-ingest 还要求严格 context。每个 workflow 按 `createdAt + id` 选最新 job；queued plan 是 active 列表短暂缺失时的兜底，awaiting-approval Research plan 也可恢复已完成 discovery job，再由其 `runId` 读取持久化审批事实。
 

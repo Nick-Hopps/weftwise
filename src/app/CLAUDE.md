@@ -38,7 +38,7 @@
 | `/api/pending-actions/[id]/reject` | POST | 拒绝仍为 pending 的审批操作；幂等边界与 subject 隔离由 service/repo 状态机保证 |
 | `/api/tag-actions` | GET / POST | Tags 工作台审批恢复 / 创建批量治理预览；POST 接受 `{ action:'rename'|'merge'|'delete', sourceTag, targetTag?, subjectId }`，只持久化无 conversation 的 `tag-batch` PendingAction，不直接写 Vault |
 | `/api/lint` | POST | 入队 `lint` 任务；默认 subject-scoped discovery，`{ allSubjects: true }` 显式全量发现；显式 verification body 暂留旧客户端兼容，Health 处置终态不再调用；返回 `jobId + mode` |
-| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；有界读取近期 jobs 与关联 Research run 后，直接投影掉 baseline 之后已完成处置验证的 finding，真实 fixed/failed/skipped 结果进入近期摘要，并重算 severity；从未跑过返回完整空快照，All Subjects plans 只读 |
+| `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；有界读取近期 jobs 与关联 Research run 后，直接投影掉 baseline 之后已完成处置验证的 finding，并按当前 `sources/page_sources` 过滤已删除或已重新关联的 `orphan-source`；真实 fixed/failed/skipped 结果进入近期摘要，并重算 severity；从未跑过返回完整空快照，All Subjects plans 只读 |
 | `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
 | `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |

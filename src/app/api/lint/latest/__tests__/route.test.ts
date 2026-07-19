@@ -12,6 +12,7 @@ const mockListLatestCompletedLint = vi.fn();
 const mockListRecent = vi.fn();
 const mockResolve = vi.fn();
 const mockGetResearchRunsByJobIds = vi.fn();
+const mockListUnreferencedSources = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({
   requireAuth: (...args: unknown[]) => mockAuth(...args),
@@ -25,6 +26,9 @@ vi.mock('@/server/middleware/subject', () => ({
 }));
 vi.mock('@/server/services/research-approval-service', () => ({
   getResearchRunsByJobIds: (...args: unknown[]) => mockGetResearchRunsByJobIds(...args),
+}));
+vi.mock('@/server/db/repos/sources-repo', () => ({
+  listUnreferencedSources: (...args: unknown[]) => mockListUnreferencedSources(...args),
 }));
 
 import { GET } from '../route';
@@ -119,9 +123,66 @@ beforeEach(() => {
   mockResolve.mockReset();
   mockGetResearchRunsByJobIds.mockReset();
   mockGetResearchRunsByJobIds.mockReturnValue([]);
+  mockListUnreferencedSources.mockReset();
+  mockListUnreferencedSources.mockReturnValue([]);
 });
 
 describe('GET /api/lint/latest', () => {
+  it('已删除的 orphan-source 不再从历史 lint 快照返回', async () => {
+    const deletedSourceFinding = finding({
+      type: 'orphan-source',
+      pageSlug: '',
+      description: 'Orphan source: deleted.md',
+      sourceId: 'source-deleted',
+      sourceFilename: 'deleted.md',
+    });
+    mockResolve.mockReturnValue({
+      subject: { id: 's1', slug: 'general' },
+      error: null,
+    });
+    mockListLatestCompletedLint.mockReturnValue(
+      lintJob('lint-stale-source', 's1', [deletedSourceFinding]),
+    );
+    mockListRecent.mockReturnValue([]);
+    mockListUnreferencedSources.mockReturnValue([]);
+
+    const response = await call();
+
+    await expect(response.json()).resolves.toMatchObject({
+      findings: [],
+      remediations: {},
+      bySeverity: { critical: 0, warning: 0, info: 0 },
+    });
+    expect(mockListUnreferencedSources).toHaveBeenCalledWith('s1');
+  });
+
+  it('当前仍未被引用的 orphan-source 继续保留', async () => {
+    const currentSourceFinding = finding({
+      type: 'orphan-source',
+      pageSlug: '',
+      description: 'Orphan source: current.md',
+      sourceId: 'source-current',
+      sourceFilename: 'current.md',
+    });
+    mockResolve.mockReturnValue({
+      subject: { id: 's1', slug: 'general' },
+      error: null,
+    });
+    mockListLatestCompletedLint.mockReturnValue(
+      lintJob('lint-current-source', 's1', [currentSourceFinding]),
+    );
+    mockListRecent.mockReturnValue([]);
+    mockListUnreferencedSources.mockReturnValue([{ id: 'source-current' }]);
+
+    const response = await call();
+    const body = await response.json();
+
+    expect(body.findings).toEqual([
+      expect.objectContaining({ type: 'orphan-source', sourceId: 'source-current' }),
+    ]);
+    expect(body.bySeverity).toEqual({ critical: 0, warning: 1, info: 0 });
+  });
+
   it.each(['fix', 'curate'] as const)(
     'completed %s 的 skipped finding 不再出现在真实 API 快照中',
     async (action) => {

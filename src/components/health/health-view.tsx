@@ -51,6 +51,7 @@ import {
   healthTerminalInvalidationKeys,
   isHealthOriginCurrent,
   persistedBusyActions,
+  readDeleteSourceResult,
   readResearchRun,
   readResearchRunId,
   recentOutcomeCounts,
@@ -883,15 +884,26 @@ export function HealthView() {
     if (!isCurrentOrigin(origin) || deleteOriginsRef.current.has(sourceId)) return;
     deleteOriginsRef.current.set(sourceId, origin);
     setDeletingSourceIds((current) => new Set(current).add(sourceId));
+    setRemediationError(null);
     try {
       const res = await apiFetch(
         `/api/sources/${sourceId}?subjectId=${encodeURIComponent(origin.subjectId)}`,
         { method: 'DELETE' },
       );
-      if (res.ok && isCurrentOrigin(origin)) {
+      const result = await readDeleteSourceResult(res);
+      if (isCurrentOrigin(origin)) {
         setHandledSourceIds((prev) => new Set(prev).add(sourceId));
-        queryClient.invalidateQueries({ queryKey: ['sources'] });
-        void runLint(origin);
+        void queryClient.invalidateQueries({ queryKey: ['sources'] });
+        void queryClient.invalidateQueries({
+          queryKey: ['lint-latest', origin.subjectId],
+        });
+        if (result === 'deleted') void runLint(origin);
+      }
+    } catch (error) {
+      if (isCurrentOrigin(origin)) {
+        setRemediationError(
+          error instanceof Error ? error.message : 'Delete source failed. Please try again.',
+        );
       }
     } finally {
       const held = deleteOriginsRef.current.get(sourceId);

@@ -18,6 +18,7 @@ import {
   fetchActiveHealthJobs,
   isHealthOriginCurrent,
   nextDeleteArmed,
+  readDeleteSourceResult,
   readResearchRun,
   readResearchRunId,
   recentOutcomeBannerTone,
@@ -240,6 +241,23 @@ describe('Health remediation UI helper', () => {
     expect(nextDeleteArmed(false, 'arm')).toBe(true);
     expect(nextDeleteArmed(true, 'acting')).toBe(false);
     expect(nextDeleteArmed(true, 'action')).toBe(false);
+  });
+
+  it('Delete source 区分成功、已删除与可见失败', async () => {
+    await expect(readDeleteSourceResult(Response.json({ deleted: true })))
+      .resolves.toBe('deleted');
+    await expect(readDeleteSourceResult(Response.json(
+      { error: 'Source not found' },
+      { status: 404 },
+    ))).resolves.toBe('already-deleted');
+    await expect(readDeleteSourceResult(Response.json(
+      { error: 'in-flight' },
+      { status: 409 },
+    ))).rejects.toThrow('Source cannot be deleted while its ingest job is active.');
+    await expect(readDeleteSourceResult(Response.json(
+      { error: 'Failed to delete source: git broke' },
+      { status: 500 },
+    ))).rejects.toThrow('Failed to delete source: git broke');
   });
 
   it('Research job 结果只读取 runId，并区分 HTTP、响应 JSON 与 resultJson 错误', async () => {

@@ -328,6 +328,23 @@ export function nextDeleteArmed(
   return event === 'arm' ? !current : false;
 }
 
+export async function readDeleteSourceResult(
+  response: Response,
+): Promise<'deleted' | 'already-deleted'> {
+  if (response.ok) return 'deleted';
+  if (response.status === 404) return 'already-deleted';
+
+  const payload = await response.json().catch(() => ({})) as { error?: unknown };
+  const error = typeof payload.error === 'string' ? payload.error : null;
+  if (response.status === 409 && error === 'in-flight') {
+    throw new Error('Source cannot be deleted while its ingest job is active.');
+  }
+  if (response.status === 409 && error === 'already-referenced') {
+    throw new Error('Source is now referenced by a page and cannot be deleted.');
+  }
+  throw new Error(error ?? `Delete source failed (${response.status}).`);
+}
+
 export async function readResearchRunId(response: Response): Promise<string> {
   if (!response.ok) throw new Error(`Research result request failed (${response.status}).`);
 
