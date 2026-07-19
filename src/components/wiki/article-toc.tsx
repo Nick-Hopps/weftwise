@@ -12,6 +12,7 @@ import {
 import { ChevronDown, ListTree } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { ArticleTocHeading } from '@/lib/article-toc';
+import { useI18n } from '@/components/i18n-provider';
 
 interface HeadingPosition {
   id: string;
@@ -42,6 +43,7 @@ export function ArticleToc({
   containerRef,
   useContainerScroll = false,
 }: ArticleTocProps) {
+  const { t } = useI18n();
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -148,7 +150,7 @@ export function ArticleToc({
             onClick={() => setOpen((value) => !value)}
           >
             <ListTree className="h-4 w-4 shrink-0 text-foreground-tertiary" aria-hidden />
-            <span className="shrink-0 font-medium text-foreground">On this page</span>
+            <span className="shrink-0 font-medium text-foreground">{t('wiki.toc.onThisPage')}</span>
             <span className="min-w-0 flex-1 truncate text-foreground-tertiary">
               {activeHeading.text}
             </span>
@@ -161,7 +163,7 @@ export function ArticleToc({
           {open && (
             <nav
               id={menuId}
-              aria-label="Table of contents"
+              aria-label={t('wiki.toc.label')}
               className="absolute inset-x-0 top-full mt-1 max-h-[min(55vh,420px)] overflow-y-auto rounded-md border border-border bg-elevated py-2 shadow-md animate-fade-in"
             >
               <TocLinks headings={headings} activeId={activeId} onNavigate={navigate} />
@@ -170,8 +172,8 @@ export function ArticleToc({
         </div>
       </div>
 
-      <aside className="wiki-article-toc-rail min-w-0" aria-label="Page outline">
-        <nav aria-label="Table of contents" className="sticky top-7 max-h-[calc(100vh-7rem)] overflow-y-auto pr-2">
+      <aside className="wiki-article-toc-rail min-w-0" aria-label={t('wiki.toc.outline')}>
+        <nav aria-label={t('wiki.toc.label')} className="sticky top-7 max-h-[calc(100vh-7rem)] overflow-y-auto pr-2">
           <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground-tertiary">
             <ListTree className="h-3.5 w-3.5" aria-hidden />
             On this page

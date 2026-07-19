@@ -16,6 +16,7 @@ import {
 } from './message-scroll';
 import type { UserMessageReference } from '@/lib/contracts';
 import type { ChatMessage, Citation } from './chat-message';
+import { useI18n } from '@/components/i18n-provider';
 
 export type { ChatMessage, Citation } from './chat-message';
 
@@ -55,6 +56,7 @@ export const MarkdownText = memo(function MarkdownText({ content }: { content: s
 // citations.length > 3 → 默认折叠；<= 3 → 默认展开。
 // 每条消息独立维护本地折叠状态，交互模式仿 layout/sidebar.tsx 现有的 "Sources" 分组折叠。
 const MessageCitations = memo(function MessageCitations({ citations }: { citations: Citation[] }) {
+  const { t } = useI18n();
   const router = useRouter();
   const [expanded, setExpanded] = useState(citations.length <= 3);
 
@@ -68,7 +70,7 @@ const MessageCitations = memo(function MessageCitations({ citations }: { citatio
       >
         <span className="flex items-center gap-1.5">
           <ChevronDown className={cn('h-3 w-3 transition-transform', !expanded && '-rotate-90')} />
-          Sources
+          {t('chat.sources')}
         </span>
         <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
           {citations.length}
@@ -103,6 +105,7 @@ export function UserMessageReferenceCapsule({
 }: {
   references: UserMessageReference[];
 }) {
+  const { t } = useI18n();
   const reference = references[0];
 
   if (!reference) return null;
@@ -120,7 +123,7 @@ export function UserMessageReferenceCapsule({
   return (
     <Link
       href={citationHref(reference)}
-      aria-label="Open referenced page"
+      aria-label={t('chat.openReference')}
       className="mb-2 inline-flex h-6 max-w-full items-center gap-1.5 overflow-hidden rounded-full border border-accent/20 bg-accent-subtle/60 px-2.5 text-[11px] font-medium text-accent-strong transition-colors hover:border-accent/35 hover:bg-accent-subtle focus-ring"
     >
       <TextQuote className="h-3 w-3 shrink-0" aria-hidden />
@@ -143,12 +146,6 @@ function StreamingIndicator() {
   );
 }
 
-const SUGGESTIONS = [
-  'Summarize this page',
-  'Find related concepts',
-  'What are the key takeaways?',
-];
-
 const MessageRow = memo(function MessageRow({
   message,
   showStreaming,
@@ -156,13 +153,14 @@ const MessageRow = memo(function MessageRow({
   message: ChatMessage;
   showStreaming: boolean;
 }) {
+  const { t } = useI18n();
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <span className={cn(
         'text-[10px] font-medium uppercase tracking-wider',
         message.role === 'user' ? 'text-foreground-tertiary' : 'text-accent-strong',
       )}>
-        {message.role === 'user' ? 'You' : 'Wiki'}
+        {message.role === 'user' ? t('chat.you') : t('chat.wiki')}
       </span>
       <div className={cn(
         'min-w-0 border-l-2 py-0.5 pl-3',
@@ -207,6 +205,12 @@ const MessageRow = memo(function MessageRow({
 });
 
 export function MessageList({ messages, isStreaming = false, onSuggestionClick }: MessageListProps) {
+  const { t } = useI18n();
+  const suggestions = [
+    t('chat.suggestion.summarize'),
+    t('chat.suggestion.related'),
+    t('chat.suggestion.takeaways'),
+  ];
   const listRef = useRef<HTMLDivElement>(null);
   const scrollFollowStateRef = useRef({
     followsBottom: true,
@@ -249,12 +253,12 @@ export function MessageList({ messages, isStreaming = false, onSuggestionClick }
         <div className="h-10 w-10 rounded-full bg-accent-subtle flex items-center justify-center mb-3">
           <MessageCircleQuestion className="h-5 w-5 text-accent" aria-hidden />
         </div>
-        <p className="text-sm font-medium text-foreground mb-1">Ask your Wiki</p>
+        <p className="text-sm font-medium text-foreground mb-1">{t('chat.title')}</p>
         <p className="text-xs text-foreground-secondary mb-5 max-w-[240px] leading-relaxed">
-          Query your knowledge base with natural language.
+          {t('chat.description')}
         </p>
         <div className="flex flex-col gap-1.5 w-full max-w-[280px]">
-          {SUGGESTIONS.map((suggestion) => (
+          {suggestions.map((suggestion) => (
             <button
               key={suggestion}
               onClick={() => onSuggestionClick?.(suggestion)}

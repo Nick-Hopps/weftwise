@@ -18,6 +18,7 @@ import {
   summarizeJobsPanel,
   type TrackedJob,
 } from './jobs-panel-state';
+import { useI18n } from '@/components/i18n-provider';
 
 export type { TrackedJob } from './jobs-panel-state';
 
@@ -39,6 +40,7 @@ function JobRow({
   onRemove: (id: string) => void;
   onStatusChange: (id: string, status: JobStreamStatus) => void;
 }) {
+  const { t } = useI18n();
   // pending 行不建 SSE（浏览器每域 SSE 连接有限；轮询会在其转 running 后接上）
   const streamId = job.queueStatus === 'running' ? job.id : null;
   const { events, status, latestMessage } = useJobStream(streamId, job.reconnectKey);
@@ -100,15 +102,15 @@ function JobRow({
               size="sm"
               onClick={handleCancel}
               disabled={cancelling}
-              aria-label="Stop job"
+              aria-label={t('jobs.stop')}
               className="tip tip-l"
-              data-tip="Stop job"
+              data-tip={t('jobs.stop')}
             >
               <Square />
             </IconButton>
           )}
           {(isCompleted || isFailed) && (
-            <IconButton size="sm" onClick={() => onRemove(job.id)} aria-label="Dismiss">
+            <IconButton size="sm" onClick={() => onRemove(job.id)} aria-label={t('jobs.dismiss')}>
               <X />
             </IconButton>
           )}
@@ -117,11 +119,11 @@ function JobRow({
           {latestTool && <ToolActivityIcon tool={latestTool} className="h-3 w-3 shrink-0" />}
           <span className="truncate">
           {job.queueStatus === 'pending' && status === 'idle'
-            ? 'Queued'
+            ? t('jobs.queued')
             : isFailed
               ? wasCancelled
-                ? 'Cancelled'
-                : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || 'Failed'
+                ? t('jobs.cancelled')
+                : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || t('jobs.failed')
               : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || '…'}
           </span>
         </p>
@@ -134,7 +136,7 @@ function JobRow({
               isFailed && !wasCancelled ? 'text-danger' : 'text-accent',
             )}
           >
-            {isFailed && !wasCancelled ? 'View error →' : 'View details →'}
+            {isFailed && !wasCancelled ? t('jobs.viewError') : t('jobs.viewDetails')}
           </button>
         )}
       </li>
@@ -160,6 +162,7 @@ export function JobsPanel({
   jobs: TrackedJob[];
   onRemove: (id: string) => void;
 }) {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, JobStreamStatus>>({});
@@ -189,9 +192,9 @@ export function JobsPanel({
   const summary = useMemo(() => summarizeJobsPanel(jobs, statuses), [jobs, statuses]);
   const finishedCount = summary.completedCount + summary.failedCount;
   const summaryText = [
-    summary.runningCount > 0 && `${summary.runningCount} running`,
-    summary.pendingCount > 0 && `${summary.pendingCount} queued`,
-    finishedCount > 0 && `${finishedCount} finished`,
+    summary.runningCount > 0 && t('jobs.runningCount', { count: summary.runningCount }),
+    summary.pendingCount > 0 && t('jobs.queuedCount', { count: summary.pendingCount }),
+    finishedCount > 0 && t('jobs.finishedCount', { count: finishedCount }),
   ].filter(Boolean).join(' · ');
 
   const handleClearFinished = () => {
@@ -217,7 +220,7 @@ export function JobsPanel({
       >
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <span className="flex-1 text-sm font-medium text-foreground">
-            Tasks
+            {t('jobs.tasks')}
             <span className="ml-1.5 font-mono text-xs text-foreground-tertiary">
               {summaryText}
             </span>
@@ -226,9 +229,9 @@ export function JobsPanel({
             <IconButton
               size="sm"
               onClick={handleClearFinished}
-              aria-label="Clear finished tasks"
+              aria-label={t('jobs.clearFinished')}
               className="tip tip-l"
-              data-tip="Clear finished tasks"
+              data-tip={t('jobs.clearFinished')}
             >
               <Trash2 />
             </IconButton>
@@ -236,9 +239,9 @@ export function JobsPanel({
           <IconButton
             size="sm"
             onClick={() => setCollapsed(true)}
-            aria-label="Collapse tasks"
+            aria-label={t('jobs.collapseTasks')}
             className="tip tip-l"
-            data-tip="Collapse"
+            data-tip={t('jobs.collapseTasks')}
           >
             <ChevronRight />
           </IconButton>
@@ -259,8 +262,8 @@ export function JobsPanel({
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        aria-label="Expand tasks"
-        data-tip="Expand tasks"
+        aria-label={t('jobs.expandTasks')}
+        data-tip={t('jobs.expandTasks')}
         inert={!collapsed}
         className={cn(
           'tip tip-l !absolute right-0 top-0 flex flex-col items-center gap-1 rounded-l-lg border border-r-0 border-border bg-surface px-1.5 py-2 shadow-lg focus-ring transition-all duration-base ease-standard',

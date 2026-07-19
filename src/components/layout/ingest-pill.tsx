@@ -11,8 +11,17 @@ import {
   JOB_STARTED_EVENT,
   type JobStartedEventDetail,
 } from '@/lib/job-started-event';
+import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
-const PHASES = ['Parse', 'Plan', 'Write', 'Enrich', 'Verify', 'Commit'];
+const PHASE_KEYS: MessageKey[] = [
+  'jobs.phase.parse',
+  'jobs.phase.plan',
+  'jobs.phase.write',
+  'jobs.phase.enrich',
+  'jobs.phase.verify',
+  'jobs.phase.commit',
+];
 
 function payloadOf(evt: JobStreamEvent): Record<string, unknown> {
   const inner = evt.data?.data;
@@ -50,6 +59,7 @@ function currentPhase(events: JobStreamEvent[]): number {
  * Clicking it opens the ingest workspace, where the live view lives.
  */
 export function IngestPill() {
+  const { t } = useI18n();
   const router = useRouter();
   const [jobId, setJobId] = useState<string | null>(null);
   // Force a re-subscribe when a tracked job restarts (a retry keeps the same id).
@@ -98,18 +108,18 @@ export function IngestPill() {
   if (!jobId || status !== 'streaming') return null;
 
   const idx = currentPhase(events);
-  const pct = Math.min(97, Math.round(((idx + 0.5) / PHASES.length) * 100));
+  const pct = Math.min(97, Math.round(((idx + 0.5) / PHASE_KEYS.length) * 100));
 
   return (
     <button
       type="button"
       onClick={() => router.push('/ingest')}
-      aria-label="Open ingest"
-      data-tip="Open ingest"
+      aria-label={t('jobs.openIngest')}
+      data-tip={t('jobs.openIngest')}
       className="tip tip-b hidden shrink-0 items-center gap-2 h-8 rounded-full border border-accent/30 bg-accent/[0.08] pl-2 pr-2.5 text-xs text-accent-strong transition-colors hover:bg-accent/[0.13] focus-ring sm:flex"
     >
       <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" />
-      <span className="font-medium whitespace-nowrap">{PHASES[idx]}…</span>
+      <span className="font-medium whitespace-nowrap">{t(PHASE_KEYS[idx])}…</span>
       <span className="font-mono tabular-nums text-foreground-tertiary">{pct}%</span>
     </button>
   );

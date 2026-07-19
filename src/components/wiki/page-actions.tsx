@@ -6,6 +6,7 @@ import { AlertTriangle, FileStack, Loader2, Pencil, RefreshCw, Sparkles, Square 
 import { Button } from '@/components/ui/button';
 import { IconButton, iconButtonVariants } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
+import { useI18n } from '@/components/i18n-provider';
 
 export type ReshapeState = 'idle' | 'loading' | 'refreshing' | 'reshaped' | 'unavailable';
 
@@ -30,6 +31,7 @@ export function PageActions({
   reshapeState,
   onRequestReshape,
 }: PageActionsProps) {
+  const { t } = useI18n();
   // Reshape 触发按钮仅在「未触发」或「不可用（允许重试）」时出现；
   // 加载中 / 已重塑时由状态行接管，避免动作条与状态行重复。
   const showReshapeTrigger = reshapeState === 'idle' || reshapeState === 'unavailable';
@@ -38,8 +40,8 @@ export function PageActions({
     <div className="flex shrink-0 items-center gap-1 self-start">
       <Link
         href={editHref}
-        data-tip="Edit page"
-        aria-label="Edit this page"
+        data-tip={t('wiki.actions.edit')}
+        aria-label={t('wiki.actions.editLabel')}
         className={cn(iconButtonVariants({ intent: 'outline', size: 'base' }), 'tip tip-b')}
       >
         <Pencil aria-hidden />
@@ -50,8 +52,8 @@ export function PageActions({
           intent={splitOn ? 'primary' : 'outline'}
           size="base"
           onClick={onToggleSplit}
-          data-tip={splitOn ? 'Hide sources' : `Show sources (${sourceCount})`}
-          aria-label={splitOn ? 'Hide source documents' : `Show ${sourceCount} source documents`}
+          data-tip={splitOn ? t('wiki.actions.hideSources') : t('wiki.actions.showSources', { count: sourceCount })}
+          aria-label={splitOn ? t('wiki.actions.hideSourceDocuments') : t('wiki.actions.showSourceDocuments', { count: sourceCount })}
           className="tip tip-b"
         >
           <FileStack aria-hidden />
@@ -63,8 +65,8 @@ export function PageActions({
           intent="outline"
           size="base"
           onClick={onRequestReshape}
-          data-tip="Reshape for your profile"
-          aria-label="Reshape this page for your profile"
+          data-tip={t('wiki.actions.reshape')}
+          aria-label={t('wiki.actions.reshapeLabel')}
           className="tip tip-b"
         >
           <Sparkles aria-hidden />
@@ -86,44 +88,45 @@ interface ReshapeStatusProps {
 
 /** 正文上方的细状态行：加载中 / 已重塑（可切原文）/ 不可用。 */
 export function ReshapeStatus({ state, showOriginal, stale, onToggle, onRefresh, onCancel }: ReshapeStatusProps) {
+  const { t } = useI18n();
   return (
     <div className="mb-6 flex items-center gap-2 text-xs text-foreground-tertiary">
       {state === 'loading' || state === 'refreshing' ? (
         <>
           <span className="inline-flex items-center gap-1.5">
             <Loader2 className="h-3 w-3 animate-spin" />
-            {state === 'refreshing' ? 'Refreshing reshape…' : 'Reshaping…'}
+            {state === 'refreshing' ? t('wiki.reshape.refreshing') : t('wiki.reshape.loading')}
           </span>
           <Button intent="outline" size="sm" className="ml-auto" onClick={onCancel}>
-            <Square className="h-2.5 w-2.5 fill-current" aria-hidden /> Cancel
+            <Square className="h-2.5 w-2.5 fill-current" aria-hidden /> {t('common.cancel')}
           </Button>
         </>
       ) : state === 'reshaped' ? (
         <>
           {showOriginal ? (
-            <span>Viewing original</span>
+            <span>{t('wiki.reshape.viewingOriginal')}</span>
           ) : (
             <span className="inline-flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 text-accent" /> Adapted for you
+              <Sparkles className="h-3 w-3 text-accent" /> {t('wiki.reshape.adapted')}
             </span>
           )}
           {stale && (
             <span className="inline-flex items-center gap-1 text-warning">
-              <AlertTriangle className="h-3 w-3" aria-hidden /> Update available
+              <AlertTriangle className="h-3 w-3" aria-hidden /> {t('wiki.reshape.updateAvailable')}
             </span>
           )}
           <div className="ml-auto flex items-center gap-1.5">
             <Button intent="outline" size="sm" onClick={onRefresh}>
-              <RefreshCw className="h-3 w-3" aria-hidden /> Refresh
+              <RefreshCw className="h-3 w-3" aria-hidden /> {t('wiki.reshape.refresh')}
             </Button>
             <Button intent="outline" size="sm" onClick={onToggle}>
-              {showOriginal ? 'Show reshaped' : 'Show original'}
+              {showOriginal ? t('wiki.reshape.showReshaped') : t('wiki.reshape.showOriginal')}
             </Button>
           </div>
         </>
       ) : (
         <span className="inline-flex items-center gap-1.5">
-          <Sparkles className="h-3 w-3 opacity-50" /> Couldn&apos;t reshape — showing original
+          <Sparkles className="h-3 w-3 opacity-50" /> {t('wiki.reshape.unavailable')}
         </span>
       )}
     </div>

@@ -4,6 +4,8 @@ import React from 'react';
 import { AlertTriangle, CheckCircle2, Clock3, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { PendingActionView } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 export interface PendingActionCardProps {
   action: PendingActionView;
@@ -13,28 +15,28 @@ export interface PendingActionCardProps {
   affectedPageLimit?: number;
 }
 
-const STATUS_LABELS: Record<PendingActionView['status'], string> = {
-  pending: 'Awaiting approval',
-  approved: 'Approved, preparing execution',
-  executing: 'Applying change',
-  applied: 'Applied',
-  rejected: 'Rejected',
-  expired: 'Expired',
-  failed: 'Failed',
+const STATUS_LABELS: Record<PendingActionView['status'], MessageKey> = {
+  pending: 'chat.action.status.pending',
+  approved: 'chat.action.status.approved',
+  executing: 'chat.action.status.executing',
+  applied: 'chat.action.status.applied',
+  rejected: 'chat.action.status.rejected',
+  expired: 'chat.action.status.expired',
+  failed: 'chat.action.status.failed',
 };
 
-const WORKFLOW_STATUS_LABELS: Record<PendingActionView['status'], string> = {
+const WORKFLOW_STATUS_LABELS: Record<PendingActionView['status'], MessageKey> = {
   ...STATUS_LABELS,
-  approved: 'Approved, preparing workflow',
-  executing: 'Executing workflow action',
-  applied: 'Workflow action applied',
+  approved: 'chat.action.status.workflowApproved',
+  executing: 'chat.action.status.workflowExecuting',
+  applied: 'chat.action.status.workflowApplied',
 };
 
-const IMAGE_INSERT_STATUS_LABELS: Record<PendingActionView['status'], string> = {
+const IMAGE_INSERT_STATUS_LABELS: Record<PendingActionView['status'], MessageKey> = {
   ...WORKFLOW_STATUS_LABELS,
-  approved: 'Approved, preparing illustration task',
-  executing: 'Starting illustration task',
-  applied: 'Illustration task started',
+  approved: 'chat.action.status.imageApproved',
+  executing: 'chat.action.status.imageExecuting',
+  applied: 'chat.action.status.imageApplied',
 };
 
 function StatusIcon({ status }: { status: PendingActionView['status'] }) {
@@ -52,22 +54,23 @@ export function PendingActionCard({
   onReject,
   affectedPageLimit = 8,
 }: PendingActionCardProps) {
+  const { t } = useI18n();
   const titleId = `pending-action-${action.actionId}`;
   const isPending = action.status === 'pending';
   const shownPages = action.affectedPages.slice(0, affectedPageLimit);
   const hiddenPageCount = action.affectedPages.length - shownPages.length;
   const isImageInsert = action.operation === 'workflow-image-insert-start';
   const title = isImageInsert
-    ? 'Proposed illustration'
+    ? t('chat.action.title.illustration')
     : action.operation === 'history-revert'
-    ? 'Proposed history revert'
+    ? t('chat.action.title.revert')
     : action.operation === 'move'
-      ? 'Proposed page move'
+      ? t('chat.action.title.move')
     : action.operation === 'tag-batch'
-      ? 'Proposed tag change'
+      ? t('chat.action.title.tags')
     : action.kind === 'workflow'
-      ? 'Proposed workflow action'
-      : 'Proposed wiki change';
+      ? t('chat.action.title.workflow')
+      : t('chat.action.title.wiki');
 
   return (
     <section
@@ -93,57 +96,57 @@ export function PendingActionCard({
             </li>
           ))}
           {hiddenPageCount > 0 && (
-            <li className="text-foreground-tertiary">+{hiddenPageCount} more pages</li>
+            <li className="text-foreground-tertiary">{t('chat.action.morePages', { count: hiddenPageCount })}</li>
           )}
         </ul>
       )}
 
       {action.kind === 'workflow' && action.operation === 'workflow-cancel' && (
         <p className="mt-2 text-xs text-foreground-secondary">
-          The selected background task will be stopped after approval.
+          {t('chat.action.cancelHint')}
         </p>
       )}
 
       {action.operation === 'move' && (
         <p className="mt-2 text-xs text-foreground-secondary">
-          The canonical page slug and URL will change; the page title stays unchanged.
+          {t('chat.action.moveHint')}
         </p>
       )}
 
       {action.kind === 'workflow' && action.operation === 'workflow-research-start' && (
         <p className="mt-2 text-xs text-foreground-secondary">
-          Research candidates will still require separate approval before import.
+          {t('chat.action.researchHint')}
         </p>
       )}
 
       {isImageInsert && action.imageInsert && (
         <div className="mt-3 space-y-2 border-t border-border-subtle pt-3 text-xs">
           <div>
-            <p className="font-medium text-foreground-secondary">Selected Markdown</p>
+            <p className="font-medium text-foreground-secondary">{t('chat.action.selectedMarkdown')}</p>
             <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-foreground">
               {action.imageInsert.selection}
             </pre>
           </div>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-foreground-secondary">
-            <dt className="font-medium">Prompt</dt>
+            <dt className="font-medium">{t('chat.action.prompt')}</dt>
             <dd className="break-words text-foreground">{action.imageInsert.prompt}</dd>
-            <dt className="font-medium">Alt text</dt>
+            <dt className="font-medium">{t('chat.action.altText')}</dt>
             <dd className="break-words text-foreground">{action.imageInsert.alt}</dd>
             {action.imageInsert.aspectRatio && (
               <>
-                <dt className="font-medium">Aspect ratio</dt>
+                <dt className="font-medium">{t('chat.action.aspectRatio')}</dt>
                 <dd className="text-foreground">{action.imageInsert.aspectRatio}</dd>
               </>
             )}
             {action.imageInsert.style && (
               <>
-                <dt className="font-medium">Style</dt>
+                <dt className="font-medium">{t('chat.action.style')}</dt>
                 <dd className="break-words text-foreground">{action.imageInsert.style}</dd>
               </>
             )}
           </dl>
           <p className="text-foreground-secondary">
-            One image will be generated after approval and inserted below this selection.
+            {t('chat.action.imageHint')}
           </p>
         </div>
       )}
@@ -154,7 +157,7 @@ export function PendingActionCard({
         'workflow-image-insert-start',
       ].includes(action.operation) && (
         <p className="mt-2 text-xs text-foreground-secondary">
-          Final content will be produced after the background task completes.
+          {t('chat.action.workflowHint')}
         </p>
       )}
 
@@ -170,7 +173,7 @@ export function PendingActionCard({
       {action.diff && (
         <details className="mt-2 rounded-md border border-border bg-canvas">
           <summary className="cursor-pointer px-2 py-1.5 text-xs font-medium text-foreground-secondary">
-            Review diff
+            {t('chat.action.reviewDiff')}
           </summary>
           <pre className="max-h-64 overflow-auto border-t border-border p-2 text-[11px] leading-4 text-foreground">
             {action.diff}
@@ -191,7 +194,7 @@ export function PendingActionCard({
             loading={busy}
             onClick={() => onApprove(action.actionId)}
           >
-            Approve
+            {t('chat.action.approve')}
           </Button>
           <Button
             intent="outline"
@@ -199,16 +202,16 @@ export function PendingActionCard({
             disabled={busy}
             onClick={() => onReject(action.actionId)}
           >
-            Reject
+            {t('chat.action.reject')}
           </Button>
         </div>
       ) : (
         <p role="status" className="mt-3 text-xs font-medium text-foreground-secondary">
-          {(isImageInsert
+          {t((isImageInsert
             ? IMAGE_INSERT_STATUS_LABELS
             : action.kind === 'workflow'
               ? WORKFLOW_STATUS_LABELS
-              : STATUS_LABELS)[action.status]}
+              : STATUS_LABELS)[action.status])}
         </p>
       )}
     </section>

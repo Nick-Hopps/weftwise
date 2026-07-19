@@ -25,6 +25,7 @@ import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import { extractArticleToc } from '@/lib/article-toc';
 import type { PageSourceDoc, PageSourceFormat } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 interface BacklinkItem {
   key: string;
@@ -206,13 +207,14 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
 }
 
 function Backlinks({ backlinks }: { backlinks: BacklinkItem[] }) {
+  const { t } = useI18n();
   if (backlinks.length === 0) return null;
   return (
     <div className="mx-auto w-full max-w-[var(--reading-max-width)] px-5 pb-14 sm:px-8">
       <div className="border-t border-border-subtle pt-7">
         <SectionLabel className="mb-2 flex items-center gap-1.5">
           <Link2 className="h-3 w-3" />
-          Linked from
+          {t('wiki.linkedFrom')}
         </SectionLabel>
         <ul className="divide-y divide-border-subtle border-y border-border-subtle">
           {backlinks.map((bl) => (
@@ -250,12 +252,13 @@ function SourcesPane({
   loading: boolean;
   error: string | null;
 }) {
+  const { t } = useI18n();
   const [active, setActive] = useState(0);
 
   if (loading || docs === null) {
     return (
       <div className="flex h-full items-center justify-center gap-2 p-8 text-sm text-foreground-tertiary">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading sources…
+        <Loader2 className="h-4 w-4 animate-spin" /> {t('wiki.sources.loading')}
       </div>
     );
   }
@@ -265,7 +268,7 @@ function SourcesPane({
   if (docs.length === 0) {
     return (
       <div className="p-8 text-sm text-foreground-tertiary">
-        No source documents were recorded for this page.
+        {t('wiki.sources.empty')}
       </div>
     );
   }
@@ -308,13 +311,13 @@ function SourcesPane({
         {src.truncated && (
           <>
             <span className="opacity-50">·</span>
-            <span>preview truncated</span>
+            <span>{t('wiki.previewTruncated')}</span>
           </>
         )}
         {src.added && (
           <span className="ml-auto inline-flex items-center gap-1.5">
             <Sparkles className="h-3 w-3 text-accent" />
-            Ingested {src.added}
+            {t('wiki.sources.ingested', { date: src.added })}
           </span>
         )}
       </div>
