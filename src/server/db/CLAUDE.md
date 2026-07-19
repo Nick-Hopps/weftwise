@@ -164,7 +164,7 @@
 | `research_candidates` | `id` | `(run_id, normalized_url)` UNIQUE；稳定候选快照、rank、decision 与 approval 复合外键，客户端不能改 URL |
 | `research_approvals` | `id` | 每 run 唯一；保存 canonical candidate ID selection、payload hash、idempotency key 与 coordinator job ID |
 | `research_candidate_ingests` | `(approval_id, candidate_id)` | run/candidate/approval 复合外键；claim token/lease、source/child job、operation/page/commit lineage；`ingest_job_id` UNIQUE |
-| `llm_usage` | `id`（自增） | app 级资源，非 subject-scoped，无 FK；一次 LLM 调用一行：`task` + `model` + `input_tokens` + `output_tokens` + `created_at`（epoch ms）；90 天 GC（`pruneOldUsage`，worker 低频 sweep） |
+| `llm_usage` | `id`（自增） | app 级明细；`subject_id` 可空、FK→subjects ON DELETE SET NULL，一次 LLM 调用一行：`task` + `model` + token 数 + `created_at`；`(subject_id, created_at)` 支持项目筛选，旧记录和全局调用保持未归因；90 天 GC（`pruneOldUsage`，worker 低频 sweep） |
 
 ## 扩展指南
 
@@ -211,13 +211,14 @@ src/server/db/
     ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
     ├── maturity-repo.ts       # 页面成熟度 CRUD（listDue/countDue 支持可选 Subject 集合过滤；其余 get / ensureRow / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
     ├── research-provenance-repo.ts # Research 五表 run/批准/delivery/验证原子状态机
-    └── usage-repo.ts          # LLM 用量明细：recordUsage（best-effort 记账）/ summarizeUsage（按 task+model 聚合）/ pruneOldUsage（90 天 GC）
+    └── usage-repo.ts          # LLM 用量明细：recordUsage（best-effort 项目归因）/ summarizeUsage（按项目可选过滤、task+model 聚合）/ pruneOldUsage（90 天 GC）
 ```
 
 ## 变更记录 (Changelog)
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `llm_usage` 新增可空 `subject_id` 与项目时间复合索引；已知 Subject 的 LLM/Embedding/图片调用显式归因，删除 Subject 时归因置空保留用量，历史未归因记录只进入全局汇总 |
 | 2026-07-17 | conversations repo 将既有 `messages.citations_json` 明确为 role-aware 消息证据容器：用户消息恢复到 `references`，Assistant 消息继续恢复到 `citations`；旧 NULL/Assistant JSON 无迁移兼容 |
 | 2026-07-17 | `pending_actions.operation` CHECK 加入 `workflow-image-insert-start`；Drizzle `0010` 与启动期原子重建均保留旧行/索引并继续拒绝未知 operation |
 | 2026-07-16 | pending_actions 支持工作台来源：`conversation_id` 改可空、CHECK 增 `tag-batch`，Drizzle 0008 与启动期结构化 PRAGMA 检测均原子重建并保留历史；repo 增 Subject-scoped TagBatch 创建/恢复/在途去重 |

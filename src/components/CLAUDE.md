@@ -26,7 +26,7 @@
 | `context-panel-chat-tab.tsx` | Ask AI 工作面 memo 边界：尺寸拖动时保持聊天子树稳定，内部复用 `chat-interface`，发问 body 含 subjectId |
 | `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
 | `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
-| `settings-content.tsx` | 按一级入口组合原有设置 section；Automation 同页收纳 Agents / Web search / Maintenance，复用 `settings-rows` 即时保存原语 |
+| `settings-content.tsx` | 按一级入口组合原有设置 section；Automation 同页收纳 Agents / Web search / Maintenance；Usage 支持按时间窗口与项目筛选，复用 `settings-rows` 即时保存原语 |
 | `settings-categories.ts` | 一级入口与 section 映射单一来源：`SETTINGS_CATEGORIES` + `SETTINGS_SECTIONS` + `DEFAULT_CATEGORY`，避免导航和内容漂移 |
 | `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow；窄屏自动切换为上下布局 |
 
@@ -46,10 +46,10 @@
 ### `wiki/` — wiki 页面渲染
 
 - `page-renderer.tsx` / `callout-icon.tsx` —— 把 markdown + frontmatter + titleSlugMap → React；callout 类型统一渲染 Lucide 语义图标并兼容历史标题 emoji；正文位图按原比例居中，并受正文宽度与 `min(32rem, 70vh)` 高度双重约束；标题行 `actions` 与 `headerExtra` 插槽保持不变
-- `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped，保存版 stale 时显示行内 Update available 提示
+- `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped，保存版 stale 时显示行内 Update available 提示；`wiki-reading-view` 按 Subject + slug 把用户最后选择的原文/重塑版本保存到浏览器 localStorage，未记录时仍优先已有重塑版本
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `article-toc.tsx` —— 阅读页固定目录：宽内容区显示右侧 sticky 目录轨道，窄内容区收敛为 sticky 入口/浮层；跟踪普通主滚动区与 Sources 左栏的当前章节并复用稳定 heading anchors
-- `mermaid-diagram.tsx` / `mermaid-theme.ts` —— Mermaid 客户端渲染与主题配置；使用紧凑 flowchart 参数、浅/深色 palette，并监听根节点主题变化重绘 SVG；Diagram callout 的无卡片图解样式位于 `globals.css`
+- `mermaid-diagram.tsx` / `mermaid-svg.tsx` / `mermaid-preview.tsx` / `mermaid-theme.ts` —— Mermaid 客户端渲染与主题配置；内联图与全屏预览复用同一 SVG 渲染器，预览支持 50%–200% 缩放、滚动、重置及 Escape/遮罩关闭；使用紧凑 flowchart 参数、浅/深色 palette，并监听根节点主题变化重绘 SVG；Diagram callout 的无卡片图解样式位于 `globals.css`
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
@@ -188,6 +188,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | 阅读页按 Subject + slug 记忆原文/重塑展示偏好；Mermaid Diagram 增加可缩放全屏预览；Settings Usage 增加项目筛选并明确历史未归因用量仅计入全部项目 |
 | 2026-07-20 | 阅读页正文图片选择器从无效的直接子节点匹配改为真实 Markdown 后代匹配；图片保持原比例居中，并限制最大正文宽度与可视高度，避免大图打断阅读 |
 | 2026-07-18 | Ask AI、Tasks 摘要与任务详情日志统一使用 `ToolActivityIcon` 的 Lucide 语义图标；正文 callout 按类型注入 `CalloutIcon`，历史 Markdown 的标题 emoji 在渲染期清理，普通正文 emoji 不受影响 |
 | 2026-07-17 | Ask AI 桌面工作面支持右/下/右下受控 resize 与键盘微调；会话选择、New/Clear/Save 合并为稳定功能区；流式 delta 按动画帧合并，消息仅在贴底时跟随并按行 memo，修复滚动争用与表格高频重排 |
