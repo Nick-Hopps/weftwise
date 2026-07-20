@@ -6,6 +6,11 @@ import '@uiw/react-markdown-preview/markdown.css';
 import 'katex/dist/katex.min.css';
 import { Providers } from '@/components/providers';
 import { getServerI18n, getServerLocale } from '@/lib/i18n/server';
+import { getBodyFontSize } from '@/server/db/repos/settings-repo';
+import {
+  BODY_FONT_SIZE_CSS_VARIABLE,
+  bodyFontSizeCssValue,
+} from '@/lib/body-font-size';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -51,12 +56,16 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const locale = await getServerLocale();
+  const bodyFontSize = getBodyFontSize();
   return (
     <html
       lang={locale}
       suppressHydrationWarning
       className={`${inter.variable} ${jetbrainsMono.variable} ${lxgwWenKai.variable} ${spaceGrotesk.variable}`}
       data-color-mode="light"
+      style={{
+        [BODY_FONT_SIZE_CSS_VARIABLE]: bodyFontSizeCssValue(bodyFontSize),
+      } as React.CSSProperties}
     >
       <head>
         {/* Apply both Tailwind dark class and @uiw data-color-mode before first paint */}

@@ -26,6 +26,7 @@
 | `job-started-event.ts` | 客户端后台任务启动事件契约：必须携带 `jobId/type/label/queueStatus`；PendingAction workflow 映射真实 job 类型，ingest 专属 UI 用 `isIngestJobStarted` 过滤 |
 | `error-format.ts` | 🆕 `describeErrorMessage(error)`：AI SDK `RetryError` 最后一次尝试自身 message 为空时，补上 `.lastError` 的 message/cause，避免真实原因丢失；`server/jobs/worker.ts` 与 `server/db/repos/jobs-repo.ts::failJob` 共用 |
 | `theme/read-theme-vars.ts` | 从 `document.documentElement` 读 CSS 变量（主题同步） |
+| `body-font-size.ts` | 正文字号 CSS 边界：校验并格式化 `px` 值，把 `app_settings.bodyFontSize` 同步到根变量 `--wiki-body-font-size` |
 
 ## 对外接口（关键类型）
 

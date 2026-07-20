@@ -11,6 +11,7 @@ export type CategoryId = 'general' | 'personalization' | 'automation' | 'usage';
 
 export type SettingsSectionId =
   | 'language'
+  | 'reading'
   | 'cognitive-lens'
   | 'agents'
   | 'web-search'
@@ -69,7 +70,7 @@ export function getSettingsCategories(t: TranslationFunction): SettingsCategory[
 }
 
 export const SETTINGS_SECTIONS = {
-  general: ['language'],
+  general: ['language', 'reading'],
   personalization: ['cognitive-lens'],
   automation: ['agents', 'web-search', 'maintenance'],
   usage: ['usage'],
