@@ -2,6 +2,7 @@ import { registerHandler } from '@/server/jobs/worker';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
 import * as embeddingsRepo from '@/server/db/repos/embeddings-repo';
+import * as maturityRepo from '@/server/db/repos/maturity-repo';
 import { readPageInSubject } from '@/server/wiki/wiki-store';
 import {
   isEmbeddingConfigured,
@@ -17,14 +18,19 @@ function embedText(p: { title: string; summary?: string | null; body: string }):
   return [p.title, p.summary ?? '', p.body].join('\n\n').slice(0, EMBED_TEXT_MAX_CHARS);
 }
 
-/** 回填 subject 内缺/过期向量 + prune 孤儿。未配置 embedding 时 no-op。 */
+/** 回填 subject 内缺/过期向量 + prune 孤儿。未配置 embedding 时只清理 maturity 孤儿。 */
 export async function runEmbedIndex(subjectId: string): Promise<void> {
-  if (!isEmbeddingConfigured()) return;
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) return;
 
-  const model = embeddingModelId();
   const pages = pagesRepo.getAllPages(subjectId);
+  // 维护层孤儿清理：删页/merge 不维护 page_maturity，残留行会虚高 dueCount，
+  // 且 sweep 会给已删页入队必失败的 re-enrich。embed-index 在每次写操作后
+  // 都会跑，在此自愈；必须放在 embedding 配置守卫之前，未配置时同样生效。
+  maturityRepo.pruneOrphans(subjectId, pages.map((p) => p.slug));
+
+  if (!isEmbeddingConfigured()) return;
+  const model = embeddingModelId();
   const existing = new Map(
     embeddingsRepo.listForSubject(subjectId, model).map((r) => [r.slug, r.contentHash])
   );

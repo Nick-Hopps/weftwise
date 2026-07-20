@@ -8,6 +8,7 @@ const mockReadPage = vi.fn();
 const mockList = vi.fn();
 const mockUpsert = vi.fn();
 const mockPrune = vi.fn();
+const mockPruneMaturity = vi.fn();
 const mockGetSubject = vi.fn();
 
 vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
@@ -25,6 +26,9 @@ vi.mock('@/server/db/repos/embeddings-repo', () => ({
   pruneOrphans: (s: unknown, live: unknown) => mockPrune(s, live),
 }));
 vi.mock('@/server/wiki/wiki-store', () => ({ readPageInSubject: (ss: unknown, slug: unknown) => mockReadPage(ss, slug) }));
+vi.mock('@/server/db/repos/maturity-repo', () => ({
+  pruneOrphans: (s: unknown, live: unknown) => mockPruneMaturity(s, live),
+}));
 
 import { runEmbedIndex } from '../embedding-service';
 
@@ -38,11 +42,21 @@ beforeEach(() => {
 });
 
 describe('runEmbedIndex', () => {
-  it('未配置 embedding → no-op（不读页/不嵌入）', async () => {
+  it('未配置 embedding → 不嵌入，但仍清理 page_maturity 孤儿', async () => {
     mockConfigured.mockReturnValue(false);
+    mockGetAllPages.mockReturnValue([{ slug: 'a', title: 'A', summary: '', contentHash: 'h1' }]);
     await runEmbedIndex('s1');
-    expect(mockGetAllPages).not.toHaveBeenCalled();
     expect(mockGenEmb).not.toHaveBeenCalled();
+    expect(mockReadPage).not.toHaveBeenCalled();
+    expect(mockPrune).not.toHaveBeenCalled(); // 向量表清理仍只在配置后执行
+    expect(mockPruneMaturity).toHaveBeenCalledWith('s1', ['a']);
+  });
+
+  it('subject 不存在 → 完全 no-op（不误删 maturity）', async () => {
+    mockGetSubject.mockReturnValue(null);
+    await runEmbedIndex('s1');
+    expect(mockPruneMaturity).not.toHaveBeenCalled();
+    expect(mockGetAllPages).not.toHaveBeenCalled();
   });
 
   it('只嵌入缺/过期页，跳过新鲜页', async () => {
@@ -61,6 +75,7 @@ describe('runEmbedIndex', () => {
     const embeddedSlugs = mockUpsert.mock.calls.map((c) => c[0].slug).sort();
     expect(embeddedSlugs).toEqual(['b', 'c']);
     expect(mockPrune).toHaveBeenCalledWith('s1', ['a', 'b', 'c']);
+    expect(mockPruneMaturity).toHaveBeenCalledWith('s1', ['a', 'b', 'c']);
   });
 
   it('全部新鲜 → 不调 generateEmbeddings，但仍 prune', async () => {
