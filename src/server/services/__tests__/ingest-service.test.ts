@@ -33,6 +33,7 @@ vi.mock('../../sources/parser-registry', () => ({
 
 let mockLoadedKind: 'raw' | 'url' = 'raw';
 const mockUpdateUrlSourcePresentation = vi.hoisted(() => vi.fn());
+const mockUpdateUrlSourceReaderText = vi.hoisted(() => vi.fn());
 const mockLoadSourceForIngest = vi.hoisted(() => vi.fn());
 vi.mock('../../sources/source-loader', () => ({
   loadSourceForIngest: (...args: unknown[]) => mockLoadSourceForIngest(...args),
@@ -50,6 +51,7 @@ vi.mock('../../sources/source-store', () => ({
   getRawSourceBuffer: () => null,
   updateSourceChunks: vi.fn(),
   updateUrlSourcePresentation: (...args: unknown[]) => mockUpdateUrlSourcePresentation(...args),
+  updateUrlSourceReaderText: (...args: unknown[]) => mockUpdateUrlSourceReaderText(...args),
   saveRawSource: vi.fn(() => ({ id: 'web-src-1', contentHash: 'abc' })),
 }));
 
@@ -165,6 +167,7 @@ describe('ingest-service', () => {
     mockCheckpointHasAny = false;
     mockCheckpointClear.mockClear();
     mockUpdateUrlSourcePresentation.mockClear();
+    mockUpdateUrlSourceReaderText.mockClear();
     mockLoadSourceForIngest.mockReset().mockImplementation(async () => ({
       kind: mockLoadedKind,
       cleanText: mockCleanText,
@@ -319,6 +322,7 @@ describe('ingest-service', () => {
       title: 'Remote title',
       description: 'Remote description',
     });
+    expect(mockUpdateUrlSourceReaderText).toHaveBeenCalledWith('url-src', '远程网页正文。');
     expect(mockCheckpointClear).toHaveBeenCalled();
     expect(emit).toHaveBeenCalledWith(
       'ingest:url-refreshed',

@@ -23,6 +23,8 @@ export interface SavedUrlSourceResult extends SavedSourceResult {
   originUrl: string;
 }
 
+export const SOURCE_READER_TEXT_CAP = 120_000;
+
 interface SourceMetadataFile {
   id: string;
   subjectId: SubjectId;
@@ -34,6 +36,9 @@ interface SourceMetadataFile {
   originUrl?: string;
   /** 链接型网页 Source 不存在 raw 文件；预览与 worker 由 originUrl 驱动。 */
   kind?: typeof URL_SOURCE_KIND;
+  /** URL Source 摄入时生成的有界 Markdown 阅读正文。 */
+  readerText?: string;
+  readerTextTruncated?: boolean;
 }
 
 function rawDirFor(subjectSlug: string): string {
@@ -246,6 +251,36 @@ export function updateUrlSourcePresentation(
     });
   } catch {
     // best-effort：展示元数据失败不应中断知识摄入。
+  }
+}
+
+/**
+ * 保存 URL Source 摄入时生成的 Markdown 阅读正文。
+ * 只写权威 sidecar，避免把大段正文复制进 SQLite metadata cache。
+ */
+export function updateUrlSourceReaderText(sourceId: string, cleanText: string): void {
+  const meta = getSourceMetadata(sourceId);
+  if (!meta) return;
+
+  const normalized = cleanText.trim();
+  const updated: Record<string, unknown> = { ...meta };
+  if (normalized) {
+    updated.readerText = normalized.slice(0, SOURCE_READER_TEXT_CAP);
+    if (normalized.length > SOURCE_READER_TEXT_CAP) updated.readerTextTruncated = true;
+    else delete updated.readerTextTruncated;
+  } else {
+    delete updated.readerText;
+    delete updated.readerTextTruncated;
+  }
+
+  const subjectSlug = typeof meta.subjectSlug === 'string' ? meta.subjectSlug : null;
+  const candidatePath = subjectSlug
+    ? path.join(sourcesMetaDirFor(subjectSlug), `${sourceId}.json`)
+    : vaultPath('.llm-wiki', 'sources', `${sourceId}.json`);
+  try {
+    fs.writeFileSync(candidatePath, JSON.stringify(updated, null, 2), 'utf-8');
+  } catch {
+    // best-effort：chunks 仍可作为旧格式阅读正文的回退。
   }
 }
 

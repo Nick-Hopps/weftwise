@@ -6,6 +6,7 @@ import * as sourcesRepo from '../db/repos/sources-repo';
 import {
   updateSourceChunks,
   updateUrlSourcePresentation,
+  updateUrlSourceReaderText,
   saveRawSource,
 } from '../sources/source-store';
 import { loadSourceForIngest } from '../sources/source-loader';
@@ -134,6 +135,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       title: loadedSource.title,
       description: loadedSource.description,
     });
+    updateUrlSourceReaderText(sourceId, loadedSource.cleanText);
   }
 
   // 解析期确定性准备：预清洗 → 切块（零 token）
