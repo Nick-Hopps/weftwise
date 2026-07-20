@@ -12,6 +12,7 @@
  * side-effect import：worker-entry import 本文件即完成 registerHandler('research', ...)。
  */
 import { registerHandler } from '../jobs/worker';
+import * as queue from '../jobs/queue';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import { webSearch } from '../search/web-search';
 import { generateStructuredOutput } from '../llm/provider-registry';
@@ -50,6 +51,7 @@ import type {
   ResearchCandidateSnapshot,
 } from '@/lib/contracts';
 import type { PromptContext } from '../llm/prompts/prompt-context';
+import { AgentCancelled } from '../agents/runtime/errors';
 
 interface ResearchParams {
   findingIds?: string[];
@@ -60,6 +62,7 @@ interface ResearchParams {
 }
 
 const FINDING_ID_PATTERN = /^[0-9a-f]{64}$/;
+const CANCEL_POLL_INTERVAL_MS = 1000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -185,98 +188,132 @@ export async function runResearchJob(
   const persisted = researchProvenanceRepo.findResearchRunByJobId(job.id, params.subjectId);
   if (persisted) return resultFromPersistedRun(persisted);
 
-  const subject = subjectsRepo.getById(params.subjectId);
-  if (!subject) throw new Error(`Subject ${params.subjectId} not found`);
-
-  const scope = params.topic
-    ? { topics: [params.topic], findings: [] }
-    : resolveResearchScopeFromFindingIds(
-      params.subjectId,
-      params.lintJobId!,
-      params.findingIds!,
-    );
-  const topics = scope.topics;
-
-  if (topics.length === 0) {
-    throw new Error('No topics resolved for research job');
-  }
-
-  const promptCtx: PromptContext = {
-    language: getWikiLanguage(),
-    subject: { slug: subject.slug, name: subject.name, description: subject.description },
+  const controller = new AbortController();
+  let cancellationObserved = false;
+  const observeCancellation = (): boolean => {
+    if (cancellationObserved) return true;
+    try {
+      cancellationObserved = queue.isCancelRequested(job.id);
+    } catch {
+      return false;
+    }
+    if (cancellationObserved) controller.abort();
+    return cancellationObserved;
   };
+  const assertNotCancelled = (): void => {
+    if (observeCancellation()) throw new AgentCancelled();
+  };
+  const cancelPoll = setInterval(observeCancellation, CANCEL_POLL_INTERVAL_MS);
+  cancelPoll.unref?.();
+
+  try {
+    assertNotCancelled();
+
+    const subject = subjectsRepo.getById(params.subjectId);
+    if (!subject) throw new Error(`Subject ${params.subjectId} not found`);
+
+    const scope = params.topic
+      ? { topics: [params.topic], findings: [] }
+      : resolveResearchScopeFromFindingIds(
+        params.subjectId,
+        params.lintJobId!,
+        params.findingIds!,
+      );
+    const topics = scope.topics;
+
+    if (topics.length === 0) {
+      throw new Error('No topics resolved for research job');
+    }
+
+    const promptCtx: PromptContext = {
+      language: getWikiLanguage(),
+      subject: { slug: subject.slug, name: subject.name, description: subject.description },
+    };
 
   // ① query 生成 — 失败即 job 失败（无候选可搜索）
-  emit('research:queries', `Generating search queries for ${topics.length} topic(s)...`, { topics });
-  const queriesResult = await generateStructuredOutput(
-    'research:queries',
-    ResearchQueriesSchema,
-    RESEARCH_QUERIES_SYSTEM_PROMPT,
-    buildResearchQueriesUserPrompt(topics, promptCtx),
-    {},
-    { usageSubjectId: subject.id },
-  );
-  const queries = dedupeQueries(queriesResult.queries);
-  if (queries.length === 0) {
-    throw new Error('LLM generated no usable search queries');
-  }
-  emit('research:queries', `Generated ${queries.length} search query(ies)`, { queries });
+    emit('research:queries', `Generating search queries for ${topics.length} topic(s)...`, { topics });
+    const queriesResult = await generateStructuredOutput(
+      'research:queries',
+      ResearchQueriesSchema,
+      RESEARCH_QUERIES_SYSTEM_PROMPT,
+      buildResearchQueriesUserPrompt(topics, promptCtx),
+      {},
+      { usageSubjectId: subject.id, abortSignal: controller.signal },
+    );
+    assertNotCancelled();
+    const queries = dedupeQueries(queriesResult.queries);
+    if (queries.length === 0) {
+      throw new Error('LLM generated no usable search queries');
+    }
+    emit('research:queries', `Generated ${queries.length} search query(ies)`, { queries });
 
   // ② 搜索 — allSettled，单条失败只跳过
-  emit('research:search', `Searching ${queries.length} query(ies)...`, { queries });
-  const settled = await Promise.allSettled(queries.map((q) => webSearch(q)));
-  const rawCandidates: RawCandidate[] = [];
-  settled.forEach((s, i) => {
-    if (s.status === 'fulfilled') {
-      rawCandidates.push(...s.value);
-    } else {
-      emit('research:search', `Search failed for query "${queries[i]}", skipping`, {
-        query: queries[i],
-        error: s.reason instanceof Error ? s.reason.message : String(s.reason),
-      });
-    }
-  });
-  const candidates = dedupeCandidates(rawCandidates);
-  emit('research:search', `Found ${candidates.length} unique candidate(s)`, { count: candidates.length });
+    emit('research:search', `Searching ${queries.length} query(ies)...`, { queries });
+    const settled = await Promise.allSettled(
+      queries.map((query) => webSearch(query, controller.signal)),
+    );
+    assertNotCancelled();
+    const rawCandidates: RawCandidate[] = [];
+    settled.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        rawCandidates.push(...result.value);
+      } else {
+        emit('research:search', `Search failed for query "${queries[index]}", skipping`, {
+          query: queries[index],
+          error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        });
+      }
+    });
+    const candidates = dedupeCandidates(rawCandidates);
+    emit('research:search', `Found ${candidates.length} unique candidate(s)`, { count: candidates.length });
 
   // ③ triage — 失败降级为按排名前 3 未评分
-  let results: ResearchCandidate[] = [];
-  if (candidates.length > 0) {
-    emit('research:triage', `Triaging ${candidates.length} candidate(s)...`);
-    try {
-      const triage = await generateStructuredOutput(
-        'research:triage',
-        ResearchTriageSchema,
-        RESEARCH_TRIAGE_SYSTEM_PROMPT,
-        buildResearchTriageUserPrompt(topics, candidates, promptCtx),
-        {},
-        { usageSubjectId: subject.id },
-      );
-      results = applyTriage(candidates, triage.results);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      emit('research:triage', `Triage failed, falling back to top-3 unscored: ${msg}`);
-      results = fallbackTriage(candidates);
+    let results: ResearchCandidate[] = [];
+    if (candidates.length > 0) {
+      emit('research:triage', `Triaging ${candidates.length} candidate(s)...`);
+      try {
+        const triage = await generateStructuredOutput(
+          'research:triage',
+          ResearchTriageSchema,
+          RESEARCH_TRIAGE_SYSTEM_PROMPT,
+          buildResearchTriageUserPrompt(topics, candidates, promptCtx),
+          {},
+          { usageSubjectId: subject.id, abortSignal: controller.signal },
+        );
+        assertNotCancelled();
+        results = applyTriage(candidates, triage.results);
+      } catch (error) {
+        assertNotCancelled();
+        const msg = error instanceof Error ? error.message : String(error);
+        emit('research:triage', `Triage failed, falling back to top-3 unscored: ${msg}`);
+        results = fallbackTriage(candidates);
+      }
     }
+
+    assertNotCancelled();
+    const stored = researchProvenanceRepo.persistResearchRun({
+      subjectId: params.subjectId,
+      researchJobId: job.id,
+      origin: params.topic ? 'topic' : 'findings',
+      lintJobId: params.lintJobId ?? null,
+      topic: params.topic ?? null,
+      topics,
+      queries,
+      findings: scope.findings,
+      candidates: prepareResearchCandidates(results),
+    });
+    emit('research:complete', `Research complete: ${results.length} candidate(s) proposed`, {
+      runId: stored.run.id,
+      count: results.length,
+    });
+
+    return resultFromPersistedRun(stored);
+  } catch (error) {
+    if (cancellationObserved || observeCancellation()) throw new AgentCancelled();
+    throw error;
+  } finally {
+    clearInterval(cancelPoll);
   }
-
-  const stored = researchProvenanceRepo.persistResearchRun({
-    subjectId: params.subjectId,
-    researchJobId: job.id,
-    origin: params.topic ? 'topic' : 'findings',
-    lintJobId: params.lintJobId ?? null,
-    topic: params.topic ?? null,
-    topics,
-    queries,
-    findings: scope.findings,
-    candidates: prepareResearchCandidates(results),
-  });
-  emit('research:complete', `Research complete: ${results.length} candidate(s) proposed`, {
-    runId: stored.run.id,
-    count: results.length,
-  });
-
-  return resultFromPersistedRun(stored);
 }
 
 function resultFromPersistedRun(

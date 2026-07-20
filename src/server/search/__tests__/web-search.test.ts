@@ -62,6 +62,30 @@ describe('web-search', () => {
     await expect(webSearch('q')).rejects.toThrow(/429/);
   });
 
+  it('webSearch 响应调用方 abort signal', async () => {
+    cfg.mockReturnValue({ provider: 'tavily', apiKey: 'tvly-x', maxResults: 3 });
+    let capturedSignal: AbortSignal | undefined;
+    let rejectFetch: ((error: Error) => void) | undefined;
+    vi.stubGlobal('fetch', vi.fn((_url, init: RequestInit) => {
+      capturedSignal = init.signal as AbortSignal;
+      return new Promise((_resolve, reject) => {
+        rejectFetch = reject;
+      });
+    }));
+
+    const controller = new AbortController();
+    const promise = webSearch('q', controller.signal);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    controller.abort();
+    const signalWasAborted = capturedSignal?.aborted;
+    const error = new Error('external abort');
+    error.name = 'AbortError';
+    rejectFetch?.(error);
+    await expect(promise).rejects.toBe(error);
+    expect(signalWasAborted).toBe(true);
+  });
+
   it('extractContent maps raw_content and drops empties', async () => {
     cfg.mockReturnValue({ provider: 'tavily', apiKey: 'tvly-x', maxResults: 3 });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
