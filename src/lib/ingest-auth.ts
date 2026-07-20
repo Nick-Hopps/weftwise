@@ -38,7 +38,7 @@ export function currentUrlAuthChallenge(
 ): UrlAuthChallenge | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
-    if (event.type === 'job:retrying') return null;
+    if (event.type === 'job:retrying' || event.type === 'job:cancelled') return null;
     if (event.type !== 'ingest:auth-required') continue;
     if (typeof event.id !== 'string' || !event.id.trim()) return null;
     const payload = nestedPayload(event.data);
@@ -64,8 +64,12 @@ export function currentUrlAuthChallenge(
 export function jobResultRequiresUrlAuth(resultJson: string | null | undefined): boolean {
   if (!resultJson) return false;
   try {
-    const value = JSON.parse(resultJson) as { error?: { code?: unknown } };
-    return value?.error?.code === 'url-auth-required';
+    const value = JSON.parse(resultJson) as {
+      cancelled?: unknown;
+      error?: { code?: unknown };
+    };
+    return value?.cancelled !== true
+      && value?.error?.code === 'url-auth-required';
   } catch {
     return false;
   }

@@ -81,6 +81,14 @@ describe('isRecoverableUrlAuthJob', () => {
     expect(isRecoverableUrlAuthJob({
       type: 'ingest', status: 'failed', resultJson: JSON.stringify({ error: { message: '401' } }),
     })).toBe(false);
+    expect(isRecoverableUrlAuthJob({
+      type: 'ingest',
+      status: 'failed',
+      resultJson: JSON.stringify({
+        error: { code: 'url-auth-required' },
+        cancelled: true,
+      }),
+    })).toBe(false);
   });
 });
 
