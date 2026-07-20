@@ -10,8 +10,9 @@ import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { latestToolName, stripLegacyToolActivityIcon } from '@/lib/tool-activity';
-import { currentUrlAuthChallenge } from '@/lib/ingest-auth';
+import { currentUrlAuthChallenge, type UrlAuthSubmissionResult } from '@/lib/ingest-auth';
 import { dispatchJobStarted } from '@/lib/job-started-event';
+import { dispatchResearchRunUpdated } from '@/lib/research-run-updated-event';
 import { IngestAuthDialog } from '@/app/(app)/_components/ingest-auth-dialog';
 import { JobDetailDialog } from './job-detail-dialog';
 import { ToolActivityIcon } from './tool-activity-icon';
@@ -224,8 +225,9 @@ export function JobsPanel({
     ));
   }, [activeAuthRequest]);
 
-  const handleAuthenticated = useCallback(() => {
+  const handleAuthenticated = useCallback((result: UrlAuthSubmissionResult) => {
     if (!activeAuthRequest) return;
+    if (result.researchRun) dispatchResearchRunUpdated(result.researchRun);
     dispatchJobStarted({
       jobId: activeAuthRequest.jobId,
       type: 'ingest',

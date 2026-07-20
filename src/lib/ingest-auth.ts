@@ -1,10 +1,32 @@
 import type { JobStreamEvent } from '@/hooks/use-job-stream';
+import type { ResearchRunView } from '@/lib/contracts';
 
 export interface UrlAuthChallenge {
   challengeId: string;
   status: 401 | 403;
   authOrigin: string;
   sourceId: string;
+}
+
+export interface UrlAuthSubmissionResult {
+  jobId: string;
+  status: 'pending';
+  expiresAt: string;
+  researchRun?: ResearchRunView;
+}
+
+export function buildUrlAuthSubmissionBody(input: {
+  subjectId: string | null;
+  cookie: string;
+  authorization: string;
+}): Record<string, string> {
+  const cookie = input.cookie.trim();
+  const authorization = input.authorization.trim();
+  return {
+    ...(input.subjectId ? { subjectId: input.subjectId } : {}),
+    ...(cookie ? { cookie } : {}),
+    ...(authorization ? { authorization } : {}),
+  };
 }
 
 /**

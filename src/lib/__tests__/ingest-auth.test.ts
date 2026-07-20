@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { currentUrlAuthChallenge, jobResultRequiresUrlAuth } from '../ingest-auth';
+import {
+  buildUrlAuthSubmissionBody,
+  currentUrlAuthChallenge,
+  jobResultRequiresUrlAuth,
+} from '../ingest-auth';
 
 function event(type: string, data?: Record<string, unknown>, id = `event-${type}`) {
   return {
@@ -87,5 +91,18 @@ describe('jobResultRequiresUrlAuth', () => {
     }))).toBe(false);
     expect(jobResultRequiresUrlAuth('{broken')).toBe(false);
     expect(jobResultRequiresUrlAuth(null)).toBe(false);
+  });
+});
+
+describe('buildUrlAuthSubmissionBody', () => {
+  it('使用 job 自身 Subject 并只提交规范化后的非空凭证', () => {
+    expect(buildUrlAuthSubmissionBody({
+      subjectId: 'research-subject',
+      cookie: '  session=secret  ',
+      authorization: '   ',
+    })).toEqual({
+      subjectId: 'research-subject',
+      cookie: 'session=secret',
+    });
   });
 });

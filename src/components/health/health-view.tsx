@@ -34,6 +34,11 @@ import { FindingRow, findingTypeLabel } from './finding-row';
 import { ResearchCandidatesDialog } from './research-candidates-dialog';
 import { ResearchBacklogSection } from './research-backlog-section';
 import { blockImeEnterSubmit } from '@/lib/keyboard';
+import {
+  isMatchingResearchRunUpdate,
+  RESEARCH_RUN_UPDATED_EVENT,
+  type ResearchRunUpdatedEventDetail,
+} from '@/lib/research-run-updated-event';
 import type {
   Job,
   LintFinding,
@@ -486,6 +491,22 @@ export function HealthView() {
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
   const { status: researchStatus, events: researchEvents } = useJobStream(researchJobId);
   const researching = workflowBusyActions.has('research');
+
+  useEffect(() => {
+    const onResearchRunUpdated = (event: Event) => {
+      const { run } = (event as CustomEvent<ResearchRunUpdatedEventDetail>).detail;
+      setCandidateResult((current) => {
+        if (
+          !current
+          || !isHealthOriginCurrent(originRef.current, current.origin)
+          || !isMatchingResearchRunUpdate(current.run, run)
+        ) return current;
+        return { ...current, run };
+      });
+    };
+    window.addEventListener(RESEARCH_RUN_UPDATED_EVENT, onResearchRunUpdated);
+    return () => window.removeEventListener(RESEARCH_RUN_UPDATED_EVENT, onResearchRunUpdated);
+  }, []);
 
   function showResearchError(source: ResearchOrigin, message: string): void {
     if (source === 'remediation') setRemediationError(message);
