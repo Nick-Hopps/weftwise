@@ -67,7 +67,7 @@ describe('recoverUnlistedTrackedJobs', () => {
 
 describe('image-insert presentation', () => {
   it('Tasks 使用 Illustrating，并只在该 job 成功完成时刷新页面', () => {
-    expect(jobTypeVerb('image-insert')).toBe('Illustrating');
+    expect(jobTypeVerb('image-insert')).toBe('jobs.activity.imageInsert');
     expect(shouldRefreshPageForCompletedJob('image-insert', 'completed')).toBe(true);
     expect(shouldRefreshPageForCompletedJob('image-insert', 'failed')).toBe(false);
     expect(shouldRefreshPageForCompletedJob('research', 'completed')).toBe(false);

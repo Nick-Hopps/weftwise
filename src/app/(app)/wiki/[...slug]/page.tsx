@@ -42,7 +42,10 @@ export async function generateMetadata({ params, searchParams }: WikiPageProps):
   const canonicalSlug = pagesRepo.resolvePageAlias(subject.id, slug) ?? slug;
   const page = pagesRepo.getPageBySlug(subject.id, canonicalSlug);
 
-  if (!page) return { title: 'Page Not Found' };
+  if (!page) {
+    const { t } = await getServerI18n();
+    return { title: t('page.notFound') };
+  }
 
   return {
     title: `${page.title} — ${subject.name}`,
@@ -140,9 +143,11 @@ async function WikiPageElsewhere({
     <div className="max-w-content mx-auto px-6 py-12 w-full">
       <h1 className="text-xl font-semibold text-foreground">{t('page.notFound')}</h1>
       <p className="mt-2 text-sm text-foreground-secondary">
-        <code className="font-mono text-xs px-1.5 py-0.5 rounded bg-subtle">{slug}</code>{' '}
-        does not exist in <span className="font-medium">{activeSubjectName}</span>, but it
-        lives in {hints.length === 1 ? 'another subject' : `${hints.length} other subjects`}:
+        {t(hints.length === 1 ? 'wiki.elsewhere.description.one' : 'wiki.elsewhere.description.many', {
+          slug,
+          subject: activeSubjectName,
+          count: hints.length,
+        })}
       </p>
       <ul className="mt-4 space-y-2">
         {hints.map(({ subject: owning, page }) => (
@@ -152,7 +157,9 @@ async function WikiPageElsewhere({
               className="inline-flex items-center gap-2 px-3 h-9 rounded-md text-sm font-medium text-accent-strong bg-accent-subtle border border-accent/20 hover:bg-accent/15 hover:border-accent/40 transition-colors focus-ring"
             >
               <span>{page.title}</span>
-              <span className="text-xs text-foreground-tertiary">in {owning.name}</span>
+              <span className="text-xs text-foreground-tertiary">
+                {t('wiki.elsewhere.location', { subject: owning.name })}
+              </span>
             </Link>
           </li>
         ))}

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { HtmlSafety } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 interface HtmlSourceFrameProps {
   /** 本地 `/api/sources/<id>/raw` 或链接型 Source 的远程 URL。 */
@@ -29,6 +30,7 @@ interface HtmlSourceFrameProps {
  * 此时即使没有 safety 也默认禁用脚本。
  */
 export function HtmlSourceFrame({ src, title, safety, remote = false, className }: HtmlSourceFrameProps) {
+  const { t } = useI18n();
   const [forceRun, setForceRun] = useState(false);
   const suspicious = remote || safety?.risk === 'suspicious';
   const runScripts = !suspicious || forceRun;
@@ -40,8 +42,8 @@ export function HtmlSourceFrame({ src, title, safety, remote = false, className 
           <div className="flex items-center gap-2 font-semibold">
             <ShieldAlert className="h-4 w-4 shrink-0" />
             {remote
-              ? 'Live website — scripts and interactivity disabled'
-              : 'Potentially unsafe scripts detected — interactivity disabled'}
+              ? t('wiki.html.remoteWarning')
+              : t('wiki.html.unsafeWarning')}
           </div>
           {safety && safety.signals.length > 0 && (
             <ul className="mt-1.5 ml-6 list-disc space-y-0.5 text-danger/90">
@@ -55,7 +57,7 @@ export function HtmlSourceFrame({ src, title, safety, remote = false, className 
             onClick={() => setForceRun(true)}
             className="mt-2 inline-flex h-7 items-center rounded-md border border-danger/40 px-2.5 font-medium text-danger transition-colors hover:bg-danger/12 focus-ring"
           >
-            I understand the risk — run scripts anyway
+            {t('wiki.html.runScripts')}
           </button>
         </div>
       )}

@@ -22,18 +22,18 @@ export interface JobsPanelSummary {
   collapsedStatus: 'processing' | 'completed' | 'failed';
 }
 
-export function jobTypeVerb(type: string): string {
+export function jobTypeVerb(type: string): MessageKey {
   switch (type) {
-    case 'ingest': return 'Ingesting';
-    case 'lint': return 'Linting';
-    case 'curate': return 'Curating';
-    case 'fix': return 'Fixing';
-    case 're-enrich': return 'Enriching';
-    case 'embed-index': return 'Indexing';
-    case 'research': return 'Researching';
-    case 'research-import': return 'Importing research';
-    case 'image-insert': return 'Illustrating';
-    default: return 'Processing';
+    case 'ingest': return 'jobs.activity.ingest';
+    case 'lint': return 'jobs.activity.lint';
+    case 'curate': return 'jobs.activity.curate';
+    case 'fix': return 'jobs.activity.fix';
+    case 're-enrich': return 'jobs.activity.reenrich';
+    case 'embed-index': return 'jobs.activity.embedIndex';
+    case 'research': return 'jobs.activity.research';
+    case 'research-import': return 'jobs.activity.researchImport';
+    case 'image-insert': return 'jobs.activity.imageInsert';
+    default: return 'jobs.activity.processing';
   }
 }
 
@@ -95,3 +95,4 @@ export function recoverUnlistedTrackedJobs(
     return [{ ...job, queueStatus: 'running' as const }];
   });
 }
+import type { MessageKey } from '@/lib/i18n/messages';

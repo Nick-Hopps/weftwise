@@ -81,6 +81,7 @@ function IngestTaskDetail({
   onRemove: (jobId: string) => void;
   onStatusChange: (jobId: string, status: IngestTask['queueStatus']) => void;
 }) {
+  const { t } = useI18n();
   const queryClient = useQueryClient();
   const [reconnectKey, setReconnectKey] = useState(0);
   const [retrying, setRetrying] = useState(false);
@@ -124,7 +125,7 @@ function IngestTaskDetail({
       const res = await apiFetch(`/api/jobs/${task.id}/retry`, { method: 'POST' });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Retry failed (${res.status})`);
+        throw new Error(body.error || t('ingest.error.retryStatus', { status: res.status }));
       }
       setCheckpointProgress(null);
       onStatusChange(task.id, 'pending');
@@ -140,7 +141,7 @@ function IngestTaskDetail({
     } finally {
       setRetrying(false);
     }
-  }, [onStatusChange, task.id, task.sourceName]);
+  }, [onStatusChange, t, task.id, task.sourceName]);
 
   const handleTerminate = useCallback(async () => {
     if (terminating) return;
@@ -195,8 +196,13 @@ function IngestTaskDetail({
           retrying={retrying}
           retryLabel={
             checkpointProgress
-              ? `Resume${checkpointProgress.totalPages ? ` · ${checkpointProgress.writerPages}/${checkpointProgress.totalPages} pages` : ''}`
-              : 'Retry'
+              ? checkpointProgress.totalPages
+                ? t('ingest.resumeProgress', {
+                    written: checkpointProgress.writerPages,
+                    total: checkpointProgress.totalPages,
+                  })
+                : t('ingest.resume')
+              : t('common.retry')
           }
           onTerminate={handleTerminate}
           terminating={terminating}
@@ -355,7 +361,7 @@ export function IngestWorkbench() {
       const res = await apiFetch('/api/ingest', { method: 'POST', body: formData });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Upload failed (${res.status})`);
+        throw new Error(body.error || t('ingest.error.uploadStatus', { status: res.status }));
       }
       const data = await res.json();
       const task = queuedTask(data.jobId, file.name);
@@ -372,7 +378,7 @@ export function IngestWorkbench() {
     } finally {
       setUploading(false);
     }
-  }, []);
+  }, [t]);
 
   const handleStart = async () => {
     if (mode === 'file') {
@@ -398,7 +404,7 @@ export function IngestWorkbench() {
           const res = await apiFetch('/api/ingest', { method: 'POST', body: formData });
           if (!res.ok) {
             const body = await res.json().catch(() => ({}));
-            throw new Error(body.error || `Upload failed (${res.status})`);
+            throw new Error(body.error || t('ingest.error.uploadStatus', { status: res.status }));
           }
           const data = await res.json();
           results.push({ filename: file.name, jobId: data.jobId });
@@ -427,11 +433,17 @@ export function IngestWorkbench() {
         setSelectedTaskId(queued[0].id);
         const failures = results.filter((result) => result.error);
         if (failures.length > 0) {
-          setError(
-            `${failures.length} ${failures.length === 1 ? 'file' : 'files'} could not be queued: ${failures
-              .map((result) => `${result.filename} — ${result.error}`)
-              .join('; ')}`,
-          );
+          setError(t(
+            failures.length === 1
+              ? 'ingest.error.fileQueue.one'
+              : 'ingest.error.fileQueue.many',
+            {
+              count: failures.length,
+              details: failures
+                .map((result) => `${result.filename} — ${result.error}`)
+                .join('; '),
+            },
+          ));
         }
       }
       return;
@@ -439,11 +451,11 @@ export function IngestWorkbench() {
     if (mode === 'url') {
       const { urls, invalid } = parseUrlLines(urlInput);
       if (invalid.length > 0) {
-        setError(`Invalid URLs (must start with http:// or https://): ${invalid.join(', ')}`);
+        setError(t('ingest.error.invalidUrls', { urls: invalid.join(', ') }));
         return;
       }
       if (urls.length === 0) {
-        setError('Please enter at least one URL.');
+        setError(t('ingest.error.urlRequired'));
         return;
       }
       setError(null);
@@ -458,7 +470,7 @@ export function IngestWorkbench() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok && res.status !== 422) {
-          throw new Error(data.error || `Submit failed (${res.status})`);
+          throw new Error(data.error || t('ingest.error.submitStatus', { status: res.status }));
         }
         const results = (data.results ?? []) as Array<{ url: string; jobId?: string; error?: string }>;
         const queued = results.flatMap((result, index) =>
@@ -478,11 +490,17 @@ export function IngestWorkbench() {
           setSelectedTaskId(queued[0].id);
           const failures = results.filter((result) => result.error);
           if (failures.length > 0) {
-            setError(
-              `${failures.length} ${failures.length === 1 ? 'URL' : 'URLs'} could not be queued: ${failures
-                .map((result) => `${result.url} — ${result.error}`)
-                .join('; ')}`,
-            );
+            setError(t(
+              failures.length === 1
+                ? 'ingest.error.urlQueue.one'
+                : 'ingest.error.urlQueue.many',
+              {
+                count: failures.length,
+                details: failures
+                  .map((result) => `${result.url} — ${result.error}`)
+                  .join('; '),
+              },
+            ));
           }
         } else {
           setUrlResults(results);
@@ -496,7 +514,7 @@ export function IngestWorkbench() {
     }
     // Text mode
     if (!textInput.trim()) {
-      setError('Please enter some text to ingest.');
+      setError(t('ingest.error.textRequired'));
       return;
     }
     setError(null);
@@ -513,7 +531,7 @@ export function IngestWorkbench() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Submit failed (${res.status})`);
+        throw new Error(body.error || t('ingest.error.submitStatus', { status: res.status }));
       }
       const data = await res.json();
       const task = queuedTask(data.jobId, filename);
@@ -717,13 +735,15 @@ export function IngestWorkbench() {
                       <span className="min-w-0">
                         <span className="break-all font-mono text-foreground-secondary">{r.url}</span>
                         {r.error && <span className="text-danger"> — {r.error}</span>}
-                        {r.jobId && <span className="text-foreground-tertiary"> — queued</span>}
+                        {r.jobId && (
+                          <span className="text-foreground-tertiary"> — {t('ingest.queuedSuffix')}</span>
+                        )}
                       </span>
                     </li>
                   ))}
                 </ul>
                 <span className="text-xs text-foreground-tertiary">
-                  Jobs run in the background — watch progress in the corner toast.
+                  {t('ingest.backgroundToast')}
                 </span>
               </div>
             )}
@@ -731,7 +751,10 @@ export function IngestWorkbench() {
             {fileResults && (
               <div className="flex flex-col gap-1.5 rounded-md border border-border bg-canvas p-3">
                 <span className="text-xs font-semibold text-foreground">
-                  {fileResults.filter((r) => r.jobId).length}/{fileResults.length} files queued
+                  {t('ingest.fileQueueSummary', {
+                    queued: fileResults.filter((r) => r.jobId).length,
+                    total: fileResults.length,
+                  })}
                 </span>
                 <ul className="flex flex-col gap-1">
                   {fileResults.map((r) => (
@@ -743,20 +766,22 @@ export function IngestWorkbench() {
                       <span className="min-w-0">
                         <span className="break-all font-mono text-foreground-secondary">{r.filename}</span>
                         {r.error && <span className="text-danger"> — {r.error}</span>}
-                        {r.jobId && <span className="text-foreground-tertiary"> — queued</span>}
+                        {r.jobId && (
+                          <span className="text-foreground-tertiary"> — {t('ingest.queuedSuffix')}</span>
+                        )}
                       </span>
                     </li>
                   ))}
                 </ul>
                 <span className="text-xs text-foreground-tertiary">
-                  Jobs run in the background — watch progress in the corner panel.
+                  {t('ingest.backgroundPanel')}
                 </span>
               </div>
             )}
 
             <div className="flex items-center justify-between gap-3 pt-1">
               <span className="flex items-center gap-1.5 text-xs text-foreground-tertiary">
-                <Layers className="h-3.5 w-3.5" /> Filing into{' '}
+                <Layers className="h-3.5 w-3.5" /> {t('ingest.filingInto')}{' '}
                 <span className="font-mono text-foreground-secondary">{subjectSlug}</span>
               </span>
               <Button
@@ -766,7 +791,7 @@ export function IngestWorkbench() {
                 loading={uploading}
                 disabled={uploading || !canStart}
               >
-                <Sparkles className="h-3.5 w-3.5" /> Start ingest
+                <Sparkles className="h-3.5 w-3.5" /> {t('ingest.start')}
               </Button>
             </div>
           </div>

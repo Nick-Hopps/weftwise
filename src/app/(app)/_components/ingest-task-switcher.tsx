@@ -59,7 +59,7 @@ export function IngestTaskSwitcher({
           <div className="shrink-0">
             <p className="text-sm font-semibold text-foreground">{t('ingest.tasks')}</p>
             <p className="font-mono text-[11px] text-foreground-tertiary">
-              {tasks.length} {tasks.length === 1 ? 'source' : 'sources'}
+              {t('ingest.sourceCount', { count: tasks.length })}
             </p>
           </div>
           <div

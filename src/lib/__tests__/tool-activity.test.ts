@@ -197,13 +197,13 @@ describe('Ask AI 选区配图 activity', () => {
 
 describe('jobActivityTitle', () => {
   it('识别 research-import 事件并优先于通用 Research', () => {
-    expect(jobActivityTitle([{ type: 'research-import:start' }])).toBe('Importing research');
-    expect(jobActivityTitle([{ type: 'research:start' }])).toBe('Researching');
+    expect(jobActivityTitle([{ type: 'research-import:start' }])).toBe('jobs.activity.researchImport');
+    expect(jobActivityTitle([{ type: 'research:start' }])).toBe('jobs.activity.research');
   });
 
   it('保留 Ingest/Lint 与未知事件回退', () => {
-    expect(jobActivityTitle([{ type: 'ingest:start' }])).toBe('Ingesting');
-    expect(jobActivityTitle([{ type: 'lint:scope' }])).toBe('Linting');
-    expect(jobActivityTitle([{ type: 'job:completed' }])).toBe('Processing');
+    expect(jobActivityTitle([{ type: 'ingest:start' }])).toBe('jobs.activity.ingest');
+    expect(jobActivityTitle([{ type: 'lint:scope' }])).toBe('jobs.activity.lint');
+    expect(jobActivityTitle([{ type: 'job:completed' }])).toBe('jobs.activity.processing');
   });
 });

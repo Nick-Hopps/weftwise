@@ -39,6 +39,7 @@ import type {
   PostconditionReport,
   ResearchRunView,
 } from '@/lib/contracts';
+import type { MessageKey } from '@/lib/i18n/messages';
 import {
   buildPostconditionNotice,
   extractPostconditionReport,
@@ -95,20 +96,21 @@ function createResearchIdempotencyKey(runId: string): string {
 }
 
 function PostconditionBanner({
-  label,
+  labelKey,
   report,
 }: {
-  label: string;
+  labelKey: MessageKey;
   report: PostconditionReport;
 }) {
-  const notice = buildPostconditionNotice(report);
+  const { t } = useI18n();
+  const notice = buildPostconditionNotice(report, t);
   const tone = notice.tone === 'success'
     ? 'border-success/40 bg-success-bg text-success'
     : 'border-warning/40 bg-warning-bg text-warning';
 
   return (
     <div className={`rounded-md border px-3 py-2 text-sm ${tone}`}>
-      <p className="font-medium">{label} · {notice.title}</p>
+      <p className="font-medium">{t(labelKey)} · {notice.title}</p>
       {notice.details.map((detail, index) => (
         <p key={`${index}-${detail}`} className="mt-0.5">{detail}</p>
       ))}
@@ -117,7 +119,7 @@ function PostconditionBanner({
 }
 
 export function HealthView() {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
@@ -296,7 +298,7 @@ export function HealthView() {
       if (rerun) void runLint(rerun.origin);
     } else if (streamStatus === 'failed') {
       if (!isCurrentOrigin(meta.origin)) return;
-      setLintError('Health check failed — see job details for the underlying error.');
+      setLintError(t('health.error.jobFailed'));
       lintJobMetaRef.current = null;
       setJobId(null);
       const rerun = lintRerunQueueRef.current.finish(meta.origin, captureOrigin());
@@ -328,7 +330,7 @@ export function HealthView() {
       });
       if (!isCurrentOrigin(expectedOrigin)) return;
       if (!res.ok) {
-        setLintError(`Health check request failed (${res.status}).`);
+        setLintError(t('health.error.requestStatus', { status: res.status }));
         return;
       }
 
@@ -336,7 +338,7 @@ export function HealthView() {
       try {
         json = await res.json();
       } catch {
-        setLintError('Health check response is invalid.');
+        setLintError(t('health.error.invalidResponse'));
         return;
       }
       if (
@@ -346,7 +348,7 @@ export function HealthView() {
         || typeof (json as { jobId?: unknown }).jobId !== 'string'
         || !(json as { jobId: string }).jobId
       ) {
-        if (isCurrentOrigin(expectedOrigin)) setLintError('Health check response is invalid.');
+        if (isCurrentOrigin(expectedOrigin)) setLintError(t('health.error.invalidResponse'));
         return;
       }
       accepted = true;
@@ -355,7 +357,7 @@ export function HealthView() {
       setJobId(nextJobId);
     } catch {
       if (isCurrentOrigin(expectedOrigin)) {
-        setLintError('Health check request failed. Please try again.');
+        setLintError(t('health.error.requestRetry'));
       }
     } finally {
       if (isCurrentOrigin(expectedOrigin)) setStarting(false);
@@ -528,7 +530,7 @@ export function HealthView() {
         try {
           const res = await apiFetch(`/api/jobs/${researchJobId}`);
           if (!isCurrentOrigin(meta.origin)) return;
-          const runId = await readResearchRunId(res);
+          const runId = await readResearchRunId(res, t);
           if (!isCurrentOrigin(meta.origin)) return;
           const run = await loadResearchRun(runId, meta.origin);
           if (!isCurrentOrigin(meta.origin)) return;
@@ -537,7 +539,7 @@ export function HealthView() {
           if (isCurrentOrigin(meta.origin)) {
             showResearchError(
               meta.source,
-              error instanceof Error ? error.message : 'Research result could not be loaded.',
+              error instanceof Error ? error.message : t('health.error.resultLoad'),
             );
           }
         } finally {
@@ -592,7 +594,7 @@ export function HealthView() {
         if (!cancelled && isCurrentOrigin(result.origin)) {
           showResearchError(
             result.run.origin === 'findings' ? 'remediation' : 'manual',
-            error instanceof Error ? error.message : 'Research run could not be refreshed.',
+            error instanceof Error ? error.message : t('health.error.runRefresh'),
           );
         }
       }
@@ -612,7 +614,7 @@ export function HealthView() {
     const response = await apiFetch(
       `/api/research-runs/${encodeURIComponent(runId)}?subjectId=${encodeURIComponent(origin.subjectId)}`,
     );
-    return readResearchRun(response);
+    return readResearchRun(response, t);
   }
 
   async function startResearch(topic: string, source: Exclude<ResearchOrigin, 'remediation'>): Promise<string | null> {
@@ -641,10 +643,10 @@ export function HealthView() {
       } else {
         const json = (await res.json().catch(() => ({}))) as { error?: string };
         if (!isCurrentOrigin(origin)) return null;
-        setResearchError(json.error ?? `Research request failed (${res.status})`);
+        setResearchError(json.error ?? t('health.error.researchStatus', { status: res.status }));
       }
     } catch {
-      if (isCurrentOrigin(origin)) setResearchError('Research request failed. Please try again.');
+      if (isCurrentOrigin(origin)) setResearchError(t('health.error.researchRetry'));
     } finally {
       if (!accepted) releaseAction('research', origin);
     }
@@ -687,13 +689,13 @@ export function HealthView() {
       if (response.status === 409) {
         await queryClient.invalidateQueries({ queryKey: ['lint-latest', origin.subjectId] });
         if (!isCurrentOrigin(origin)) return;
-        setRemediationError('体检结果已更新，请重新确认。');
+        setRemediationError(t('health.error.snapshotChanged'));
         return;
       }
       if (!response.ok) {
         const payload = await response.json().catch(() => ({})) as { error?: string };
         if (!isCurrentOrigin(origin)) return;
-        setRemediationError(payload.error ?? `处置请求失败（${response.status}）`);
+        setRemediationError(payload.error ?? t('health.error.remediationStatus', { status: response.status }));
         return;
       }
 
@@ -722,7 +724,7 @@ export function HealthView() {
       }
       await queryClient.invalidateQueries({ queryKey: ['lint-latest', origin.subjectId] });
     } catch {
-      if (isCurrentOrigin(origin)) setRemediationError('处置请求失败，请稍后重试。');
+      if (isCurrentOrigin(origin)) setRemediationError(t('health.error.remediationRetry'));
     } finally {
       if (!accepted) releaseAction(action, origin);
     }
@@ -754,7 +756,7 @@ export function HealthView() {
       });
       if (!isCurrentOrigin(result.origin)) return;
       if (res.ok) {
-        const run = await readResearchRun(res);
+        const run = await readResearchRun(res, t);
         if (isCurrentOrigin(result.origin)) {
           setCandidateResult({ run, origin: result.origin });
           invalidateWorkflowLifecycle(result.origin);
@@ -768,7 +770,7 @@ export function HealthView() {
       if (latest.status === 'awaiting-approval') {
         showResearchError(
           result.run.origin === 'findings' ? 'remediation' : 'manual',
-          `Research approval failed (${res.status}).`,
+          t('health.error.approvalStatus', { status: res.status }),
         );
       }
     } catch (error) {
@@ -779,7 +781,7 @@ export function HealthView() {
           if (latest.status === 'awaiting-approval') {
             showResearchError(
               result.run.origin === 'findings' ? 'remediation' : 'manual',
-              'Research approval result is uncertain. Review the current run before retrying.',
+              t('health.error.approvalUncertain'),
             );
           }
         }
@@ -787,7 +789,7 @@ export function HealthView() {
         if (isCurrentOrigin(result.origin)) {
           showResearchError(
             result.run.origin === 'findings' ? 'remediation' : 'manual',
-            error instanceof Error ? error.message : 'Research approval failed.',
+            error instanceof Error ? error.message : t('health.error.approval'),
           );
         }
       }
@@ -819,7 +821,7 @@ export function HealthView() {
           body: JSON.stringify({ subjectId: result.run.subjectId }),
         },
       );
-      const run = await readResearchRun(response);
+      const run = await readResearchRun(response, t);
       if (!isCurrentOrigin(result.origin)) return;
       setCandidateResult({ run, origin: result.origin });
       invalidateWorkflowLifecycle(result.origin);
@@ -827,7 +829,7 @@ export function HealthView() {
       if (isCurrentOrigin(result.origin)) {
         showResearchError(
           result.run.origin === 'findings' ? 'remediation' : 'manual',
-          error instanceof Error ? error.message : 'Research dismiss failed.',
+          error instanceof Error ? error.message : t('health.error.dismiss'),
         );
       }
     } finally {
@@ -861,7 +863,7 @@ export function HealthView() {
           }),
         },
       );
-      const run = await readResearchRun(response);
+      const run = await readResearchRun(response, t);
       if (!isCurrentOrigin(result.origin)) return;
       setCandidateResult({ run, origin: result.origin });
       invalidateWorkflowLifecycle(result.origin);
@@ -869,7 +871,7 @@ export function HealthView() {
       if (isCurrentOrigin(result.origin)) {
         showResearchError(
           result.run.origin === 'findings' ? 'remediation' : 'manual',
-          error instanceof Error ? error.message : 'Research retry failed.',
+          error instanceof Error ? error.message : t('health.error.retry'),
         );
       }
     } finally {
@@ -892,7 +894,7 @@ export function HealthView() {
         `/api/sources/${sourceId}?subjectId=${encodeURIComponent(origin.subjectId)}`,
         { method: 'DELETE' },
       );
-      const result = await readDeleteSourceResult(res);
+      const result = await readDeleteSourceResult(res, t);
       if (isCurrentOrigin(origin)) {
         setHandledSourceIds((prev) => new Set(prev).add(sourceId));
         void queryClient.invalidateQueries({ queryKey: ['sources'] });
@@ -904,7 +906,7 @@ export function HealthView() {
     } catch (error) {
       if (isCurrentOrigin(origin)) {
         setRemediationError(
-          error instanceof Error ? error.message : 'Delete source failed. Please try again.',
+          error instanceof Error ? error.message : t('health.error.deleteSource'),
         );
       }
     } finally {
@@ -983,10 +985,10 @@ export function HealthView() {
     + recentOutcomeSummary.failed
     + recentOutcomeSummary.skipped;
   const activeMessages = [
-    running ? latestMessage || 'Running health check...' : null,
-    researching ? 'Researching sources...' : null,
-    curating ? curateMessage || 'Curating structure...' : null,
-    fixing ? fixMessage || 'Fixing issues...' : null,
+    running ? latestMessage || t('health.activity.check') : null,
+    researching ? t('health.activity.research') : null,
+    curating ? curateMessage || t('health.activity.curate') : null,
+    fixing ? fixMessage || t('health.activity.fix') : null,
   ].filter((message): message is string => message !== null);
 
   return (
@@ -996,11 +998,13 @@ export function HealthView() {
         title={t('health.title')}
         description={(
           <span className="block truncate">
-            {allSubjects ? 'All subjects' : subjectSlug}
+            {allSubjects ? t('health.scope.all') : subjectSlug}
             <span className="text-foreground-tertiary">
               {data?.ranAt
-                ? ` · Checked ${new Date(data.ranAt).toLocaleString()}`
-                : ' · Not checked yet'}
+                ? ` · ${t('health.checkedAt', {
+                    time: formatDate(data.ranAt, { dateStyle: 'medium', timeStyle: 'short' }),
+                  })}`
+                : ` · ${t('health.notChecked')}`}
             </span>
           </span>
         )}
@@ -1022,7 +1026,7 @@ export function HealthView() {
                   : 'text-foreground-secondary hover:text-foreground')
               }
             >
-              This subject
+              {t('health.scope.subject')}
             </button>
             <button
               type="button"
@@ -1036,12 +1040,12 @@ export function HealthView() {
                   : 'text-foreground-secondary hover:text-foreground')
               }
             >
-              All subjects
+              {t('health.scope.all')}
             </button>
           </div>
           <Button intent="primary" onClick={() => void runLint()} loading={running}>
             {!running && <RefreshCw className="h-3.5 w-3.5" />}
-            {neverRun ? 'Run check' : 'Run again'}
+            {neverRun ? t('health.runCheck') : t('health.runAgain')}
           </Button>
         </div>}
       />
@@ -1051,29 +1055,29 @@ export function HealthView() {
         className="grid-cols-2 sm:grid-cols-4 lg:grid-cols-[1.15fr_repeat(3,0.85fr)_1.5fr]"
       >
         <WorkspaceMetric
-          label="Open findings"
+          label={t('health.openFindings')}
           value={total}
           className="border-b border-r border-border-subtle sm:border-b-0"
         />
         <WorkspaceMetric
-          label="Critical"
+          label={t('health.metric.critical')}
           value={data?.bySeverity.critical ?? 0}
           tone="danger"
           className="border-b border-border-subtle sm:border-b-0 sm:border-r"
         />
         <WorkspaceMetric
-          label="Warning"
+          label={t('health.metric.warning')}
           value={data?.bySeverity.warning ?? 0}
           tone="warning"
           className="border-r border-border-subtle sm:border-r-0 lg:border-r"
         />
         <WorkspaceMetric
-          label="Info"
+          label={t('health.metric.info')}
           value={data?.bySeverity.info ?? 0}
           className="sm:border-r lg:border-r"
         />
         <WorkspaceMetric
-          label="Recently verified"
+          label={t('health.metric.recent')}
           value={recentTerminalCount}
           className="col-span-2 border-t border-border-subtle sm:col-span-4 lg:col-span-1 lg:border-t-0"
           detail={recentTerminalCount > 0 ? (
@@ -1082,7 +1086,7 @@ export function HealthView() {
               <span><strong className="text-danger">{recentOutcomeSummary.failed}</strong> {t('health.failed')}</span>
               <span><strong className="text-foreground-secondary">{recentOutcomeSummary.skipped}</strong> {t('health.skipped')}</span>
             </span>
-          ) : 'No recent results'}
+          ) : t('health.noRecentResults')}
         />
       </WorkspaceSummary>
 
@@ -1102,12 +1106,12 @@ export function HealthView() {
             >
               <option value="">{t('health.allTypes')}</option>
               {presentTypes.map((type) => (
-                <option key={type} value={type}>{findingTypeLabel(type)}</option>
+                <option key={type} value={type}>{t(findingTypeLabel(type))}</option>
               ))}
             </Select>
             {typeFilter && (
               <span className="text-xs text-foreground-tertiary">
-                {visibleFindings.length} of {total}
+                {t('health.visibleCount', { visible: visibleFindings.length, total })}
               </span>
             )}
           </div>
@@ -1120,7 +1124,7 @@ export function HealthView() {
                 aria-expanded={researchComposerOpen}
               >
                 <Search className="h-3.5 w-3.5" />
-                Custom research
+                {t('health.customResearch')}
                 <ChevronDown
                   className={'h-3.5 w-3.5 transition-transform ' + (researchComposerOpen ? 'rotate-180' : '')}
                 />
@@ -1140,7 +1144,7 @@ export function HealthView() {
                 title={t('health.curate')}
               >
                 {!curating && <Wand2 className="h-3.5 w-3.5" />}
-                Tidy {curateFindingIds.length > 0 && `(${curateFindingIds.length})`}
+                {t('health.action.tidy')} {curateFindingIds.length > 0 && `(${curateFindingIds.length})`}
               </Button>
               <Button
                 intent="outline"
@@ -1156,7 +1160,7 @@ export function HealthView() {
                 title={t('health.fix')}
               >
                 {!fixing && <Wrench className="h-3.5 w-3.5" />}
-                Fix {fixFindingIds.length > 0 && `(${fixFindingIds.length})`}
+                {t('health.action.fix')} {fixFindingIds.length > 0 && `(${fixFindingIds.length})`}
               </Button>
               <Button
                 intent="outline"
@@ -1170,7 +1174,7 @@ export function HealthView() {
                 title={t('health.research')}
               >
                 {!researching && <Search className="h-3.5 w-3.5" />}
-                Research {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}
+                {t('health.action.research')} {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}
               </Button>
             </div>
           )}
@@ -1203,7 +1207,7 @@ export function HealthView() {
               disabled={effectiveBusyActions.has('research') || !topicInput.trim()}
             >
               {!researching && <Search className="h-3.5 w-3.5" />}
-              Start research
+              {t('health.action.startResearch')}
             </Button>
           </form>
         )}
@@ -1234,7 +1238,7 @@ export function HealthView() {
               loading={activeJobsFetching}
               onClick={() => void refetchActiveJobs()}
             >
-              Retry
+              {t('common.retry')}
             </Button>
           </div>
         )}
@@ -1246,21 +1250,21 @@ export function HealthView() {
         )}
         {semanticErrored && (
           <div className="border-l-2 border-warning bg-warning-bg px-3 py-2 text-sm text-warning">
-            Semantic checks did not complete. Only deterministic findings are shown.
+            {t('health.semanticIncomplete')}
           </div>
         )}
         {fixSummary && (
           <div className="border-l-2 border-accent bg-accent-subtle px-3 py-2 text-sm text-accent-strong">
             {fixSummary.fixed + fixSummary.failed + fixSummary.skipped > 0
-              ? `Verified ${fixSummary.fixed} fixed · ${fixSummary.failed} failed · ${fixSummary.skipped} skipped`
-              : 'Per-finding verification was unavailable'}
+              ? t('health.fixSummary', fixSummary)
+              : t('health.fixSummaryUnavailable')}
           </div>
         )}
         {curatePostcondition && (
-          <PostconditionBanner label="Tidy structure" report={curatePostcondition} />
+          <PostconditionBanner labelKey="health.postcondition.tidy" report={curatePostcondition} />
         )}
         {fixPostcondition && (
-          <PostconditionBanner label="Fix issues" report={fixPostcondition} />
+          <PostconditionBanner labelKey="health.postcondition.fix" report={fixPostcondition} />
         )}
       </div>
 
@@ -1307,11 +1311,11 @@ export function HealthView() {
               <div>
                 <h2 className="text-sm font-semibold text-foreground">{t('health.openFindings')}</h2>
                 <p className="mt-0.5 text-xs text-foreground-tertiary">
-                  Ordered by severity, then finding type.
+                  {t('health.findingsOrder')}
                 </p>
               </div>
               <span className="text-xs text-foreground-tertiary">
-                Showing {visibleFindings.length} of {total}
+                {t('health.showing', { visible: visibleFindings.length, total })}
               </span>
             </div>
 
@@ -1332,7 +1336,7 @@ export function HealthView() {
                         id={`health-${group.severity}`}
                         className="text-xs font-semibold capitalize text-foreground-secondary"
                       >
-                        {group.severity}
+                        {t(`health.severity.${group.severity}` as MessageKey)}
                       </h3>
                       <span className="text-xs text-foreground-tertiary">{group.findings.length}</span>
                     </div>

@@ -1,5 +1,6 @@
 import type { PostconditionReport } from '@/lib/contracts';
 import type { JobStreamEvent } from '@/hooks/use-job-stream';
+import type { TranslationFunction } from '@/lib/i18n/translator';
 
 export interface PostconditionNotice {
   tone: 'success' | 'warning';
@@ -53,13 +54,14 @@ function boundedDetail(value: string): string {
 
 export function buildPostconditionNotice(
   report: PostconditionReport,
+  t: TranslationFunction,
 ): PostconditionNotice {
   if (report.semanticStatus === 'failed') {
     return {
       tone: 'warning',
-      title: '语义复检未完成',
+      title: t('health.postcondition.semanticTitle'),
       details: [
-        '结构校验已完成；相关语义问题仍需人工确认。',
+        t('health.postcondition.semanticDetail'),
         ...report.residualFindings
           .slice(0, 2)
           .map((finding) => boundedDetail(finding.description)),
@@ -70,7 +72,7 @@ export function buildPostconditionNotice(
   if (report.status === 'residual') {
     return {
       tone: 'warning',
-      title: `发现 ${report.residualFindings.length} 个残留问题`,
+      title: t('health.postcondition.residualTitle', { count: report.residualFindings.length }),
       details: report.residualFindings
         .slice(0, 3)
         .map((finding) => boundedDetail(finding.description)),
@@ -79,7 +81,7 @@ export function buildPostconditionNotice(
 
   return {
     tone: 'success',
-    title: '后置校验通过',
-    details: ['未发现残留问题。'],
+    title: t('health.postcondition.cleanTitle'),
+    details: [t('health.postcondition.cleanDetail')],
   };
 }

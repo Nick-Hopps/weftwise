@@ -186,12 +186,13 @@ export function latestToolName(events: readonly { data?: Record<string, unknown>
 }
 
 /** 根据 SSE 事件识别 job 活动标题，供进度条与详情弹窗共用。 */
-export function jobActivityTitle(events: readonly { type: string }[]): string {
+export function jobActivityTitle(events: readonly { type: string }[]): MessageKey {
   for (const event of events) {
-    if (event.type.startsWith('research-import')) return 'Importing research';
-    if (event.type.startsWith('research')) return 'Researching';
-    if (event.type.startsWith('ingest')) return 'Ingesting';
-    if (event.type.startsWith('lint')) return 'Linting';
+    if (event.type.startsWith('research-import')) return 'jobs.activity.researchImport';
+    if (event.type.startsWith('research')) return 'jobs.activity.research';
+    if (event.type.startsWith('ingest')) return 'jobs.activity.ingest';
+    if (event.type.startsWith('lint')) return 'jobs.activity.lint';
   }
-  return 'Processing';
+  return 'jobs.activity.processing';
 }
+import type { MessageKey } from '@/lib/i18n/messages';

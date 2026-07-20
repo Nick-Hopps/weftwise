@@ -27,7 +27,7 @@ export function RevertButton({ entry }: { entry: HistoryEntry }) {
       });
       if (!res.ok) {
         const b = await res.json().catch(() => ({}));
-        throw new Error((b as { error?: string }).error ?? 'Revert failed');
+        throw new Error((b as { error?: string }).error ?? t('history.revertFailed'));
       }
       return res.json();
     },
@@ -70,7 +70,7 @@ export function RevertButton({ entry }: { entry: HistoryEntry }) {
           {revert.isPending ? t('history.reverting') : t('history.confirmRevert')}
         </Button>
         <Button intent="ghost" size="sm" disabled={revert.isPending} onClick={() => setConfirming(false)}>
-          取消
+          {t('common.cancel')}
         </Button>
       </div>
     </div>

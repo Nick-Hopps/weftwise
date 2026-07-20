@@ -92,11 +92,11 @@ export function FullscreenGraph({
       {/* Operation hint — bottom-right */}
       <div className="pointer-events-none absolute bottom-4 right-5 z-10 flex items-center gap-3 text-[11px] text-foreground-tertiary">
         <HintChip>
-          <Kbd>Drag</Kbd>
+          <Kbd>{t('graph.input.drag')}</Kbd>
           <span>{t('graph.drag')}</span>
         </HintChip>
         <HintChip>
-          <Kbd>Click</Kbd>
+          <Kbd>{t('graph.input.click')}</Kbd>
           <span>{t('graph.click')}</span>
         </HintChip>
         <HintChip>

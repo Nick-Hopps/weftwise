@@ -5,6 +5,7 @@ import { Sparkles } from 'lucide-react';
 import { useTextSelection } from '@/hooks/use-text-selection';
 import { useUIStore } from '@/stores/ui-store';
 import type { SelectionSourceKind } from '@/lib/contracts';
+import { useI18n } from '@/components/i18n-provider';
 
 /** 选区上方按钮与选区之间的间距（px）。 */
 const OFFSET = 8;
@@ -18,6 +19,7 @@ export function SelectionAskButton({
   containerRef: RefObject<HTMLElement | null>;
   sourceKind: SelectionSourceKind;
 }) {
+  const { t } = useI18n();
   const selection = useTextSelection(containerRef);
   const askAboutSelection = useUIStore((s) => s.askAboutSelection);
 
@@ -56,7 +58,7 @@ export function SelectionAskButton({
       className="z-overlay inline-flex items-center gap-1.5 rounded-md border border-border bg-surface px-2.5 h-8 text-xs font-medium text-foreground shadow-md transition-colors hover:bg-subtle focus-ring animate-fade-in"
     >
       <Sparkles className="h-3.5 w-3.5 text-accent" />
-      Ask AI
+      {t('chat.askAI')}
     </button>
   );
 }

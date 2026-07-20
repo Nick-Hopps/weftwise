@@ -208,7 +208,7 @@ export function DashboardIngestHero() {
         <div className="relative z-[1] mt-3 flex items-center justify-between gap-3">
           <span className="min-w-0 truncate text-xs text-foreground-tertiary">{status}</span>
           <span className="shrink-0 text-xs text-foreground-secondary">
-            <strong className="font-semibold tabular-nums text-foreground">{pages}</strong> pages
+            {t('ingest.pageCount', { count: pages })}
             {' · '}
             <span className="font-mono tabular-nums">{pct}%</span>
           </span>

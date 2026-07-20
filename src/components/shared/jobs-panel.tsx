@@ -97,7 +97,7 @@ function JobRow({
         <div className="flex items-center gap-2">
           <RowStatusIcon status={status} queueStatus={job.queueStatus} />
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-            <span className="text-foreground-secondary">{jobTypeVerb(job.type)}</span>{' '}
+            <span className="text-foreground-secondary">{t(jobTypeVerb(job.type))}</span>{' '}
             <span className="font-mono">{job.label}</span>
           </span>
           {status === 'streaming' && (

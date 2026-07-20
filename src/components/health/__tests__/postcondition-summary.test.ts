@@ -4,6 +4,9 @@ import {
   buildPostconditionNotice,
   extractPostconditionReport,
 } from '../postcondition-summary';
+import { createI18n } from '@/lib/i18n/translator';
+
+const { t } = createI18n('zh-CN');
 
 const cleanReport: PostconditionReport = {
   status: 'clean',
@@ -65,7 +68,7 @@ describe('extractPostconditionReport', () => {
 
 describe('buildPostconditionNotice', () => {
   it('clean 映射为成功提示', () => {
-    expect(buildPostconditionNotice(cleanReport)).toEqual({
+    expect(buildPostconditionNotice(cleanReport, t)).toEqual({
       tone: 'success',
       title: '后置校验通过',
       details: ['未发现残留问题。'],
@@ -84,7 +87,7 @@ describe('buildPostconditionNotice', () => {
     };
     const original = structuredClone(report);
 
-    const notice = buildPostconditionNotice(report);
+    const notice = buildPostconditionNotice(report, t);
 
     expect(notice.tone).toBe('warning');
     expect(notice.title).toBe('发现 4 个残留问题');
@@ -98,7 +101,7 @@ describe('buildPostconditionNotice', () => {
       ...residualReport,
       semanticStatus: 'failed',
       verificationError: 'Fix 语义后置复检未完成。',
-    });
+    }, t);
 
     expect(notice.tone).toBe('warning');
     expect(notice.title).toBe('语义复检未完成');

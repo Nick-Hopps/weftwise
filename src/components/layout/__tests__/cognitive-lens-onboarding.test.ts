@@ -5,59 +5,51 @@ import {
 } from '../cognitive-lens-onboarding';
 
 describe('Cognitive Lens onboarding 文案', () => {
-  it('使用全局界面约定的英文文案和术语', () => {
+  it('所有可见文案都保存为消息键', () => {
     expect(COGNITIVE_LENS_ONBOARDING_COPY).toEqual({
-      title: 'Make every page work for you',
-      description:
-        'Tell us about your background and preferences. Each page will adapt how it explains things, and you can change these settings at any time.',
-      backgroundPlaceholder:
-        'For example: Backend engineer familiar with distributed systems, but new to machine learning',
-      skip: 'Skip',
-      save: 'Save and start',
+      title: 'lens.onboarding.title',
+      description: 'lens.onboarding.description',
+      backgroundPlaceholder: 'lens.onboarding.backgroundPlaceholder',
+      skip: 'lens.onboarding.skip',
+      save: 'lens.onboarding.save',
     });
     expect(COGNITIVE_LENS_ONBOARDING_FIELDS).toEqual([
       {
         key: 'readingLevel',
-        label: 'Reading level',
+        labelKey: 'settings.lens.readingLevel',
         options: [
-          ['beginner', 'Beginner'],
-          ['intermediate', 'Intermediate'],
-          ['advanced', 'Advanced'],
+          ['beginner', 'settings.lens.beginner'],
+          ['intermediate', 'settings.lens.intermediate'],
+          ['advanced', 'settings.lens.advanced'],
         ],
       },
       {
         key: 'verbosity',
-        label: 'Verbosity',
+        labelKey: 'settings.lens.verbosity',
         options: [
-          ['terse', 'Terse'],
-          ['balanced', 'Balanced'],
-          ['thorough', 'Thorough'],
+          ['terse', 'settings.lens.terse'],
+          ['balanced', 'settings.lens.balanced'],
+          ['thorough', 'settings.lens.thorough'],
         ],
       },
       {
         key: 'exampleDensity',
-        label: 'Examples & analogies',
+        labelKey: 'settings.lens.examples',
         options: [
-          ['few', 'Few'],
-          ['some', 'Some'],
-          ['many', 'Many'],
+          ['few', 'settings.lens.few'],
+          ['some', 'settings.lens.some'],
+          ['many', 'settings.lens.many'],
         ],
       },
       {
         key: 'formality',
-        label: 'Tone',
+        labelKey: 'settings.lens.tone',
         options: [
-          ['casual', 'Casual'],
-          ['neutral', 'Neutral'],
-          ['formal', 'Formal'],
+          ['casual', 'settings.lens.casual'],
+          ['neutral', 'settings.lens.neutral'],
+          ['formal', 'settings.lens.formal'],
         ],
       },
     ]);
-
-    const visibleCopy = JSON.stringify({
-      copy: COGNITIVE_LENS_ONBOARDING_COPY,
-      fields: COGNITIVE_LENS_ONBOARDING_FIELDS,
-    });
-    expect(visibleCopy).not.toMatch(/[\u3400-\u9fff]/u);
   });
 });

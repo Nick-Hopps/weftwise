@@ -5,6 +5,7 @@ import type {
   RemediationActionType,
   ResearchRunView,
 } from '@/lib/contracts';
+import type { TranslationFunction } from '@/lib/i18n/translator';
 
 export type ExecutableRemediationAction = Exclude<RemediationActionType, 'review-source'>;
 export type HealthScope = 'subject' | 'all';
@@ -330,6 +331,7 @@ export function nextDeleteArmed(
 
 export async function readDeleteSourceResult(
   response: Response,
+  t: TranslationFunction,
 ): Promise<'deleted' | 'already-deleted'> {
   if (response.ok) return 'deleted';
   if (response.status === 404) return 'already-deleted';
@@ -337,54 +339,54 @@ export async function readDeleteSourceResult(
   const payload = await response.json().catch(() => ({})) as { error?: unknown };
   const error = typeof payload.error === 'string' ? payload.error : null;
   if (response.status === 409 && error === 'in-flight') {
-    throw new Error('Source cannot be deleted while its ingest job is active.');
+    throw new Error(t('health.error.sourceInFlight'));
   }
   if (response.status === 409 && error === 'already-referenced') {
-    throw new Error('Source is now referenced by a page and cannot be deleted.');
+    throw new Error(t('health.error.sourceReferenced'));
   }
-  throw new Error(error ?? `Delete source failed (${response.status}).`);
+  throw new Error(error ?? t('health.error.deleteSourceStatus', { status: response.status }));
 }
 
-export async function readResearchRunId(response: Response): Promise<string> {
-  if (!response.ok) throw new Error(`Research result request failed (${response.status}).`);
+export async function readResearchRunId(response: Response, t: TranslationFunction): Promise<string> {
+  if (!response.ok) throw new Error(t('health.error.resultRequestStatus', { status: response.status }));
 
   let json: unknown;
   try {
     json = await response.json();
   } catch {
-    throw new Error('Research result response is invalid.');
+    throw new Error(t('health.error.resultResponseInvalid'));
   }
   if (
     typeof json !== 'object'
     || json === null
     || typeof (json as { resultJson?: unknown }).resultJson !== 'string'
   ) {
-    throw new Error('Research result is invalid.');
+    throw new Error(t('health.error.resultInvalid'));
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse((json as { resultJson: string }).resultJson);
   } catch {
-    throw new Error('Research result is invalid.');
+    throw new Error(t('health.error.resultInvalid'));
   }
   if (!isRecord(parsed) || typeof parsed.runId !== 'string' || !parsed.runId) {
-    throw new Error('Research result is invalid.');
+    throw new Error(t('health.error.resultInvalid'));
   }
   return parsed.runId;
 }
 
-export async function readResearchRun(response: Response): Promise<ResearchRunView> {
-  if (!response.ok) throw new Error(`Research run request failed (${response.status}).`);
+export async function readResearchRun(response: Response, t: TranslationFunction): Promise<ResearchRunView> {
+  if (!response.ok) throw new Error(t('health.error.runRequestStatus', { status: response.status }));
 
   let json: unknown;
   try {
     json = await response.json();
   } catch {
-    throw new Error('Research run response is invalid.');
+    throw new Error(t('health.error.runResponseInvalid'));
   }
   const run = isRecord(json) ? json.run : null;
-  if (!isResearchRunView(run)) throw new Error('Research run is invalid.');
+  if (!isResearchRunView(run)) throw new Error(t('health.error.runInvalid'));
   return run;
 }
 
