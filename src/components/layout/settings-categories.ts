@@ -6,6 +6,7 @@
 import { BarChart3, Bot, Brain, Settings2, type LucideIcon } from 'lucide-react';
 import type { MessageKey } from '@/lib/i18n/messages';
 import type { TranslationFunction } from '@/lib/i18n/translator';
+import packageJson from '../../../package.json';
 
 export type CategoryId = 'general' | 'personalization' | 'automation' | 'usage';
 
@@ -32,7 +33,7 @@ interface SettingsCategoryDefinition {
   icon: LucideIcon;
 }
 
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = packageJson.version;
 
 export const SETTINGS_CATEGORY_DEFINITIONS: SettingsCategoryDefinition[] = [
   {

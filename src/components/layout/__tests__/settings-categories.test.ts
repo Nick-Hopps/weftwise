@@ -1,13 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APP_VERSION,
   DEFAULT_CATEGORY,
   SETTINGS_CATEGORY_DEFINITIONS,
   SETTINGS_SECTIONS,
   getSettingsCategories,
 } from '../settings-categories';
 import { createI18n } from '@/lib/i18n/translator';
+import packageJson from '../../../../package.json';
 
 describe('设置分类信息架构', () => {
+  it('版本号读取 package.json', () => {
+    expect(APP_VERSION).toBe(packageJson.version);
+  });
+
   it('只暴露四个任务导向的一级入口，并默认进入 General', () => {
     expect(DEFAULT_CATEGORY).toBe('general');
     expect(SETTINGS_CATEGORY_DEFINITIONS.map((category) => category.id)).toEqual([
