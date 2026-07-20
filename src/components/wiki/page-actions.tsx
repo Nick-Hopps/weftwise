@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { AlertTriangle, FileStack, Loader2, Pencil, RefreshCw, Sparkles, Square } from 'lucide-react';
+import { AlertTriangle, FileStack, Loader2, Pencil, RefreshCw, Sparkles, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { IconButton, iconButtonVariants } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
@@ -98,7 +98,7 @@ export function ReshapeStatus({ state, showOriginal, stale, onToggle, onRefresh,
             {state === 'refreshing' ? t('wiki.reshape.refreshing') : t('wiki.reshape.loading')}
           </span>
           <Button intent="outline" size="sm" className="ml-auto" onClick={onCancel}>
-            <Square className="h-2.5 w-2.5 fill-current" aria-hidden /> {t('common.cancel')}
+            <X className="h-3 w-3" aria-hidden /> {t('common.cancel')}
           </Button>
         </>
       ) : state === 'reshaped' ? (
