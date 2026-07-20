@@ -9,6 +9,7 @@
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { Segmented } from '@/components/ui/segmented';
 import { Select } from '@/components/ui/select';
@@ -16,10 +17,12 @@ import { SectionLabel } from '@/components/ui/panel';
 import { apiFetch } from '@/lib/api-fetch';
 import { cn } from '@/lib/cn';
 import { formatTokenCount } from '@/lib/format';
+import { useUIStore } from '@/stores/ui-store';
 import type {
   AppSettings,
   MaintenanceScope,
   MaintenanceStatus,
+  MaintenanceDuePagesResult,
   StylePrefs,
   SubjectListEntry,
   UsageWindow,
@@ -450,6 +453,7 @@ function MaintenancePanel({
   });
   const save = toSave(savePartial);
   const scope = settings?.maintenanceScope ?? { mode: 'all' };
+  const [duePagesOpen, setDuePagesOpen] = useState(false);
 
   return (
     <>
@@ -481,14 +485,29 @@ function MaintenancePanel({
         save={save}
       />
 
-      <SettingRow label={t('settings.maintenance.status')} description={t('settings.maintenance.statusDescription')}>
+      <SettingRow
+        label={t('settings.maintenance.status')}
+        description={t('settings.maintenance.statusDescription')}
+        footer={duePagesOpen ? <MaintenanceDuePagesList /> : null}
+      >
         <div className="text-xs text-foreground-secondary tabular-nums space-y-0.5 sm:text-right">
           {statusQuery.isError ? (
             <span className="text-danger">{t('common.unavailable')}</span>
           ) : (
             <>
               <div>{t('settings.maintenance.lastSweep', { time: status ? formatSweepTime(status.lastSweepAt, i18n) : '…' })}</div>
-              <div>{t('settings.maintenance.pagesDue', { count: status ? status.dueCount : '…' })}</div>
+              <div>
+                {t('settings.maintenance.pagesDue', { count: status ? status.dueCount : '…' })}
+                {status && status.dueCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setDuePagesOpen((v) => !v)}
+                    className="ml-2 text-link hover:text-link-hover hover:underline"
+                  >
+                    {t(duePagesOpen ? 'settings.maintenance.hideDuePages' : 'settings.maintenance.viewDuePages')}
+                  </button>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -511,6 +530,66 @@ function MaintenancePanel({
         save={save}
       />
     </>
+  );
+}
+
+/**
+ * 到期页面明细：展开时才请求（与 status 分离，走 /api/maintenance/due-pages），
+ * 条目链接到对应 wiki 页并关闭设置弹窗；超出服务端上限时提示剩余条数。
+ */
+function MaintenanceDuePagesList() {
+  const i18n = useI18n();
+  const { t } = i18n;
+  const closeSettings = useUIStore((s) => s.closeSettingsDialog);
+  const query = useQuery<MaintenanceDuePagesResult>({
+    queryKey: ['maintenance-due-pages'],
+    queryFn: async () => {
+      const res = await apiFetch('/api/maintenance/due-pages');
+      if (!res.ok) throw new Error(`GET /api/maintenance/due-pages → ${res.status}`);
+      return (await res.json()) as MaintenanceDuePagesResult;
+    },
+    staleTime: 10_000,
+  });
+
+  if (query.isError) {
+    return <div className="mt-2 text-xs text-danger">{t('common.unavailable')}</div>;
+  }
+  const data = query.data;
+  if (!data) {
+    return <div className="mt-2 text-xs text-foreground-tertiary">{t('common.loading')}</div>;
+  }
+  if (data.entries.length === 0) {
+    return (
+      <div className="mt-2 text-xs text-foreground-tertiary">
+        {t('settings.maintenance.duePagesEmpty')}
+      </div>
+    );
+  }
+  return (
+    <ul className="mt-2 max-h-56 overflow-y-auto rounded-md border border-border divide-y divide-border">
+      {data.entries.map((entry) => (
+        <li key={`${entry.subjectId}:${entry.slug}`}>
+          <Link
+            href={`/wiki/${encodeURIComponent(entry.slug)}?s=${encodeURIComponent(entry.subjectSlug)}`}
+            onClick={closeSettings}
+            className="flex items-baseline justify-between gap-3 px-3 py-1.5 text-xs hover:bg-subtle"
+          >
+            <span className="min-w-0 truncate">
+              <span className="font-medium text-foreground">{entry.title ?? entry.slug}</span>
+              <span className="ml-2 text-foreground-tertiary">{entry.subjectName}</span>
+            </span>
+            <span className="shrink-0 text-foreground-tertiary tabular-nums">
+              {t('settings.maintenance.dueSince', { time: formatSweepTime(entry.nextDueAt, i18n) })}
+            </span>
+          </Link>
+        </li>
+      ))}
+      {data.total > data.entries.length && (
+        <li className="px-3 py-1.5 text-xs text-foreground-tertiary">
+          {t('settings.maintenance.duePagesMore', { count: data.total - data.entries.length })}
+        </li>
+      )}
+    </ul>
   );
 }
 

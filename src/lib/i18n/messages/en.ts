@@ -84,6 +84,11 @@ export const en = {
   'settings.maintenance.statusDescription': 'Read-only — refreshes when this panel opens',
   'settings.maintenance.lastSweep': 'Last sweep: {time}',
   'settings.maintenance.pagesDue': 'Pages due now: {count}',
+  'settings.maintenance.viewDuePages': 'View',
+  'settings.maintenance.hideDuePages': 'Hide',
+  'settings.maintenance.duePagesEmpty': 'No pages due right now.',
+  'settings.maintenance.dueSince': 'Due {time}',
+  'settings.maintenance.duePagesMore': '+{count} more',
   'settings.maintenance.interval': 'Sweep interval (hours)',
   'settings.maintenance.maxPages': 'Max pages per sweep',
   'settings.maintenance.maxPagesDescription':
