@@ -1,10 +1,48 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createSystemHostResolver,
   isPublicIpAddress,
   resolvePublicHttpTarget,
   validateHttpUrl,
   type HostResolver,
 } from '../url-safety';
+
+describe('createSystemHostResolver', () => {
+  it('目标与公网哨兵都完全落在代理池时标记系统 Fake-IP provenance', async () => {
+    const lookupHost = vi.fn(async (hostname: string) => hostname === 'candidate.example'
+      ? [{ address: '198.18.0.42', family: 4 }]
+      : [{ address: '198.18.0.71', family: 4 }]);
+    const resolver = createSystemHostResolver(lookupHost);
+
+    await expect(resolver('candidate.example')).resolves.toEqual([
+      { address: '198.18.0.42', family: 4, provenance: 'system-fake-ip' },
+    ]);
+    expect(lookupHost).toHaveBeenCalledWith('candidate.example');
+    expect(lookupHost).toHaveBeenCalledWith('example.com');
+  });
+
+  it('公网哨兵不在代理池时不标记目标保留地址', async () => {
+    const lookupHost = vi.fn(async (hostname: string) => hostname === 'candidate.example'
+      ? [{ address: '198.18.0.42', family: 4 }]
+      : [{ address: '93.184.216.34', family: 4 }]);
+    const resolver = createSystemHostResolver(lookupHost);
+
+    await expect(resolver('candidate.example')).resolves.toEqual([
+      { address: '198.18.0.42', family: 4 },
+    ]);
+  });
+
+  it('目标答案不完全属于代理池时不查询公网哨兵', async () => {
+    const lookupHost = vi.fn(async () => [
+      { address: '198.18.0.42', family: 4 },
+      { address: '93.184.216.34', family: 4 },
+    ]);
+    const resolver = createSystemHostResolver(lookupHost);
+
+    await resolver('candidate.example');
+    expect(lookupHost).toHaveBeenCalledOnce();
+  });
+});
 
 describe('validateHttpUrl', () => {
   it('只接受没有 userinfo 的 http/https URL', () => {
@@ -85,11 +123,43 @@ describe('resolvePublicHttpTarget', () => {
     await expect(resolvePublicHttpTarget('https://example.com', resolver)).rejects.toThrow(/public/i);
   });
 
+  it('接受 resolver 标记的同质系统 Fake-IP DNS 结果', async () => {
+    const resolver: HostResolver = async () => [
+      { address: '198.18.0.42', family: 4, provenance: 'system-fake-ip' },
+      { address: '198.19.255.254', family: 4, provenance: 'system-fake-ip' },
+    ];
+
+    await expect(resolvePublicHttpTarget('https://example.com', resolver)).resolves.toMatchObject({
+      address: '198.18.0.42',
+      family: 4,
+      hostname: 'example.com',
+      provenance: 'system-fake-ip',
+    });
+  });
+
+  it('拒绝没有系统 Fake-IP provenance 的基准测试地址', async () => {
+    const resolver: HostResolver = async () => [
+      { address: '198.18.0.42', family: 4 },
+    ];
+
+    await expect(resolvePublicHttpTarget('https://example.com', resolver)).rejects.toThrow(/public/i);
+  });
+
+  it('拒绝系统 Fake-IP 与私网地址混合的 DNS 结果', async () => {
+    const resolver: HostResolver = async () => [
+      { address: '198.18.0.42', family: 4, provenance: 'system-fake-ip' },
+      { address: '127.0.0.1', family: 4 },
+    ];
+
+    await expect(resolvePublicHttpTarget('https://example.com', resolver)).rejects.toThrow(/public/i);
+  });
+
   it('IP literal 不走 DNS，并拒绝 loopback 与 IPv4-mapped IPv6', async () => {
     const resolver: HostResolver = vi.fn(async () => []);
 
     await expect(resolvePublicHttpTarget('http://127.0.0.1', resolver)).rejects.toThrow(/public/i);
     await expect(resolvePublicHttpTarget('http://[::ffff:127.0.0.1]', resolver)).rejects.toThrow(/public/i);
+    await expect(resolvePublicHttpTarget('http://198.18.0.42', resolver)).rejects.toThrow(/public/i);
     expect(resolver).not.toHaveBeenCalled();
   });
 });
