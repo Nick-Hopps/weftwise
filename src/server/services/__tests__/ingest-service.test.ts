@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IngestResult } from '@/lib/contracts';
 
 vi.mock('../../db/repos/subjects-repo', () => ({
@@ -11,16 +11,41 @@ vi.mock('../../db/repos/pages-repo', () => ({
   ],
 }));
 
+vi.mock('../../db/repos/sources-repo', () => ({
+  getSource: (id: string) => ({
+    id,
+    subjectId: 's1',
+    filename: id === 'url-src' ? 'web-example.html' : 'doc.txt',
+    contentHash: 'hash',
+    parsedAt: null,
+    metadataJson: id === 'url-src'
+      ? JSON.stringify({ kind: 'url', originUrl: 'https://example.com/a' })
+      : '{}',
+  }),
+}));
+
 let mockCleanText = '这是一段短内容。';
 vi.mock('../../sources/parser-registry', () => ({
   parseSourceAsync: async () => ({ title: 't', cleanText: mockCleanText, metadata: {} }),
   requiresBuffer: () => false,
 }));
 
+let mockLoadedKind: 'raw' | 'url' = 'raw';
+const mockUpdateUrlSourcePresentation = vi.hoisted(() => vi.fn());
+vi.mock('../../sources/source-loader', () => ({
+  loadSourceForIngest: vi.fn(async () => ({
+    kind: mockLoadedKind,
+    cleanText: mockCleanText,
+    title: 'Remote title',
+    description: 'Remote description',
+  })),
+}));
+
 vi.mock('../../sources/source-store', () => ({
   getRawSourceContent: () => 'raw content',
   getRawSourceBuffer: () => null,
   updateSourceChunks: vi.fn(),
+  updateUrlSourcePresentation: (...args: unknown[]) => mockUpdateUrlSourcePresentation(...args),
   saveRawSource: vi.fn(() => ({ id: 'web-src-1', contentHash: 'abc' })),
 }));
 
@@ -72,6 +97,8 @@ vi.mock('../../agents/runtime/overlay-vault', () => ({
   }),
 }));
 
+let mockCheckpointHasAny = false;
+const mockCheckpointClear = vi.fn();
 vi.mock('../../agents/runtime/checkpoint', () => ({
   loadCheckpoint: () => ({
     getChunkSummary: () => undefined,
@@ -82,9 +109,9 @@ vi.mock('../../agents/runtime/checkpoint', () => ({
     putWriterPage: () => {},
     getCitedSources: () => [],
     putCitedSources: () => {},
-    hasAny: () => false,
+    hasAny: () => mockCheckpointHasAny,
     progress: () => ({ plan: false, chunkSummaries: 0, writerPages: 0, totalPages: null }),
-    clear: () => {},
+    clear: mockCheckpointClear,
   }),
 }));
 
@@ -127,6 +154,13 @@ function makeJob() {
 describe('ingest-service', () => {
   beforeAll(async () => {
     await import('../ingest-service');
+  });
+
+  beforeEach(() => {
+    mockLoadedKind = 'raw';
+    mockCheckpointHasAny = false;
+    mockCheckpointClear.mockClear();
+    mockUpdateUrlSourcePresentation.mockClear();
   });
 
   it('runs orchestrator pipeline and returns IngestResult', async () => {
@@ -253,5 +287,35 @@ describe('ingest-service', () => {
     };
     expect(typeof opts.initialInput.languageDirective).toBe('string');
     expect(opts.initialInput.languageDirective!.length).toBeGreaterThan(0);
+  });
+
+  it('URL Source 每次重新抓取后清除旧 checkpoint，避免混用不同网页版本', async () => {
+    mockLoadedKind = 'url';
+    mockCheckpointHasAny = true;
+    mockCleanText = '远程网页正文。';
+    mockMaxTokens = 100_000;
+    const handler = handlers.get('ingest')!;
+    const job = {
+      ...makeJob(),
+      paramsJson: JSON.stringify({ sourceId: 'url-src', filename: 'web-example.html', subjectId: 's1' }),
+    };
+    const emit = vi.fn();
+
+    await handler(job, emit);
+
+    expect(mockUpdateUrlSourcePresentation).toHaveBeenCalledWith('url-src', {
+      title: 'Remote title',
+      description: 'Remote description',
+    });
+    expect(mockCheckpointClear).toHaveBeenCalled();
+    expect(emit).toHaveBeenCalledWith(
+      'ingest:url-refreshed',
+      expect.stringContaining('checkpoint'),
+    );
+    expect(emit).not.toHaveBeenCalledWith(
+      'ingest:resuming',
+      expect.anything(),
+      expect.anything(),
+    );
   });
 });

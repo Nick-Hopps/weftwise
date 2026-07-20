@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
-import { fetchUrlSource } from '@/server/sources/url-fetcher';
 import { validateUrlList, ingestUrlBatch } from '@/server/sources/url-ingest';
 import {
   acquireSubjectWriteLease,
@@ -91,14 +90,12 @@ export async function POST(request: NextRequest) {
         const lease = acquireSubjectWriteLease(subject.id);
 
         const results = await ingestUrlBatch(validated.urls, {
-          fetchSource: (url) => fetchUrlSource(url),
-          persist: (filename, content, url) => {
+          persist: (url) => {
             const result = persistSourceAndEnqueueIngest({
+              kind: 'url',
               subject,
               lease,
-              filename,
-              content,
-              originUrl: url,
+              url,
             });
             return { sourceId: result.sourceId, jobId: result.job.id };
           },

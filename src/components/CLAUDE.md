@@ -17,7 +17,7 @@
 |------|------|
 | `shell.tsx` | 主 Shell，含 Header + Sidebar + 主内容 + 可伸缩 ContextPanel（`pointer` 事件实现拖拽宽度）|
 | `header.tsx` | 顶栏：logo、`<SubjectSwitcher />`、面包屑、命令面板触发、dark mode toggle、context panel toggle |
-| `sidebar.tsx` | 左侧目录树（按 `currentSubjectId` 过滤的 wiki pages + 最近访问） |
+| `sidebar.tsx` | 左侧目录树（按 `currentSubjectId` 过滤的 wiki pages + 最近访问）；Sources 对 URL Source 展示 worker 已持久化的网页标题与描述，普通文件仍展示 filename |
 | `subject-switcher.tsx` | 🔀 cmdk + 自定义浮层；显示 subjects 列表；⌘O 唤起；切换时写 store + cookie + invalidate 8 个 query key + `router.refresh()`；"New subject…" 改调 openSubjectDialog（删 ?new=1），切换复用 useSwitchSubject |
 | `context-panel.tsx` | 右侧页面 Context 检查器（backlinks / frontmatter / mini-graph） |
 | `context-panel-sheet.tsx` | Context 的移动端右侧抽屉版本 |
@@ -49,6 +49,7 @@
 - `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped，保存版 stale 时显示行内 Update available 提示；`wiki-reading-view` 按 Subject + slug 把用户最后选择的原文/重塑版本保存到浏览器 localStorage，未记录时仍优先已有重塑版本
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `article-toc.tsx` —— 阅读页固定目录：宽内容区显示右侧 sticky 目录轨道，窄内容区收敛为 sticky 入口/浮层；跟踪普通主滚动区与 Sources 左栏的当前章节并复用稳定 heading anchors
+- `html-source-frame.tsx` —— HTML/网页 Source 的 sandbox iframe：上传 HTML 仍加载同源 raw 路由；链接型 URL Source 直接加载远程地址并设置 `referrerPolicy=no-referrer`，始终不开放 `allow-same-origin`，默认禁用脚本，用户显式点击后只增加 `allow-scripts`
 - `mermaid-diagram.tsx` / `mermaid-svg.tsx` / `mermaid-preview.tsx` / `mermaid-theme.ts` —— Mermaid 客户端渲染与主题配置；内联图与全屏预览复用同一 SVG 渲染器，预览支持 50%–200% 缩放、滚动、重置及 Escape/遮罩关闭；使用紧凑 flowchart 参数、浅/深色 palette，并监听根节点主题变化重绘 SVG；Diagram callout 的无卡片图解样式位于 `globals.css`
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
@@ -112,7 +113,7 @@
 ### `shared/`
 
 - `global-job-tracker.tsx` —— 🆕 全局任务状态指示器：轮询 running+pending 聚合追踪（不再是单任务 toast 挂载点），queued 行离开 active 列表时切入 SSE 终态恢复，托管 `JobsPanel`
-- `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态；`image-insert` 显示 `Illustrating`，成功后失效页面缓存并 `router.refresh()`
+- `jobs-panel.tsx` / `jobs-panel-state.ts` —— 🆕 聚合任务面板（多行、独立 SSE、折叠把手）及纯状态逻辑：active pending 行不建连接；消失的 pending 行转为 streamable 并回放终态；Ingest 完成后额外失效 Sources cache 以刷新网页标题/描述；`image-insert` 显示 `Illustrating`，成功后失效页面缓存并 `router.refresh()`
 - `progress-toast.tsx` / `tool-activity-icon.tsx` —— SSE 进度表面与共享 Lucide 工具图标适配；任务摘要和详情日志消费事件 `data.tool`，历史 emoji 只在展示层兼容清理
 
 > Settings 弹窗已迁到 `layout/`（两栏式：`settings-dialog` / `settings-nav` / `settings-content` / `settings-categories` / `settings-rows`），见上文 `layout/` 表。设置项走各自服务端接口，持久化配置不写 Zustand；主题切换与侧栏拖拽保留在应用骨架中，不再作为 General 设置项展示。
@@ -188,6 +189,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL Source 预览改为直接加载原网页：左侧 Sources 列表展示已持久化的网页标题+描述；source 独立页与 Wiki Sources 分栏复用远程 sandbox iframe，显示 Web/Open original，默认禁用脚本且永不开放同源权限；上传 HTML 继续走本地 raw+CSP 预览 |
 | 2026-07-20 | Settings Maintenance 状态行新增到期页面预览：`Pages due now` 计数 >0 时显示 View/Hide 切换，展开行 footer 懒加载 `GET /api/maintenance/due-pages`（React Query `['maintenance-due-pages']`，10s stale）渲染有界列表——标题（孤儿行回退 slug）+ 项目名 + 相对到期时间，条目 Link 到 `/wiki/<slug>?s=` 并关闭弹窗，超上限提示剩余条数。spec/plan 见 `docs/{specs,plans}/2026-07-20-maintenance-due-pages-preview.md` |
 | 2026-07-20 | `MultiSelectRow`（Maintenance scope 项目选择器）重做：面板从行内 footer 展开改为 portal + fixed 悬浮层（卡片 overflow-hidden/内容区滚动下不被裁切），锚定触发按钮右缘、滚动跟随、底部空间不足自动向上翻转；摘要单选时直接显示项目名；sr-only checkbox + 自定义勾选标记，All 行带半选态与 n/m 计数；最后一个选中项仅弱化勾选标记不再整行置灰；点外/Escape 关闭且 Escape 截停冒泡不误关 Settings 弹窗 |
 | 2026-07-20 | Wiki 图谱布局间距自适应：`graph-layout.ts` 的固定 `LAYOUT_COMPACT` 改为 `computeLayoutPreset(nodeCount, edgeCount)`，按结点数（40→120）或平均度（6→16）线性加大理想边长/斥力并降低重力（封顶 130/11000/0.18），高密度小图与大图不再挤在聚合根附近；小而稀疏的图参数不变 |

@@ -67,6 +67,9 @@ function JobRow({
     }
     queryClient.invalidateQueries({ queryKey: ['pages'] });
     queryClient.invalidateQueries({ queryKey: ['page-detail'] });
+    if (job.type === 'ingest') {
+      queryClient.invalidateQueries({ queryKey: ['sources'] });
+    }
     if (
       shouldRefreshPageForCompletedJob(job.type, status)
       && !refreshedCompletion.current

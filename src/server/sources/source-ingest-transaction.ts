@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 import type { Job, Subject } from '@/lib/contracts';
 import { vaultPath } from '../config/env';
 import { getRawDb } from '../db/client';
-import { deleteRawSourceFiles, saveRawSource } from './source-store';
+import { deleteRawSourceFiles, saveRawSource, saveUrlSource } from './source-store';
+import { createUrlSourceIdentity } from './url-source';
 
 export interface SubjectWriteLease {
   subjectId: string;
@@ -21,12 +22,9 @@ export class SubjectWriteLeaseError extends Error {
   }
 }
 
-export interface PersistSourceAndEnqueueInput {
+interface PersistSourceAndEnqueueCommon {
   subject: Pick<Subject, 'id' | 'slug'>;
   lease: SubjectWriteLease;
-  filename: string;
-  content: Buffer | string;
-  originUrl?: string;
   /** 仅供受信任的服务端协调器补充 lineage；受控字段始终由本函数覆盖。 */
   jobParams?: Record<string, unknown>;
   /** 仅供服务端协调器维持跨表事务边界；Route 不得透传。 */
@@ -38,6 +36,19 @@ export interface PersistSourceAndEnqueueInput {
     ) => void;
   };
 }
+
+export type PersistSourceAndEnqueueInput = PersistSourceAndEnqueueCommon & (
+  | {
+      kind?: 'raw';
+      filename: string;
+      content: Buffer | string;
+      originUrl?: string;
+    }
+  | {
+      kind: 'url';
+      url: string;
+    }
+);
 
 export interface PersistSourceAndEnqueueResult {
   sourceId: string;
@@ -75,8 +86,11 @@ export function persistSourceAndEnqueueIngest(
   }
 
   const sqlite = getRawDb();
-  const safeFilename = path.basename(input.filename);
-  const rawPath = vaultPath('raw', input.subject.slug, safeFilename);
+  const isUrlSource = input.kind === 'url';
+  const safeFilename = isUrlSource
+    ? createUrlSourceIdentity(input.url).filename
+    : path.basename(input.filename);
+  const rawPath = isUrlSource ? null : vaultPath('raw', input.subject.slug, safeFilename);
   let previousRaw: Buffer | null = null;
   let rawExisted = false;
   const compensation: { createdSourceId: string | null } = { createdSourceId: null };
@@ -103,14 +117,18 @@ export function persistSourceAndEnqueueIngest(
 
     input.transactionHooks?.beforePersist?.(sqlite);
 
-    rawExisted = fs.existsSync(rawPath);
-    previousRaw = rawExisted ? fs.readFileSync(rawPath) : null;
-    const saved = saveRawSource(
-      input.subject,
-      input.filename,
-      input.content,
-      input.originUrl ? { originUrl: input.originUrl } : undefined,
-    );
+    if (rawPath) {
+      rawExisted = fs.existsSync(rawPath);
+      previousRaw = rawExisted ? fs.readFileSync(rawPath) : null;
+    }
+    const saved = isUrlSource
+      ? saveUrlSource(input.subject, input.url)
+      : saveRawSource(
+          input.subject,
+          input.filename,
+          input.content,
+          input.originUrl ? { originUrl: input.originUrl } : undefined,
+        );
     if (saved.created) compensation.createdSourceId = saved.id;
 
     const now = new Date().toISOString();
@@ -167,7 +185,7 @@ export function persistSourceAndEnqueueIngest(
         compensation.createdSourceId,
       );
       try {
-        if (rawExisted && previousRaw) {
+        if (rawPath && rawExisted && previousRaw) {
           fs.mkdirSync(path.dirname(rawPath), { recursive: true });
           fs.writeFileSync(rawPath, previousRaw);
         }

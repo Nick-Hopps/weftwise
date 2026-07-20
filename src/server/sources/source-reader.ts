@@ -2,6 +2,7 @@ import path from 'path';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import { getSourceMetadata, getRawSourceContent } from './source-store';
 import { analyzeHtmlSafety } from './html-safety';
+import { readUrlSourceReference } from './url-source';
 import type { PageSourceDoc, PageSourceFormat, Subject } from '@/lib/contracts';
 
 /** Per-source content caps — sources can be whole books, so we never ship the
@@ -47,11 +48,21 @@ export function readPageSources(
   const docs: PageSourceDoc[] = [];
 
   for (const src of sources) {
-    const format = formatFor(src.filename);
+    const urlReference = readUrlSourceReference(src);
+    const format = urlReference ? 'html' : formatFor(src.filename);
     const sidecar = (getSourceMetadata(src.id) as SourceSidecar | null) ?? {};
     const added = (sidecar.savedAt ?? src.parsedAt ?? '').slice(0, 10);
 
     const base = { id: src.id, name: src.filename, format, added } as PageSourceDoc;
+
+    if (urlReference) {
+      docs.push({
+        ...base,
+        meta: 'Web',
+        sourceUrl: urlReference.originUrl,
+      });
+      continue;
+    }
 
     // pdf 在客户端由浏览器原生阅读器加载，只下发元数据。
     if (format === 'pdf') {

@@ -6,11 +6,13 @@ import { cn } from '@/lib/cn';
 import type { HtmlSafety } from '@/lib/contracts';
 
 interface HtmlSourceFrameProps {
-  /** /api/sources/<id>/raw */
+  /** 本地 `/api/sources/<id>/raw` 或链接型 Source 的远程 URL。 */
   src: string;
   title: string;
   /** 服务端启发式扫描结论；缺省按 safe 处理。 */
   safety?: HtmlSafety;
+  /** true 时 src 是远程网页：默认禁脚本，用户显式确认后才放行。 */
+  remote?: boolean;
   /** 施加在根容器上的尺寸/定位类，沿用各调用点原 iframe 的类名。 */
   className?: string;
 }
@@ -23,12 +25,12 @@ interface HtmlSourceFrameProps {
  * 安全边界靠 iframe 的 opaque origin（sandbox 永不含 allow-same-origin）+ raw 路由
  * 的 CSP，不依赖此处的启发式判定。
  *
- * 调用方应传入服务端计算的 `safety`：缺省（无 safety）按 safe 处理 = 直接放行脚本
- * （最不保守分支），故请勿在未经扫描的情况下挂载本组件。
+ * 本地 HTML 调用方应传入服务端计算的 `safety`；远程 URL 必须传 `remote=true`，
+ * 此时即使没有 safety 也默认禁用脚本。
  */
-export function HtmlSourceFrame({ src, title, safety, className }: HtmlSourceFrameProps) {
+export function HtmlSourceFrame({ src, title, safety, remote = false, className }: HtmlSourceFrameProps) {
   const [forceRun, setForceRun] = useState(false);
-  const suspicious = safety?.risk === 'suspicious';
+  const suspicious = remote || safety?.risk === 'suspicious';
   const runScripts = !suspicious || forceRun;
 
   return (
@@ -37,7 +39,9 @@ export function HtmlSourceFrame({ src, title, safety, className }: HtmlSourceFra
         <div className="shrink-0 border-b border-danger-border bg-danger-bg px-4 py-3 text-xs text-danger">
           <div className="flex items-center gap-2 font-semibold">
             <ShieldAlert className="h-4 w-4 shrink-0" />
-            Potentially unsafe scripts detected — interactivity disabled
+            {remote
+              ? 'Live website — scripts and interactivity disabled'
+              : 'Potentially unsafe scripts detected — interactivity disabled'}
           </div>
           {safety && safety.signals.length > 0 && (
             <ul className="mt-1.5 ml-6 list-disc space-y-0.5 text-danger/90">
@@ -60,6 +64,7 @@ export function HtmlSourceFrame({ src, title, safety, className }: HtmlSourceFra
         src={src}
         title={title}
         sandbox={runScripts ? 'allow-scripts' : ''}
+        referrerPolicy="no-referrer"
         className="min-h-0 w-full flex-1 border-0 bg-white"
       />
     </div>

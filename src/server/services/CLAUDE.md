@@ -26,7 +26,7 @@ worker-entry.ts
 
 > **强校验** `params.subjectId`（缺失直接 fail job）。所有页面的 `existingPages` / `titleMap` 都仅取自该 subject（实读 pagesRepo，不再截断）。
 
-预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；常量在 `ingest-prep.ts`。
+`source-loader.ts` 先按 source 类型加载输入：上传文件从 `vault/raw/<subject>/` 读取；URL Source 从 sidecar 回读规范化地址，并在 worker 内通过 `fetchUrlSource()` 临时抓取、解析，不把 HTML 写入 vault；解析得到的网页标题/描述写回 source sidecar 与 SQLite cache，供左侧列表直接展示。随后执行预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；常量在 `ingest-prep.ts`。
 
 调用 `runPipeline(...)` 执行 **4 个内容 skill 阶段**（全部结构化输出、无写盘工具，只往 `ctx.pending` 暂存），随后由 service 层 `finalizeIngest` 收口提交：
 
@@ -47,7 +47,7 @@ worker-entry.ts
 
 旧的多阶段 LLM 直调（`generateStructuredOutput` plan → pageBody → index）与 `buildLogContent` helper 均已移除，详见 `src/server/agents/CLAUDE.md`。
 
-接入断点续传：启动时 `loadCheckpoint(job.id)` 载入检查点句柄并挂至 `AgentContext.checkpoint`；若 `ckpt.hasAny()` 则 emit `ingest:resuming`；steps 标注 `checkpointAs` 使 orchestrator 逐页续传；预算预检调 `reduceCostForResume(ingest-prep)` 按已写页比例折减估算值；pipeline 成功返回前 `checkpoint.clear()` 删除所有检查点行。
+接入断点续传：上传文件启动时 `loadCheckpoint(job.id)` 载入检查点句柄并挂至 `AgentContext.checkpoint`；若 `ckpt.hasAny()` 则 emit `ingest:resuming`；steps 标注 `checkpointAs` 使 orchestrator 逐页续传；预算预检调 `reduceCostForResume(ingest-prep)` 按已写页比例折减估算值；pipeline 成功返回前 `checkpoint.clear()` 删除所有检查点行。URL Source 每次执行都会重新抓取活网页面；若检测到旧 checkpoint，先清空并发出 `ingest:url-refreshed`，防止把不同网页版本的阶段产物混合续传。
 
 ### `query-service.ts` — 任务类型 `'save-to-wiki'` + agentic 工具循环 + 多轮记忆
 
@@ -136,7 +136,7 @@ Research finding 的 immutable `snapshot_json` 必须无损覆盖 finding identi
 
 `research-service.ts` 完成查询与 triage 后，不再把 job `resultJson.candidates` 当批准事实，而是用稳定 run/candidate ID 持久化候选快照、finding 快照、topics 与 queries；客户端与审批链路只将 job result 的 `runId` 作为权威定位，兼容字段不能参与批准。`research-approval-service.ts` 将存储行严格映射为脱敏 `ResearchRunView`，批准 API 只接受 candidate ID、expectedVersion 与 idempotency key；repo 在单个 `IMMEDIATE` transaction 内 CAS run、写 approval、冻结 selected/rejected decision、建立每候选 delivery 并创建唯一 `research-import` coordinator。
 
-`research-import-service.ts` 只接受 run/approval/subject ID，URL 必须回读服务端候选快照。每条 delivery 用 claim token + lease CAS；抓取后在同一事务重验 token，再完成 source get-or-create、sourceId 回写和 child Ingest 入队。child params 的 `researchProvenance` 由服务端注入，通用 Ingest API 不接受客户端 provenance。`research-provenance-reconciler.ts` 汇总 coordinator/child 终态，物化 source、Ingest job、operation IDs、touched pages、commit SHA 与安全错误；finding run 至少一条导入成功后唯一入队 verification lint，并用 exact finding ID 或稳定 locus 物化 `fixed/residual/unverifiable`。worker 终态 hook、启动扫描和维护 tick 共用同一幂等对账原语，补偿取消与崩溃窗口。工作台手动重试 failed child 时，`research-approval-service::retryResearchIngestJob` 先精确对账，再由 repo 在一个 IMMEDIATE transaction 内恢复同一 job、delivery 与 run；job ID、attempt 与 checkpoint 保留，已取消、source 缺失、lineage 不匹配或 verification 已物化时 fail-closed。
+`research-import-service.ts` 只接受 run/approval/subject ID，URL 必须回读服务端候选快照。每条 delivery 用 claim token + lease CAS；coordinator 不再抓取 HTML，而是在同一事务重验 token 后完成 URL Source get-or-create、sourceId 回写和 child Ingest 入队，真正抓取由 child worker 的 `source-loader` 执行。child params 的 `researchProvenance` 由服务端注入，通用 Ingest API 不接受客户端 provenance。`research-provenance-reconciler.ts` 汇总 coordinator/child 终态，物化 source、Ingest job、operation IDs、touched pages、commit SHA 与安全错误；finding run 至少一条导入成功后唯一入队 verification lint，并用 exact finding ID 或稳定 locus 物化 `fixed/residual/unverifiable`。worker 终态 hook、启动扫描和维护 tick 共用同一幂等对账原语，补偿取消与崩溃窗口。工作台手动重试 failed child 时，`research-approval-service::retryResearchIngestJob` 先精确对账，再由 repo 在一个 IMMEDIATE transaction 内恢复同一 job、delivery 与 run；job ID、attempt 保留；URL child 因活网页面可能变化会在执行时清空旧 checkpoint，已取消、source 缺失、lineage 不匹配或 verification 已物化时 fail-closed。
 
 Health 前端刷新时按 subject 读取 active jobs，并可从 queued 或 awaiting-approval plan 的原 Research job ID 恢复 run。Research job 完成后先从 result 提取 `runId`，再 GET 持久化 view；批准只提交 candidate ID，网络结果不确定时 GET 同一 run 对账并保留同一 selection 的幂等键。`importing/verifying` 轮询 run，终态失效 pages、active-jobs 与 lint snapshot。普通关闭不等同 dismiss，显式忽略走独立 API。切换 subject/scope 会同步作废旧请求、候选 view 与幂等键。All Subjects 只构造只读 plans，不允许执行。
 
@@ -306,6 +306,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL Source 改为链接型输入：Ingest worker 通过 `source-loader` 执行时临时抓取解析并写回网页标题/描述，URL 重试清空旧 checkpoint；Research coordinator 只持久化候选 URL 与 child lineage，不再下载 HTML |
 | 2026-07-20 | `embed-index` 接线 `maturityRepo.pruneOrphans`（原为从未调用的死代码）：每次写后自愈清理 `page_maturity` 孤儿行，放在 embedding 配置守卫之前、未配置也生效；修复删页/merge 残留导致维护 dueCount 虚高、到期预览显示裸 slug、sweep 给已删页入队必失败 re-enrich 的问题 |
 | 2026-07-20 | `image-insert` 改为在可信锚点后直接写标准 Markdown 图片，不再用无标题 `[!diagram]` callout 包装，Saga、恢复与取消边界保持不变 |
 | 2026-07-17 | Query mode 增加独立 `image-insert` 工具面并删除 `imageInsertEnabled` 平行开关；配图请求不再携带 `wiki.preview_change`，避免 provider 因其顶层 union schema 拒绝工具注册 |

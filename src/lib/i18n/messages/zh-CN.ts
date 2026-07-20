@@ -389,6 +389,8 @@ export const zhCN = {
   'source.back': '返回',
   'source.missingDescription': '此来源可能已被移除，或属于其他主题。',
   'source.backDashboard': '返回仪表盘',
+  'source.openRaw': '打开原始文件',
+  'source.openOriginal': '打开原网页',
   'page.notFound': '找不到页面',
   'dashboard.ask': '询问你的 Wiki',
   'dashboard.search': '搜索',

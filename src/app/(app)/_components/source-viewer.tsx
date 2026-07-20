@@ -33,6 +33,8 @@ interface SourceViewerProps {
   content?: string;
   /** 仅 html：服务端启发式扫描结论。 */
   htmlSafety?: HtmlSafety;
+  /** URL Source：直接在沙箱 iframe 中加载原站。 */
+  sourceUrl?: string;
 }
 
 const FORMAT_LABEL: Record<PageSourceFormat, string> = {
@@ -42,9 +44,10 @@ const FORMAT_LABEL: Record<PageSourceFormat, string> = {
   text: 'Text',
 };
 
-export function SourceViewer({ id, filename, format, content, htmlSafety }: SourceViewerProps) {
+export function SourceViewer({ id, filename, format, content, htmlSafety, sourceUrl }: SourceViewerProps) {
   const { t } = useI18n();
   const rawUrl = `/api/sources/${id}/raw`;
+  const viewUrl = sourceUrl ?? rawUrl;
   const rendered = useMemo(
     () => (format === 'markdown' && content ? renderMarkdown(content) : null),
     [format, content],
@@ -67,15 +70,16 @@ export function SourceViewer({ id, filename, format, content, htmlSafety }: Sour
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="truncate font-mono text-sm font-semibold text-foreground">{filename}</span>
-          <Tag tone="neutral">{FORMAT_LABEL[format]}</Tag>
+          <Tag tone="neutral">{sourceUrl ? 'Web' : FORMAT_LABEL[format]}</Tag>
         </div>
         <a
-          href={rawUrl}
+          href={viewUrl}
           target="_blank"
           rel="noreferrer"
           className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-foreground-secondary hover:bg-subtle transition-colors focus-ring"
         >
-          <ExternalLink className="h-3.5 w-3.5" /> Open raw
+          <ExternalLink className="h-3.5 w-3.5" />
+          {sourceUrl ? t('source.openOriginal') : t('source.openRaw')}
         </a>
       </div>
 
@@ -83,7 +87,13 @@ export function SourceViewer({ id, filename, format, content, htmlSafety }: Sour
       {format === 'pdf' ? (
         <iframe src={rawUrl} title={filename} className="min-h-0 flex-1 border-0 bg-canvas" />
       ) : format === 'html' ? (
-        <HtmlSourceFrame src={rawUrl} title={filename} safety={htmlSafety} className="min-h-0 flex-1" />
+        <HtmlSourceFrame
+          src={viewUrl}
+          title={filename}
+          safety={htmlSafety}
+          remote={Boolean(sourceUrl)}
+          className="min-h-0 flex-1"
+        />
       ) : format === 'markdown' ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <article className={cn(PROSE_CLASS, 'mx-auto max-w-[760px] px-6 py-8')}>{rendered}</article>

@@ -4,6 +4,7 @@ import { requireAuth } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { readPageSources } from '@/server/sources/source-reader';
 import { listSourcesForSubject } from '@/server/db/repos/sources-repo';
+import { readUrlSourceReference, urlSourceDisplayTitle } from '@/server/sources/url-source';
 
 export const runtime = 'nodejs';
 
@@ -33,11 +34,16 @@ export async function GET(request: NextRequest) {
 
   const slug = request.nextUrl.searchParams.get('slug');
   if (!slug) {
-    const sources = listSourcesForSubject(resolution.subject.id).map((s) => ({
-      id: s.id,
-      filename: s.filename,
-      format: formatLabelFor(s.filename),
-    }));
+    const sources = listSourcesForSubject(resolution.subject.id).map((s) => {
+      const urlReference = readUrlSourceReference(s);
+      return {
+        id: s.id,
+        filename: s.filename,
+        format: urlReference ? 'Web' : formatLabelFor(s.filename),
+        title: urlReference ? urlSourceDisplayTitle(urlReference) : s.filename,
+        ...(urlReference?.description ? { description: urlReference.description } : {}),
+      };
+    });
     return NextResponse.json({ sources });
   }
 

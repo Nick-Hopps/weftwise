@@ -11,12 +11,7 @@ export interface UrlIngestResult {
 }
 
 export interface UrlIngestDeps {
-  fetchSource: (url: string) => Promise<{ filename: string; content: string }>;
-  persist: (
-    filename: string,
-    content: string,
-    url: string,
-  ) => { sourceId: string; jobId: string };
+  persist: (url: string) => { sourceId: string; jobId: string };
 }
 
 /** 校验 urls 请求体：trim / 去空 / 去重 / 协议校验 / 上限。 */
@@ -43,12 +38,11 @@ export function validateUrlList(input: unknown): { urls: string[] } | { error: s
   return { urls };
 }
 
-/** 逐 URL 抓取→落盘→入队；单条失败不阻断其余（allSettled 语义）。 */
+/** 逐 URL 创建链接型 Source→入队；单条失败不阻断其余（allSettled 语义）。 */
 export async function ingestUrlBatch(urls: string[], deps: UrlIngestDeps): Promise<UrlIngestResult[]> {
   const settled = await Promise.allSettled(
     urls.map(async (url) => {
-      const { filename, content } = await deps.fetchSource(url);
-      const { sourceId, jobId } = deps.persist(filename, content, url);
+      const { sourceId, jobId } = deps.persist(url);
       return { url, sourceId, jobId } satisfies UrlIngestResult;
     }),
   );

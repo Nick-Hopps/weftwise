@@ -2,8 +2,13 @@
 import { registerHandler } from '../jobs/worker';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import * as pagesRepo from '../db/repos/pages-repo';
-import { parseSourceAsync, requiresBuffer } from '../sources/parser-registry';
-import { getRawSourceContent, getRawSourceBuffer, updateSourceChunks, saveRawSource } from '../sources/source-store';
+import * as sourcesRepo from '../db/repos/sources-repo';
+import {
+  updateSourceChunks,
+  updateUrlSourcePresentation,
+  saveRawSource,
+} from '../sources/source-store';
+import { loadSourceForIngest } from '../sources/source-loader';
 import { deriveUrlFilename } from '../sources/url-fetcher';
 import {
   getAgentMaxSteps,
@@ -51,26 +56,6 @@ interface IngestParams {
   subjectId: string;
 }
 
-async function loadCleanText(filename: string, subjectSlug: string): Promise<string> {
-  let textContent: string;
-  let bufferContent: Buffer | null = null;
-  if (requiresBuffer(filename)) {
-    bufferContent = getRawSourceBuffer(subjectSlug, filename);
-    if (!bufferContent) {
-      throw new Error(`Source file not found: ${filename}`);
-    }
-    textContent = '';
-  } else {
-    const raw = getRawSourceContent(subjectSlug, filename);
-    if (!raw) {
-      throw new Error(`Source file not found: ${filename}`);
-    }
-    textContent = raw;
-  }
-  const parsed = await parseSourceAsync(filename, textContent, bufferContent);
-  return parsed.cleanText;
-}
-
 /**
  * 构造 ingest 流水线 steps。`level === 'off'` 时跳过 enricher + verify（退回纯忠实层）。
  * 抽为纯函数以便单测；handler 把 inline/level/carryKeys 传入。
@@ -106,14 +91,24 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   const subject = subjectsRepo.getById(subjectId);
   if (!subject) throw new Error(`Subject ${subjectId} not found`);
+  const source = sourcesRepo.getSource(sourceId);
+  if (!source || source.subjectId !== subject.id) {
+    throw new Error(`Source ${sourceId} not found in subject ${subject.slug}`);
+  }
 
   emit('ingest:start', `Ingest started for subject ${subject.slug}`, { subject: subject.slug, filename });
 
   emit('ingest:parsing', `Parsing source: ${filename}`);
-  const cleanText = await loadCleanText(filename, subject.slug);
+  const loadedSource = await loadSourceForIngest(source, subject.slug);
+  if (loadedSource.kind === 'url') {
+    updateUrlSourcePresentation(sourceId, {
+      title: loadedSource.title,
+      description: loadedSource.description,
+    });
+  }
 
   // 解析期确定性准备：预清洗 → 切块（零 token）
-  const prep = prepareIngest([{ sourceId, filename, cleanText }]);
+  const prep = prepareIngest([{ sourceId, filename, cleanText: loadedSource.cleanText }]);
   updateSourceChunks(sourceId, prep.chunksBySource[sourceId] ?? []);
 
   const budgetSnapshot = {
@@ -124,7 +119,16 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
 
   // 断点续传：载入该 job 已有检查点（重试 = requeue 同一 job.id）
   const checkpoint = loadCheckpoint(job.id);
-  const resumeProgress = checkpoint.hasAny() ? checkpoint.progress() : null;
+  const hadCheckpoint = checkpoint.hasAny();
+  if (loadedSource.kind === 'url' && hadCheckpoint) {
+    checkpoint.clear();
+    emit('ingest:url-refreshed', 'URL source was fetched again; cleared old checkpoint');
+  }
+  const resumeProgress = loadedSource.kind === 'url'
+    ? null
+    : hadCheckpoint
+      ? checkpoint.progress()
+      : null;
   if (resumeProgress) {
     emit(
       'ingest:resuming',

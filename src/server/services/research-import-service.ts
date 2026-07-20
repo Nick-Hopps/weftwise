@@ -7,7 +7,6 @@ import {
   acquireSubjectWriteLease,
   persistSourceAndEnqueueIngest,
 } from '../sources/source-ingest-transaction';
-import { fetchUrlSource as fetchUrlSourceDefault } from '../sources/url-fetcher';
 import {
   canonicalizeResearchSelection,
   validateStoredResearchCandidates,
@@ -30,7 +29,8 @@ type Emit = (
 ) => void;
 
 export interface ResearchImportDependencies {
-  fetchUrlSource?: typeof fetchUrlSourceDefault;
+  /** @deprecated URL 抓取已由 child ingest worker 负责；保留测试/调用签名兼容。 */
+  fetchUrlSource?: (url: string) => Promise<{ filename: string; content: string }>;
 }
 
 export interface ResearchImportResult extends Record<string, unknown> {
@@ -45,8 +45,9 @@ export interface ResearchImportResult extends Record<string, unknown> {
 export async function runResearchImportJob(
   job: Job,
   emit: Emit,
-  dependencies: ResearchImportDependencies = {},
+  _dependencies: ResearchImportDependencies = {},
 ): Promise<ResearchImportResult> {
+  void _dependencies;
   const params = parseResearchImportParams(job);
   const stored = researchRepo.findResearchRunById(params.runId, params.subjectId);
   if (
@@ -89,8 +90,6 @@ export async function runResearchImportJob(
     runId: params.runId,
     candidateCount: selectedIds.length,
   });
-  const fetchUrlSource = dependencies.fetchUrlSource ?? fetchUrlSourceDefault;
-
   for (const candidateId of selectedIds) {
     const snapshot = snapshotsById.get(candidateId);
     if (!snapshot) throw new Error('Research import candidate snapshot is missing');
@@ -120,9 +119,8 @@ export async function runResearchImportJob(
         continue;
       }
 
-      emit('research-import:fetching', '正在抓取 Research 候选', { candidateId });
+      emit('research-import:linking', '正在创建 Research URL Source', { candidateId });
       const lease = acquireSubjectWriteLease(subject.id);
-      const fetched = await fetchUrlSource(snapshot.normalizedUrl);
       const claimToken = claim.claimToken!;
       const renewed = researchRepo.renewResearchDeliveryClaim({
         approvalId: params.approvalId,
@@ -136,11 +134,10 @@ export async function runResearchImportJob(
       }
 
       const persisted = persistSourceAndEnqueueIngest({
+        kind: 'url',
         subject,
         lease,
-        filename: fetched.filename,
-        content: fetched.content,
-        originUrl: snapshot.normalizedUrl,
+        url: snapshot.normalizedUrl,
         jobParams: {
           researchProvenance: {
             runId: params.runId,

@@ -345,8 +345,8 @@ export interface HtmlSafety {
 
 /**
  * A source document a page was written from, prepared for the split reading
- * view. Markdown/text ship their (capped) body in `text`; pdf/html ship no
- * payload and are rendered client-side via an iframe over `/api/sources/{id}/raw`.
+ * view. Markdown/text ship their (capped) body in `text`; local pdf/html ship no
+ * payload and are rendered via `/api/sources/{id}/raw`; URL Source 直接使用 sourceUrl。
  */
 export interface PageSourceDoc {
   id: string;
@@ -360,6 +360,8 @@ export interface PageSourceDoc {
   text?: string;
   /** 仅 html 有意义：服务端启发式扫描结论，驱动 iframe sandbox 决策与警告条。 */
   htmlSafety?: HtmlSafety;
+  /** URL Source 的规范化原始链接；存在时 iframe 直接加载远程网页，不读取 local raw。 */
+  sourceUrl?: string;
 }
 
 export interface IngestResult {

@@ -7,6 +7,7 @@ let tmpDir: string;
 
 const sourceRepoMocks = vi.hoisted(() => ({
   getSourceByIdentity: vi.fn(),
+  getSource: vi.fn(),
   upsertSource: vi.fn(),
   insertSourceOrGetWinner: vi.fn(),
   recordSourceSidecarCleanup: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../../config/env', () => ({
 
 vi.mock('../../db/repos/sources-repo', () => ({
   getSourceByIdentity: (...args: unknown[]) => sourceRepoMocks.getSourceByIdentity(...args),
+  getSource: (...args: unknown[]) => sourceRepoMocks.getSource(...args),
   upsertSource: (...args: unknown[]) => sourceRepoMocks.upsertSource(...args),
   insertSourceOrGetWinner: (...args: unknown[]) => sourceRepoMocks.insertSourceOrGetWinner(...args),
   recordSourceSidecarCleanup: (...args: unknown[]) => sourceRepoMocks.recordSourceSidecarCleanup(...args),
@@ -27,6 +29,7 @@ describe('updateSourceChunks', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vault-test-'));
     sourceRepoMocks.getSourceByIdentity.mockReset().mockReturnValue(null);
+    sourceRepoMocks.getSource.mockReset().mockReturnValue(null);
     sourceRepoMocks.upsertSource.mockReset();
     sourceRepoMocks.insertSourceOrGetWinner.mockReset().mockImplementation((source) => ({
       source,
@@ -47,6 +50,60 @@ describe('updateSourceChunks', () => {
     expect((meta as { chunks: unknown[] }).chunks).toEqual([
       { id: 'c0', heading: '', text: 'hello', tokenCount: 1 },
     ]);
+  });
+
+  it('URL Source 只写 sidecar/DB，不创建 raw HTML，并按规范化 URL 幂等', async () => {
+    const { saveUrlSource, getSourceMetadata } = await import('../source-store');
+    const subject = { id: 'sub1', slug: 'general' };
+
+    const first = saveUrlSource(subject, 'https://example.com/article');
+    sourceRepoMocks.getSourceByIdentity.mockReturnValue({
+      id: first.id,
+      subjectId: subject.id,
+      filename: first.filename,
+      contentHash: first.contentHash,
+      parsedAt: null,
+      metadataJson: JSON.stringify({ kind: 'url', originUrl: 'https://example.com/article' }),
+    });
+    const second = saveUrlSource(subject, 'https://example.com/article');
+
+    expect(second).toMatchObject({ id: first.id, filename: first.filename, created: false });
+    expect(fs.existsSync(path.join(tmpDir, 'raw', 'general', first.filename))).toBe(false);
+    expect(getSourceMetadata(first.id)).toMatchObject({
+      kind: 'url',
+      originUrl: 'https://example.com/article',
+      filename: first.filename,
+    });
+    expect(sourceRepoMocks.insertSourceOrGetWinner).toHaveBeenCalledTimes(1);
+  });
+
+  it('把 worker 解析到的网页标题和描述同时写回 sidecar 与 SQLite cache', async () => {
+    const { saveUrlSource, updateUrlSourcePresentation, getSourceMetadata } = await import('../source-store');
+    const subject = { id: 'sub1', slug: 'general' };
+    const saved = saveUrlSource(subject, 'https://example.com/article');
+    const source = {
+      id: saved.id,
+      subjectId: subject.id,
+      filename: saved.filename,
+      contentHash: saved.contentHash,
+      parsedAt: null,
+      metadataJson: JSON.stringify(getSourceMetadata(saved.id)),
+    };
+    sourceRepoMocks.getSource.mockReturnValue(source);
+
+    updateUrlSourcePresentation(saved.id, {
+      title: ' Example article ',
+      description: ' A useful summary. ',
+    });
+
+    expect(getSourceMetadata(saved.id)).toMatchObject({
+      title: 'Example article',
+      description: 'A useful summary.',
+    });
+    expect(sourceRepoMocks.upsertSource).toHaveBeenLastCalledWith(expect.objectContaining({
+      id: saved.id,
+      metadataJson: expect.stringContaining('Example article'),
+    }));
   });
 
   it('sidecar 不存在时静默跳过（best-effort）', async () => {

@@ -66,23 +66,30 @@ describe('runResearchImportJob', () => {
 
     const result = await service.runResearchImportJob(coordinator, vi.fn(), { fetchUrlSource: fetch });
 
-    expect(fetch).toHaveBeenCalledWith('https://example.com/a');
+    expect(fetch).not.toHaveBeenCalled();
     expect(result.deliveries).toHaveLength(1);
     const run = repo.findResearchRunById(stored.run.id, subject.id)!;
     expect(run.deliveries[0]).toMatchObject({ status: 'queued', attemptCount: 1 });
     expect(run.deliveries[0]!.sourceId).toBeTruthy();
     expect(run.deliveries[0]!.ingestJobId).toBeTruthy();
     const child = queue.get(run.deliveries[0]!.ingestJobId!)!;
-    expect(JSON.parse(child.paramsJson)).toEqual({
+    expect(JSON.parse(child.paramsJson)).toMatchObject({
       researchProvenance: {
         runId: stored.run.id,
         approvalId: stored.approval!.id,
         candidateId: stored.candidates[0]!.id,
       },
       sourceId: run.deliveries[0]!.sourceId,
-      filename: 'candidate.html',
       subjectId: subject.id,
     });
+    const childParams = JSON.parse(child.paramsJson) as { filename: string };
+    expect(childParams.filename).toMatch(/^web-example\.com-a-[a-f0-9]{8}\.html$/);
+    const source = (await import('../../db/repos/sources-repo')).getSource(run.deliveries[0]!.sourceId!)!;
+    expect(JSON.parse(source.metadataJson)).toMatchObject({
+      kind: 'url',
+      originUrl: 'https://example.com/a',
+    });
+    expect(existsSync(join(dir, 'vault', 'raw', 'general', source.filename))).toBe(false);
   });
 
   it('重复执行 coordinator 不重复抓取、source、sidecar 或 child job', async () => {
@@ -94,7 +101,7 @@ describe('runResearchImportJob', () => {
     await service.runResearchImportJob(coordinator, vi.fn(), { fetchUrlSource: fetch });
     await service.runResearchImportJob(coordinator, vi.fn(), { fetchUrlSource: fetch });
 
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
     const sqlite = getRawDb();
     expect(sqlite.prepare('SELECT count(*) AS count FROM sources').get()).toEqual({ count: 1 });
     expect(sqlite.prepare("SELECT count(*) AS count FROM jobs WHERE type = 'ingest'").get())
@@ -109,12 +116,7 @@ describe('runResearchImportJob', () => {
     const service = await import('../research-import-service');
     const sourceStore = await import('../../sources/source-store');
     const { getRawDb } = await import('../../db/client');
-    const saved = sourceStore.saveRawSource(
-      subject,
-      'existing.html',
-      '<p>existing</p>',
-      { originUrl: 'https://example.com/a' },
-    );
+    const saved = sourceStore.saveUrlSource(subject, 'https://example.com/a');
     getRawDb().prepare(`
       UPDATE research_candidate_ingests SET source_id = ? WHERE run_id = ?
     `).run(saved.id, stored.run.id);
@@ -130,23 +132,20 @@ describe('runResearchImportJob', () => {
       .toEqual([`${saved.id}.json`]);
   });
 
-  it('单候选抓取失败不阻断其他候选，并对失败信息脱敏', async () => {
+  it('多个候选只创建 URL 引用，不在 coordinator 中抓取', async () => {
     const { subject, repo, stored, coordinator } = await setup([
       'https://example.com/fail',
       'https://example.com/success',
     ]);
     const service = await import('../research-import-service');
-    const fetch = vi.fn(async (url: string) => {
-      if (url.endsWith('/fail')) throw new Error('fetch failed for https://user:secret@example.com/fail');
-      return { filename: 'success.html', content: '<p>success</p>' };
-    });
+    const fetch = vi.fn();
 
     const result = await service.runResearchImportJob(coordinator, vi.fn(), { fetchUrlSource: fetch });
 
-    expect(result.deliveries.map((delivery) => delivery.status)).toEqual(['failed', 'queued']);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result.deliveries.map((delivery) => delivery.status)).toEqual(['queued', 'queued']);
     const deliveries = repo.findResearchRunById(stored.run.id, subject.id)!.deliveries;
-    expect(deliveries.map((delivery) => delivery.status)).toEqual(['failed', 'queued']);
-    expect(deliveries[0]!.errorJson).not.toContain('secret');
+    expect(deliveries.map((delivery) => delivery.status)).toEqual(['queued', 'queued']);
   });
 
   it('拒绝未知参数、URL 参数与 job/params Subject 不一致', async () => {
@@ -178,9 +177,8 @@ describe('runResearchImportJob', () => {
       BEGIN SELECT RAISE(ABORT, 'child insert failed'); END
     `);
 
-    const result = await service.runResearchImportJob(coordinator, vi.fn(), {
-      fetchUrlSource: async () => ({ filename: 'candidate.html', content: '<p>A</p>' }),
-    });
+    const fetch = vi.fn();
+    const result = await service.runResearchImportJob(coordinator, vi.fn(), { fetchUrlSource: fetch });
 
     expect(result.deliveries).toEqual([
       expect.objectContaining({ status: 'failed' }),
@@ -188,7 +186,7 @@ describe('runResearchImportJob', () => {
     expect(sqlite.prepare('SELECT count(*) AS count FROM sources').get()).toEqual({ count: 0 });
     expect(repo.findResearchRunById(stored.run.id, subject.id)!.deliveries[0])
       .toMatchObject({ status: 'failed', sourceId: null, ingestJobId: null });
-    expect(existsSync(join(dir, 'vault', 'raw', 'general', 'candidate.html'))).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
     const sidecarDir = join(dir, 'vault', '.llm-wiki', 'sources', 'general');
     expect(existsSync(sidecarDir) ? readdirSync(sidecarDir) : []).toEqual([]);
   });
