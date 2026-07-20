@@ -19,7 +19,7 @@ vi.mock('@/components/i18n-provider', () => {
 import { SettingsContent, usageQueryPath } from '../settings-content';
 
 describe('General 设置内容', () => {
-  it('只显示语言设置，不再显示深色模式和侧栏宽度', () => {
+  it('显示语言与阅读设置，不再显示深色模式和侧栏宽度', () => {
     const html = renderToStaticMarkup(
       React.createElement(SettingsContent, {
         active: 'general',
@@ -42,6 +42,11 @@ describe('General 设置内容', () => {
 
     expect(html).toContain('Interface language');
     expect(html).toContain('Wiki language');
+    expect(html).toContain('Reading');
+    expect(html).toContain('Body font size');
+    expect(html).toContain('value="16"');
+    expect(html).toContain('min="14"');
+    expect(html).toContain('max="22"');
     expect(html).not.toContain('Dark mode');
     expect(html).not.toContain('Sidebar width');
   });
@@ -70,7 +75,7 @@ describe('General 设置内容', () => {
     // 旧的独立 section 标题已删除。
     expect(html).not.toContain('Content language');
     // 两行同处一个 divide-y 卡片容器。
-    expect(html.match(/divide-y/g)).toHaveLength(1);
+    expect(html.match(/divide-y/g)).toHaveLength(2);
   });
 });
 

@@ -110,6 +110,8 @@
 
 - `getWikiLanguage()` — 缺失时返回 `DEFAULT_WIKI_LANGUAGE`（`English`）
 - `setWikiLanguage(value)` — 经 `WikiLanguageSchema.parse()` 校验（trim + min 1 + max 64）后 upsert
+- `getBodyFontSize()` — 缺失或历史脏值时返回当前正文基线 `16`
+- `setBodyFontSize(value)` — 经 `BodyFontSizeSchema` 校验后写入 `14–22` 的整数像素字号
 
 服务层（`ingest` / `query` / `lint`）每次调用时**实时**读取，不在启动时缓存，方便 UI 修改即时生效。
 

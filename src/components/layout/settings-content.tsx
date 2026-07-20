@@ -18,15 +18,16 @@ import { apiFetch } from '@/lib/api-fetch';
 import { cn } from '@/lib/cn';
 import { formatTokenCount } from '@/lib/format';
 import { useUIStore } from '@/stores/ui-store';
-import type {
-  AppSettings,
-  MaintenanceScope,
-  MaintenanceStatus,
-  MaintenanceDuePagesResult,
-  StylePrefs,
-  SubjectListEntry,
-  UsageWindow,
-  UsageSummaryRow,
+import {
+  DEFAULT_BODY_FONT_SIZE,
+  type AppSettings,
+  type MaintenanceScope,
+  type MaintenanceStatus,
+  type MaintenanceDuePagesResult,
+  type StylePrefs,
+  type SubjectListEntry,
+  type UsageWindow,
+  type UsageSummaryRow,
 } from '@/lib/contracts';
 import { fetchSubjects } from '@/components/subjects/subjects-api';
 import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
@@ -114,6 +115,20 @@ export function SettingsContent(props: SettingsContentProps) {
                 settings={props.settings}
                 settingsLoading={props.settingsLoading}
                 saveLanguage={props.saveLanguage}
+              />
+            </SettingsSection>
+          )}
+
+          {sections.includes('reading') && (
+            <SettingsSection title={t('settings.section.reading')}>
+              <NumberRow
+                label={t('settings.bodyFontSize.label')}
+                description={t('settings.bodyFontSize.description')}
+                value={props.settings?.bodyFontSize ?? DEFAULT_BODY_FONT_SIZE}
+                min={14}
+                max={22}
+                onSave={(value) => props.savePartial.mutate({ bodyFontSize: value })}
+                save={toSave(props.savePartial)}
               />
             </SettingsSection>
           )}

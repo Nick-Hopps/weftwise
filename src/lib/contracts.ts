@@ -978,6 +978,10 @@ export const WikiLanguageSchema = z
     'Wiki language must not contain newlines or markdown control characters',
   );
 
+/** Wiki 阅读正文的全局字号；16px 与功能引入前的固定样式一致。 */
+export const DEFAULT_BODY_FONT_SIZE = 16;
+export const BodyFontSizeSchema = z.number().int().min(14).max(22);
+
 export const DEFAULT_AGENT_MAX_STEPS = 25;
 export const DEFAULT_AGENT_MAX_TOKENS_PER_JOB = 1_200_000;
 export const DEFAULT_AGENT_MAX_PARALLEL_SUB_AGENTS = 3;
@@ -1068,6 +1072,7 @@ export interface MaintenanceStatus {
 
 export interface AppSettings {
   wikiLanguage: string;
+  bodyFontSize: number;
   agentMaxSteps: number;
   agentMaxTokensPerJob: number;
   agentMaxParallelSubAgents: number;
@@ -1085,6 +1090,7 @@ export interface AppSettings {
 
 export const AppSettingsSchema = z.object({
   wikiLanguage: WikiLanguageSchema,
+  bodyFontSize: BodyFontSizeSchema,
   agentMaxSteps: AgentMaxStepsSchema,
   agentMaxTokensPerJob: AgentMaxTokensPerJobSchema,
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema,

@@ -13,6 +13,7 @@ import { apiFetch } from '@/lib/api-fetch';
 import { useUIStore } from '@/stores/ui-store';
 import { IconButton } from '@/components/ui/icon-button';
 import type { AppSettings } from '@/lib/contracts';
+import { applyBodyFontSize } from '@/lib/body-font-size';
 import { SettingsContent } from './settings-content';
 import { SettingsNav } from './settings-nav';
 import { DEFAULT_CATEGORY, type CategoryId } from './settings-categories';
@@ -68,6 +69,9 @@ export function SettingsDialog() {
     mutationFn: (patch: Partial<AppSettings>) => putSettings(patch),
     onSuccess: (data, patch) => {
       queryClient.setQueryData(['app-settings'], data);
+      if (patch.bodyFontSize !== undefined) {
+        applyBodyFontSize(document.documentElement, data.bodyFontSize);
+      }
       if (
         patch.maintenanceScope !== undefined ||
         patch.maintenanceEnabled !== undefined ||

@@ -33,7 +33,7 @@ describe('设置分类信息架构', () => {
 
   it('将原有设置完整收纳到四个入口中', () => {
     expect(SETTINGS_SECTIONS).toEqual({
-      general: ['language'],
+      general: ['language', 'reading'],
       personalization: ['cognitive-lens'],
       automation: ['agents', 'web-search', 'maintenance'],
       usage: ['usage'],

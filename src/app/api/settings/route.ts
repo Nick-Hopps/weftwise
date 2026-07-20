@@ -4,6 +4,8 @@ import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import {
   getWikiLanguage,
   setWikiLanguage,
+  getBodyFontSize,
+  setBodyFontSize,
   getAgentMaxSteps,
   setAgentMaxSteps,
   getAgentMaxTokensPerJob,
@@ -33,6 +35,7 @@ import {
 } from '@/server/db/repos/settings-repo';
 import {
   WikiLanguageSchema,
+  BodyFontSizeSchema,
   AgentMaxStepsSchema,
   AgentMaxTokensPerJobSchema,
   AgentMaxParallelSubAgentsSchema,
@@ -54,6 +57,7 @@ export const runtime = 'nodejs';
 function readSettings(): AppSettings {
   return {
     wikiLanguage: getWikiLanguage(),
+    bodyFontSize: getBodyFontSize(),
     agentMaxSteps: getAgentMaxSteps(),
     agentMaxTokensPerJob: getAgentMaxTokensPerJob(),
     agentMaxParallelSubAgents: getAgentMaxParallelSubAgents(),
@@ -78,6 +82,7 @@ export async function GET(request: NextRequest) {
 
 const PutBodySchema = z.object({
   wikiLanguage: WikiLanguageSchema.optional(),
+  bodyFontSize: BodyFontSizeSchema.optional(),
   agentMaxSteps: AgentMaxStepsSchema.optional(),
   agentMaxTokensPerJob: AgentMaxTokensPerJobSchema.optional(),
   agentMaxParallelSubAgents: AgentMaxParallelSubAgentsSchema.optional(),
@@ -116,6 +121,7 @@ export async function PUT(request: NextRequest) {
 
   const d = parsed.data;
   if (d.wikiLanguage !== undefined) setWikiLanguage(d.wikiLanguage);
+  if (d.bodyFontSize !== undefined) setBodyFontSize(d.bodyFontSize);
   if (d.agentMaxSteps !== undefined) setAgentMaxSteps(d.agentMaxSteps);
   if (d.agentMaxTokensPerJob !== undefined) setAgentMaxTokensPerJob(d.agentMaxTokensPerJob);
   if (d.agentMaxParallelSubAgents !== undefined) setAgentMaxParallelSubAgents(d.agentMaxParallelSubAgents);

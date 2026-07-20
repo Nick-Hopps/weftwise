@@ -22,6 +22,7 @@ export const en = {
   'settings.category.usage.label': 'Usage',
   'settings.category.usage.description': 'LLM activity and tokens',
   'settings.section.language': 'Language',
+  'settings.section.reading': 'Reading',
   'settings.section.cognitiveLens': 'Cognitive Lens',
   'settings.section.agentBehavior': 'Agent behavior',
   'settings.section.webGrounding': 'Web grounding',
@@ -56,6 +57,8 @@ export const en = {
   'settings.wikiLanguage.label': 'Wiki language',
   'settings.wikiLanguage.description':
     'Language LLM uses for new wiki content (slugs and wikilinks stay verbatim)',
+  'settings.bodyFontSize.label': 'Body font size',
+  'settings.bodyFontSize.description': 'Wiki reading text size in pixels (14–22)',
   'settings.agent.maxSteps': 'Max steps per agent',
   'settings.agent.tokenBudget': 'Total token budget per task',
   'settings.agent.tokenBudgetDescription':

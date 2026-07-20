@@ -24,9 +24,9 @@
 | `context-panel-context-tab.tsx` | Context 内容：backlinks + frontmatter + mini-graph（queryKey 含 subjectId） |
 | `ask-ai-floating-panel.tsx` | Ask AI 响应式容器：桌面 fixed 悬浮拖动 + 右/下/右下 resize（含键盘微调与视口安全边界）；空白双击坐标作为候选左上角，选区保留附近定位，无锚点时复用末位置或居中；触发代次重建聊天实例；移动端 Bottom Sheet 下滑关闭 |
 | `context-panel-chat-tab.tsx` | Ask AI 工作面 memo 边界：尺寸拖动时保持聊天子树稳定，内部复用 `chat-interface`，发问 body 含 subjectId |
-| `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭 |
+| `settings-dialog.tsx` | 响应式 Settings 弹窗容器（桌面两栏、移动端上下布局）：持有 `GET/PUT /api/settings` query/mutation + `active` 分类 state（开窗重置 `general`）+ Esc/遮罩关闭；正文字号保存成功后即时同步根 CSS 变量 |
 | `settings-nav.tsx` | 四个任务导向入口（General / Personalization / Automation / Usage）；桌面左侧导航，移动端横向导航，About 版本信息收进导航底部 |
-| `settings-content.tsx` | 按一级入口组合设置 section：小标签 + 组描述 + `divide-y` 边框卡片；General 语言合并单卡，Automation 同页收纳 Agents / Web search / Maintenance 三卡，Usage 为工具栏（时间 segmented + 项目 select）+ 表格卡片 |
+| `settings-content.tsx` | 按一级入口组合设置 section：小标签 + 组描述 + `divide-y` 边框卡片；General 收纳语言与阅读（正文字号）两卡，Automation 同页收纳 Agents / Web search / Maintenance 三卡，Usage 为工具栏（时间 segmented + 项目 select）+ 表格卡片 |
 | `settings-categories.ts` | 一级入口与 section 映射单一来源：`SETTINGS_CATEGORIES` + `SETTINGS_SECTIONS` + `DEFAULT_CATEGORY`，避免导航和内容漂移 |
 | `settings-rows.tsx` | 即时保存行原语：SettingRow/SwitchRow/SegmentedRow/SelectRow/MultiSelectRow/NumberRow/TextRow/TextareaRow；行自持 `px-4 py-3` 供卡片 `divide-y` 分组，保存指示内联在行标签旁，textarea 行上下布局全宽；窄屏自动切换为上下布局 |
 
@@ -45,7 +45,7 @@
 
 ### `wiki/` — wiki 页面渲染
 
-- `page-renderer.tsx` / `callout-icon.tsx` —— 把 markdown + frontmatter + titleSlugMap → React；callout 类型统一渲染 Lucide 语义图标并兼容历史标题 emoji；正文位图按原比例居中，并受正文宽度与 `min(32rem, 70vh)` 高度双重约束；标题行 `actions` 与 `headerExtra` 插槽保持不变
+- `page-renderer.tsx` / `callout-icon.tsx` —— 把 markdown + frontmatter + titleSlugMap → React；callout 类型统一渲染 Lucide 语义图标并兼容历史标题 emoji；正文消费根变量 `--wiki-body-font-size`（默认 16px，相对行高 1.75），位图按原比例居中并受正文宽度与 `min(32rem, 70vh)` 高度双重约束；标题行 `actions` 与 `headerExtra` 插槽保持不变
 - `page-actions.tsx` —— 阅读页统一图标动作条 + Reshape 状态行；生成态提供 Cancel，成功态提供 Refresh 与 Show original/reshaped，保存版 stale 时显示行内 Update available 提示；`wiki-reading-view` 按 Subject + slug 把用户最后选择的原文/重塑版本保存到浏览器 localStorage，未记录时仍优先已有重塑版本
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `article-toc.tsx` —— 阅读页固定目录：宽内容区显示右侧 sticky 目录轨道，窄内容区收敛为 sticky 入口/浮层；跟踪普通主滚动区与 Sources 左栏的当前章节并复用稳定 heading anchors

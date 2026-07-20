@@ -111,3 +111,36 @@ describe('ingestConcurrency', () => {
     expect(() => repo.setIngestConcurrency(2.5)).toThrow();
   });
 });
+
+describe('bodyFontSize', () => {
+  it('缺省时返回当前正文默认字号 16', async () => {
+    const repo = await import('../settings-repo');
+    expect(repo.getBodyFontSize()).toBe(16);
+  });
+
+  it('set 后 get 读到新值', async () => {
+    const repo = await import('../settings-repo');
+    repo.setBodyFontSize(20);
+    expect(repo.getBodyFontSize()).toBe(20);
+  });
+
+  it('拒绝越界值与非整数', async () => {
+    const repo = await import('../settings-repo');
+    expect(() => repo.setBodyFontSize(13)).toThrow();
+    expect(() => repo.setBodyFontSize(23)).toThrow();
+    expect(() => repo.setBodyFontSize(16.5)).toThrow();
+  });
+
+  it('历史脏值回退到默认字号', async () => {
+    const repo = await import('../settings-repo');
+    const { getDb } = await import('../../client');
+    const { appSettings } = await import('../../schema');
+    getDb().insert(appSettings).values({
+      key: 'bodyFontSize',
+      value: '99',
+      updatedAt: new Date().toISOString(),
+    }).run();
+
+    expect(repo.getBodyFontSize()).toBe(16);
+  });
+});
