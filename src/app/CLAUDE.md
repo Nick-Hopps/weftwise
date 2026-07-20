@@ -68,6 +68,8 @@
 | `/api/conversations` | GET | 🆕 列出当前 subject 会话（`updated_at DESC, rowid DESC`）|
 | `/api/conversations/[id]` | GET / PATCH / DELETE | 🆕 读单个会话含 messages / 重命名（仅 title）/ 删除（跨 subject→404，PATCH 空 title→400）|
 | `/api/query` | POST | 默认流式分支扩展：body 加 `conversationId?`（无/跨 subject 静默当新会话防泄漏）与 `messageReferences?`（最多 40 条，非空时要求 `pageSlug`）→ 载末 8 条历史注入 prompt → 流末 best-effort 落库 role-aware 消息证据 → done 回传 `{subjectId, conversationId}`；save-as-page/save-to-wiki 模式不持久化 |
+| `/api/maintenance/status` | GET | 只读维护层运行态：开关 / 上次 sweep / 节律 / 范围内到期页数（`dueCount`）；维护是全局调度不绑 subject，仅 `requireAuth` |
+| `/api/maintenance/due-pages` | GET | 🆕 到期页面明细预览：scope 与 status 同源、`total` 与 `dueCount` 同口径；entries 含 subject slug/name、标题（maturity 孤儿行为 null）、`nextDueAt`/priority/state，按 `priority DESC, next_due_at ASC` 最多 100 条 |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
 | `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录；两种模式都按外键顺序清理 Research provenance 五表（需 auth + CSRF） |
 
@@ -162,6 +164,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | 新增 `GET /api/maintenance/due-pages`（到期页面明细预览，最多 100 条 + total）：`maturity-repo.listDueDetailed` JOIN pages/subjects，scope 与 `/api/maintenance/status` 同源；Settings Maintenance 状态行新增 View 展开列表。spec/plan 见 docs/{specs,plans}/2026-07-20-maintenance-due-pages-preview.md |
 | 2026-07-20 | `GET /api/usage` 新增可选 `subjectId` 项目筛选与存在性校验；不传项目时保持全局统计，旧版未归因用量不会被错误归入任一项目 |
 | 2026-07-17 | `/api/query` 流式分支接收有界 `messageReferences`；非空时要求当前 `pageSlug`，并由服务端当前 Subject/page 补全用户引用身份后随问题持久化，客户端不能用该字段伪造跨 Subject 来源 |
 | 2026-07-17 | 标志 v2：`icon.svg`/`apple-icon.png`/`opengraph-image.png` 随织纹 mark 改版重生成（三经 + 波形纬线，小尺寸可读），几何与 `shared/weftwise-mark.tsx` 保持一致 |

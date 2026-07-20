@@ -209,7 +209,7 @@ src/server/db/
     ├── operations-repo.ts     # 版本历史（listForSubject / getById / markReverted，⑥）
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
     ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
-    ├── maturity-repo.ts       # 页面成熟度 CRUD（listDue/countDue 支持可选 Subject 集合过滤；其余 get / ensureRow / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
+    ├── maturity-repo.ts       # 页面成熟度 CRUD（listDue/countDue/listDueDetailed 支持可选 Subject 集合过滤，detailed 版 JOIN pages/subjects 供到期预览；其余 get / ensureRow / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
     ├── research-provenance-repo.ts # Research 五表 run/批准/delivery/验证原子状态机
     └── usage-repo.ts          # LLM 用量明细：recordUsage（best-effort 项目归因）/ summarizeUsage（按项目可选过滤、task+model 聚合）/ pruneOldUsage（90 天 GC）
 ```
@@ -218,6 +218,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `maturity-repo` 新增 `listDueDetailed(nowIso, limit, subjectIds?)`：WHERE/ORDER 与 `listDue` 同口径，LEFT JOIN pages 取标题（孤儿行 title=null）、JOIN subjects 取 slug/name，供 `GET /api/maintenance/due-pages` 到期预览 |
 | 2026-07-20 | `llm_usage` 新增可空 `subject_id` 与项目时间复合索引；已知 Subject 的 LLM/Embedding/图片调用显式归因，删除 Subject 时归因置空保留用量，历史未归因记录只进入全局汇总 |
 | 2026-07-17 | conversations repo 将既有 `messages.citations_json` 明确为 role-aware 消息证据容器：用户消息恢复到 `references`，Assistant 消息继续恢复到 `citations`；旧 NULL/Assistant JSON 无迁移兼容 |
 | 2026-07-17 | `pending_actions.operation` CHECK 加入 `workflow-image-insert-start`；Drizzle `0010` 与启动期原子重建均保留旧行/索引并继续拒绝未知 operation |
