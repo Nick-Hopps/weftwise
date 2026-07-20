@@ -154,7 +154,7 @@
 | `jobs` | `id` | `subject_id` 可空（全局型 lint / reset）；ingest/save-to-wiki 必填 |
 | `job_events` | `id` | 持久化顺序由 SQLite `rowid`（INSERT 顺序）决定；SSE 用 `Last-Event-Id` 解析 cursor rowid 后续播 |
 | `operations` | `id` | `subject_id` 用于 rollback 时仅 reindex 该 subject；状态机 `pending / applied / rolled-back / reverted`；🆕 GC：`pruneOldOperations` 每 subject 只保留最近 500 条终态行（`pending` 永不删），挂在 worker 低频 sweep（无时间戳列，退化为单条件数量保留，见 operations-repo.ts 注释） |
-| `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；不进 vault |
+| `ingest_checkpoints` | `(job_id, kind, key)` 复合 PK | 断点续传：chunk 摘要 / plan / 每页 writer 产出；job 成功即删；已取消 job 原子拒绝迟到写入且不暴露恢复进度；不进 vault |
 | `conversations` | `id` | `subject_id` FK→subjects ON DELETE CASCADE；`title` + `created_at` + `updated_at` |
 | `messages` | `id` | `conversation_id` FK→conversations ON DELETE CASCADE；`role` ('user'\|'assistant') + `content` + `citations_json` (nullable，role=user 时保存用户正文引用，role=assistant 时保存回答 citations) |
 | `pending_actions` | `id` | `conversation_id` 可空（Chat 有值，Tags 工作台为空）/`subject_id` FK CASCADE；状态 `pending/approved/executing/applied/rejected/expired/failed`；30 分钟 TTL；`operation_id` 指向页面或 History inverse Saga，`job_id` 指向已批准的 workflow；operation CHECK 含 `tag-batch/move/history-revert/workflow-*` |
@@ -220,6 +220,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-21 | checkpoint 写入边界按 `jobs.cancel_requested` 原子拒绝已取消任务的迟到 upsert；`getProgress` 同步屏蔽历史 cancelled checkpoint，避免结束后的 Ingest 刷新复活 |
 | 2026-07-20 | `retryResearchIngestJobAtomic` 可在既有 lineage 校验内合并 `sourceAuthGrantId`：grant params、failed job→pending、delivery→queued、run→importing 同属一个 IMMEDIATE transaction，任一 CAS 失败整体回滚 |
 | 2026-07-20 | `maturity-repo` 新增 `listDueDetailed(nowIso, limit, subjectIds?)`：WHERE/ORDER 与 `listDue` 同口径，LEFT JOIN pages 取标题（孤儿行 title=null）、JOIN subjects 取 slug/name，供 `GET /api/maintenance/due-pages` 到期预览 |
 | 2026-07-20 | `llm_usage` 新增可空 `subject_id` 与项目时间复合索引；已知 Subject 的 LLM/Embedding/图片调用显式归因，删除 Subject 时归因置空保留用量，历史未归因记录只进入全局汇总 |
