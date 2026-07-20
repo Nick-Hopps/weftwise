@@ -4,6 +4,8 @@ import { appSettings } from '../schema';
 import {
   DEFAULT_WIKI_LANGUAGE,
   WikiLanguageSchema,
+  BodyFontSizeSchema,
+  DEFAULT_BODY_FONT_SIZE,
   AgentMaxParallelSubAgentsSchema,
   AgentMaxStepsSchema,
   AgentMaxTokensPerJobSchema,
@@ -36,6 +38,7 @@ import {
 } from '@/lib/contracts';
 
 const KEY_WIKI_LANGUAGE = 'wikiLanguage';
+const KEY_BODY_FONT_SIZE = 'bodyFontSize';
 const KEY_AGENT_MAX_STEPS = 'agentMaxSteps';
 const KEY_AGENT_MAX_TOKENS_PER_JOB = 'agentMaxTokensPerJob';
 const KEY_AGENT_MAX_PARALLEL_SUB_AGENTS = 'agentMaxParallelSubAgents';
@@ -86,6 +89,21 @@ export function getWikiLanguage(): string {
 export function setWikiLanguage(value: string): string {
   const validated = WikiLanguageSchema.parse(value);
   writeKey(KEY_WIKI_LANGUAGE, validated);
+  return validated;
+}
+
+/** 返回 Wiki 阅读正文的全局字号；缺失或历史脏值均保持原有 16px。 */
+export function getBodyFontSize(): number {
+  const raw = readKey(KEY_BODY_FONT_SIZE);
+  if (raw === undefined) return DEFAULT_BODY_FONT_SIZE;
+  const parsed = BodyFontSizeSchema.safeParse(Number(raw));
+  return parsed.success ? parsed.data : DEFAULT_BODY_FONT_SIZE;
+}
+
+/** 持久化 14–22 的整数正文字号。 */
+export function setBodyFontSize(value: number): number {
+  const validated = BodyFontSizeSchema.parse(value);
+  writeKey(KEY_BODY_FONT_SIZE, String(validated));
   return validated;
 }
 
