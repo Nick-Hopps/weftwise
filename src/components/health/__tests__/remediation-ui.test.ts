@@ -13,6 +13,7 @@ import {
   activeJobsHydrationBusyActions,
   actionFindingIds,
   actionForFinding,
+  blockingRecoverableActions,
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
@@ -491,6 +492,7 @@ describe('Health remediation UI helper', () => {
     expect(selectRecoverableHealthJobs(queuedSnapshot, []).fix).toMatchObject({
       jobId: 'fix-from-plan',
       source: 'remediation',
+      blocksAction: true,
     });
   });
 
@@ -510,7 +512,27 @@ describe('Health remediation UI helper', () => {
     expect(selectRecoverableHealthJobs(awaitingSnapshot, []).research).toMatchObject({
       jobId: 'research-completed',
       source: 'remediation',
+      blocksAction: false,
     });
+  });
+
+  it('候选弹窗关闭后，已完成 Research 恢复项不再占用动作按钮', () => {
+    expect([...blockingRecoverableActions({
+      fix: {
+        jobId: 'fix-running',
+        workflow: 'fix',
+        source: 'remediation',
+        createdAt: '2026-07-21T00:00:00.000Z',
+        blocksAction: true,
+      },
+      research: {
+        jobId: 'research-completed',
+        workflow: 'research',
+        source: 'remediation',
+        createdAt: '2026-07-21T00:00:00.000Z',
+        blocksAction: false,
+      },
+    })]).toEqual(['fix']);
   });
 
   it('ingest 的非法 remediation params 不误判为 re-ingest', () => {

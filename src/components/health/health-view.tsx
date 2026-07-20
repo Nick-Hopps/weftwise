@@ -53,6 +53,7 @@ import {
 import {
   activeJobsHydrationBusyActions,
   actionFindingIds,
+  blockingRecoverableActions,
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
@@ -212,7 +213,7 @@ export function HealthView() {
   const workflowBusyActions = useMemo(
     () => new Set([
       ...snapshotBusyActions,
-      ...(Object.keys(recoverableJobs) as ExecutableRemediationAction[]),
+      ...blockingRecoverableActions(recoverableJobs),
       ...busyActions,
     ]),
     [snapshotBusyActions, recoverableJobs, busyActions],

@@ -20,6 +20,8 @@ export interface RecoverableHealthJob {
   workflow: ExecutableRemediationAction;
   source: 'manual' | 'remediation';
   createdAt: string;
+  /** true 表示任务仍在执行，恢复期间必须锁住同类 action。 */
+  blocksAction: boolean;
 }
 
 export interface QueuedLintRun {
@@ -51,6 +53,18 @@ export function healthActionButtonState(
   if (!busy) return 'idle';
   if (!jobId) return 'starting';
   return cancelling ? 'cancelling' : 'running';
+}
+
+export function blockingRecoverableActions(
+  jobs: Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>>,
+): Set<ExecutableRemediationAction> {
+  const actions = new Set<ExecutableRemediationAction>();
+  for (const [action, candidate] of Object.entries(jobs) as Array<
+    [ExecutableRemediationAction, RecoverableHealthJob | undefined]
+  >) {
+    if (candidate?.blocksAction) actions.add(action);
+  }
+  return actions;
 }
 
 export async function requestHealthJobCancel(
@@ -188,6 +202,7 @@ export function selectRecoverableHealthJobs(
       workflow,
       source: 'remediation',
       createdAt: snapshot.ranAt ?? '',
+      blocksAction: plan.status === 'queued',
     };
     if (!current || candidate.jobId > current.jobId) selected[workflow] = candidate;
   }
@@ -209,6 +224,7 @@ function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
       workflow: job.type,
       source: context?.action === job.type ? 'remediation' : 'manual',
       createdAt: job.createdAt,
+      blocksAction: true,
     };
   }
   if (job.type === 'research') {
@@ -218,6 +234,7 @@ function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
       workflow: 'research',
       source: context?.action === 'research' ? 'remediation' : 'manual',
       createdAt: job.createdAt,
+      blocksAction: true,
     };
   }
   if (job.type === 'ingest' && readStrictRemediationContext(job.paramsJson)?.action === 're-ingest') {
@@ -226,6 +243,7 @@ function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
       workflow: 're-ingest',
       source: 'remediation',
       createdAt: job.createdAt,
+      blocksAction: true,
     };
   }
   return null;
