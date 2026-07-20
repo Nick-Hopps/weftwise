@@ -5,11 +5,10 @@ import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useApiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
-import { buildTitleSlugMap } from '@/lib/title-slug-map';
-import type { WikiPage } from '@/lib/contracts';
 import { Button } from '@/components/ui/button';
 import { MdEditor } from './md-editor';
 import { DeferredEditorPreview } from './deferred-editor-preview';
+import { pageEditorPagesQueryOptions } from './page-editor-pages-query';
 import { useI18n } from '@/components/i18n-provider';
 
 const INVALIDATE_KEYS = ['pages', 'page-detail', 'graph', 'search', 'jobs', 'backlinks', 'context', 'frontmatter'];
@@ -37,16 +36,7 @@ export function PageEditor({ slug }: { slug: string }) {
   });
 
   // 拉取本 subject 所有页，构建 wikilink 解析用 titleSlugMap（与阅读页一致）。
-  const { data: titleSlugMap } = useQuery({
-    queryKey: ['pages', subjectId],
-    queryFn: async () => {
-      const res = await apiFetch('/api/pages');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const pages = (await res.json()) as WikiPage[];
-      return buildTitleSlugMap(pages);
-    },
-    enabled: !!subjectId,
-  });
+  const { data: titleSlugMap } = useQuery(pageEditorPagesQueryOptions(apiFetch, subjectId));
 
   // 受控编辑器：value 为 null 表示尚未编辑，回落到首次加载的 raw。
   const initialRaw = data?.raw ?? '';
