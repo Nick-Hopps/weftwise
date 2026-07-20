@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   finishUrlAuthRecovery,
   initialUrlAuthRecoveryState,
-  observeUrlAuthChallenge,
-  reopenUrlAuthChallenge,
+  selectUrlAuthRecovery,
   type UrlAuthRecoveryRequest,
 } from '../url-auth-recovery-state';
 
@@ -25,43 +24,30 @@ function request(
 }
 
 describe('url-auth-recovery-state', () => {
-  it('同一持久化 challenge 自动提示一次，多个任务保持观察顺序', () => {
-    const first = observeUrlAuthChallenge(initialUrlAuthRecoveryState(), request('challenge-1'));
-    const duplicate = observeUrlAuthChallenge(first, request('challenge-1'));
-    const second = observeUrlAuthChallenge(duplicate, request('challenge-2'));
+  it('初始状态不选择任务，只有显式操作才进入授权恢复', () => {
+    const initial = initialUrlAuthRecoveryState();
+    expect(initial.selected).toBeNull();
 
-    expect(duplicate).toBe(first);
-    expect(second.queue.map((item) => item.challenge.challengeId)).toEqual([
-      'challenge-1',
-      'challenge-2',
-    ]);
-    expect(second.promptedChallengeIds).toEqual(new Set(['challenge-1', 'challenge-2']));
+    const selected = selectUrlAuthRecovery(initial, request('challenge-1'));
+    expect(selected.selected).toEqual(request('challenge-1'));
   });
 
-  it('关闭只移除当前请求且不再次自动弹出，手动入口可以重开', () => {
-    const observed = observeUrlAuthChallenge(
+  it('重复选择同一 challenge 保持引用，选择另一任务时原子替换', () => {
+    const first = selectUrlAuthRecovery(
       initialUrlAuthRecoveryState(),
       request('challenge-1'),
     );
-    const closed = finishUrlAuthRecovery(observed, 'challenge-1');
-    expect(closed.queue).toEqual([]);
-    expect(observeUrlAuthChallenge(closed, request('challenge-1'))).toBe(closed);
-
-    const reopened = reopenUrlAuthChallenge(closed, request('challenge-1'));
-    expect(reopened.queue).toEqual([request('challenge-1')]);
+    expect(selectUrlAuthRecovery(first, request('challenge-1'))).toBe(first);
+    expect(selectUrlAuthRecovery(first, request('challenge-2')).selected)
+      .toEqual(request('challenge-2'));
   });
 
-  it('完成队首后保留后续 challenge，新事件身份仍可再次提示', () => {
-    const queued = observeUrlAuthChallenge(
-      observeUrlAuthChallenge(initialUrlAuthRecoveryState(), request('challenge-1', 'job-1')),
-      request('challenge-2', 'job-2'),
+  it('关闭只清除匹配的显式选择', () => {
+    const selected = selectUrlAuthRecovery(
+      initialUrlAuthRecoveryState(),
+      request('challenge-1'),
     );
-    const next = finishUrlAuthRecovery(queued, 'challenge-1');
-    const repeatedJob = observeUrlAuthChallenge(next, request('challenge-3', 'job-1'));
-
-    expect(repeatedJob.queue.map((item) => item.challenge.challengeId)).toEqual([
-      'challenge-2',
-      'challenge-3',
-    ]);
+    expect(finishUrlAuthRecovery(selected, 'other')).toBe(selected);
+    expect(finishUrlAuthRecovery(selected, 'challenge-1').selected).toBeNull();
   });
 });

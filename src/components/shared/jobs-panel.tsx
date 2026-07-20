@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronRight, KeyRound, Loader2, ListTodo, Square, Trash2, X } from 'lucide-react';
+import { Check, ChevronRight, CircleX, KeyRound, Loader2, ListTodo, Square, Trash2, X } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
 import type { JobStreamStatus } from '@/hooks/job-stream-logic';
 import { apiFetch } from '@/lib/api-fetch';
@@ -18,6 +18,7 @@ import { JobDetailDialog } from './job-detail-dialog';
 import { ToolActivityIcon } from './tool-activity-icon';
 import {
   jobTypeVerb,
+  requestTrackedJobCancel,
   shouldRefreshPageForCompletedJob,
   summarizeJobsPanel,
   type TrackedJob,
@@ -25,8 +26,7 @@ import {
 import {
   finishUrlAuthRecovery,
   initialUrlAuthRecoveryState,
-  observeUrlAuthChallenge,
-  reopenUrlAuthChallenge,
+  selectUrlAuthRecovery,
   type UrlAuthRecoveryRequest,
 } from './url-auth-recovery-state';
 import { useI18n } from '@/components/i18n-provider';
@@ -46,13 +46,11 @@ function JobRow({
   job,
   onRemove,
   onStatusChange,
-  onAuthRequired,
   onOpenAuth,
 }: {
   job: TrackedJob;
   onRemove: (id: string) => void;
   onStatusChange: (id: string, status: JobStreamStatus) => void;
-  onAuthRequired: (request: UrlAuthRecoveryRequest) => void;
   onOpenAuth: (request: UrlAuthRecoveryRequest) => void;
 }) {
   const { t } = useI18n();
@@ -61,6 +59,8 @@ function JobRow({
   const { events, status, latestMessage } = useJobStream(streamId, job.reconnectKey);
   const [detailOpen, setDetailOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [authCancelling, setAuthCancelling] = useState(false);
+  const [authCancelError, setAuthCancelError] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const router = useRouter();
   const refreshedCompletion = useRef(false);
@@ -80,10 +80,6 @@ function JobRow({
   useEffect(() => {
     onStatusChange(job.id, status);
   }, [job.id, onStatusChange, status]);
-
-  useEffect(() => {
-    if (isFailed && authRequest) onAuthRequired(authRequest);
-  }, [authRequest, isFailed, onAuthRequired]);
 
   // 任一 job 完成 → 失效列表缓存（保持旧 GlobalJobTracker 语义）
   useEffect(() => {
@@ -117,6 +113,20 @@ function JobRow({
     }
   };
 
+  const handleAuthCancel = async () => {
+    if (!authRequest || authCancelling) return;
+    setAuthCancelling(true);
+    setAuthCancelError(null);
+    try {
+      await requestTrackedJobCancel(job.id, apiFetch);
+      onRemove(job.id);
+    } catch {
+      setAuthCancelError(t('jobs.cancelFailed'));
+    } finally {
+      setAuthCancelling(false);
+    }
+  };
+
   return (
     <>
       <li className="flex flex-col gap-1 px-3 py-2">
@@ -139,17 +149,30 @@ function JobRow({
             </IconButton>
           )}
           {isFailed && authRequest && (
-            <IconButton
-              size="sm"
-              onClick={() => onOpenAuth(authRequest)}
-              aria-label={t('ingest.auth.action')}
-              className="tip tip-l"
-              data-tip={t('ingest.auth.action')}
-            >
-              <KeyRound />
-            </IconButton>
+            <>
+              <IconButton
+                size="sm"
+                onClick={() => onOpenAuth(authRequest)}
+                disabled={authCancelling}
+                aria-label={t('ingest.auth.retryAction')}
+                className="tip tip-l"
+                data-tip={t('ingest.auth.retryAction')}
+              >
+                <KeyRound />
+              </IconButton>
+              <IconButton
+                size="sm"
+                onClick={handleAuthCancel}
+                disabled={authCancelling}
+                aria-label={t('jobs.cancelTask')}
+                className="tip tip-l text-danger hover:text-danger"
+                data-tip={t('jobs.cancelTask')}
+              >
+                {authCancelling ? <Loader2 className="animate-spin" /> : <CircleX />}
+              </IconButton>
+            </>
           )}
-          {(isCompleted || isFailed) && (
+          {(isCompleted || isFailed) && !authRequest && (
             <IconButton size="sm" onClick={() => onRemove(job.id)} aria-label={t('jobs.dismiss')}>
               <X />
             </IconButton>
@@ -163,10 +186,17 @@ function JobRow({
             : isFailed
               ? wasCancelled
                 ? t('jobs.cancelled')
-                : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || t('jobs.failed')
+                : authRequest
+                  ? t('ingest.auth.choiceRequired')
+                  : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || t('jobs.failed')
               : (latestTool ? stripLegacyToolActivityIcon(latestMessage) : latestMessage) || '…'}
           </span>
         </p>
+        {authCancelError && (
+          <p role="alert" className="pl-[22px] text-xs text-danger">
+            {authCancelError}
+          </p>
+        )}
         {(isFailed || events.length > 0) && (
           <button
             type="button"
@@ -208,15 +238,11 @@ export function JobsPanel({
   const [statuses, setStatuses] = useState<Record<string, JobStreamStatus>>({});
   const [authRecovery, setAuthRecovery] = useState(initialUrlAuthRecoveryState);
 
-  const handleAuthRequired = useCallback((request: UrlAuthRecoveryRequest) => {
-    setAuthRecovery((current) => observeUrlAuthChallenge(current, request));
-  }, []);
-
   const handleOpenAuth = useCallback((request: UrlAuthRecoveryRequest) => {
-    setAuthRecovery((current) => reopenUrlAuthChallenge(current, request));
+    setAuthRecovery((current) => selectUrlAuthRecovery(current, request));
   }, []);
 
-  const activeAuthRequest = authRecovery.queue[0] ?? null;
+  const activeAuthRequest = authRecovery.selected;
   const finishActiveAuth = useCallback(() => {
     if (!activeAuthRequest) return;
     setAuthRecovery((current) => finishUrlAuthRecovery(
@@ -324,7 +350,6 @@ export function JobsPanel({
               job={job}
               onRemove={onRemove}
               onStatusChange={handleStatusChange}
-              onAuthRequired={handleAuthRequired}
               onOpenAuth={handleOpenAuth}
             />
           ))}

@@ -2,6 +2,8 @@ import type { Job } from '@/lib/contracts';
 import type { MessageKey } from '@/lib/i18n/messages';
 import { jobResultRequiresUrlAuth } from '@/lib/ingest-auth';
 
+type ApiFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
 export type TrackedJobStatus = 'idle' | 'streaming' | 'completed' | 'failed';
 
 export interface TrackedJob {
@@ -55,6 +57,22 @@ export function isRecoverableUrlAuthJob(
   return job.type === 'ingest'
     && job.status === 'failed'
     && jobResultRequiresUrlAuth(job.resultJson);
+}
+
+export async function requestTrackedJobCancel(
+  jobId: string,
+  apiFetch: ApiFetch,
+): Promise<void> {
+  const response = await apiFetch(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+  });
+  if (response.ok) return;
+  const payload = await response.json().catch(() => ({})) as { error?: unknown };
+  throw new Error(
+    typeof payload.error === 'string' && payload.error
+      ? payload.error
+      : `Task cancellation failed (${response.status})`,
+  );
 }
 
 export function summarizeJobsPanel(
