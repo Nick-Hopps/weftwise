@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IngestResult } from '@/lib/contracts';
+import { UrlAuthenticationRequiredError } from '../../sources/url-fetcher';
 
 vi.mock('../../db/repos/subjects-repo', () => ({
   getById: () => ({ id: 's1', slug: 'general', name: 'General', description: '', createdAt: '', updatedAt: '' }),
@@ -32,13 +33,16 @@ vi.mock('../../sources/parser-registry', () => ({
 
 let mockLoadedKind: 'raw' | 'url' = 'raw';
 const mockUpdateUrlSourcePresentation = vi.hoisted(() => vi.fn());
+const mockLoadSourceForIngest = vi.hoisted(() => vi.fn());
 vi.mock('../../sources/source-loader', () => ({
-  loadSourceForIngest: vi.fn(async () => ({
-    kind: mockLoadedKind,
-    cleanText: mockCleanText,
-    title: 'Remote title',
-    description: 'Remote description',
-  })),
+  loadSourceForIngest: (...args: unknown[]) => mockLoadSourceForIngest(...args),
+}));
+
+const mockReadSourceAuthGrant = vi.hoisted(() => vi.fn());
+const mockDeleteSourceAuthGrant = vi.hoisted(() => vi.fn());
+vi.mock('../../sources/source-auth-grant', () => ({
+  readSourceAuthGrant: (...args: unknown[]) => mockReadSourceAuthGrant(...args),
+  deleteSourceAuthGrant: (...args: unknown[]) => mockDeleteSourceAuthGrant(...args),
 }));
 
 vi.mock('../../sources/source-store', () => ({
@@ -161,6 +165,14 @@ describe('ingest-service', () => {
     mockCheckpointHasAny = false;
     mockCheckpointClear.mockClear();
     mockUpdateUrlSourcePresentation.mockClear();
+    mockLoadSourceForIngest.mockReset().mockImplementation(async () => ({
+      kind: mockLoadedKind,
+      cleanText: mockCleanText,
+      title: 'Remote title',
+      description: 'Remote description',
+    }));
+    mockReadSourceAuthGrant.mockReset().mockReturnValue(null);
+    mockDeleteSourceAuthGrant.mockReset();
   });
 
   it('runs orchestrator pipeline and returns IngestResult', async () => {
@@ -317,5 +329,107 @@ describe('ingest-service', () => {
       expect.anything(),
       expect.anything(),
     );
+  });
+
+  it('URL grant 按 job/source 绑定解密，提交成功后删除', async () => {
+    mockLoadedKind = 'url';
+    mockReadSourceAuthGrant.mockReturnValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      authOrigin: 'https://example.com',
+      cookie: 'session=secret',
+      authorization: 'Bearer secret',
+      expiresAt: '2026-07-20T02:00:00.000Z',
+    });
+    const handler = handlers.get('ingest')!;
+    const job = {
+      ...makeJob(),
+      paramsJson: JSON.stringify({
+        sourceId: 'url-src',
+        filename: 'web-example.html',
+        subjectId: 's1',
+        sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
+      }),
+    };
+
+    await handler(job, vi.fn());
+
+    expect(mockReadSourceAuthGrant).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+      { jobId: 'j1', sourceId: 'url-src' },
+    );
+    expect(mockLoadSourceForIngest).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'url-src' }),
+      'general',
+      {
+        credentials: {
+          origin: 'https://example.com',
+          cookie: 'session=secret',
+          authorization: 'Bearer secret',
+        },
+      },
+    );
+    expect(mockDeleteSourceAuthGrant).toHaveBeenCalledWith(
+      '11111111-1111-4111-8111-111111111111',
+    );
+  });
+
+  it('401/403 发结构化 auth-required 事件，且失败时保留 grant', async () => {
+    mockReadSourceAuthGrant.mockReturnValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      authOrigin: 'https://example.com',
+      cookie: 'expired-session',
+      expiresAt: '2026-07-20T02:00:00.000Z',
+    });
+    mockLoadSourceForIngest.mockRejectedValue(
+      new UrlAuthenticationRequiredError(401, 'https://accounts.example.com'),
+    );
+    const handler = handlers.get('ingest')!;
+    const job = {
+      ...makeJob(),
+      paramsJson: JSON.stringify({
+        sourceId: 'url-src',
+        filename: 'web-example.html',
+        subjectId: 's1',
+        sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
+      }),
+    };
+    const emit = vi.fn();
+
+    await expect(handler(job, emit)).rejects.toMatchObject({ code: 'url-auth-required' });
+    expect(emit).toHaveBeenCalledWith(
+      'ingest:auth-required',
+      'Authentication required (HTTP 401)',
+      {
+        code: 'url-auth-required',
+        status: 401,
+        authOrigin: 'https://accounts.example.com',
+        sourceId: 'url-src',
+      },
+    );
+    expect(mockDeleteSourceAuthGrant).not.toHaveBeenCalled();
+  });
+
+  it('URL 抓取成功但下游失败时保留 grant，供同一 job 重试', async () => {
+    mockLoadedKind = 'url';
+    mockReadSourceAuthGrant.mockReturnValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      authOrigin: 'https://example.com',
+      cookie: 'session=secret',
+      expiresAt: '2026-07-20T02:00:00.000Z',
+    });
+    mockRunPipeline.mockRejectedValueOnce(new Error('downstream failure'));
+    const handler = handlers.get('ingest')!;
+    const job = {
+      ...makeJob(),
+      paramsJson: JSON.stringify({
+        sourceId: 'url-src',
+        filename: 'web-example.html',
+        subjectId: 's1',
+        sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
+      }),
+    };
+
+    await expect(handler(job, vi.fn())).rejects.toThrow('downstream failure');
+    expect(mockDeleteSourceAuthGrant).not.toHaveBeenCalled();
   });
 });

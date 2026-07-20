@@ -1,13 +1,14 @@
 import type { Source } from '@/lib/contracts';
 import { parseSourceAsync, requiresBuffer } from './parser-registry';
 import { getRawSourceBuffer, getRawSourceContent } from './source-store';
-import { fetchUrlSource } from './url-fetcher';
+import { fetchUrlSource, type UrlFetchCredentials } from './url-fetcher';
 import { readUrlSourceReference } from './url-source';
 
 export interface SourceLoaderDependencies {
   fetchUrlSource?: typeof fetchUrlSource;
   getRawSourceContent?: typeof getRawSourceContent;
   getRawSourceBuffer?: typeof getRawSourceBuffer;
+  credentials?: UrlFetchCredentials;
 }
 
 export interface LoadedSourceForIngest {
@@ -25,7 +26,10 @@ export async function loadSourceForIngest(
 ): Promise<LoadedSourceForIngest> {
   const urlReference = readUrlSourceReference(source);
   if (urlReference) {
-    const fetched = await (dependencies.fetchUrlSource ?? fetchUrlSource)(urlReference.originUrl);
+    const fetchSource = dependencies.fetchUrlSource ?? fetchUrlSource;
+    const fetched = dependencies.credentials
+      ? await fetchSource(urlReference.originUrl, { credentials: dependencies.credentials })
+      : await fetchSource(urlReference.originUrl);
     const parsed = await parseSourceAsync(fetched.filename, fetched.content);
     return {
       kind: 'url',

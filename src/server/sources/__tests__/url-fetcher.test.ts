@@ -4,6 +4,7 @@ import {
   deriveUrlFilename,
   fetchUrlSource,
   MAX_URL_BYTES,
+  UrlAuthenticationRequiredError,
   URL_FETCH_USER_AGENT,
   type UrlRequestTransport,
 } from '../url-fetcher';
@@ -107,6 +108,35 @@ describe('fetchUrlSource', () => {
     const transport = fakeTransport({ status: 404 });
     await expect(fetchUrlSource('https://example.com/x', { transport, resolver: publicResolver })).rejects.toThrow(/404/);
   });
+
+  it.each([401, 403])('HTTP %s 分类为需要用户授权，且不读取响应体', async (status) => {
+    const close = vi.fn();
+    const bodyStarted = vi.fn();
+    const transport: UrlRequestTransport = vi.fn(async () => ({
+      status,
+      headers: { 'content-type': 'text/html' },
+      body: (async function* authBody() {
+        bodyStarted();
+        yield Buffer.from('login page must not be parsed');
+      }()),
+      close,
+    }));
+
+    const promise = fetchUrlSource('https://example.com/private', {
+      transport,
+      resolver: publicResolver,
+    });
+
+    await expect(promise).rejects.toBeInstanceOf(UrlAuthenticationRequiredError);
+    await expect(promise).rejects.toMatchObject({
+      name: 'UrlAuthenticationRequiredError',
+      code: 'url-auth-required',
+      status,
+      authOrigin: 'https://example.com',
+    });
+    expect(bodyStarted).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
   it('非文本 content-type 拒绝', async () => {
     const transport = fakeTransport({ contentType: 'image/png' });
     await expect(fetchUrlSource('https://example.com/x', { transport, resolver: publicResolver })).rejects.toThrow(/content-type/i);
@@ -153,6 +183,79 @@ describe('fetchUrlSource', () => {
       .resolves.toMatchObject({ content: '<p>ok</p>' });
     expect(resolver).toHaveBeenCalledTimes(2);
     expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('同源重定向继续携带授权请求头', async () => {
+    const transport: UrlRequestTransport = vi.fn(async ({ url }) => url.pathname === '/start'
+      ? {
+          status: 302,
+          headers: { location: '/private' },
+          body: chunks(),
+          close: vi.fn(),
+        }
+      : {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          body: chunks('<p>ok</p>'),
+          close: vi.fn(),
+        });
+
+    await fetchUrlSource('https://example.com/start', {
+      transport,
+      resolver: publicResolver,
+      credentials: {
+        origin: 'https://example.com',
+        cookie: 'session=same-origin-secret',
+        authorization: 'Bearer same-origin-secret',
+      },
+    });
+
+    expect(transport).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      headers: {
+        cookie: 'session=same-origin-secret',
+        authorization: 'Bearer same-origin-secret',
+      },
+    }));
+    expect(transport).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      headers: {
+        cookie: 'session=same-origin-secret',
+        authorization: 'Bearer same-origin-secret',
+      },
+    }));
+  });
+
+  it('跨 origin 重定向移除 Cookie 与 Authorization', async () => {
+    const transport: UrlRequestTransport = vi.fn(async ({ url }) => url.hostname === 'example.com'
+      ? {
+          status: 302,
+          headers: { location: 'https://accounts.example.net/private' },
+          body: chunks(),
+          close: vi.fn(),
+        }
+      : {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+          body: chunks('<p>ok</p>'),
+          close: vi.fn(),
+        });
+
+    await fetchUrlSource('https://example.com/start', {
+      transport,
+      resolver: publicResolver,
+      credentials: {
+        origin: 'https://example.com',
+        cookie: 'session=must-not-leak',
+        authorization: 'Bearer must-not-leak',
+      },
+    });
+
+    expect(transport).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      headers: {
+        cookie: 'session=must-not-leak',
+        authorization: 'Bearer must-not-leak',
+      },
+    }));
+    expect(transport).toHaveBeenNthCalledWith(2, expect.objectContaining({ headers: {} }));
   });
 
   it('拒绝 public 页面重定向到 private 地址', async () => {
