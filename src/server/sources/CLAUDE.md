@@ -88,7 +88,7 @@ updateUrlSourceReaderText(sourceId, cleanText) // URL Source 有界 Markdown 阅
 ### `url-safety.ts` / `url-fetcher.ts`
 
 - 仅允许无 userinfo 的 `http:` / `https:`；拒绝 localhost、`.local`、`.internal`、非公网 IPv4、非 `2000::/3` 公网 IPv6 及特殊/文档保留段；IP literal 不享受任何代理例外。
-- 每次请求及每一跳重定向都解析全部 DNS 答案；只接受“全部公网”或“全部为已验证系统 Fake-IP 映射”的同质结果。系统 Fake-IP 仅在目标 hostname 与固定公网哨兵 `example.com` 都完全解析到 `198.18.0.0/15` 时附加 provenance；未标记保留地址、Fake-IP/公网混合、公私混合仍 fail-closed。
+- 每次请求及每一跳重定向都解析全部 DNS 答案；只接受“全部公网”或“全部为已验证系统 Fake-IP 映射”的同质结果。系统 Fake-IP 仅在目标 hostname 与固定公网哨兵 `example.com` 都完全解析到 `198.18.0.0/15`，或解析到该网段 IPv4 的标准 IPv6 mapped/translated 表示时附加 provenance；未标记保留地址、Fake-IP/公网混合、公私混合仍 fail-closed。
 - socket 固定连接首个已验证 IP，HTTPS 仍使用原 hostname 做 SNI 与证书校验，关闭 DNS rebinding 窗口；Fake-IP 模式固定的是系统代理映射地址，不把 `198.18.0.0/15` 重新分类为公网。
 - 重定向手动处理，最多 5 跳；全链路共享 10 秒超时，只接受 identity 编码的文本响应，并同时用 `Content-Length` 和流式累计限制 5MB。
 - 通用 URL Ingest 与 Research coordinator 只保存服务端校验后的 URL 引用；Research 客户端批准请求不能提交或覆盖 URL。
@@ -171,6 +171,7 @@ src/server/sources/
 |------|------|
 | 2026-07-20 | Research URL child 接入同一短期加密 grant，但授权后必须经 provenance 事务恢复；API/service 失败删除新 grant，成功接管后 best-effort 清理旧 grant |
 | 2026-07-20 | URL Source 增加阅读正文持久化：worker 把有界 cleanText 写入 sidecar，`source-reader` 优先读取 readerText 并兼容从旧 chunks 去重重建；页面预览不重新抓取远程网页 |
+| 2026-07-21 | URL SSRF 守卫兼容 macOS resolver 对 Fake-IP 同时返回 IPv4 与 `::ffff:<IPv4>` / `::ffff:0:<IPv4>` 的结果；嵌入地址必须解码后仍落入 `198.18.0.0/15`，私网和未标记结果继续拒绝 |
 | 2026-07-20 | URL SSRF 守卫兼容系统代理 Fake-IP：目标与公网哨兵均完全落入 `198.18.0.0/15` 时标记代理映射，Research/通用 URL Ingest 可继续使用 pinned transport；IP literal、未标记保留地址与混合结果仍拒绝 |
 | 2026-07-20 | URL Ingest 401/403 增加登录态恢复：`source-auth-grant` 在数据库目录旁保存 job/source/origin 绑定的 2 小时 AES-GCM 临时授权，worker 仅向精确 origin 携带 Cookie/Authorization，跨源重定向剥离，成功后清理 |
 | 2026-07-20 | URL Source 改为链接型实体：只持久化规范化 URL sidecar，不落 raw HTML；Ingest worker 通过 `source-loader` 临时抓取解析并写回网页标题/描述；历史 `originUrl` sidecar 自动兼容，预览直接加载原网页 sandbox |

@@ -42,6 +42,24 @@ describe('createSystemHostResolver', () => {
     await resolver('candidate.example');
     expect(lookupHost).toHaveBeenCalledOnce();
   });
+
+  it('目标与哨兵的 Fake-IP 同时包含系统 IPv6 嵌入表示时仍标记 provenance', async () => {
+    const lookupHost = vi.fn(async (hostname: string) => hostname === 'candidate.example'
+      ? [
+          { address: '198.18.0.152', family: 4 },
+          { address: '::ffff:0:c612:98', family: 6 },
+        ]
+      : [
+          { address: '198.18.0.71', family: 4 },
+          { address: '::ffff:0:c612:47', family: 6 },
+        ]);
+    const resolver = createSystemHostResolver(lookupHost);
+
+    await expect(resolver('candidate.example')).resolves.toEqual([
+      { address: '198.18.0.152', family: 4, provenance: 'system-fake-ip' },
+      { address: '::ffff:0:c612:98', family: 6, provenance: 'system-fake-ip' },
+    ]);
+  });
 });
 
 describe('validateHttpUrl', () => {
@@ -137,6 +155,21 @@ describe('resolvePublicHttpTarget', () => {
     });
   });
 
+  it('接受 resolver 标记的 Fake-IP IPv4 与 IPv6 嵌入表示', async () => {
+    const resolver: HostResolver = async () => [
+      { address: '198.18.0.152', family: 4, provenance: 'system-fake-ip' },
+      { address: '::ffff:0:c612:98', family: 6, provenance: 'system-fake-ip' },
+      { address: '::ffff:c612:98', family: 6, provenance: 'system-fake-ip' },
+    ];
+
+    await expect(resolvePublicHttpTarget('https://example.com', resolver)).resolves.toMatchObject({
+      address: '198.18.0.152',
+      family: 4,
+      hostname: 'example.com',
+      provenance: 'system-fake-ip',
+    });
+  });
+
   it('拒绝没有系统 Fake-IP provenance 的基准测试地址', async () => {
     const resolver: HostResolver = async () => [
       { address: '198.18.0.42', family: 4 },
@@ -149,6 +182,15 @@ describe('resolvePublicHttpTarget', () => {
     const resolver: HostResolver = async () => [
       { address: '198.18.0.42', family: 4, provenance: 'system-fake-ip' },
       { address: '127.0.0.1', family: 4 },
+    ];
+
+    await expect(resolvePublicHttpTarget('https://example.com', resolver)).rejects.toThrow(/public/i);
+  });
+
+  it('拒绝标记为 provenance 但实际嵌入私网 IPv4 的 IPv6 结果', async () => {
+    const resolver: HostResolver = async () => [
+      { address: '198.18.0.42', family: 4, provenance: 'system-fake-ip' },
+      { address: '::ffff:0:7f00:1', family: 6, provenance: 'system-fake-ip' },
     ];
 
     await expect(resolvePublicHttpTarget('https://example.com', resolver)).rejects.toThrow(/public/i);

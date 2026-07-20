@@ -166,16 +166,42 @@ function isValidResolvedAddress(entry: ResolvedAddress): boolean {
 
 function areAllFakeIpProxyAddresses(addresses: ResolvedAddress[]): boolean {
   return addresses.length > 0
-    && addresses.every((entry) => entry.family === 4 && isFakeIpProxyAddress(entry.address));
+    && addresses.every((entry) => (
+      isValidResolvedAddress(entry) && isFakeIpProxyAddress(entry.address)
+    ));
 }
 
-/** RFC 2544 benchmark range；仅能由系统 Fake-IP 一致性探测提升为代理映射。 */
+/**
+ * RFC 2544 benchmark range，以及系统 resolver 对该 IPv4 的 mapped/translated IPv6 表示。
+ * 这些地址仍只能由系统 Fake-IP 一致性探测提升为代理映射。
+ */
 function isFakeIpProxyAddress(address: string): boolean {
-  const parts = address.split('.').map(Number);
+  const ipv4 = embeddedIpv4Address(address);
+  if (!ipv4) return false;
+  const parts = ipv4.split('.').map(Number);
   if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
     return false;
   }
   return parts[0] === 198 && (parts[1] === 18 || parts[1] === 19);
+}
+
+function embeddedIpv4Address(address: string): string | null {
+  const family = isIP(address);
+  if (family === 4) return address;
+  if (family !== 6) return null;
+
+  const groups = parseIpv6(address);
+  if (!groups) return null;
+  const mapped = groups.slice(0, 5).every((group) => group === 0)
+    && groups[5] === 0xffff;
+  const translated = groups.slice(0, 4).every((group) => group === 0)
+    && groups[4] === 0xffff
+    && groups[5] === 0;
+  if (!mapped && !translated) return null;
+
+  const high = groups[6]!;
+  const low = groups[7]!;
+  return [high >>> 8, high & 0xff, low >>> 8, low & 0xff].join('.');
 }
 
 function isPublicIpv4(address: string): boolean {

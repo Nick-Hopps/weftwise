@@ -38,7 +38,7 @@ URL hostname must resolve exclusively to public addresses
 
 ### 方案 C：系统 Fake-IP 一致性探测（推荐）
 
-先按现状解析目标 hostname。只有目标的全部答案都属于 `198.18.0.0/15` 时，再解析固定公网哨兵 `example.com`；哨兵也全部落入同一网段，才把目标结果标记为系统 Fake-IP 映射。`resolvePublicHttpTarget()` 只接受以下两种同质结果：
+先按现状解析目标 hostname。只有目标的全部答案都属于 `198.18.0.0/15`，或属于该网段 IPv4 的标准 IPv6 mapped/translated 表示时，再解析固定公网哨兵 `example.com`；哨兵也满足相同条件，才把目标结果标记为系统 Fake-IP 映射。`resolvePublicHttpTarget()` 只接受以下两种同质结果：
 
 1. 全部地址均为公开可路由地址；
 2. 全部地址均为经过系统 Fake-IP 一致性探测标记的 `198.18.0.0/15` 地址。
@@ -67,7 +67,7 @@ Research candidate URL
 
 - `isPublicIpAddress('198.18.x.x')` 始终返回 `false`。
 - Fake-IP 兼容只适用于 DNS hostname，不适用于 IP literal。
-- 目标与哨兵都必须非空，且各自全部落在 `198.18.0.0/15`。
+- 目标与哨兵都必须非空，且各自全部落在 `198.18.0.0/15`，或解码后落入该网段的 `::ffff:<IPv4>` / `::ffff:0:<IPv4>` 表示。
 - Fake-IP 标记是 resolver 产生的 provenance；未标记的同网段答案继续拒绝。
 - 一组 DNS 答案必须全部公开，或全部为已标记 Fake-IP；不接受混合结果。
 - 每次重定向重新解析和校验，连接仍固定到本次校验得到的地址。
