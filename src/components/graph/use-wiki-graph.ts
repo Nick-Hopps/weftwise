@@ -14,7 +14,7 @@ import { useUIStore } from '@/stores/ui-store';
 import { useApiFetch } from '@/lib/api-fetch';
 import { readGraphTheme } from '@/lib/theme/read-theme-vars';
 import { buildStylesheet, applyHighlight } from './graph-stylesheet';
-import { computeNodeSize, LAYOUT_COMPACT } from './graph-layout';
+import { computeNodeSize, computeLayoutPreset } from './graph-layout';
 import { startForceSimulation, type SimulationHandle } from './force-simulation';
 
 interface WikiGraphData {
@@ -115,7 +115,7 @@ export function useWikiGraph(
           if (host instanceof HTMLElement) host.style.cursor = 'default';
         });
 
-        const preset = LAYOUT_COMPACT;
+        const preset = computeLayoutPreset(data.nodes.length, data.edges.length);
         // animate:false — run cose synchronously so the initial jump is invisible.
         // The loading overlay stays until layoutstop, then the canvas fades in.
         const layout = cy.layout({

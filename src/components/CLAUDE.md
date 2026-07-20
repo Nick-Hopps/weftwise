@@ -188,6 +188,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Wiki 图谱布局间距自适应：`graph-layout.ts` 的固定 `LAYOUT_COMPACT` 改为 `computeLayoutPreset(nodeCount, edgeCount)`，按结点数（40→120）或平均度（6→16）线性加大理想边长/斥力并降低重力（封顶 130/11000/0.18），高密度小图与大图不再挤在聚合根附近；小而稀疏的图参数不变 |
 | 2026-07-20 | 设置界面卡片分组重构：section 改「小标签 + 组描述 + 边框卡片 divide-y」修正标题层级；General 界面/内容语言合并单卡；保存指示器移到行标签旁不再在控件侧占位；控件宽度规范化（text w-56 / select min-w-36）、textarea 全宽；Usage 筛选收敛为工具栏 + 表格卡片；删「提供方」静态行并入 API key 描述。spec/plan 见 `docs/{specs,plans}/2026-07-20-settings-ui-redesign.md` |
 | 2026-07-20 | 全站正常操作主色从纬线朱切换为经线靛：主按钮、开关、选中态、焦点环、进度与图谱激活态统一使用 warp；纬线朱仅保留品牌识别，danger 红色独占删除、失败与错误语义 |
 | 2026-07-20 | 阅读页按 Subject + slug 记忆原文/重塑展示偏好；Mermaid Diagram 增加可缩放全屏预览；Settings Usage 增加项目筛选并明确历史未归因用量仅计入全部项目 |
