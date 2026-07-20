@@ -50,6 +50,7 @@
 - `reading-progress.tsx` —— 阅读页顶部细进度条；普通模式监听 `#main-content`，Sources 分栏模式监听左侧正文容器，尺寸变化时重新计算并限制在 0–100%
 - `article-toc.tsx` —— 阅读页固定目录：宽内容区显示右侧 sticky 目录轨道，窄内容区收敛为 sticky 入口/浮层；跟踪普通主滚动区与 Sources 左栏的当前章节并复用稳定 heading anchors
 - `html-source-frame.tsx` —— HTML/网页 Source 的 sandbox iframe：上传 HTML 仍加载同源 raw 路由；链接型 URL Source 直接加载远程地址并设置 `referrerPolicy=no-referrer`，始终不开放 `allow-same-origin`，默认禁用脚本，用户显式点击后只增加 `allow-scripts`
+- `url-source-preview.tsx` —— URL Source 共用双视图：默认实时 sandbox iframe，可显式切到摄入时保存的本地 Markdown 阅读正文；独立 Source 页和 Wiki Sources 分栏复用，正文缺失/截断都有明确状态
 - `mermaid-diagram.tsx` / `mermaid-svg.tsx` / `mermaid-preview.tsx` / `mermaid-theme.ts` —— Mermaid 客户端渲染与主题配置；内联图与全屏预览复用同一 SVG 渲染器，预览支持 50%–200% 缩放、滚动、重置及 Escape/遮罩关闭；使用紧凑 flowchart 参数、浅/深色 palette，并监听根节点主题变化重绘 SVG；Diagram callout 的无卡片图解样式位于 `globals.css`
 - `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
@@ -189,6 +190,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL Source 增加“实时网页 / 阅读模式”共享 Tabs：目标站拒绝 iframe 时可原地阅读 ingest 已清洗的 Markdown；两个 Source 入口复用同一组件，打开原网页继续保留 |
 | 2026-07-20 | Health「整理/修复/研究」三个处置按钮支持手动停止：运行态原位切换 Square + Stop，pending/running 与刷新恢复 job 复用通用 cancel API；请求失败可见且可重试，成功等待 `job:cancelled` SSE 清理，不把主动取消 Research 误报为普通失败。spec/plan 见 `docs/{specs,plans}/2026-07-20-health-actions-manual-cancel.md` |
 | 2026-07-20 | Ingest URL 登录态恢复：`use-job-stream` 注册 `ingest:auth-required`；工作台把无 checkpoint 的认证失败 job 纳入刷新恢复，失败主操作切为 Sign in；新增 `ingest-auth-dialog`，打开精确 origin 登录页并提交默认遮蔽的 Cookie/可选 Authorization，成功后复用同一 job SSE。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |
 | 2026-07-20 | URL Source 预览改为直接加载原网页：左侧 Sources 列表展示已持久化的网页标题+描述；source 独立页与 Wiki Sources 分栏复用远程 sandbox iframe，显示 Web/Open original，默认禁用脚本且永不开放同源权限；上传 HTML 继续走本地 raw+CSP 预览 |

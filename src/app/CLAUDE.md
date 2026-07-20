@@ -31,7 +31,7 @@
 |------|------|------|
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
 | `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
-| `/api/sources` | GET | 无 `slug` 时返回左侧 Sources 轻量列表：URL Source 使用 worker 已持久化的网页标题/描述（未抓取时标题回退 hostname），普通文件回退 filename；带 `slug` 时返回页面 Sources 分栏文档 DTO |
+| `/api/sources` | GET | 无 `slug` 时返回左侧 Sources 轻量列表：URL Source 使用 worker 已持久化的网页标题/描述（未抓取时标题回退 hostname），普通文件回退 filename；带 `slug` 时返回页面 Sources 分栏文档 DTO，URL Source 同时携带有界本地阅读正文与截断状态 |
 | `/api/usage` | GET | app 级 LLM 用量统计；`window=7d\|30d\|all` 控制时间范围，可选 `subjectId` 精确筛选项目；未知项目返回 400，缺省项目包含历史/全局未归因记录 |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20），只持久化规范化网页链接与 source sidecar，不下载 raw HTML；每 URL 独立 ingest job，worker 执行时临时抓取并解析；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
 | `/api/query` | POST | Chat 流式问答：每轮先由统一结构化 LLM 分类 `read/propose/direct-reenrich/image-insert/reset-*` 与可选页面目标，服务端再按可信 page/selection/context 收窄能力；可选 `messageReferences` 只接收章节/摘录，必须同时提供 `pageSlug`，服务端用当前 Subject/page 补全身份并从页面仓库读取标题快照后随用户消息持久化。明确单页 re-enrich 直接创建 PendingAction，canonical 选区配图才进入独立 `image-insert` mode，工具面仅为只读工具加 `wiki.image.insert`，Reshape 确定性拒绝。重置请求以 `reset-confirmation` SSE 进入二次确认，后续 body 用 `intentContext:'reset-confirmation'` 复用同一分类入口；确认后前端仍调用受鉴权/CSRF/Subject 守卫的 `/api/reset`。分类失败时普通请求回退 read、重置确认回退 unclear。三种 Query mode 均可跨 Subject 只读、读取 active Subject History 与脱敏 workflow status；也支持两种 subject-scoped `save-to-wiki` 入队模式，Route 不直接写 vault |
@@ -168,6 +168,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL Source 增加本地阅读模式：`/sources/[id]` 与页面 Sources 分栏均可在实时 sandbox iframe 和摄入时保存的 Markdown 正文间切换；只读预览不重新联网，旧 sidecar 从 chunks 去重回退。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-reader-mode.md |
 | 2026-07-20 | 新增 `POST /api/jobs/[id]/url-auth`：只接受当前 Subject 的普通 failed URL Ingest 与最新 401/403 challenge，敏感头写短期 AES-GCM grant，job params 只保存 grant ID；CAS 失败补偿密文，Research child 保持 provenance 专用 retry 边界。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |
 | 2026-07-20 | URL Source 改为链接型实体：`POST /api/ingest` 与 Research 导入只保存规范化 URL 并原子入队，worker 开始 Ingest 时才临时抓取并写回网页标题/描述；左侧 Sources 列表展示标题+描述；`/sources/[id]` 与页面 Sources 分栏直接在无同源权限的远程 sandbox iframe 中加载原网页，默认禁用脚本，显式允许后也只开放 `allow-scripts`；旧 `originUrl` sidecar 自动兼容。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-live-preview.md |
 | 2026-07-20 | 新增 `GET /api/maintenance/due-pages`（到期页面明细预览，最多 100 条 + total）：`maturity-repo.listDueDetailed` JOIN pages/subjects，scope 与 `/api/maintenance/status` 同源；Settings Maintenance 状态行新增 View 展开列表。spec/plan 见 docs/{specs,plans}/2026-07-20-maintenance-due-pages-preview.md |

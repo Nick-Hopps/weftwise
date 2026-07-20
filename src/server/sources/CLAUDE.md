@@ -74,12 +74,14 @@ getRawSourceBuffer(sourceId): Buffer | null
 updateSourcePageLinks(sourceId, pageSlugs)    // 写 page_sources 多对多
 updateSourceChunks(sourceId, chunks)          // chunk 持久化到 metadata sidecar
 updateUrlSourcePresentation(sourceId, metadata) // 网页标题/描述写回 sidecar + SQLite cache
+updateUrlSourceReaderText(sourceId, cleanText) // URL Source 有界 Markdown 阅读正文
 ```
 
 ### `url-source.ts` / `source-loader.ts`
 
 - `url-source.ts` 是 URL Source 身份与兼容读取的唯一入口；新 sidecar 写 `kind:'url' + originUrl`，历史仅有 `originUrl` 的 sidecar 仍按 URL Source 读取。
 - `source-loader.ts` 是 Ingest 内容加载边界：raw Source 读 vault 文件；URL Source 调 `fetchUrlSource()`，将响应只保留在 worker 内存中并交给 HTML parser 生成 `cleanText`。
+- URL Source 的 `cleanText` 除切块外还会以最多 120K 字符的 `readerText` 写入权威 sidecar，供 CSP/X-Frame-Options 拒绝 iframe 时的本地阅读模式使用；旧 sidecar 由 `source-reader.ts` 对 chunks overlap 做有界精确去重后回退重建，预览阶段不重新联网。
 - URL loader 同时返回真实网页标题与描述；Ingest handler 通过 `updateUrlSourcePresentation` 写回 sidecar 与 SQLite。左侧列表只读取已持久化字段，不因渲染列表额外联网。
 - URL 身份按规范化地址确定，不按抓取内容 hash；同一 Subject 重复提交同一地址复用 source。
 
@@ -166,6 +168,7 @@ src/server/sources/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL Source 增加阅读正文持久化：worker 把有界 cleanText 写入 sidecar，`source-reader` 优先读取 readerText 并兼容从旧 chunks 去重重建；页面预览不重新抓取远程网页 |
 | 2026-07-20 | URL SSRF 守卫兼容系统代理 Fake-IP：目标与公网哨兵均完全落入 `198.18.0.0/15` 时标记代理映射，Research/通用 URL Ingest 可继续使用 pinned transport；IP literal、未标记保留地址与混合结果仍拒绝 |
 | 2026-07-20 | URL Ingest 401/403 增加登录态恢复：`source-auth-grant` 在数据库目录旁保存 job/source/origin 绑定的 2 小时 AES-GCM 临时授权，worker 仅向精确 origin 携带 Cookie/Authorization，跨源重定向剥离，成功后清理 |
 | 2026-07-20 | URL Source 改为链接型实体：只持久化规范化 URL sidecar，不落 raw HTML；Ingest worker 通过 `source-loader` 临时抓取解析并写回网页标题/描述；历史 `originUrl` sidecar 自动兼容，预览直接加载原网页 sandbox |
