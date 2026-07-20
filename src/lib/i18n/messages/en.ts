@@ -792,6 +792,8 @@ export const en = {
   'health.error.snapshotChanged': 'Health results changed. Review them again before continuing.',
   'health.error.remediationStatus': 'Remediation request failed ({status}).',
   'health.error.remediationRetry': 'Remediation request failed. Please try again.',
+  'health.error.cancelStatus': 'Stop request failed ({status}).',
+  'health.error.cancelRetry': 'Stop request failed. Please try again.',
   'health.error.deleteSource': 'Delete source failed. Please try again.',
   'health.error.sourceInFlight': 'Source cannot be deleted while its ingest job is active.',
   'health.error.sourceReferenced': 'Source is now referenced by a page and cannot be deleted.',

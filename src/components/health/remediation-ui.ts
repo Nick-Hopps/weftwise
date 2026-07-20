@@ -32,6 +32,9 @@ type ActiveJobsResponse = {
 };
 
 type ActiveJobsFetch = (url: string) => Promise<ActiveJobsResponse>;
+type HealthJobCancelFetch = (url: string, init?: RequestInit) => Promise<Response>;
+
+export type HealthActionButtonState = 'idle' | 'starting' | 'running' | 'cancelling';
 
 const EXECUTABLE_REMEDIATION_ACTIONS: readonly ExecutableRemediationAction[] = [
   'fix',
@@ -39,6 +42,35 @@ const EXECUTABLE_REMEDIATION_ACTIONS: readonly ExecutableRemediationAction[] = [
   'research',
   're-ingest',
 ];
+
+export function healthActionButtonState(
+  busy: boolean,
+  jobId: string | null,
+  cancelling: boolean,
+): HealthActionButtonState {
+  if (!busy) return 'idle';
+  if (!jobId) return 'starting';
+  return cancelling ? 'cancelling' : 'running';
+}
+
+export async function requestHealthJobCancel(
+  jobId: string,
+  request: HealthJobCancelFetch,
+  t: TranslationFunction,
+): Promise<'cancelled' | 'already-terminal'> {
+  const response = await request(`/api/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+  });
+  if (response.ok) return 'cancelled';
+  if (response.status === 409) return 'already-terminal';
+
+  const payload = await response.json().catch(() => ({})) as { error?: unknown };
+  throw new Error(
+    typeof payload.error === 'string'
+      ? payload.error
+      : t('health.error.cancelStatus', { status: response.status }),
+  );
+}
 
 export function isHealthOriginCurrent(current: HealthOrigin, candidate: HealthOrigin): boolean {
   return current.generation === candidate.generation

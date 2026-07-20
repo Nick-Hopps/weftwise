@@ -16,6 +16,7 @@ import {
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
+  healthActionButtonState,
   isHealthOriginCurrent,
   nextDeleteArmed,
   readDeleteSourceResult,
@@ -28,6 +29,7 @@ import {
   selectRecoverableHealthJobs,
   researchBacklogPatchBody,
   researchApprovalBody,
+  requestHealthJobCancel,
   summarizeFixOutcomes,
 } from '../remediation-ui';
 import { FindingRow, remediationStatusLabel } from '../finding-row';
@@ -122,6 +124,37 @@ const snapshot: HealthSnapshot = {
 };
 
 describe('Health remediation UI helper', () => {
+  it('三个处置按钮共用 idle、starting、running 与 cancelling 状态', () => {
+    expect(healthActionButtonState(false, null, false)).toBe('idle');
+    expect(healthActionButtonState(true, null, false)).toBe('starting');
+    expect(healthActionButtonState(true, 'job-1', false)).toBe('running');
+    expect(healthActionButtonState(true, 'job-1', true)).toBe('cancelling');
+    expect(healthActionButtonState(false, 'stale-job', false)).toBe('idle');
+  });
+
+  it('取消处置 job 区分成功、已终态幂等收敛与可见失败', async () => {
+    const requests: Array<{ url: string; method?: string }> = [];
+    await expect(requestHealthJobCancel('fix/job', async (url, init) => {
+      requests.push({ url, method: init?.method });
+      return Response.json({ status: 'failed' });
+    }, t)).resolves.toBe('cancelled');
+    expect(requests).toEqual([{ url: '/api/jobs/fix%2Fjob/cancel', method: 'POST' }]);
+
+    await expect(requestHealthJobCancel('done', async () => Response.json(
+      { error: 'Cannot cancel a job with status "completed"' },
+      { status: 409 },
+    ), t)).resolves.toBe('already-terminal');
+
+    await expect(requestHealthJobCancel('missing', async () => Response.json(
+      { error: 'Job not found' },
+      { status: 404 },
+    ), t)).rejects.toThrow('Job not found');
+
+    await expect(requestHealthJobCancel('broken', async () => new Response('', {
+      status: 503,
+    }), t)).rejects.toThrow('Stop request failed (503).');
+  });
+
   it('批量 ID 只来自服务端允许的 action，并保持 findings 顺序', () => {
     expect(actionFindingIds(snapshot, 'research')).toEqual([gap.id]);
     expect(actionFindingIds(snapshot, 'fix')).toEqual([broken.id]);

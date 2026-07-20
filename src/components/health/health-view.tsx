@@ -9,6 +9,7 @@ import {
   ListFilter,
   RefreshCw,
   Search,
+  Square,
   Wand2,
   Wrench,
 } from 'lucide-react';
@@ -51,6 +52,7 @@ import {
   createLintRerunQueue,
   fetchActiveHealthJobs,
   healthTerminalInvalidationKeys,
+  healthActionButtonState,
   isHealthOriginCurrent,
   persistedBusyActions,
   readDeleteSourceResult,
@@ -58,6 +60,7 @@ import {
   readResearchRunId,
   recentOutcomeCounts,
   researchApprovalBody,
+  requestHealthJobCancel,
   selectRecoverableHealthJobs,
   summarizeFixOutcomes,
   type ExecutableRemediationAction,
@@ -129,11 +132,13 @@ export function HealthView() {
   const originSubjectId = subjectId ?? '';
   const [remediationError, setRemediationError] = useState<string | null>(null);
   const [busyActions, setBusyActions] = useState<Set<ExecutableRemediationAction>>(new Set());
+  const [cancellingActions, setCancellingActions] = useState<Set<ExecutableRemediationAction>>(new Set());
   const [actingFindingByAction, setActingFindingByAction] = useState<
     Partial<Record<ExecutableRemediationAction, string>>
   >({});
 
   const actionGateRef = useRef(createActionGate());
+  const cancellingActionsRef = useRef<Set<ExecutableRemediationAction>>(new Set());
   const actionJobMetaRef = useRef<Partial<Record<ExecutableRemediationAction, ActionJobMeta>>>({});
   const researchJobMetaRef = useRef<ResearchJobMeta | null>(null);
   const researchFetchJobIdRef = useRef<string | null>(null);
@@ -156,6 +161,7 @@ export function HealthView() {
       scope,
     };
     actionGateRef.current.reset();
+    cancellingActionsRef.current.clear();
     actionJobMetaRef.current = {};
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
@@ -257,6 +263,12 @@ export function HealthView() {
     });
   }
 
+  function setActionCancelling(action: ExecutableRemediationAction, cancelling: boolean): void {
+    if (cancelling) cancellingActionsRef.current.add(action);
+    else cancellingActionsRef.current.delete(action);
+    setCancellingActions(new Set(cancellingActionsRef.current));
+  }
+
   function invalidateOrigin(nextScope: Scope): void {
     originRef.current = {
       generation: originRef.current.generation + 1,
@@ -265,6 +277,7 @@ export function HealthView() {
     };
     originKeyRef.current = `${originSubjectId}\u0000${nextScope}`;
     actionGateRef.current.reset();
+    cancellingActionsRef.current.clear();
     actionJobMetaRef.current = {};
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
@@ -396,12 +409,14 @@ export function HealthView() {
       invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.curate;
       setCurateJobId(null);
+      setActionCancelling('curate', false);
       releaseAction('curate', meta.origin);
     } else if (curateStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.curate;
       setCurateJobId(null);
+      setActionCancelling('curate', false);
       releaseAction('curate', meta.origin);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -422,12 +437,14 @@ export function HealthView() {
       invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.fix;
       setFixJobId(null);
+      setActionCancelling('fix', false);
       releaseAction('fix', meta.origin);
     } else if (fixStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
       delete actionJobMetaRef.current.fix;
       setFixJobId(null);
+      setActionCancelling('fix', false);
       releaseAction('fix', meta.origin);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -467,7 +484,7 @@ export function HealthView() {
   const [researchActing, setResearchActing] = useState(false);
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
-  const { status: researchStatus } = useJobStream(researchJobId);
+  const { status: researchStatus, events: researchEvents } = useJobStream(researchJobId);
   const researching = workflowBusyActions.has('research');
 
   function showResearchError(source: ResearchOrigin, message: string): void {
@@ -549,6 +566,7 @@ export function HealthView() {
             researchJobMetaRef.current = null;
             delete actionJobMetaRef.current.research;
             setResearchJobId(null);
+            setActionCancelling('research', false);
             releaseAction('research', meta.origin);
           }
           if (researchFetchJobIdRef.current === researchJobId) {
@@ -557,16 +575,20 @@ export function HealthView() {
         }
       })();
     } else if (researchStatus === 'failed') {
-      showResearchError(meta.source, 'Research failed — see job details for the underlying error.');
+      const wasCancelled = researchEvents.some((event) => event.type === 'job:cancelled');
+      if (!wasCancelled) {
+        showResearchError(meta.source, 'Research failed — see job details for the underlying error.');
+      }
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
       researchJobMetaRef.current = null;
       delete actionJobMetaRef.current.research;
       setResearchJobId(null);
+      setActionCancelling('research', false);
       releaseAction('research', meta.origin);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [researchStatus]);
+  }, [researchStatus, researchEvents]);
 
   useEffect(() => {
     const result = candidateResult;
@@ -727,6 +749,32 @@ export function HealthView() {
       if (isCurrentOrigin(origin)) setRemediationError(t('health.error.remediationRetry'));
     } finally {
       if (!accepted) releaseAction(action, origin);
+    }
+  }
+
+  async function cancelHealthAction(
+    action: Extract<ExecutableRemediationAction, 'fix' | 'curate' | 'research'>,
+    jobIdToCancel: string,
+  ) {
+    const meta = actionJobMetaRef.current[action];
+    const origin = meta?.jobId === jobIdToCancel ? meta.origin : captureOrigin();
+    if (!isCurrentOrigin(origin) || cancellingActionsRef.current.has(action)) return;
+
+    setRemediationError(null);
+    setActionCancelling(action, true);
+    let accepted = false;
+    try {
+      await requestHealthJobCancel(jobIdToCancel, apiFetch, t);
+      accepted = true;
+      if (isCurrentOrigin(origin)) invalidateWorkflowLifecycle(origin);
+    } catch (error) {
+      if (isCurrentOrigin(origin)) {
+        setRemediationError(
+          error instanceof Error ? error.message : t('health.error.cancelRetry'),
+        );
+      }
+    } finally {
+      if (!accepted && isCurrentOrigin(origin)) setActionCancelling(action, false);
     }
   }
 
@@ -948,6 +996,8 @@ export function HealthView() {
     setTopicInput('');
     setRemediationError(null);
     setBusyActions(new Set());
+    cancellingActionsRef.current.clear();
+    setCancellingActions(new Set());
     setActingFindingByAction({});
     setHandledSourceIds(new Set());
     setDeletingSourceIds(new Set());
@@ -975,6 +1025,21 @@ export function HealthView() {
   const fixFindingIds = data ? actionFindingIds(data, 'fix') : [];
   const curateFindingIds = data ? actionFindingIds(data, 'curate') : [];
   const researchFindingIds = data ? actionFindingIds(data, 'research') : [];
+  const curateButtonState = healthActionButtonState(
+    curating,
+    curateJobId,
+    cancellingActions.has('curate'),
+  );
+  const fixButtonState = healthActionButtonState(
+    fixing,
+    fixJobId,
+    cancellingActions.has('fix'),
+  );
+  const researchButtonState = healthActionButtonState(
+    researching,
+    researchJobId,
+    cancellingActions.has('research'),
+  );
   const recentOutcomeSummary = useMemo(
     () => data
       ? recentOutcomeCounts(data)
@@ -1131,50 +1196,65 @@ export function HealthView() {
               </Button>
               <span className="hidden h-5 w-px bg-border lg:block" aria-hidden />
               <Button
-                intent="outline"
-                onClick={() => void runRemediation('curate', curateFindingIds)}
-                loading={curating}
-                disabled={
+                intent={curateButtonState === 'running' || curateButtonState === 'cancelling' ? 'danger' : 'outline'}
+                onClick={() => curateJobId && curateButtonState !== 'idle'
+                  ? void cancelHealthAction('curate', curateJobId)
+                  : void runRemediation('curate', curateFindingIds)}
+                loading={curateButtonState === 'starting' || curateButtonState === 'cancelling'}
+                disabled={curateButtonState === 'idle' && (
                   neverRun
                   || curateFindingIds.length === 0
                   || running
                   || fixing
                   || effectiveBusyActions.has('curate')
-                }
-                title={t('health.curate')}
+                )}
+                title={curateButtonState === 'idle' ? t('health.curate') : t('jobs.stop')}
               >
-                {!curating && <Wand2 className="h-3.5 w-3.5" />}
-                {t('health.action.tidy')} {curateFindingIds.length > 0 && `(${curateFindingIds.length})`}
+                {curateButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
+                {curateButtonState === 'idle' && <Wand2 className="h-3.5 w-3.5" />}
+                {curateButtonState === 'idle'
+                  ? <>{t('health.action.tidy')} {curateFindingIds.length > 0 && `(${curateFindingIds.length})`}</>
+                  : t('jobs.stop')}
               </Button>
               <Button
-                intent="outline"
-                onClick={() => void runRemediation('fix', fixFindingIds)}
-                loading={fixing}
-                disabled={
+                intent={fixButtonState === 'running' || fixButtonState === 'cancelling' ? 'danger' : 'outline'}
+                onClick={() => fixJobId && fixButtonState !== 'idle'
+                  ? void cancelHealthAction('fix', fixJobId)
+                  : void runRemediation('fix', fixFindingIds)}
+                loading={fixButtonState === 'starting' || fixButtonState === 'cancelling'}
+                disabled={fixButtonState === 'idle' && (
                   neverRun
                   || fixFindingIds.length === 0
                   || running
                   || curating
                   || effectiveBusyActions.has('fix')
-                }
-                title={t('health.fix')}
+                )}
+                title={fixButtonState === 'idle' ? t('health.fix') : t('jobs.stop')}
               >
-                {!fixing && <Wrench className="h-3.5 w-3.5" />}
-                {t('health.action.fix')} {fixFindingIds.length > 0 && `(${fixFindingIds.length})`}
+                {fixButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
+                {fixButtonState === 'idle' && <Wrench className="h-3.5 w-3.5" />}
+                {fixButtonState === 'idle'
+                  ? <>{t('health.action.fix')} {fixFindingIds.length > 0 && `(${fixFindingIds.length})`}</>
+                  : t('jobs.stop')}
               </Button>
               <Button
-                intent="outline"
-                onClick={() => void runRemediation('research', researchFindingIds)}
-                loading={researching}
-                disabled={
+                intent={researchButtonState === 'running' || researchButtonState === 'cancelling' ? 'danger' : 'outline'}
+                onClick={() => researchJobId && researchButtonState !== 'idle'
+                  ? void cancelHealthAction('research', researchJobId)
+                  : void runRemediation('research', researchFindingIds)}
+                loading={researchButtonState === 'starting' || researchButtonState === 'cancelling'}
+                disabled={researchButtonState === 'idle' && (
                   neverRun
                   || researchFindingIds.length === 0
                   || effectiveBusyActions.has('research')
-                }
-                title={t('health.research')}
+                )}
+                title={researchButtonState === 'idle' ? t('health.research') : t('jobs.stop')}
               >
-                {!researching && <Search className="h-3.5 w-3.5" />}
-                {t('health.action.research')} {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}
+                {researchButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
+                {researchButtonState === 'idle' && <Search className="h-3.5 w-3.5" />}
+                {researchButtonState === 'idle'
+                  ? <>{t('health.action.research')} {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}</>
+                  : t('jobs.stop')}
               </Button>
             </div>
           )}
