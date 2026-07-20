@@ -190,6 +190,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL 登录态恢复改为全局自动提示：`GlobalJobTracker` 同时恢复 active 与结构化 auth-required failed Ingest，`JobsPanel` 按持久化 challenge event ID 去重排队并自动打开授权框，关闭后可用 KeyRound 手动重开；请求携带 job 自身 Subject，Research 授权成功快照同步回 Health 并恢复 importing 轮询。spec/plan 见 docs/{specs,plans}/2026-07-20-url-auth-auto-recovery-research.md |
 | 2026-07-20 | URL Source 增加“实时网页 / 阅读模式”共享 Tabs：目标站拒绝 iframe 时可原地阅读 ingest 已清洗的 Markdown；两个 Source 入口复用同一组件，打开原网页继续保留 |
 | 2026-07-20 | Health「整理/修复/研究」三个处置按钮支持手动停止：运行态原位切换 Square + Stop，pending/running 与刷新恢复 job 复用通用 cancel API；请求失败可见且可重试，成功等待 `job:cancelled` SSE 清理，不把主动取消 Research 误报为普通失败。spec/plan 见 `docs/{specs,plans}/2026-07-20-health-actions-manual-cancel.md` |
 | 2026-07-20 | Ingest URL 登录态恢复：`use-job-stream` 注册 `ingest:auth-required`；工作台把无 checkpoint 的认证失败 job 纳入刷新恢复，失败主操作切为 Sign in；新增 `ingest-auth-dialog`，打开精确 origin 登录页并提交默认遮蔽的 Cookie/可选 Authorization，成功后复用同一 job SSE。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |

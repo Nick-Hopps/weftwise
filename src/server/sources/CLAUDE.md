@@ -104,7 +104,8 @@ updateUrlSourceReaderText(sourceId, cleanText) // URL Source 有界 Markdown 阅
   job/source 绑定解密；主密钥 `.source-auth-key` 与 grant 文件权限均为 0600。
 - grant 默认 2 小时过期；完整 Ingest 提交成功后删除，下游失败时暂时保留供同一 job
   retry。`fetchUrlSource` 只在 grant 的精确 origin 上携带敏感头，跨 origin 重定向自动移除。
-- Research child Ingest 仍由 provenance 状态机管理，不接受通用 URL auth API 绕过。
+- Research child Ingest 仍由 provenance 状态机管理；URL auth API 只把 grant ID 交给 Research
+  原子恢复原语，同步恢复 job/delivery/run，不允许退化为普通 job requeue。
 
 ## 关键依赖与配置
 
@@ -168,6 +169,7 @@ src/server/sources/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Research URL child 接入同一短期加密 grant，但授权后必须经 provenance 事务恢复；API/service 失败删除新 grant，成功接管后 best-effort 清理旧 grant |
 | 2026-07-20 | URL Source 增加阅读正文持久化：worker 把有界 cleanText 写入 sidecar，`source-reader` 优先读取 readerText 并兼容从旧 chunks 去重重建；页面预览不重新抓取远程网页 |
 | 2026-07-20 | URL SSRF 守卫兼容系统代理 Fake-IP：目标与公网哨兵均完全落入 `198.18.0.0/15` 时标记代理映射，Research/通用 URL Ingest 可继续使用 pinned transport；IP literal、未标记保留地址与混合结果仍拒绝 |
 | 2026-07-20 | URL Ingest 401/403 增加登录态恢复：`source-auth-grant` 在数据库目录旁保存 job/source/origin 绑定的 2 小时 AES-GCM 临时授权，worker 仅向精确 origin 携带 Cookie/Authorization，跨源重定向剥离，成功后清理 |
