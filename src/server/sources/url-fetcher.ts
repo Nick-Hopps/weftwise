@@ -26,6 +26,7 @@ export interface UrlTransportResponse {
 
 export interface UrlTransportRequest extends PublicHttpTarget {
   signal: AbortSignal;
+  headers: Record<string, string>;
 }
 
 export type UrlRequestTransport = (
@@ -37,6 +38,25 @@ export interface FetchUrlSourceOptions {
   transport?: UrlRequestTransport;
   timeoutMs?: number;
   maxRedirects?: number;
+  credentials?: UrlFetchCredentials;
+}
+
+export interface UrlFetchCredentials {
+  origin: string;
+  cookie?: string;
+  authorization?: string;
+}
+
+export class UrlAuthenticationRequiredError extends Error {
+  readonly name = 'UrlAuthenticationRequiredError';
+  readonly code = 'url-auth-required';
+
+  constructor(
+    readonly status: 401 | 403,
+    readonly authOrigin: string,
+  ) {
+    super(`Authentication required (HTTP ${status})`);
+  }
 }
 
 /**
@@ -88,6 +108,7 @@ export async function fetchUrlSource(
   }
 
   const originalUrl = validateHttpUrl(rawUrl).toString();
+  const credentials = normalizeFetchCredentials(options.credentials);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let current = originalUrl;
@@ -99,7 +120,11 @@ export async function fetchUrlSource(
         controller.signal,
       );
       const response = await raceWithAbort(
-        transport({ ...target, signal: controller.signal }),
+        transport({
+          ...target,
+          signal: controller.signal,
+          headers: sensitiveHeadersForOrigin(target.url.origin, credentials),
+        }),
         controller.signal,
       );
       let closed = false;
@@ -116,6 +141,11 @@ export async function fetchUrlSource(
         if (redirects >= maxRedirects) throw new Error(`Too many redirects (maximum ${maxRedirects})`);
         current = new URL(location, target.url).toString();
         continue;
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        close();
+        throw new UrlAuthenticationRequiredError(response.status, target.url.origin);
       }
 
       if (response.status < 200 || response.status >= 300) {
@@ -223,6 +253,10 @@ const nodeRequestTransport: UrlRequestTransport = async (target) =>
           Accept: 'text/html,text/markdown,text/plain;q=0.9,*/*;q=0.1',
           'Accept-Encoding': 'identity',
           'User-Agent': URL_FETCH_USER_AGENT,
+          ...(target.headers.cookie ? { Cookie: target.headers.cookie } : {}),
+          ...(target.headers.authorization
+            ? { Authorization: target.headers.authorization }
+            : {}),
         },
         ...(target.url.protocol === 'https:' ? { servername: target.hostname } : {}),
         signal: target.signal,
@@ -239,6 +273,28 @@ const nodeRequestTransport: UrlRequestTransport = async (target) =>
     request.once('error', reject);
     request.end();
   });
+
+function normalizeFetchCredentials(credentials: UrlFetchCredentials | undefined):
+  | UrlFetchCredentials
+  | undefined {
+  if (!credentials) return undefined;
+  return {
+    origin: validateHttpUrl(credentials.origin).origin,
+    cookie: credentials.cookie,
+    authorization: credentials.authorization,
+  };
+}
+
+function sensitiveHeadersForOrigin(
+  currentOrigin: string,
+  credentials: UrlFetchCredentials | undefined,
+): Record<string, string> {
+  if (!credentials || currentOrigin !== credentials.origin) return {};
+  return {
+    ...(credentials.cookie ? { cookie: credentials.cookie } : {}),
+    ...(credentials.authorization ? { authorization: credentials.authorization } : {}),
+  };
+}
 
 function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string | undefined> {
   const normalized: Record<string, string | undefined> = {};

@@ -9,7 +9,11 @@ import {
   saveRawSource,
 } from '../sources/source-store';
 import { loadSourceForIngest } from '../sources/source-loader';
-import { deriveUrlFilename } from '../sources/url-fetcher';
+import { deriveUrlFilename, UrlAuthenticationRequiredError } from '../sources/url-fetcher';
+import {
+  deleteSourceAuthGrant,
+  readSourceAuthGrant,
+} from '../sources/source-auth-grant';
 import {
   getAgentMaxSteps,
   getAgentMaxTokensPerJob,
@@ -54,6 +58,7 @@ interface IngestParams {
   sourceId: string;
   filename: string;
   subjectId: string;
+  sourceAuthGrantId?: string;
 }
 
 /**
@@ -85,7 +90,7 @@ export function buildIngestSteps(opts: {
 
 registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown>> => {
   const params = JSON.parse(job.paramsJson) as Partial<IngestParams>;
-  const { sourceId, filename, subjectId } = params;
+  const { sourceId, filename, subjectId, sourceAuthGrantId } = params;
   if (!sourceId || !filename) throw new Error('Ingest job missing sourceId or filename');
   if (!subjectId) throw new Error('Ingest job missing subjectId — re-queue with a subject');
 
@@ -99,7 +104,31 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   emit('ingest:start', `Ingest started for subject ${subject.slug}`, { subject: subject.slug, filename });
 
   emit('ingest:parsing', `Parsing source: ${filename}`);
-  const loadedSource = await loadSourceForIngest(source, subject.slug);
+  const sourceAuthGrant = sourceAuthGrantId
+    ? readSourceAuthGrant(sourceAuthGrantId, { jobId: job.id, sourceId })
+    : null;
+  let loadedSource;
+  try {
+    loadedSource = await loadSourceForIngest(source, subject.slug, {
+      credentials: sourceAuthGrant
+        ? {
+            origin: sourceAuthGrant.authOrigin,
+            cookie: sourceAuthGrant.cookie,
+            authorization: sourceAuthGrant.authorization,
+          }
+        : undefined,
+    });
+  } catch (error) {
+    if (error instanceof UrlAuthenticationRequiredError) {
+      emit('ingest:auth-required', error.message, {
+        code: error.code,
+        status: error.status,
+        authOrigin: error.authOrigin,
+        sourceId,
+      });
+    }
+    throw error;
+  }
   if (loadedSource.kind === 'url') {
     updateUrlSourcePresentation(sourceId, {
       title: loadedSource.title,
@@ -283,6 +312,17 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
       } catch {
         // fire-and-forget：自动策展入队失败不影响本次 ingest 的成功返回
       }
+    }
+  }
+
+  if (sourceAuthGrantId) {
+    try {
+      deleteSourceAuthGrant(sourceAuthGrantId);
+    } catch {
+      emit(
+        'ingest:warn',
+        'Authentication grant cleanup failed; it will expire automatically',
+      );
     }
   }
 

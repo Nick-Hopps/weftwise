@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -21,6 +21,7 @@ import { useJobStream } from '@/hooks/use-job-stream';
 import { apiFetch } from '@/lib/api-fetch';
 import { takePendingIngestFile } from '@/lib/pending-ingest-file';
 import { parseUrlLines } from '@/lib/url-list';
+import { currentUrlAuthChallenge, jobResultRequiresUrlAuth } from '@/lib/ingest-auth';
 import { useUIStore } from '@/stores/ui-store';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { Button } from '@/components/ui/button';
@@ -34,6 +35,7 @@ import {
   type IngestTask,
 } from '@/lib/ingest-task-list';
 import { IngestLiveView } from './ingest-live-view';
+import { IngestAuthDialog } from './ingest-auth-dialog';
 import { IngestTaskSwitcher } from './ingest-task-switcher';
 import type { CheckpointProgress, Job } from '@/lib/contracts';
 import { dispatchJobStarted } from '@/lib/job-started-event';
@@ -91,7 +93,9 @@ function IngestTaskDetail({
   );
   const [createdPages, setCreatedPages] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
   const { events, status, latestMessage } = useJobStream(task.id, reconnectKey);
+  const authChallenge = useMemo(() => currentUrlAuthChallenge(events), [events]);
   const isDone = status === 'completed';
   const hasEvents = events.length > 0;
 
@@ -143,6 +147,24 @@ function IngestTaskDetail({
     }
   }, [onStatusChange, t, task.id, task.sourceName]);
 
+  const handleAuthenticated = useCallback(() => {
+    setAuthDialogOpen(false);
+    setCheckpointProgress(null);
+    setError(null);
+    onStatusChange(task.id, 'pending');
+    setReconnectKey((key) => key + 1);
+    dispatchJobStarted({
+      jobId: task.id,
+      type: 'ingest',
+      label: task.sourceName,
+      queueStatus: 'pending',
+    });
+  }, [onStatusChange, task.id, task.sourceName]);
+
+  useEffect(() => {
+    if (status !== 'failed') setAuthDialogOpen(false);
+  }, [status]);
+
   const handleTerminate = useCallback(async () => {
     if (terminating) return;
     setTerminating(true);
@@ -192,23 +214,33 @@ function IngestTaskDetail({
           createdPages={createdPages}
           onBackground={onBackground}
           onIngestAnother={onStartNew}
-          onRetry={handleRetry}
-          retrying={retrying}
+          onRetry={authChallenge ? () => setAuthDialogOpen(true) : handleRetry}
+          retrying={authChallenge ? false : retrying}
+          retryKind={authChallenge ? 'authenticate' : 'retry'}
           retryLabel={
-            checkpointProgress
-              ? checkpointProgress.totalPages
-                ? t('ingest.resumeProgress', {
-                    written: checkpointProgress.writerPages,
-                    total: checkpointProgress.totalPages,
-                  })
-                : t('ingest.resume')
-              : t('common.retry')
+            authChallenge
+              ? t('ingest.auth.action')
+              : checkpointProgress
+                ? checkpointProgress.totalPages
+                  ? t('ingest.resumeProgress', {
+                      written: checkpointProgress.writerPages,
+                      total: checkpointProgress.totalPages,
+                    })
+                  : t('ingest.resume')
+                : t('common.retry')
           }
           onTerminate={handleTerminate}
           terminating={terminating}
           queued={task.queueStatus === 'pending' && !hasEvents}
         />
       </div>
+      <IngestAuthDialog
+        open={authDialogOpen}
+        jobId={task.id}
+        challenge={authChallenge}
+        onClose={() => setAuthDialogOpen(false)}
+        onAuthenticated={handleAuthenticated}
+      />
     </div>
   );
 }
@@ -331,7 +363,12 @@ export function IngestWorkbench() {
         ]);
         const restored = mergeIngestTasks(
           [],
-          [...running, ...pending, ...failed.filter((job) => job.checkpointProgress)].map(
+          [
+            ...running,
+            ...pending,
+            ...failed.filter((job) =>
+              job.checkpointProgress || jobResultRequiresUrlAuth(job.resultJson)),
+          ].map(
             ingestTaskFromJob,
           ),
         );

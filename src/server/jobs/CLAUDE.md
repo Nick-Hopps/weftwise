@@ -122,6 +122,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `failJob` 对 `url-auth-required` 只持久化安全的 code/status/authOrigin，供无 checkpoint 的认证失败 Ingest 在刷新后恢复；Cookie/Authorization 不复制到 result/event/job params |
 | 2026-07-17 | 新增独占型 `image-insert` job：PendingAction 批准事务原子入队，worker 轮询取消并注册专用 handler；前端按真实类型追踪而非伪装成 ingest |
 | 2026-07-14 | Saga/Worker 终态一致性：状态迁移成功后才发布 completed/failed/retrying/cancelled，CAS/fencing 未命中静默退出；重复取消幂等；job_events 按 rowid 插入顺序读取与续播，并以真实 SQLite trigger 锁定 Saga 失败顺序 |
 | 2026-07-14 | Worker/DB 不变量测试收尾：所有 runJob 终态清 timer；claim/reclaim 统一 `<= now` 到期语义，`attempt_count` 作为 heartbeat/complete/fail/requeue fencing token；双进程 WAL 竞争与旧 attempt 隔离已有真实 repo 测试 |

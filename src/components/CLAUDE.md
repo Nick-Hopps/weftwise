@@ -189,6 +189,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Ingest URL 登录态恢复：`use-job-stream` 注册 `ingest:auth-required`；工作台把无 checkpoint 的认证失败 job 纳入刷新恢复，失败主操作切为 Sign in；新增 `ingest-auth-dialog`，打开精确 origin 登录页并提交默认遮蔽的 Cookie/可选 Authorization，成功后复用同一 job SSE。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |
 | 2026-07-20 | URL Source 预览改为直接加载原网页：左侧 Sources 列表展示已持久化的网页标题+描述；source 独立页与 Wiki Sources 分栏复用远程 sandbox iframe，显示 Web/Open original，默认禁用脚本且永不开放同源权限；上传 HTML 继续走本地 raw+CSP 预览 |
 | 2026-07-20 | Settings Maintenance 状态行新增到期页面预览：`Pages due now` 计数 >0 时显示 View/Hide 切换，展开行 footer 懒加载 `GET /api/maintenance/due-pages`（React Query `['maintenance-due-pages']`，10s stale）渲染有界列表——标题（孤儿行回退 slug）+ 项目名 + 相对到期时间，条目 Link 到 `/wiki/<slug>?s=` 并关闭弹窗，超上限提示剩余条数。spec/plan 见 `docs/{specs,plans}/2026-07-20-maintenance-due-pages-preview.md` |
 | 2026-07-20 | `MultiSelectRow`（Maintenance scope 项目选择器）重做：面板从行内 footer 展开改为 portal + fixed 悬浮层（卡片 overflow-hidden/内容区滚动下不被裁切），锚定触发按钮右缘、滚动跟随、底部空间不足自动向上翻转；摘要单选时直接显示项目名；sr-only checkbox + 自定义勾选标记，All 行带半选态与 n/m 计数；最后一个选中项仅弱化勾选标记不再整行置灰；点外/Escape 关闭且 Escape 截停冒泡不误关 Settings 弹窗 |

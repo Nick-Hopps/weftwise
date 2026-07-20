@@ -175,6 +175,7 @@ export function useJobStream(jobId: string | null, reconnectKey = 0): UseJobStre
         // Ingest events
         'ingest:start',
         'ingest:resuming',
+        'ingest:auth-required',
         'ingest:parsing',
         'ingest:chunking',
         'ingest:reading-wiki',

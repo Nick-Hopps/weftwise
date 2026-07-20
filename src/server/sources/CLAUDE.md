@@ -93,6 +93,17 @@ updateUrlSourcePresentation(sourceId, metadata) // 网页标题/描述写回 sid
 - 真正出网只发生在 child Ingest worker 的 `source-loader`，复用 `fetchUrlSource()` 的逐跳 SSRF 防护。
 - Source 预览直接在浏览器 sandbox iframe 中加载原地址，因此可能被目标站点的 `X-Frame-Options` / CSP `frame-ancestors`、混合内容策略或登录态限制拦截；默认脚本关闭，显式开启后也不授予 `allow-same-origin`。
 
+### `source-auth-grant.ts`
+
+- URL 抓取遇到 401/403 时抛 `UrlAuthenticationRequiredError`；Ingest handler 持久化
+  `ingest:auth-required` 事件，UI 可为当前失败 job 提交 Cookie/可选 Authorization 后重排。
+- 凭证不进入 vault、source sidecar、job params 明文或 job event。Web 进程在
+  `dirname(DATABASE_PATH)/source-auth/` 写 AES-256-GCM 临时密文，worker 以 grant ID 按
+  job/source 绑定解密；主密钥 `.source-auth-key` 与 grant 文件权限均为 0600。
+- grant 默认 2 小时过期；完整 Ingest 提交成功后删除，下游失败时暂时保留供同一 job
+  retry。`fetchUrlSource` 只在 grant 的精确 origin 上携带敏感头，跨 origin 重定向自动移除。
+- Research child Ingest 仍由 provenance 状态机管理，不接受通用 URL auth API 绕过。
+
 ## 关键依赖与配置
 
 - `pdf-parse` —— PDF 二进制解析（只能在 Node 环境运行；Route Handler 必须 `runtime='nodejs'`）。
@@ -140,6 +151,7 @@ src/server/sources/
 ├── source-chunker.ts                # 结构感知递归切分器（token 计长）
 ├── source-store.ts                  # 持久化 + 去重 + page_sources
 ├── source-loader.ts                 # worker 侧 raw/URL 内容加载边界
+├── source-auth-grant.ts             # URL 登录态短期 AES-GCM grant
 ├── url-source.ts                    # URL 身份、规范化与 sidecar 兼容读取
 ├── url-safety.ts                    # URL/DNS/IP 公网判定与固定目标解析
 ├── url-fetcher.ts                   # 逐跳 SSRF 校验 + IP 固定 + 超时/5MB/content-type 守卫
@@ -155,6 +167,7 @@ src/server/sources/
 | 日期 | 变更 |
 |------|------|
 | 2026-07-20 | URL SSRF 守卫兼容系统代理 Fake-IP：目标与公网哨兵均完全落入 `198.18.0.0/15` 时标记代理映射，Research/通用 URL Ingest 可继续使用 pinned transport；IP literal、未标记保留地址与混合结果仍拒绝 |
+| 2026-07-20 | URL Ingest 401/403 增加登录态恢复：`source-auth-grant` 在数据库目录旁保存 job/source/origin 绑定的 2 小时 AES-GCM 临时授权，worker 仅向精确 origin 携带 Cookie/Authorization，跨源重定向剥离，成功后清理 |
 | 2026-07-20 | URL Source 改为链接型实体：只持久化规范化 URL sidecar，不落 raw HTML；Ingest worker 通过 `source-loader` 临时抓取解析并写回网页标题/描述；历史 `originUrl` sidecar 自动兼容，预览直接加载原网页 sandbox |
 | 2026-07-14 | Phase 2C 收紧 URL 出网边界：逐跳手动重定向、每跳全 DNS 公网校验、固定已验证 IP、防 DNS rebinding，并由通用 URL Ingest 与 Research 候选导入共用；总超时/5MB/文本类型守卫保留 |
 | 2026-04-22 | 初始化 |
