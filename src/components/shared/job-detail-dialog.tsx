@@ -11,14 +11,23 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, ChevronRight, Copy, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleAlert,
+  Copy,
+  TriangleAlert,
+  X,
+} from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import type { Job } from '@/lib/contracts';
 import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
-import { eventLogLine, parseJobError } from '@/lib/job-log';
+import { eventLogLines, parseJobError, type JobLogLine } from '@/lib/job-log';
 import { jobActivityTitle } from '@/lib/tool-activity';
 import { ToolActivityIcon } from './tool-activity-icon';
 import { useI18n } from '@/components/i18n-provider';
@@ -31,6 +40,16 @@ interface JobDetailDialogProps {
   onClose: () => void;
 }
 
+function LogEventIcon({ line }: { line: JobLogLine }) {
+  if (line.tool) {
+    return <ToolActivityIcon tool={line.tool} className="h-3.5 w-3.5 text-accent" />;
+  }
+  if (line.tone === 'success') return <Check className="h-3.5 w-3.5 text-success" />;
+  if (line.tone === 'warning') return <TriangleAlert className="h-3.5 w-3.5 text-warning" />;
+  if (line.tone === 'error') return <CircleAlert className="h-3.5 w-3.5 text-danger" />;
+  return <Circle className="h-1.5 w-1.5 fill-current text-foreground-tertiary" />;
+}
+
 export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDetailDialogProps) {
   const { t } = useI18n();
   const logRef = useRef<HTMLDivElement>(null);
@@ -38,7 +57,7 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
   const [copied, setCopied] = useState(false);
   const [errorExpanded, setErrorExpanded] = useState(true);
 
-  const lines = useMemo(() => events.map(eventLogLine), [events]);
+  const lines = useMemo(() => eventLogLines(events), [events]);
 
   // 失败时拉权威完整错误（resultJson.error）。SSE 实时 job:failed 只带摘要。
   const jobQuery = useQuery<Job>({
@@ -127,32 +146,41 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
 
         <div className="flex min-h-0 flex-1 flex-col">
           {/* 日志区 */}
-          <div className="px-4 py-2 text-xs font-medium text-foreground-secondary border-b border-border">
+          <div className="shrink-0 border-b border-border bg-subtle/40 px-5 py-2.5 text-xs font-medium text-foreground-secondary">
             {t('jobs.log', { count: lines.length })}
           </div>
           <div
             ref={logRef}
             onScroll={handleScroll}
-            className="min-h-0 flex-1 overflow-y-auto px-4 py-2 space-y-0.5 font-mono text-xs"
+            className="min-h-0 flex-1 overflow-y-auto px-3 py-2"
           >
             {lines.length === 0 ? (
-              <p className="text-foreground-tertiary">{t('jobs.noLogs')}</p>
+              <p className="px-2 py-3 text-xs text-foreground-tertiary">{t('jobs.noLogs')}</p>
             ) : (
               lines.map((line, idx) => (
                 <div
                   key={idx}
                   className={cn(
-                    'flex gap-2 whitespace-pre-wrap break-words',
-                    line.isError ? 'text-danger' : 'text-foreground-secondary',
+                    'grid grid-cols-[4.5rem_1.25rem_minmax(0,1fr)] items-start gap-x-2 rounded-sm px-2 py-1.5 transition-colors hover:bg-subtle/60',
+                    line.tone === 'error' && 'bg-danger/5',
                   )}
                 >
-                  {line.time && (
-                    <span className="shrink-0 text-foreground-tertiary tabular-nums">{line.time}</span>
-                  )}
-                  {line.tool && (
-                    <ToolActivityIcon tool={line.tool} className="mt-px h-3.5 w-3.5 shrink-0" />
-                  )}
-                  <span>{line.text}</span>
+                  <time className="pt-px font-mono text-[11px] leading-5 tabular-nums text-foreground-tertiary">
+                    {line.time}
+                  </time>
+                  <span className="flex h-5 items-center justify-center" aria-hidden="true">
+                    <LogEventIcon line={line} />
+                  </span>
+                  <span
+                    className={cn(
+                      'min-w-0 whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground-secondary',
+                      line.tone === 'success' && 'font-medium text-foreground',
+                      line.tone === 'warning' && 'text-warning',
+                      line.tone === 'error' && 'font-medium text-danger',
+                    )}
+                  >
+                    {line.text}
+                  </span>
                 </div>
               ))
             )}

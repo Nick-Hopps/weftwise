@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { eventLogLine, parseJobError } from '../job-log';
+import { eventLogLine, eventLogLines, parseJobError } from '../job-log';
 
 describe('eventLogLine', () => {
   it('uses top-level message as the text', () => {
@@ -34,6 +34,13 @@ describe('eventLogLine', () => {
     expect(eventLogLine({ type: 'ingest:start', data: {} }).isError).toBe(false);
   });
 
+  it('classifies completion, warning, and error events for visual treatment', () => {
+    expect(eventLogLine({ type: 'job:completed', data: {} }).tone).toBe('success');
+    expect(eventLogLine({ type: 'fix:warn', data: {} }).tone).toBe('warning');
+    expect(eventLogLine({ type: 'job:failed', data: {} }).tone).toBe('error');
+    expect(eventLogLine({ type: 'fix:tool', data: {} }).tone).toBe('default');
+  });
+
   it('formats createdAt as HH:mm:ss and tolerates missing/invalid', () => {
     const iso = '2026-06-28T12:03:45.000Z';
     const d = new Date(iso);
@@ -42,6 +49,15 @@ describe('eventLogLine', () => {
       .toBe(`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`);
     expect(eventLogLine({ type: 't', data: {} }).time).toBe('');
     expect(eventLogLine({ type: 't', data: { createdAt: 'nonsense' } }).time).toBe('');
+  });
+});
+
+describe('eventLogLines', () => {
+  it('omits the synthetic terminal marker while retaining persisted terminal events', () => {
+    expect(eventLogLines([
+      { type: 'job:completed', id: 'event-29', data: { message: 'Job completed successfully' } },
+      { type: 'job:completed', id: 'final', data: {} },
+    ]).map((line) => line.text)).toEqual(['Job completed successfully']);
   });
 });
 
