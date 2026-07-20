@@ -30,8 +30,8 @@ export function buildUrlAuthSubmissionBody(input: {
 }
 
 /**
- * 从持久化 SSE 历史中归约当前认证挑战。旧 challenge 后只要出现 retry 就失效；
- * 新一轮 401/403 会追加在 retry 后并重新生效。
+ * 从持久化 SSE 历史中归约当前认证挑战。旧 challenge 后出现 retry 或 cancel 即失效；
+ * retry 后若再次收到 401/403，新事件会成为新的当前 challenge。
  */
 export function currentUrlAuthChallenge(
   events: ReadonlyArray<Pick<JobStreamEvent, 'type' | 'data' | 'id'>>,
