@@ -69,5 +69,23 @@
   - `npm run lint`
   - `npx vitest run`
   - `npm run build`
+
+### T5 左侧 Sources 列表展示网页标题与描述（TDD）
+
+- 文件：
+  - `src/server/sources/parsers/html-parser.ts`（确定性提取 title/description）
+  - `src/server/sources/{source-loader,source-store,url-source}.ts`（worker 写回与读取）
+  - `src/app/api/sources/route.ts`（轻量列表 DTO）
+  - `src/components/layout/sidebar.tsx`（标题 + 描述两行展示）
+  - 对应 `__tests__`。
+- 先写失败测试：
+  1. HTML parser 按标准 meta/OG 回退提取标题和描述，解码 entity 并归一空白；
+  2. URL worker loader 返回展示元数据，Ingest handler 将其写回 sidecar 与 SQLite；
+  3. `GET /api/sources` 对 URL Source 返回已持久化 title/description，缺标题时回退 hostname，
+     且列表请求不联网；普通文件仍回退 filename。
+- UI：左侧 Sources 项以网页标题为主行、描述为次行；tooltip 同时包含两者。没有描述时
+  保持单行紧凑高度，不展示原始 URL 作为标签。
+- 验证：
+  `npx vitest run src/server/sources/__tests__/html-parser.test.ts src/server/sources/__tests__/source-loader.test.ts src/server/sources/__tests__/source-store.test.ts src/app/api/sources/__tests__/route.test.ts src/server/services/__tests__/ingest-service.test.ts`
 - 提交：设计/计划使用 `docs:`，实现与文档同步使用一个 `feat:`；完成后提醒是否用
   `--no-ff` 回合 main 并清理 worktree。

@@ -82,36 +82,29 @@ describe('POST /api/ingest', () => {
     });
   });
 
-  it('URL 抓取等待期间真实 reset 完成后，旧请求不得重建 source/job/文件', async () => {
+  it('URL Source 只保存链接并入队，不在 Route 抓取或写 raw HTML', async () => {
     const subjectsRepo = await import('@/server/db/repos/subjects-repo');
     const { getRawDb } = await import('@/server/db/client');
     const subject = subjectsRepo.getBySlug('general')!;
     mocks.resolveSubject.mockReturnValue({ subject, error: null });
-    let releaseFetch!: (value: { filename: string; content: string }) => void;
-    mocks.fetchUrl.mockReturnValue(new Promise((resolve) => {
-      releaseFetch = resolve;
-    }));
     const { POST } = await import('../route');
-    const { POST: reset } = await import('../../reset/route');
-
-    const pending = POST(jsonRequest({
+    const response = await POST(jsonRequest({
       urls: ['https://example.com/article'],
       subjectId: subject.id,
     }));
-    await vi.waitFor(() => expect(mocks.fetchUrl).toHaveBeenCalledTimes(1));
-    const resetResponse = await reset(new NextRequest('http://localhost/api/reset', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ subjectId: subject.id }),
-    }));
-    expect(resetResponse.status).toBe(200);
-    releaseFetch({ filename: 'article.html', content: '<h1>Article</h1>' });
-    const response = await pending;
 
-    expect(response.status).toBe(422);
-    expect((getRawDb().prepare(`SELECT COUNT(*) AS count FROM sources`).get() as { count: number }).count).toBe(0);
-    expect((getRawDb().prepare(`SELECT COUNT(*) AS count FROM jobs`).get() as { count: number }).count).toBe(0);
-    expect(existsSync(join(dir, 'vault', 'raw', 'general', 'article.html'))).toBe(false);
+    expect(response.status).toBe(202);
+    expect(mocks.fetchUrl).not.toHaveBeenCalled();
+    const body = await response.json() as {
+      results: Array<{ sourceId: string; jobId: string }>;
+    };
+    const source = getRawDb().prepare(`SELECT filename, metadata_json FROM sources WHERE id = ?`)
+      .get(body.results[0]!.sourceId) as { filename: string; metadata_json: string };
+    expect(JSON.parse(source.metadata_json)).toMatchObject({
+      kind: 'url',
+      originUrl: 'https://example.com/article',
+    });
+    expect(existsSync(join(dir, 'vault', 'raw', 'general', source.filename))).toBe(false);
   });
 
   it('source+job 先原子落地后，真实 reset 被 active-job guard 阻止', async () => {
@@ -140,34 +133,4 @@ describe('POST /api/ingest', () => {
     expect(existsSync(join(dir, 'vault', 'raw', 'general', 'keep.md'))).toBe(true);
   });
 
-  it('URL 抓取等待期间真实 delete 完成后，旧 lease 因 Subject 不存在而失败', async () => {
-    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
-    const { getRawDb } = await import('@/server/db/client');
-    const subject = subjectsRepo.create({ slug: 'delete-race', name: 'Delete Race' });
-    mocks.resolveSubject.mockReturnValue({ subject, error: null });
-    let releaseFetch!: (value: { filename: string; content: string }) => void;
-    mocks.fetchUrl.mockReturnValue(new Promise((resolve) => {
-      releaseFetch = resolve;
-    }));
-    const { POST } = await import('../route');
-    const { DELETE } = await import('../../subjects/[id]/route');
-
-    const pending = POST(jsonRequest({
-      urls: ['https://example.com/delete-race'],
-      subjectId: subject.id,
-    }));
-    await vi.waitFor(() => expect(mocks.fetchUrl).toHaveBeenCalledTimes(1));
-    const deleteResponse = await DELETE(
-      new NextRequest(`http://localhost/api/subjects/${subject.id}`, { method: 'DELETE' }),
-      { params: Promise.resolve({ id: subject.id }) },
-    );
-    expect(deleteResponse.status).toBe(200);
-    releaseFetch({ filename: 'late.html', content: '<h1>Late</h1>' });
-    const ingestResponse = await pending;
-
-    expect(ingestResponse.status).toBe(422);
-    expect(subjectsRepo.getById(subject.id)).toBeNull();
-    expect((getRawDb().prepare(`SELECT COUNT(*) AS count FROM sources WHERE subject_id = ?`).get(subject.id) as { count: number }).count).toBe(0);
-    expect(existsSync(join(dir, 'vault', 'raw', subject.slug, 'late.html'))).toBe(false);
-  });
 });

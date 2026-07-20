@@ -6,6 +6,7 @@ import {
   FileCode2,
   FileText,
   Globe,
+  ExternalLink,
   Link2,
   Loader2,
   NotebookPen,
@@ -324,12 +325,24 @@ function SourcesPane({
             <span>{t('wiki.previewTruncated')}</span>
           </>
         )}
-        {src.added && (
-          <span className="ml-auto inline-flex items-center gap-1.5">
-            <Sparkles className="h-3 w-3 text-accent" />
-            {t('wiki.sources.ingested', { date: src.added })}
-          </span>
-        )}
+        <span className="ml-auto inline-flex items-center gap-3">
+          {src.added && (
+            <span className="inline-flex items-center gap-1.5">
+              <Sparkles className="h-3 w-3 text-accent" />
+              {t('wiki.sources.ingested', { date: src.added })}
+            </span>
+          )}
+          {src.sourceUrl && (
+            <a
+              href={src.sourceUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-accent hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" /> {t('source.openOriginal')}
+            </a>
+          )}
+        </span>
       </div>
 
       {/* document body */}
@@ -363,9 +376,10 @@ function SourceBody({ source }: { source: PageSourceDoc }) {
   if (source.format === 'html') {
     return (
       <HtmlSourceFrame
-        src={rawUrl}
+        src={source.sourceUrl ?? rawUrl}
         title={source.name}
         safety={source.htmlSafety}
+        remote={Boolean(source.sourceUrl)}
         className="h-[80vh] lg:h-full"
       />
     );

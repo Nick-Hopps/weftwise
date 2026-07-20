@@ -4,6 +4,7 @@ import { getSource } from '@/server/db/repos/sources-repo';
 import { getById as getSubjectById } from '@/server/db/repos/subjects-repo';
 import { getRawSourceContent } from '@/server/sources/source-store';
 import { analyzeHtmlSafety } from '@/server/sources/html-safety';
+import { readUrlSourceReference } from '@/server/sources/url-source';
 import { SourceViewer } from '../../_components/source-viewer';
 import { decodeRouteSegment } from '@/lib/route-params';
 import type { PageSourceFormat } from '@/lib/contracts';
@@ -40,13 +41,14 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
     );
   }
 
-  const format = formatFor(source.filename);
+  const urlReference = readUrlSourceReference(source);
+  const format = urlReference ? 'html' : formatFor(source.filename);
   const content =
-    format === 'markdown' || format === 'text'
+    !urlReference && (format === 'markdown' || format === 'text')
       ? getRawSourceContent(subject.slug, source.filename) ?? undefined
       : undefined;
   const htmlSafety =
-    format === 'html'
+    format === 'html' && !urlReference
       ? analyzeHtmlSafety(getRawSourceContent(subject.slug, source.filename) ?? '')
       : undefined;
 
@@ -57,6 +59,7 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
       format={format}
       content={content}
       htmlSafety={htmlSafety}
+      sourceUrl={urlReference?.originUrl}
     />
   );
 }

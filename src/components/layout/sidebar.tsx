@@ -38,6 +38,8 @@ interface SourceItem {
   id: string;
   filename: string;
   format?: string;
+  title: string;
+  description?: string;
 }
 
 function isMetaPage(page: PageItem): boolean {
@@ -272,16 +274,27 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                     key={source.id}
                     href={`/sources/${source.id}`}
                     onClick={onNavigate}
-                    title={t('nav.openSource', { name: source.filename })}
+                    title={t('nav.openSource', {
+                      name: source.description
+                        ? `${source.title} — ${source.description}`
+                        : source.title,
+                    })}
                     className={cn(
-                      'relative flex h-8 items-center gap-2 rounded-md pl-5 pr-2 text-sm transition-colors focus-ring',
+                      'relative flex min-h-8 items-start gap-2 rounded-md py-1.5 pl-5 pr-2 text-sm transition-colors focus-ring',
                       pathname === `/sources/${source.id}`
                         ? 'bg-surface font-medium text-accent-strong shadow-xs before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-accent'
                         : 'text-foreground-secondary hover:bg-subtle hover:text-foreground',
                     )}
                   >
-                    <FileType2 className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
-                    <span className="truncate">{source.filename}</span>
+                    <FileType2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground-tertiary" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{source.title || source.filename}</span>
+                      {source.description && (
+                        <span className="mt-0.5 block truncate text-xs leading-4 text-foreground-tertiary">
+                          {source.description}
+                        </span>
+                      )}
+                    </span>
                   </Link>
                 ))}
               </nav>

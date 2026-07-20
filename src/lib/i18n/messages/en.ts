@@ -399,6 +399,8 @@ export const en = {
   'source.back': 'Back',
   'source.missingDescription': 'This source may have been removed, or it belongs to another subject.',
   'source.backDashboard': 'Back to dashboard',
+  'source.openRaw': 'Open raw',
+  'source.openOriginal': 'Open original',
   'page.notFound': 'Page not found',
   'dashboard.ask': 'Ask your Wiki',
   'dashboard.search': 'Search',

@@ -4,12 +4,23 @@ import { createHash, randomUUID } from 'crypto';
 import { vaultPath } from '../config/env';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import type { Subject, SubjectId } from '@/lib/contracts';
+import {
+  createUrlSourceIdentity,
+  normalizeUrlSourcePresentation,
+  URL_SOURCE_KIND,
+  type UrlSourcePresentation,
+} from './url-source';
 
 export interface SavedSourceResult {
   id: string;
   contentHash: string;
   /** 本次调用是否创建了新的 canonical source 行。 */
   created: boolean;
+}
+
+export interface SavedUrlSourceResult extends SavedSourceResult {
+  filename: string;
+  originUrl: string;
 }
 
 interface SourceMetadataFile {
@@ -21,6 +32,8 @@ interface SourceMetadataFile {
   savedAt: string;
   /** 网页来源的原始 URL（URL ingest 溯源用）。 */
   originUrl?: string;
+  /** 链接型网页 Source 不存在 raw 文件；预览与 worker 由 originUrl 驱动。 */
+  kind?: typeof URL_SOURCE_KIND;
 }
 
 function rawDirFor(subjectSlug: string): string {
@@ -130,6 +143,109 @@ export function saveRawSource(
     }
     if (rawWriteAttempted) restoreRawFile(rawFilePath, rawExisted, previousRaw);
     throw error;
+  }
+}
+
+/**
+ * 保存链接型 URL Source：只写 metadata sidecar + SQLite，不落地远程 HTML。
+ * identity 由规范化 URL 决定，因此同一 Subject 重复提交同一 URL 会复用 canonical row。
+ */
+export function saveUrlSource(
+  subject: Pick<Subject, 'id' | 'slug'>,
+  rawUrl: string,
+): SavedUrlSourceResult {
+  const identity = createUrlSourceIdentity(rawUrl);
+  const existing = sourcesRepo.getSourceByIdentity(
+    subject.id,
+    identity.contentHash,
+    identity.filename,
+  );
+  if (existing) {
+    sourcesRepo.upsertSource({ ...existing, parsedAt: null });
+    return { ...identity, id: existing.id, created: false };
+  }
+
+  const id = randomUUID();
+  const metaDir = sourcesMetaDirFor(subject.slug);
+  fs.mkdirSync(metaDir, { recursive: true });
+  const candidateMetaPath = path.join(metaDir, `${id}.json`);
+  const metaContent: SourceMetadataFile = {
+    id,
+    subjectId: subject.id,
+    subjectSlug: subject.slug,
+    filename: identity.filename,
+    contentHash: identity.contentHash,
+    savedAt: new Date().toISOString(),
+    kind: URL_SOURCE_KIND,
+    originUrl: identity.originUrl,
+  };
+
+  try {
+    fs.writeFileSync(candidateMetaPath, JSON.stringify(metaContent, null, 2), 'utf-8');
+    const candidate = {
+      id,
+      subjectId: subject.id,
+      filename: identity.filename,
+      contentHash: identity.contentHash,
+      parsedAt: null,
+      metadataJson: JSON.stringify(metaContent),
+    };
+    const winner = sourcesRepo.insertSourceOrGetWinner(candidate);
+    if (!winner.inserted) {
+      try {
+        fs.rmSync(candidateMetaPath, { force: true });
+      } catch {
+        sourcesRepo.recordSourceSidecarCleanup({
+          loserId: id,
+          winnerId: winner.source.id,
+          subjectSlug: subject.slug,
+          filename: identity.filename,
+        });
+      }
+    }
+    return {
+      ...identity,
+      id: winner.source.id,
+      created: winner.inserted,
+    };
+  } catch (error) {
+    try {
+      fs.rmSync(candidateMetaPath, { force: true });
+    } catch {
+      // best-effort
+    }
+    throw error;
+  }
+}
+
+/** worker 抓取完成后写回 URL Source 的纯文本展示元数据；失败不阻塞主摄入。 */
+export function updateUrlSourcePresentation(
+  sourceId: string,
+  presentation: UrlSourcePresentation,
+): void {
+  const source = sourcesRepo.getSource(sourceId);
+  const meta = getSourceMetadata(sourceId);
+  if (!source || !meta) return;
+
+  const normalized = normalizeUrlSourcePresentation(presentation);
+  const updated: Record<string, unknown> = { ...meta };
+  if (normalized.title) updated.title = normalized.title;
+  else delete updated.title;
+  if (normalized.description) updated.description = normalized.description;
+  else delete updated.description;
+
+  const subjectSlug = typeof meta.subjectSlug === 'string' ? meta.subjectSlug : null;
+  const candidatePath = subjectSlug
+    ? path.join(sourcesMetaDirFor(subjectSlug), `${sourceId}.json`)
+    : vaultPath('.llm-wiki', 'sources', `${sourceId}.json`);
+  try {
+    fs.writeFileSync(candidatePath, JSON.stringify(updated, null, 2), 'utf-8');
+    sourcesRepo.upsertSource({
+      ...source,
+      metadataJson: JSON.stringify(updated),
+    });
+  } catch {
+    // best-effort：展示元数据失败不应中断知识摄入。
   }
 }
 

@@ -4,6 +4,7 @@ import { requireAuth } from '@/server/middleware/auth';
 import { getSource } from '@/server/db/repos/sources-repo';
 import { getById as getSubjectById } from '@/server/db/repos/subjects-repo';
 import { getRawSourceBuffer, getRawSourceContent } from '@/server/sources/source-store';
+import { readUrlSourceReference } from '@/server/sources/url-source';
 
 export const runtime = 'nodejs';
 
@@ -52,6 +53,11 @@ export async function GET(
 
   const subject = getSubjectById(source.subjectId);
   if (!subject) return NextResponse.json({ error: 'Source not found' }, { status: 404 });
+
+  const urlReference = readUrlSourceReference(source);
+  if (urlReference) {
+    return NextResponse.redirect(urlReference.originUrl, 307);
+  }
 
   const ext = path.extname(source.filename).toLowerCase();
   const contentType = CONTENT_TYPES[ext] ?? 'text/plain; charset=utf-8';

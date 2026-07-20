@@ -49,4 +49,14 @@ describe('isSourceStale', () => {
 
     expect(isSourceStale('general', { filename: 'legacy.md', contentHash: hash })).toBe(false);
   });
+
+  it('合法 URL Source 不因缺少 raw HTML 被判为 stale', async () => {
+    const { isSourceStale } = await import('../source-staleness');
+
+    expect(isSourceStale('general', {
+      filename: 'web-example.html',
+      contentHash: 'url-hash',
+      metadataJson: JSON.stringify({ kind: 'url', originUrl: 'https://example.com/a' }),
+    })).toBe(false);
+  });
 });

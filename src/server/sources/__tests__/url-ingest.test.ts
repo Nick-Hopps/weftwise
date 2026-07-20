@@ -29,23 +29,22 @@ describe('validateUrlList', () => {
 
 describe('ingestUrlBatch', () => {
   const okDeps = {
-    fetchSource: async (url: string) => ({ filename: `f-${url.slice(-1)}.html`, content: 'x' }),
-    persist: (filename: string) => ({
-      sourceId: `src-${filename}`,
-      jobId: `job-src-${filename}`,
+    persist: (url: string) => ({
+      sourceId: `src-${url.slice(-1)}`,
+      jobId: `job-src-${url.slice(-1)}`,
     }),
   };
   it('全部成功：每条带 jobId/sourceId', async () => {
     const r = await ingestUrlBatch(['https://a.com/1', 'https://a.com/2'], okDeps);
     expect(r).toHaveLength(2);
-    expect(r[0]).toMatchObject({ url: 'https://a.com/1', sourceId: 'src-f-1.html', jobId: 'job-src-f-1.html' });
+    expect(r[0]).toMatchObject({ url: 'https://a.com/1', sourceId: 'src-1', jobId: 'job-src-1' });
   });
   it('部分失败：失败条目带 error，不影响其他', async () => {
     const deps = {
       ...okDeps,
-      fetchSource: async (url: string) => {
+      persist: (url: string) => {
         if (url.endsWith('bad')) throw new Error('HTTP 404');
-        return { filename: 'ok.html', content: 'x' };
+        return { sourceId: 'src-ok', jobId: 'job-src-ok' };
       },
     };
     const r = await ingestUrlBatch(['https://a.com/bad', 'https://a.com/ok'], deps);

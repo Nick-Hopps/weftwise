@@ -80,6 +80,44 @@ describe('persistSourceAndEnqueueIngest', () => {
     ]);
   });
 
+  it('URL Source 与 pending job 原子落地且不创建 raw HTML', async () => {
+    const subjectsRepo = await import('../../db/repos/subjects-repo');
+    const { getRawDb } = await import('../../db/client');
+    const tx = await import('../source-ingest-transaction');
+    const subject = subjectsRepo.getBySlug('general')!;
+
+    const result = tx.persistSourceAndEnqueueIngest({
+      kind: 'url',
+      subject,
+      lease: tx.acquireSubjectWriteLease(subject.id),
+      url: 'https://example.com/article',
+    });
+
+    const sqlite = getRawDb();
+    const source = sqlite.prepare(`SELECT * FROM sources WHERE id = ?`).get(result.sourceId) as {
+      filename: string;
+      metadata_json: string;
+    };
+    expect(JSON.parse(source.metadata_json)).toMatchObject({
+      kind: 'url',
+      originUrl: 'https://example.com/article',
+    });
+    expect(existsSync(join(dir, 'vault', 'raw', 'general', source.filename))).toBe(false);
+    expect(existsSync(join(
+      dir,
+      'vault',
+      '.llm-wiki',
+      'sources',
+      'general',
+      `${result.sourceId}.json`,
+    ))).toBe(true);
+    expect(JSON.parse(result.job.paramsJson)).toEqual({
+      sourceId: result.sourceId,
+      filename: source.filename,
+      subjectId: subject.id,
+    });
+  });
+
   it('reset 提升 epoch 后拒绝旧 lease，且不重建文件、source 或 job', async () => {
     const subjectsRepo = await import('../../db/repos/subjects-repo');
     const { getRawDb } = await import('../../db/client');
