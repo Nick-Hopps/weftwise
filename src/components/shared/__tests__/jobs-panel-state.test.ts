@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isRecoverableUrlAuthJob,
   jobTypeVerb,
   recoverUnlistedTrackedJobs,
   shouldRefreshPageForCompletedJob,
@@ -48,10 +49,10 @@ describe('summarizeJobsPanel', () => {
 describe('recoverUnlistedTrackedJobs', () => {
   it('把未列出的 queued 行切换为 SSE 终态恢复', () => {
     const previous = [
-      { id: 'running', type: 'ingest', label: 'a.md', queueStatus: 'running' as const, reconnectKey: 0 },
-      { id: 'fast-failure', type: 're-enrich', label: 'page-a', queueStatus: 'pending' as const, reconnectKey: 0 },
-      { id: 'still-active', type: 're-enrich', label: 'page-b', queueStatus: 'pending' as const, reconnectKey: 0 },
-      { id: 'dismissed', type: 're-enrich', label: 'page-c', queueStatus: 'pending' as const, reconnectKey: 0 },
+      { id: 'running', type: 'ingest', label: 'a.md', subjectId: 's1', queueStatus: 'running' as const, reconnectKey: 0 },
+      { id: 'fast-failure', type: 're-enrich', label: 'page-a', subjectId: 's1', queueStatus: 'pending' as const, reconnectKey: 0 },
+      { id: 'still-active', type: 're-enrich', label: 'page-b', subjectId: 's1', queueStatus: 'pending' as const, reconnectKey: 0 },
+      { id: 'dismissed', type: 're-enrich', label: 'page-c', subjectId: 's1', queueStatus: 'pending' as const, reconnectKey: 0 },
     ];
 
     expect(recoverUnlistedTrackedJobs(
@@ -62,6 +63,24 @@ describe('recoverUnlistedTrackedJobs', () => {
       previous[0],
       { ...previous[1], queueStatus: 'running' },
     ]);
+  });
+});
+
+describe('isRecoverableUrlAuthJob', () => {
+  it('只恢复 failed ingest 的结构化 url-auth-required 结果', () => {
+    const authFailure = JSON.stringify({ error: { code: 'url-auth-required' } });
+    expect(isRecoverableUrlAuthJob({
+      type: 'ingest', status: 'failed', resultJson: authFailure,
+    })).toBe(true);
+    expect(isRecoverableUrlAuthJob({
+      type: 'research', status: 'failed', resultJson: authFailure,
+    })).toBe(false);
+    expect(isRecoverableUrlAuthJob({
+      type: 'ingest', status: 'completed', resultJson: authFailure,
+    })).toBe(false);
+    expect(isRecoverableUrlAuthJob({
+      type: 'ingest', status: 'failed', resultJson: JSON.stringify({ error: { message: '401' } }),
+    })).toBe(false);
   });
 });
 

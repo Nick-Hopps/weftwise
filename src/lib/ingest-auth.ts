@@ -1,6 +1,7 @@
 import type { JobStreamEvent } from '@/hooks/use-job-stream';
 
 export interface UrlAuthChallenge {
+  challengeId: string;
   status: 401 | 403;
   authOrigin: string;
   sourceId: string;
@@ -11,12 +12,13 @@ export interface UrlAuthChallenge {
  * 新一轮 401/403 会追加在 retry 后并重新生效。
  */
 export function currentUrlAuthChallenge(
-  events: ReadonlyArray<Pick<JobStreamEvent, 'type' | 'data'>>,
+  events: ReadonlyArray<Pick<JobStreamEvent, 'type' | 'data' | 'id'>>,
 ): UrlAuthChallenge | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
     if (event.type === 'job:retrying') return null;
     if (event.type !== 'ingest:auth-required') continue;
+    if (typeof event.id !== 'string' || !event.id.trim()) return null;
     const payload = nestedPayload(event.data);
     if (
       payload.code !== 'url-auth-required'
@@ -27,6 +29,7 @@ export function currentUrlAuthChallenge(
       || !payload.sourceId.trim()
     ) return null;
     return {
+      challengeId: event.id,
       status: payload.status,
       authOrigin: payload.authOrigin,
       sourceId: payload.sourceId,

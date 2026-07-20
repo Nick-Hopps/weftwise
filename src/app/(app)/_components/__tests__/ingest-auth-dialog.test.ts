@@ -45,6 +45,7 @@ describe('IngestAuthDialog', () => {
       open: true,
       jobId: 'job-1',
       challenge: {
+        challengeId: 'challenge-1',
         status: 401,
         authOrigin: 'https://example.com',
         sourceId: 'source-1',

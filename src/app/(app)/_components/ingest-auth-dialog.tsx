@@ -21,12 +21,14 @@ import { cn } from '@/lib/cn';
 export function IngestAuthDialog({
   open,
   jobId,
+  subjectId: jobSubjectId,
   challenge,
   onClose,
   onAuthenticated,
 }: {
   open: boolean;
   jobId: string;
+  subjectId?: string | null;
   challenge: UrlAuthChallenge | null;
   onClose: () => void;
   onAuthenticated: () => void;
@@ -63,7 +65,7 @@ export function IngestAuthDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const subjectId = useUIStore.getState().currentSubjectId;
+      const subjectId = jobSubjectId ?? useUIStore.getState().currentSubjectId;
       const response = await apiFetch(`/api/jobs/${jobId}/url-auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
