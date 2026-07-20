@@ -1032,6 +1032,28 @@ export const MaintenanceScopeSchema = z.discriminatedUnion('mode', [
 export type MaintenanceScope = z.infer<typeof MaintenanceScopeSchema>;
 export const DEFAULT_MAINTENANCE_SCOPE: MaintenanceScope = { mode: 'all' };
 
+/** 到期页面明细条目（`GET /api/maintenance/due-pages`）；口径与 countDue/sweep 一致。 */
+export interface MaintenanceDuePage {
+  subjectId: string;
+  subjectSlug: string;
+  subjectName: string;
+  slug: string;
+  /** pages 表标题；maturity 孤儿行（页已删未 prune）为 null，UI 回退显示 slug。 */
+  title: string | null;
+  nextDueAt: string;
+  priority: number;
+  state: MaturityState;
+}
+
+export interface MaintenanceDuePagesResult {
+  /** 与 status 的 dueCount 同口径的全量数（可能大于 entries 长度）。 */
+  total: number;
+  /** 按 priority DESC, next_due_at ASC 排序，最多 limit 条。 */
+  entries: MaintenanceDuePage[];
+  /** 服务端单次返回上限，供 UI 判断截断。 */
+  limit: number;
+}
+
 /** 维护层只读运行态（`GET /api/maintenance/status`）；非设置，故不进 AppSettings。 */
 export interface MaintenanceStatus {
   enabled: boolean;

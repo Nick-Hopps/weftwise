@@ -1,5 +1,5 @@
 import { getRawDb } from '../client';
-import type { PageMaturity, MaturityState } from '@/lib/contracts';
+import type { PageMaturity, MaturityState, MaintenanceDuePage } from '@/lib/contracts';
 
 interface RawRow {
   subject_id: string;
@@ -74,6 +74,54 @@ export function listDue(
     )
     .all(nowIso, ...(subjectIds ?? []), limit) as Array<{ subject_id: string; slug: string }>;
   return rows.map((r) => ({ subjectId: r.subject_id, slug: r.slug }));
+}
+
+/**
+ * 到期页面明细（供 UI 预览）：WHERE/ORDER 与 listDue 完全一致，另 JOIN
+ * pages 取标题、subjects 取 slug/name。pages 用 LEFT JOIN 容忍 maturity
+ * 孤儿行（页已删未 prune），保证明细与 countDue 口径不漂移。
+ */
+export function listDueDetailed(
+  nowIso: string,
+  limit: number,
+  subjectIds?: readonly string[],
+): MaintenanceDuePage[] {
+  if (subjectIds?.length === 0) return [];
+  const scopeClause = subjectIds
+    ? ` AND m.subject_id IN (${subjectIds.map(() => '?').join(', ')})`
+    : '';
+  const rows = getRawDb()
+    .prepare(
+      `SELECT m.subject_id, m.slug, m.next_due_at, m.priority, m.state,
+              p.title, s.slug AS subject_slug, s.name AS subject_name
+       FROM page_maturity m
+       JOIN subjects s ON s.id = m.subject_id
+       LEFT JOIN pages p ON p.subject_id = m.subject_id AND p.slug = m.slug
+       WHERE m.state != 'graduated' AND m.next_due_at <= ?
+       ${scopeClause}
+       ORDER BY m.priority DESC, m.next_due_at ASC
+       LIMIT ?`,
+    )
+    .all(nowIso, ...(subjectIds ?? []), limit) as Array<{
+      subject_id: string;
+      slug: string;
+      next_due_at: string;
+      priority: number;
+      state: string;
+      title: string | null;
+      subject_slug: string;
+      subject_name: string;
+    }>;
+  return rows.map((r) => ({
+    subjectId: r.subject_id,
+    subjectSlug: r.subject_slug,
+    subjectName: r.subject_name,
+    slug: r.slug,
+    title: r.title,
+    nextDueAt: r.next_due_at,
+    priority: r.priority,
+    state: r.state as MaturityState,
+  }));
 }
 
 /** 统计范围内到期且未毕业的页数；subjectIds 缺省为全量，与调度器 sweep 同口径。 */

@@ -94,4 +94,56 @@ describe('maturity-repo', () => {
     expect(row?.state).toBe('active');
     expect(new Date(row!.nextDueAt).getTime()).toBeLessThanOrEqual(now.getTime());
   });
+
+  it('listDueDetailed 带页面标题与 subject 信息，排序/过滤与 listDue 同口径', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const pagesRepo = await import('../pages-repo');
+    const maturityRepo = await import('../maturity-repo');
+
+    const now = new Date();
+    const s1 = subjectsRepo.create({ slug: 's-ldd-1', name: 'Subject One' });
+    const s2 = subjectsRepo.create({ slug: 's-ldd-2', name: 'Subject Two' });
+    const mkPage = (subjectId: string, slug: string, title: string) =>
+      pagesRepo.upsertPage({
+        subjectId, slug, title,
+        path: `wiki/${subjectId}/${slug}.md`,
+        summary: '', contentHash: `h-${subjectId}-${slug}`, tags: [],
+        createdAt: ISO(now), updatedAt: ISO(now),
+      });
+
+    mkPage(s1.id, 'due-low', 'Due Low');
+    mkPage(s1.id, 'due-high', 'Due High');
+    mkPage(s1.id, 'future', 'Future');
+    mkPage(s2.id, 'other', 'Other Subject Page');
+    maturityRepo.ensureRow(s1.id, 'due-low', ISO(days(-5)), 1);
+    maturityRepo.ensureRow(s1.id, 'due-high', ISO(days(-5)), 1);
+    maturityRepo.bumpNeighbor(s1.id, 'due-high', ISO(now));
+    maturityRepo.ensureRow(s1.id, 'future', ISO(now), 30);
+    maturityRepo.ensureRow(s2.id, 'other', ISO(days(-5)), 1);
+    // 孤儿 maturity 行：页已删（无 pages 行），明细仍应返回且 title 为 null
+    maturityRepo.ensureRow(s1.id, 'orphan', ISO(days(-5)), 1);
+    maturityRepo.bumpNeighbor(s1.id, 'orphan', ISO(days(-1))); // 排到 due-high 之后、无 priority 行之前
+
+    const all = maturityRepo.listDueDetailed(ISO(now), 10);
+    expect(all.map((e) => e.slug)).toEqual(['due-high', 'orphan', 'due-low', 'other']);
+    const high = all[0];
+    expect(high).toMatchObject({
+      subjectId: s1.id,
+      subjectSlug: 's-ldd-1',
+      subjectName: 'Subject One',
+      title: 'Due High',
+      priority: 1,
+      state: 'active',
+    });
+    expect(new Date(high.nextDueAt).getTime()).toBeLessThanOrEqual(now.getTime());
+    expect(all.find((e) => e.slug === 'orphan')?.title).toBeNull();
+
+    // scope 过滤与空数组短路
+    const scoped = maturityRepo.listDueDetailed(ISO(now), 10, [s2.id]);
+    expect(scoped.map((e) => e.slug)).toEqual(['other']);
+    expect(maturityRepo.listDueDetailed(ISO(now), 10, [])).toEqual([]);
+
+    // limit 有界
+    expect(maturityRepo.listDueDetailed(ISO(now), 2)).toHaveLength(2);
+  });
 });
