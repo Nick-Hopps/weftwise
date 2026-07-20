@@ -1,8 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { useI18n } from '@/components/i18n-provider';
 import { useProfile, useUpdateProfile } from '@/hooks/use-profile';
 import type { StylePrefs } from '@/lib/contracts';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 const DEFAULTS: StylePrefs = {
   readingLevel: 'intermediate',
@@ -12,60 +14,59 @@ const DEFAULTS: StylePrefs = {
 };
 
 export const COGNITIVE_LENS_ONBOARDING_COPY = {
-  title: 'Make every page work for you',
-  description:
-    'Tell us about your background and preferences. Each page will adapt how it explains things, and you can change these settings at any time.',
-  backgroundPlaceholder:
-    'For example: Backend engineer familiar with distributed systems, but new to machine learning',
-  skip: 'Skip',
-  save: 'Save and start',
-} as const;
+  title: 'lens.onboarding.title',
+  description: 'lens.onboarding.description',
+  backgroundPlaceholder: 'lens.onboarding.backgroundPlaceholder',
+  skip: 'lens.onboarding.skip',
+  save: 'lens.onboarding.save',
+} as const satisfies Record<string, MessageKey>;
 
 export const COGNITIVE_LENS_ONBOARDING_FIELDS: {
   key: keyof StylePrefs;
-  label: string;
-  options: [string, string][];
+  labelKey: MessageKey;
+  options: [string, MessageKey][];
 }[] = [
   {
     key: 'readingLevel',
-    label: 'Reading level',
+    labelKey: 'settings.lens.readingLevel',
     options: [
-      ['beginner', 'Beginner'],
-      ['intermediate', 'Intermediate'],
-      ['advanced', 'Advanced'],
+      ['beginner', 'settings.lens.beginner'],
+      ['intermediate', 'settings.lens.intermediate'],
+      ['advanced', 'settings.lens.advanced'],
     ],
   },
   {
     key: 'verbosity',
-    label: 'Verbosity',
+    labelKey: 'settings.lens.verbosity',
     options: [
-      ['terse', 'Terse'],
-      ['balanced', 'Balanced'],
-      ['thorough', 'Thorough'],
+      ['terse', 'settings.lens.terse'],
+      ['balanced', 'settings.lens.balanced'],
+      ['thorough', 'settings.lens.thorough'],
     ],
   },
   {
     key: 'exampleDensity',
-    label: 'Examples & analogies',
+    labelKey: 'settings.lens.examples',
     options: [
-      ['few', 'Few'],
-      ['some', 'Some'],
-      ['many', 'Many'],
+      ['few', 'settings.lens.few'],
+      ['some', 'settings.lens.some'],
+      ['many', 'settings.lens.many'],
     ],
   },
   {
     key: 'formality',
-    label: 'Tone',
+    labelKey: 'settings.lens.tone',
     options: [
-      ['casual', 'Casual'],
-      ['neutral', 'Neutral'],
-      ['formal', 'Formal'],
+      ['casual', 'settings.lens.casual'],
+      ['neutral', 'settings.lens.neutral'],
+      ['formal', 'settings.lens.formal'],
     ],
   },
 ];
 
 /** 首次使用（画像未 onboarded）弹出的轻量画像向导。 */
 export function CognitiveLensOnboarding() {
+  const { t } = useI18n();
   const { data } = useProfile();
   const update = useUpdateProfile();
   const [bg, setBg] = useState('');
@@ -77,31 +78,31 @@ export function CognitiveLensOnboarding() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-lg border border-border bg-surface p-6 shadow-xl">
         <h2 className="mb-1 text-lg font-semibold text-foreground">
-          {COGNITIVE_LENS_ONBOARDING_COPY.title}
+          {t(COGNITIVE_LENS_ONBOARDING_COPY.title)}
         </h2>
         <p className="mb-4 text-sm text-foreground-tertiary">
-          {COGNITIVE_LENS_ONBOARDING_COPY.description}
+          {t(COGNITIVE_LENS_ONBOARDING_COPY.description)}
         </p>
 
         <textarea
           value={bg}
           onChange={(e) => setBg(e.target.value)}
-          placeholder={COGNITIVE_LENS_ONBOARDING_COPY.backgroundPlaceholder}
+          placeholder={t(COGNITIVE_LENS_ONBOARDING_COPY.backgroundPlaceholder)}
           className="mb-4 h-24 w-full rounded-md border border-border bg-canvas p-2 text-sm"
         />
 
         {COGNITIVE_LENS_ONBOARDING_FIELDS.map((f) => (
           <label key={f.key} className="mb-2 flex items-center justify-between gap-3 text-sm">
-            <span className="text-foreground-secondary">{f.label}</span>
+            <span className="text-foreground-secondary">{t(f.labelKey)}</span>
             <select
               value={prefs[f.key]}
               onChange={(e) => setPrefs((p) => ({ ...p, [f.key]: e.target.value }) as StylePrefs)}
-              aria-label={f.label}
+              aria-label={t(f.labelKey)}
               className="rounded-md border border-border bg-canvas px-2 py-1 text-sm"
             >
-              {f.options.map(([v, label]) => (
+              {f.options.map(([v, labelKey]) => (
                 <option key={v} value={v}>
-                  {label}
+                  {t(labelKey)}
                 </option>
               ))}
             </select>
@@ -115,7 +116,7 @@ export function CognitiveLensOnboarding() {
             disabled={update.isPending}
             onClick={() => update.mutate({ markOnboarded: true })}
           >
-            {COGNITIVE_LENS_ONBOARDING_COPY.skip}
+            {t(COGNITIVE_LENS_ONBOARDING_COPY.skip)}
           </Button>
           <Button
             intent="primary"
@@ -123,7 +124,7 @@ export function CognitiveLensOnboarding() {
             disabled={update.isPending}
             onClick={() => update.mutate({ backgroundSummary: bg, stylePrefs: prefs, markOnboarded: true })}
           >
-            {COGNITIVE_LENS_ONBOARDING_COPY.save}
+            {t(COGNITIVE_LENS_ONBOARDING_COPY.save)}
           </Button>
         </div>
       </div>

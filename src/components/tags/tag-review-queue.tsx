@@ -15,12 +15,6 @@ import { IconButton } from '@/components/ui/icon-button';
 import type { TagReviewQueue } from '@/lib/tags';
 import { useI18n } from '@/components/i18n-provider';
 
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 function SectionHeading({
   id,
   title,
@@ -56,14 +50,14 @@ export function TagReviewQueueView({
   actionDisabled: boolean;
   onManageTag(sourceTag: string, suggestedTarget?: string): void;
 }) {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
   if (queue.issueCount === 0) {
     return (
       <div className="flex min-h-48 flex-col items-center justify-center border-y border-border-subtle px-4 text-center">
         <CheckCircle2 className="h-5 w-5 text-success" aria-hidden />
         <h2 className="mt-3 text-sm font-medium text-foreground">{t('tags.reviewClear')}</h2>
         <p className="mt-1 max-w-sm text-xs leading-5 text-foreground-tertiary">
-          No format variants, single-use tags, or untagged pages need attention.
+          {t('tags.review.clearDescription')}
         </p>
       </div>
     );
@@ -77,7 +71,7 @@ export function TagReviewQueueView({
             id="format-variants-heading"
             title={t('tags.formatVariants')}
             count={queue.variantGroups.reduce((sum, group) => sum + group.variants.length, 0)}
-            description="Merge alternate spellings into the recommended target."
+            description={t('tags.review.variantsDescription')}
           />
           <ul className="divide-y divide-border-subtle border-y border-border-subtle">
             {queue.variantGroups.flatMap((group) => group.variants.map((variant) => (
@@ -92,7 +86,14 @@ export function TagReviewQueueView({
                     <span className="max-w-full truncate text-accent-strong">#{group.canonical.tag}</span>
                   </div>
                   <p className="mt-1 text-xs tabular-nums text-foreground-tertiary">
-                    {variant.count} page{variant.count === 1 ? '' : 's'} into {group.canonical.count} existing page{group.canonical.count === 1 ? '' : 's'}
+                    {t('tags.review.mergeSummary', {
+                      source: t(variant.count === 1
+                        ? 'tags.review.pageCount.one'
+                        : 'tags.review.pageCount.many', { count: variant.count }),
+                      target: t(group.canonical.count === 1
+                        ? 'tags.review.existingPageCount.one'
+                        : 'tags.review.existingPageCount.many', { count: group.canonical.count }),
+                    })}
                   </p>
                 </div>
                 <Button
@@ -101,10 +102,10 @@ export function TagReviewQueueView({
                   className="self-start sm:self-auto"
                   disabled={actionDisabled}
                   onClick={() => onManageTag(variant.tag, group.canonical.tag)}
-                  title={actionDisabled ? 'Resolve the current tag action first' : undefined}
+                  title={actionDisabled ? t('tags.resolveCurrentAction') : undefined}
                 >
                   <GitMerge className="h-3.5 w-3.5" aria-hidden />
-                  Preview merge
+                  {t('tags.review.previewMerge')}
                 </Button>
               </li>
             )))}
@@ -118,7 +119,7 @@ export function TagReviewQueueView({
             id="single-use-tags-heading"
             title={t('tags.singleUse')}
             count={queue.singletonTags.length}
-            description="Check whether these tags should be kept, renamed, or removed."
+            description={t('tags.review.singleUseDescription')}
           />
           <ul className="divide-y divide-border-subtle border-y border-border-subtle">
             {queue.singletonTags.map((summary) => {
@@ -139,19 +140,21 @@ export function TagReviewQueueView({
                     </Link>
                     {page && (
                       <p className="mt-1 truncate text-xs text-foreground-tertiary">
-                        Used only on {page.title}
+                        {t('tags.review.usedOnlyOn', { page: page.title })}
                       </p>
                     )}
                   </div>
                   <span className="hidden text-xs tabular-nums text-foreground-tertiary sm:block">
-                    {summary.updatedAt ? formatDate(summary.updatedAt) : '—'}
+                    {summary.updatedAt ? formatDate(summary.updatedAt, { month: 'short', day: 'numeric' }) : '—'}
                   </span>
                   <IconButton
                     size="base"
                     disabled={actionDisabled}
                     onClick={() => onManageTag(summary.tag)}
-                    aria-label={`Manage ${summary.tag}`}
-                    title={actionDisabled ? 'Resolve the current tag action first' : `Manage ${summary.tag}`}
+                    aria-label={t('tags.manage', { tag: summary.tag })}
+                    title={actionDisabled
+                      ? t('tags.resolveCurrentAction')
+                      : t('tags.manage', { tag: summary.tag })}
                   >
                     <MoreHorizontal aria-hidden />
                   </IconButton>
@@ -168,7 +171,7 @@ export function TagReviewQueueView({
             id="untagged-pages-heading"
             title={t('tags.untagged')}
             count={queue.untaggedPages.length}
-            description="Open these pages to add useful classification."
+            description={t('tags.review.untaggedDescription')}
           />
           <ul className="divide-y divide-border-subtle border-y border-border-subtle">
             {queue.untaggedPages.map((page) => (
@@ -184,7 +187,7 @@ export function TagReviewQueueView({
                         {page.title}
                       </span>
                       <time className="shrink-0 text-xs tabular-nums text-foreground-tertiary" dateTime={page.updatedAt}>
-                        {formatDate(page.updatedAt)}
+                        {formatDate(page.updatedAt, { month: 'short', day: 'numeric' })}
                       </time>
                     </div>
                     {page.summary && (

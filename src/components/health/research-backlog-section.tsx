@@ -63,7 +63,7 @@ export function ResearchBacklogSection({
       });
       await refetch();
     } catch {
-      setError('Research backlog could not be updated.');
+      setError(t('health.backlog.updateError'));
     } finally {
       setPendingId(null);
     }
@@ -94,7 +94,9 @@ export function ResearchBacklogSection({
           <h2 className="text-sm font-semibold text-foreground">{t('health.backlog')}</h2>
           <p className="mt-0.5 text-xs text-foreground-tertiary">{t('health.backlogDescription')}</p>
         </div>
-        <span className="text-xs text-foreground-tertiary">{entries.length} open</span>
+        <span className="text-xs text-foreground-tertiary">
+          {t('health.backlog.openCount', { count: entries.length })}
+        </span>
       </div>
       {error && (
         <div className="mb-2 border-l-2 border-danger bg-danger-bg px-3 py-2 text-sm text-danger">
@@ -112,7 +114,9 @@ export function ResearchBacklogSection({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Tag tone="neutral" size="sm">
-                    {entry.source === 'ask-ai' ? 'Ask AI' : 'Manual'}
+                    {entry.source === 'ask-ai'
+                      ? t('health.backlog.askAI')
+                      : t('health.backlog.manual')}
                   </Tag>
                   <span className="text-xs text-foreground-tertiary">
                     {formatDate(entry.createdAt, { dateStyle: 'medium', timeStyle: 'short' })}
@@ -129,7 +133,7 @@ export function ResearchBacklogSection({
                   disabled={researchBusy}
                 >
                   {!busy && <Search className="h-3 w-3" />}
-                  Research
+                  {t('health.backlog.research')}
                 </Button>
                 <Button
                   intent="ghost"
@@ -138,7 +142,7 @@ export function ResearchBacklogSection({
                   disabled={busy || researchBusy}
                 >
                   <X className="h-3 w-3" />
-                  Dismiss
+                  {t('health.backlog.dismiss')}
                 </Button>
               </div>
             </div>

@@ -27,6 +27,7 @@ import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
 import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
 import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 interface IngestLiveViewProps {
   jobId: string;
@@ -54,19 +55,19 @@ interface IngestLiveViewProps {
 
 interface Phase {
   id: string;
-  label: string;
+  labelKey: MessageKey;
   Icon: LucideIcon;
-  verb: string;
+  verbKey: MessageKey;
 }
 
 /** The real ingest pipeline's six phases, in order. */
 const PHASES: readonly Phase[] = [
-  { id: 'parse', label: 'Parse', Icon: ScanText, verb: 'Parsing source' },
-  { id: 'plan', label: 'Plan', Icon: ListChecks, verb: 'Planning changes' },
-  { id: 'write', label: 'Write', Icon: PenLine, verb: 'Writing pages' },
-  { id: 'enrich', label: 'Enrich', Icon: Wand2, verb: 'Enriching pages' },
-  { id: 'verify', label: 'Verify', Icon: ShieldCheck, verb: 'Verifying claims' },
-  { id: 'commit', label: 'Commit', Icon: GitCommitHorizontal, verb: 'Committing changeset' },
+  { id: 'parse', labelKey: 'jobs.phase.parse', Icon: ScanText, verbKey: 'ingest.phase.parsing' },
+  { id: 'plan', labelKey: 'jobs.phase.plan', Icon: ListChecks, verbKey: 'ingest.phase.planning' },
+  { id: 'write', labelKey: 'jobs.phase.write', Icon: PenLine, verbKey: 'ingest.phase.writing' },
+  { id: 'enrich', labelKey: 'jobs.phase.enrich', Icon: Wand2, verbKey: 'ingest.phase.enriching' },
+  { id: 'verify', labelKey: 'jobs.phase.verify', Icon: ShieldCheck, verbKey: 'ingest.phase.verifying' },
+  { id: 'commit', labelKey: 'jobs.phase.commit', Icon: GitCommitHorizontal, verbKey: 'ingest.phase.committing' },
 ];
 
 const PAGE_SKILLS = new Set(['ingest-writer', 'ingest-enricher']);
@@ -153,7 +154,7 @@ export function IngestLiveView({
   inline = false,
   onRetry,
   retrying = false,
-  retryLabel = 'Retry',
+  retryLabel,
   onTerminate,
   terminating = false,
   queued = false,
@@ -264,19 +265,23 @@ export function IngestLiveView({
             <span className="text-xs text-foreground-secondary">
               {done ? (
                 <>
-                  Ingest complete —{' '}
                   <strong className="font-semibold text-foreground">
-                    {createdPages.length || nodes.length} pages
-                  </strong>{' '}
-                  committed
+                    {t('ingest.complete', { count: createdPages.length || nodes.length })}
+                  </strong>
                 </>
               ) : failed ? (
-                <span className="text-danger">{latestMessage || 'Ingest failed'}</span>
+                <span className="text-danger">{latestMessage || t('ingest.failed')}</span>
               ) : queued ? (
                 <strong className="font-semibold text-foreground">{t('ingest.queued')}</strong>
               ) : (
                 <>
-                  <strong className="font-semibold text-foreground">{phase.verb}…</strong> · phase {curPhase + 1} of {PHASES.length}
+                  <strong className="font-semibold text-foreground">
+                    {t('ingest.phaseProgress', {
+                      verb: t(phase.verbKey),
+                      current: curPhase + 1,
+                      total: PHASES.length,
+                    })}
+                  </strong>
                 </>
               )}
             </span>
@@ -292,7 +297,7 @@ export function IngestLiveView({
               <>
                 {failed && onRetry && (
                   <Button intent="primary" onClick={onRetry} loading={retrying} disabled={retrying}>
-                    {retryLabel}
+                    {retryLabel ?? t('common.retry')}
                   </Button>
                 )}
                 {failed && onTerminate && (
@@ -303,20 +308,20 @@ export function IngestLiveView({
                     disabled={terminating}
                     data-tip={t('ingest.abandon')}
                   >
-                    <Ban className="h-3.5 w-3.5" /> End ingest
+                    <Ban className="h-3.5 w-3.5" /> {t('ingest.end')}
                   </Button>
                 )}
                 <Button intent="outline" onClick={onIngestAnother}>
-                  <Plus className="h-3.5 w-3.5" /> Ingest another
+                  <Plus className="h-3.5 w-3.5" /> {t('ingest.another')}
                 </Button>
                 {done && createdPages.length > 0 && (
                   <Link href={`/wiki/${createdPages[0]}`} className={buttonVariants({ intent: 'primary' })}>
-                    <ArrowRight className="h-3.5 w-3.5" /> View pages
+                    <ArrowRight className="h-3.5 w-3.5" /> {t('ingest.viewPages')}
                   </Link>
                 )}
                 {(failed || createdPages.length === 0) && (
                   <Button intent="ghost" onClick={onBackground}>
-                    Close
+                    {t('ingest.close')}
                   </Button>
                 )}
               </>
@@ -329,11 +334,11 @@ export function IngestLiveView({
                     disabled={terminating}
                     data-tip={t('ingest.stop')}
                   >
-                    <Square className="h-3.5 w-3.5" /> Stop
+                    <Square className="h-3.5 w-3.5" /> {t('ingest.stopButton')}
                   </Button>
                 )}
                 <Button intent="outline" onClick={onBackground}>
-                  <Minimize2 className="h-3.5 w-3.5" /> Run in background
+                  <Minimize2 className="h-3.5 w-3.5" /> {t('ingest.background')}
                 </Button>
               </>
             )}
@@ -387,7 +392,7 @@ export function IngestLiveView({
                       state === 'pending' ? 'text-foreground-tertiary' : 'text-foreground',
                     )}
                   >
-                    {p.label}
+                    {t(p.labelKey)}
                   </span>
                   <span
                     className={cn(
@@ -395,7 +400,11 @@ export function IngestLiveView({
                       state === 'active' ? 'text-accent-strong' : 'text-foreground-tertiary',
                     )}
                   >
-                    {state === 'done' ? 'done' : state === 'active' ? 'running' : '—'}
+                    {state === 'done'
+                      ? t('ingest.phase.done')
+                      : state === 'active'
+                        ? t('ingest.phase.running')
+                        : '—'}
                   </span>
                 </span>
               </div>
@@ -471,7 +480,7 @@ function IngestTimeline({
       {done && createdPages.length > 0 && (
         <div className="mb-4 flex flex-col gap-2 rounded-md border border-success-border/40 bg-success-bg px-3.5 py-3">
           <span className="flex items-center gap-2 text-sm font-semibold text-success">
-            <CircleCheck className="h-[15px] w-[15px]" /> Committed to the vault
+            <CircleCheck className="h-[15px] w-[15px]" /> {t('ingest.committed')}
           </span>
           <div className="flex flex-wrap gap-1.5">
             {createdPages.map((slug) => (
@@ -520,7 +529,7 @@ function IngestTimeline({
                 <span
                   className={cn('text-sm font-semibold', state === 'pending' ? 'text-foreground-tertiary' : 'text-foreground')}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </span>
                 {state === 'active' && <span className="text-[11px] font-medium text-accent-strong">{t('ingest.running')}</span>}
               </div>
@@ -583,6 +592,7 @@ function IngestGraph({
   latestMessage: string;
   stepCount: number;
 }) {
+  const { t } = useI18n();
   const hub = { x: 50, y: 47 };
   const activeIdx = nodes.length - 1;
   const running = !done && !failed && !queued;
@@ -638,14 +648,20 @@ function IngestGraph({
                     : 'text-accent-strong',
             )}
           >
-            {done ? 'Complete' : failed ? 'Failed' : queued ? 'Queued' : phase.label}
+            {done
+              ? t('ingest.status.completed')
+              : failed
+                ? t('ingest.status.failed')
+                : queued
+                  ? t('ingest.status.pending')
+                  : t(phase.labelKey)}
           </span>
           <span className="block truncate text-sm font-medium text-foreground">
             {done
-              ? 'Committed to the vault'
+              ? t('ingest.committed')
               : queued
-                ? 'Waiting for a worker'
-                : latestMessage || 'Starting…'}
+                ? t('ingest.waitingWorker')
+                : latestMessage || t('ingest.starting')}
             {running && <span className="ig-caret ml-0.5 text-accent">▍</span>}
           </span>
         </div>
@@ -743,8 +759,8 @@ function IngestGraph({
       {/* counters */}
       <div className="absolute inset-x-4 bottom-3.5 z-[2] flex items-center justify-between gap-3">
         <div className="flex gap-5">
-          <Counter value={nodes.length} label="pages written" />
-          <Counter value={stepCount} label="agent steps" />
+          <Counter value={nodes.length} label={t('ingest.pagesWritten')} />
+          <Counter value={stepCount} label={t('ingest.agentSteps')} />
         </div>
       </div>
     </div>

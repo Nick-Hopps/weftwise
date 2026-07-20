@@ -31,6 +31,9 @@ import {
   summarizeFixOutcomes,
 } from '../remediation-ui';
 import { FindingRow, remediationStatusLabel } from '../finding-row';
+import { createI18n } from '@/lib/i18n/translator';
+
+const { t } = createI18n('en');
 
 vi.mock('@/components/ui/tag', async () => {
   const ReactModule = await import('react');
@@ -232,7 +235,7 @@ describe('Health remediation UI helper', () => {
       },
     }));
 
-    expect(remediationStatusLabel('awaiting-approval')).toBe('Needs action');
+    expect(remediationStatusLabel('awaiting-approval')).toBe('health.remediation.awaitingApproval');
     expect(html).toContain('Needs action');
     expect(html).not.toContain('awaiting-approval');
   });
@@ -244,34 +247,34 @@ describe('Health remediation UI helper', () => {
   });
 
   it('Delete source 区分成功、已删除与可见失败', async () => {
-    await expect(readDeleteSourceResult(Response.json({ deleted: true })))
+    await expect(readDeleteSourceResult(Response.json({ deleted: true }), t))
       .resolves.toBe('deleted');
     await expect(readDeleteSourceResult(Response.json(
       { error: 'Source not found' },
       { status: 404 },
-    ))).resolves.toBe('already-deleted');
+    ), t)).resolves.toBe('already-deleted');
     await expect(readDeleteSourceResult(Response.json(
       { error: 'in-flight' },
       { status: 409 },
-    ))).rejects.toThrow('Source cannot be deleted while its ingest job is active.');
+    ), t)).rejects.toThrow('Source cannot be deleted while its ingest job is active.');
     await expect(readDeleteSourceResult(Response.json(
       { error: 'Failed to delete source: git broke' },
       { status: 500 },
-    ))).rejects.toThrow('Failed to delete source: git broke');
+    ), t)).rejects.toThrow('Failed to delete source: git broke');
   });
 
   it('Research job 结果只读取 runId，并区分 HTTP、响应 JSON 与 resultJson 错误', async () => {
-    await expect(readResearchRunId(new Response('', { status: 503 })))
+    await expect(readResearchRunId(new Response('', { status: 503 }), t))
       .rejects.toThrow('Research result request failed (503).');
     await expect(readResearchRunId(new Response('{', {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-    }))).rejects.toThrow('Research result response is invalid.');
-    await expect(readResearchRunId(Response.json({ resultJson: '{' })))
+    }), t)).rejects.toThrow('Research result response is invalid.');
+    await expect(readResearchRunId(Response.json({ resultJson: '{' }), t))
       .rejects.toThrow('Research result is invalid.');
     await expect(readResearchRunId(Response.json({
       resultJson: JSON.stringify({ runId: 'run-1', candidates: [] }),
-    }))).resolves.toBe('run-1');
+    }), t)).resolves.toBe('run-1');
   });
 
   it('Research run 响应严格校验，批准 body 不包含 URL', async () => {
@@ -287,8 +290,8 @@ describe('Health remediation UI helper', () => {
       updatedAt: '2026-07-14T00:00:00.000Z', completedAt: null, error: null,
     } satisfies ResearchRunView;
 
-    await expect(readResearchRun(Response.json({ run }))).resolves.toEqual(run);
-    await expect(readResearchRun(Response.json({ run: { ...run, candidates: [{ url: 'x' }] } })))
+    await expect(readResearchRun(Response.json({ run }), t)).resolves.toEqual(run);
+    await expect(readResearchRun(Response.json({ run: { ...run, candidates: [{ url: 'x' }] } }), t))
       .rejects.toThrow('Research run is invalid.');
     expect(researchApprovalBody(run, ['candidate-1'], 'key-1')).toEqual({
       candidateIds: ['candidate-1'],

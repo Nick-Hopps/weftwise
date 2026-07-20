@@ -22,19 +22,8 @@ import { useI18n } from '@/components/i18n-provider';
 
 type PageSort = 'recent' | 'title';
 
-const MODE_OPTIONS = [
-  { value: 'and' as const, label: 'Match all' },
-  { value: 'or' as const, label: 'Match any' },
-];
-
-function formatDate(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
 export function TagPagesView({ tag }: { tag: string }) {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
   const apiFetch = useApiFetch();
   const { id: subjectId, slug: subjectSlug } = useCurrentSubject();
   const { searchParams, updateSearchParams } = useTagSearchParams();
@@ -47,6 +36,10 @@ export function TagPagesView({ tag }: { tag: string }) {
   );
   const selectedTags = useMemo(() => [tag, ...extraTags], [extraTags, tag]);
   const [query, setQuery] = useState(queryParam);
+  const modeOptions = [
+    { value: 'and' as const, label: t('tags.matchAll') },
+    { value: 'or' as const, label: t('tags.matchAny') },
+  ];
 
   useEffect(() => setQuery(queryParam), [queryParam]);
 
@@ -98,7 +91,7 @@ export function TagPagesView({ tag }: { tag: string }) {
           className="inline-flex items-center gap-1.5 text-xs text-foreground-tertiary transition-colors hover:text-foreground focus-ring"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-          All tags
+          {t('tags.allTags')}
         </Link>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
@@ -107,13 +100,17 @@ export function TagPagesView({ tag }: { tag: string }) {
               <span className="truncate">{tag}</span>
             </h1>
             <p className="mt-1 text-sm text-foreground-secondary">
-              {isLoading ? 'Loading pages…' : `${matched.length} matching page${matched.length === 1 ? '' : 's'}`}
+              {isLoading
+                ? t('tags.loadingPages')
+                : t(matched.length === 1 ? 'tags.matchingPage.one' : 'tags.matchingPage.many', {
+                    count: matched.length,
+                  })}
             </p>
           </div>
           {extraTags.length > 0 && (
             <Segmented
               value={mode}
-              options={MODE_OPTIONS}
+              options={modeOptions}
               onChange={(value) => updateSearchParams({ mode: value === 'and' ? null : value })}
               aria-label={t('tags.matchMode')}
             />
@@ -130,8 +127,8 @@ export function TagPagesView({ tag }: { tag: string }) {
               type="button"
               onClick={() => removeTag(extraTag)}
               className="rounded-sm p-0.5 transition-colors hover:bg-border hover:text-foreground focus-ring"
-              aria-label={`Remove ${extraTag} filter`}
-              title={`Remove ${extraTag}`}
+              aria-label={t('tags.removeFilter', { tag: extraTag })}
+              title={t('tags.removeTag', { tag: extraTag })}
             >
               <X className="h-3 w-3" aria-hidden />
             </button>
@@ -143,7 +140,7 @@ export function TagPagesView({ tag }: { tag: string }) {
             size="sm"
             onClick={() => updateSearchParams({ with: null, mode: null })}
           >
-            Clear combined tags
+            {t('tags.clearCombined')}
           </Button>
         )}
       </div>
@@ -189,7 +186,7 @@ export function TagPagesView({ tag }: { tag: string }) {
           <section aria-labelledby="matching-pages-heading" className="min-w-0">
             <div className="mb-2 flex items-center justify-between">
               <h2 id="matching-pages-heading" className="text-xs font-medium uppercase tracking-wider text-foreground-tertiary">
-                Matching pages
+                {t('tags.matchingPages')}
               </h2>
               <span className="text-xs tabular-nums text-foreground-tertiary">{matched.length}</span>
             </div>
@@ -206,7 +203,7 @@ export function TagPagesView({ tag }: { tag: string }) {
                       updateSearchParams({ q: null, with: null, mode: null });
                     }}
                   >
-                    Clear filters
+                    {t('tags.clearFilters')}
                   </Button>
                 )}
               </div>
@@ -227,7 +224,7 @@ export function TagPagesView({ tag }: { tag: string }) {
                               {page.title}
                             </Link>
                             <time className="shrink-0 text-xs tabular-nums text-foreground-tertiary" dateTime={page.updatedAt}>
-                              {formatDate(page.updatedAt)}
+                              {formatDate(page.updatedAt, { year: 'numeric', month: 'short', day: 'numeric' })}
                             </time>
                           </div>
                           {page.summary && (
@@ -258,7 +255,7 @@ export function TagPagesView({ tag }: { tag: string }) {
           <aside aria-labelledby="related-tags-heading" className="min-w-0 lg:border-l lg:border-border-subtle lg:pl-5">
             <div className="mb-2 flex items-center justify-between">
               <h2 id="related-tags-heading" className="text-xs font-medium uppercase tracking-wider text-foreground-tertiary">
-                Related tags
+                {t('tags.relatedTags')}
               </h2>
               <span className="text-xs tabular-nums text-foreground-tertiary">{related.length}</span>
             </div>
@@ -272,7 +269,7 @@ export function TagPagesView({ tag }: { tag: string }) {
                       type="button"
                       onClick={() => addTag(item.tag)}
                       className="group/related flex w-full min-w-0 items-center gap-2 px-1 py-2 text-left transition-colors hover:bg-subtle focus-ring"
-                      title={`Add ${item.tag} to filters`}
+                      title={t('tags.addFilter', { tag: item.tag })}
                     >
                       <Plus className="h-3.5 w-3.5 shrink-0 text-foreground-tertiary group-hover/related:text-accent" aria-hidden />
                       <span className="min-w-0 flex-1 truncate text-xs text-foreground-secondary group-hover/related:text-foreground">{item.tag}</span>

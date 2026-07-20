@@ -1,7 +1,21 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ResearchRunView } from '@/lib/contracts';
+
+const testLocale = vi.hoisted(() => ({ value: 'en' as 'en' | 'zh-CN' }));
+
+vi.mock('@/components/i18n-provider', async () => {
+  const { createI18n } = await import('@/lib/i18n/translator');
+  return {
+    useI18n: () => ({
+      ...createI18n(testLocale.value),
+      setLocale: vi.fn(),
+      isLocalePending: false,
+    }),
+  };
+});
+
 import {
   defaultResearchCandidateIds,
   ResearchCandidatesDialog,
@@ -88,6 +102,10 @@ function run(status: ResearchRunView['status'] = 'awaiting-approval'): ResearchR
 }
 
 describe('ResearchCandidatesDialog', () => {
+  beforeEach(() => {
+    testLocale.value = 'en';
+  });
+
   it('用 candidate ID 作为默认选择，且只默认勾选 score=3', () => {
     expect([...defaultResearchCandidateIds(run())]).toEqual(['candidate-a']);
     const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
@@ -214,5 +232,75 @@ describe('ResearchCandidatesDialog', () => {
       acting: false,
     }));
     expect(html).not.toContain('Retry failed imports');
+  });
+
+  it('简体中文等待批准态翻译标题、评分、选择计数与操作', () => {
+    testLocale.value = 'zh-CN';
+    const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
+      run: run(),
+      onClose: vi.fn(),
+      onApprove: vi.fn(),
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      acting: false,
+    }));
+
+    expect(html).toContain('研究候选项（2）');
+    expect(html).toContain('等待批准');
+    expect(html).toContain('评分 3');
+    expect(html).toContain('已选择 1 项');
+    expect(html).toContain('忽略');
+    expect(html).toContain('取消');
+    expect(html).toContain('批准 1 项');
+    expect(html).not.toContain('Research candidates');
+    expect(html).not.toContain('selected');
+  });
+
+  it.each([
+    ['importing', '正在导入已批准候选项'],
+    ['verifying', '正在验证导入的知识'],
+    ['completed', '研究已完成'],
+    ['partial', '研究已部分完成'],
+    ['failed', '研究失败'],
+    ['dismissed', '研究已忽略'],
+    ['empty', '未发现候选项'],
+  ] as const)('简体中文 %s 状态显示本地化文案', (status, text) => {
+    testLocale.value = 'zh-CN';
+    const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
+      run: run(status),
+      onClose: vi.fn(),
+      onApprove: vi.fn(),
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      acting: false,
+    }));
+
+    expect(html).toContain(text);
+  });
+
+  it('简体中文翻译 candidate decision、delivery 状态与失败重试操作', () => {
+    testLocale.value = 'zh-CN';
+    const importingHtml = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
+      run: run('importing'),
+      onClose: vi.fn(),
+      onApprove: vi.fn(),
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      acting: false,
+    }));
+    const failedHtml = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
+      run: failedRun(),
+      onClose: vi.fn(),
+      onApprove: vi.fn(),
+      onDismiss: vi.fn(),
+      onRetry: vi.fn(),
+      acting: false,
+    }));
+
+    expect(importingHtml).toContain('已批准');
+    expect(importingHtml).toContain('已拒绝');
+    expect(importingHtml).toContain('正在导入');
+    expect(failedHtml).toContain('导入失败');
+    expect(failedHtml).toContain('重试失败的导入');
   });
 });

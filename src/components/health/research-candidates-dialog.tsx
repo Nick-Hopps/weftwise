@@ -2,21 +2,40 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import type { ResearchRunView } from '@/lib/contracts';
+import type {
+  ResearchCandidateDecision,
+  ResearchCandidateIngestStatus,
+  ResearchRunView,
+} from '@/lib/contracts';
+import type { MessageKey } from '@/lib/i18n/messages';
 import { Button } from '@/components/ui/button';
 import { Tag } from '@/components/ui/tag';
 import { useI18n } from '@/components/i18n-provider';
 
-const RUN_STATUS_LABEL: Record<ResearchRunView['status'], string> = {
-  'awaiting-approval': 'Awaiting approval',
-  importing: 'Importing approved candidates',
-  verifying: 'Verifying imported knowledge',
-  completed: 'Research completed',
-  partial: 'Research partially completed',
-  failed: 'Research failed',
-  dismissed: 'Research dismissed',
-  empty: 'No candidates found',
-};
+const RUN_STATUS_MESSAGE = {
+  'awaiting-approval': 'health.researchCandidates.status.awaitingApproval',
+  importing: 'health.researchCandidates.status.importing',
+  verifying: 'health.researchCandidates.status.verifying',
+  completed: 'health.researchCandidates.status.completed',
+  partial: 'health.researchCandidates.status.partial',
+  failed: 'health.researchCandidates.status.failed',
+  dismissed: 'health.researchCandidates.status.dismissed',
+  empty: 'health.researchCandidates.status.empty',
+} satisfies Record<ResearchRunView['status'], MessageKey>;
+
+const CANDIDATE_DECISION_MESSAGE = {
+  approved: 'health.researchCandidates.decision.approved',
+  rejected: 'health.researchCandidates.decision.rejected',
+} satisfies Record<Exclude<ResearchCandidateDecision, 'pending'>, MessageKey>;
+
+const DELIVERY_STATUS_MESSAGE = {
+  pending: 'health.researchCandidates.delivery.pending',
+  fetching: 'health.researchCandidates.delivery.fetching',
+  queued: 'health.researchCandidates.delivery.queued',
+  running: 'health.researchCandidates.delivery.running',
+  completed: 'health.researchCandidates.delivery.completed',
+  failed: 'health.researchCandidates.delivery.failed',
+} satisfies Record<ResearchCandidateIngestStatus, MessageKey>;
 
 export function defaultResearchCandidateIds(run: ResearchRunView): Set<string> {
   return new Set(
@@ -92,9 +111,9 @@ export function ResearchCandidatesDialog({
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="min-w-0">
             <h2 id="research-candidates-title" className="text-sm font-semibold text-foreground">
-              Research candidates ({run.candidates.length})
+              {t('health.researchCandidates.title', { count: run.candidates.length })}
             </h2>
-            <p className="text-xs text-foreground-tertiary">{RUN_STATUS_LABEL[run.status]}</p>
+            <p className="text-xs text-foreground-tertiary">{t(RUN_STATUS_MESSAGE[run.status])}</p>
           </div>
           <button
             type="button"
@@ -110,7 +129,7 @@ export function ResearchCandidatesDialog({
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
           {run.candidates.length === 0 ? (
             <p className="text-sm text-foreground-tertiary italic py-6 text-center">
-              No candidates found
+              {t('health.researchCandidates.status.empty')}
             </p>
           ) : (
             run.candidates.map((candidate) => (
@@ -144,14 +163,14 @@ export function ResearchCandidatesDialog({
                         tone={candidate.score >= 3 ? 'success' : candidate.score >= 2 ? 'neutral' : 'warning'}
                         size="sm"
                       >
-                        score {candidate.score}
+                        {t('health.researchCandidates.score', { score: candidate.score })}
                       </Tag>
                     ) : (
                       <Tag tone="neutral" size="sm">{t('health.unscored')}</Tag>
                     )}
                     {candidate.decision !== 'pending' && (
                       <Tag tone={candidate.decision === 'approved' ? 'success' : 'neutral'} size="sm">
-                        {candidate.decision}
+                        {t(CANDIDATE_DECISION_MESSAGE[candidate.decision])}
                       </Tag>
                     )}
                     {candidate.delivery && (
@@ -161,7 +180,7 @@ export function ResearchCandidatesDialog({
                           : candidate.delivery.status === 'completed' ? 'success' : 'neutral'}
                         size="sm"
                       >
-                        {candidate.delivery.status}
+                        {t(DELIVERY_STATUS_MESSAGE[candidate.delivery.status])}
                       </Tag>
                     )}
                   </div>
@@ -186,16 +205,18 @@ export function ResearchCandidatesDialog({
 
         <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
           <span className="text-xs text-foreground-tertiary">
-            {approvable ? `${selectedIds.length} selected` : RUN_STATUS_LABEL[run.status]}
+            {approvable
+              ? t('health.researchCandidates.selected', { count: selectedIds.length })
+              : t(RUN_STATUS_MESSAGE[run.status])}
           </span>
           <div className="flex items-center gap-2">
             {approvable ? (
               <>
                 <Button intent="secondary" onClick={onDismiss} disabled={acting}>
-                  Dismiss
+                  {t('health.researchCandidates.dismiss')}
                 </Button>
                 <Button intent="secondary" onClick={onClose} disabled={acting}>
-                  Cancel
+                  {t('health.researchCandidates.cancel')}
                 </Button>
                 <Button
                   intent="primary"
@@ -203,14 +224,14 @@ export function ResearchCandidatesDialog({
                   loading={acting}
                   disabled={selectedIds.length === 0}
                 >
-                  Approve {selectedIds.length > 0 ? selectedIds.length : ''}
+                  {t('health.researchCandidates.approve', { count: selectedIds.length })}
                 </Button>
               </>
             ) : (
               <>
                 {researchRunRetryable(run) && (
                   <Button intent="primary" onClick={onRetry} loading={acting}>
-                    Retry failed imports
+                    {t('health.researchCandidates.retryFailedImports')}
                   </Button>
                 )}
                 <Button intent="secondary" onClick={onClose} disabled={acting}>{t('health.close')}</Button>

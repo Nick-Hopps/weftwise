@@ -39,15 +39,8 @@ import { useTagSearchParams } from './use-tag-search-params';
 
 type DirectoryScope = 'all' | 'review';
 
-function formatDate(value: string | null): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
 export function TagsIndexView() {
-  const { t } = useI18n();
+  const { t, formatDate } = useI18n();
   const apiFetch = useApiFetch();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -145,7 +138,7 @@ export function TagsIndexView() {
       const data = await response.json() as { action?: PendingActionView; error?: string };
       if (data.action) setLocalAction(data.action);
       if (!response.ok) {
-        setActionError(data.error ?? 'The tag action could not be updated.');
+        setActionError(data.error ?? t('tags.actionUpdateError'));
         return;
       }
       await queryClient.invalidateQueries({ queryKey: ['tag-actions', subjectId] });
@@ -159,7 +152,7 @@ export function TagsIndexView() {
         router.refresh();
       }
     } catch {
-      setActionError('The tag action could not be updated.');
+      setActionError(t('tags.actionUpdateError'));
     } finally {
       setActionBusy(false);
     }
@@ -265,7 +258,7 @@ export function TagsIndexView() {
             className="mt-2"
             onClick={() => updateQuery('')}
           >
-            Clear search
+            {t('tags.clearSearch')}
           </Button>
         </div>
       ) : scope === 'review' ? (
@@ -297,7 +290,7 @@ export function TagsIndexView() {
                 updateSearchParams({ q: null });
               }}
             >
-              Clear filters
+              {t('tags.clearFilters')}
             </Button>
           ) : undefined}
         />
@@ -333,7 +326,9 @@ export function TagsIndexView() {
                     {Math.round(summary.coverage * 100)}%
                   </span>
                   <time className="hidden text-right text-xs tabular-nums text-foreground-tertiary sm:block" dateTime={summary.updatedAt ?? undefined}>
-                    {formatDate(summary.updatedAt)}
+                    {summary.updatedAt
+                      ? formatDate(summary.updatedAt, { month: 'short', day: 'numeric' })
+                      : '—'}
                   </time>
                   <IconButton
                     size="sm"
@@ -344,8 +339,10 @@ export function TagsIndexView() {
                         ? { suggestedTarget: recommendedTargetBySource.get(summary.tag) }
                         : {}),
                     })}
-                    aria-label={`Manage ${summary.tag}`}
-                    title={actionInProgress ? 'Resolve the current tag action first' : `Manage ${summary.tag}`}
+                    aria-label={t('tags.manage', { tag: summary.tag })}
+                    title={actionInProgress
+                      ? t('tags.resolveCurrentAction')
+                      : t('tags.manage', { tag: summary.tag })}
                   >
                     <MoreHorizontal aria-hidden />
                   </IconButton>
@@ -354,7 +351,7 @@ export function TagsIndexView() {
             })}
           </ul>
           <p className="mt-3 text-xs tabular-nums text-foreground-tertiary">
-            {visibleTags.length} of {summaries.length} tags
+            {t('tags.visibleCount', { visible: visibleTags.length, total: summaries.length })}
           </p>
         </section>
       )}

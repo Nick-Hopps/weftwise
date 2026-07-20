@@ -209,8 +209,8 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
               <IconButton
                 size="sm"
                 onClick={recenter}
-                aria-label={currentSlug ? 'Center on current page' : 'Fit graph to view'}
-                data-tip={currentSlug ? 'Center on current page' : 'Fit to view'}
+                aria-label={currentSlug ? t('graph.centerCurrent') : t('graph.fit')}
+                data-tip={currentSlug ? t('graph.centerCurrent') : t('graph.fitTip')}
                 className="tip tip-l"
               >
                 {currentSlug ? <Target /> : <Compass />}

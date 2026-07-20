@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn';
 import { HtmlSourceFrame } from '@/components/wiki/html-source-frame';
 import type { PageSourceFormat, HtmlSafety } from '@/lib/contracts';
 import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 
 const PROSE_CLASS = cn(
   'text-[15px] leading-7 text-prose-body',
@@ -37,11 +38,11 @@ interface SourceViewerProps {
   sourceUrl?: string;
 }
 
-const FORMAT_LABEL: Record<PageSourceFormat, string> = {
-  pdf: 'PDF',
-  markdown: 'Markdown',
-  html: 'HTML',
-  text: 'Text',
+const FORMAT_LABEL: Record<PageSourceFormat, MessageKey> = {
+  pdf: 'source.format.pdf',
+  markdown: 'source.format.markdown',
+  html: 'source.format.html',
+  text: 'source.format.text',
 };
 
 export function SourceViewer({ id, filename, format, content, htmlSafety, sourceUrl }: SourceViewerProps) {
@@ -70,7 +71,7 @@ export function SourceViewer({ id, filename, format, content, htmlSafety, source
         </span>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="truncate font-mono text-sm font-semibold text-foreground">{filename}</span>
-          <Tag tone="neutral">{sourceUrl ? 'Web' : FORMAT_LABEL[format]}</Tag>
+          <Tag tone="neutral">{sourceUrl ? t('source.web') : t(FORMAT_LABEL[format])}</Tag>
         </div>
         <a
           href={viewUrl}
@@ -101,7 +102,7 @@ export function SourceViewer({ id, filename, format, content, htmlSafety, source
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <pre className="mx-auto max-w-[860px] whitespace-pre-wrap px-6 py-8 font-mono text-[13px] leading-6 text-foreground">
-            {content ?? 'No content available for this source.'}
+            {content ?? t('source.noContent')}
           </pre>
         </div>
       )}

@@ -27,6 +27,7 @@ import { Tag } from '@/components/ui/tag';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/components/i18n-provider';
+import type { MessageKey } from '@/lib/i18n/messages';
 import { findingHref, SEVERITY_TONE } from './lint-findings';
 import { nextDeleteArmed, type ExecutableRemediationAction } from './remediation-ui';
 
@@ -42,24 +43,24 @@ const TYPE_ICON: Record<LintFinding['type'], LucideIcon> = {
   'thin-page': FileMinus,
 };
 
-const TYPE_LABEL: Record<LintFinding['type'], string> = {
-  'broken-link': 'Broken link',
-  orphan: 'Orphan page',
-  'missing-frontmatter': 'Missing frontmatter',
-  'stale-source': 'Stale source',
-  contradiction: 'Contradiction',
-  'missing-crossref': 'Missing cross-reference',
-  'coverage-gap': 'Coverage gap',
-  'orphan-source': 'Orphan source',
-  'thin-page': 'Thin page',
+const TYPE_LABEL: Record<LintFinding['type'], MessageKey> = {
+  'broken-link': 'health.finding.brokenLink',
+  orphan: 'health.finding.orphan',
+  'missing-frontmatter': 'health.finding.missingFrontmatter',
+  'stale-source': 'health.finding.staleSource',
+  contradiction: 'health.finding.contradiction',
+  'missing-crossref': 'health.finding.missingCrossref',
+  'coverage-gap': 'health.finding.coverageGap',
+  'orphan-source': 'health.finding.orphanSource',
+  'thin-page': 'health.finding.thinPage',
 };
 
-const STATUS_LABEL: Record<RemediationStatus, string> = {
-  'awaiting-approval': 'Needs action',
-  queued: 'In progress',
-  fixed: 'Resolved',
-  skipped: 'No change',
-  failed: 'Needs review',
+const STATUS_LABEL: Record<RemediationStatus, MessageKey> = {
+  'awaiting-approval': 'health.remediation.awaitingApproval',
+  queued: 'health.remediation.queued',
+  fixed: 'health.remediation.fixed',
+  skipped: 'health.remediation.skipped',
+  failed: 'health.remediation.failed',
 };
 
 const STATUS_DOT: Record<RemediationStatus, string> = {
@@ -70,21 +71,35 @@ const STATUS_DOT: Record<RemediationStatus, string> = {
   failed: 'bg-danger',
 };
 
-const WORKFLOW_LABEL: Record<RemediationPlan['workflow'], string> = {
-  fix: 'Automatic fix',
-  curate: 'Structure curation',
-  research: 'Guided research',
-  're-ingest': 'Source ingestion',
-  'source-review': 'Source review',
+const WORKFLOW_LABEL: Record<RemediationPlan['workflow'], MessageKey> = {
+  fix: 'health.workflow.fix',
+  curate: 'health.workflow.curate',
+  research: 'health.workflow.research',
+  're-ingest': 'health.workflow.reingest',
+  'source-review': 'health.workflow.sourceReview',
+};
+
+const SEVERITY_LABEL: Record<LintFinding['severity'], MessageKey> = {
+  critical: 'health.severity.critical',
+  warning: 'health.severity.warning',
+  info: 'health.severity.info',
+};
+
+const ACTION_LABEL: Record<RemediationAction['type'], MessageKey> = {
+  fix: 'health.remediationAction.fix',
+  curate: 'health.remediationAction.curate',
+  research: 'health.remediationAction.research',
+  're-ingest': 'health.remediationAction.reingest',
+  'review-source': 'health.remediationAction.reviewSource',
 };
 
 const NO_ACTING_ACTIONS = new Set<ExecutableRemediationAction>();
 
-export function remediationStatusLabel(status: RemediationStatus): string {
+export function remediationStatusLabel(status: RemediationStatus): MessageKey {
   return STATUS_LABEL[status];
 }
 
-export function findingTypeLabel(type: LintFinding['type']): string {
+export function findingTypeLabel(type: LintFinding['type']): MessageKey {
   return TYPE_LABEL[type];
 }
 
@@ -134,10 +149,10 @@ export function FindingRow({
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <Tag tone={SEVERITY_TONE[finding.severity]} size="sm">
-                {finding.severity}
+                {t(SEVERITY_LABEL[finding.severity])}
               </Tag>
               <span className="text-xs font-medium text-foreground-secondary">
-                {TYPE_LABEL[finding.type]}
+                {t(TYPE_LABEL[finding.type])}
               </span>
               {showSubject && (
                 <span className="text-xs text-foreground-tertiary">{finding.subjectSlug}</span>
@@ -178,10 +193,10 @@ export function FindingRow({
               <>
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
                   <span className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[plan.status])} />
-                  {STATUS_LABEL[plan.status]}
+                  {t(STATUS_LABEL[plan.status])}
                 </span>
                 <span className="mt-0.5 block text-xs text-foreground-tertiary">
-                  {WORKFLOW_LABEL[plan.workflow]}
+                  {t(WORKFLOW_LABEL[plan.workflow])}
                 </span>
               </>
             ) : (
@@ -208,7 +223,7 @@ export function FindingRow({
                     deleting && 'pointer-events-none opacity-50',
                   )}
                 >
-                  {item.label}
+                  {t(ACTION_LABEL[item.type])}
                 </Link>
               ) : (
                 <Button
@@ -225,7 +240,7 @@ export function FindingRow({
                     onAction?.(item);
                   }}
                 >
-                  {item.label}
+                  {t(ACTION_LABEL[item.type])}
                 </Button>
               ),
             )}
@@ -270,7 +285,7 @@ export function FindingRow({
 
       {!plan && (
         <p className="border-t border-border-subtle bg-canvas/60 px-4 py-2 pl-16 text-xs text-foreground-tertiary">
-          Re-run the health check before choosing a remediation.
+          {t('health.rerunBeforeRemediation')}
         </p>
       )}
 
@@ -291,7 +306,7 @@ export function FindingRow({
             }}
           >
             <Trash2 className="h-3 w-3" aria-hidden />
-            {deleteArmed ? 'Confirm delete' : 'Delete source'}
+            {deleteArmed ? t('health.confirmDelete') : t('health.deleteSource')}
           </Button>
         </div>
       )}

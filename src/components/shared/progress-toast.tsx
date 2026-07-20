@@ -73,7 +73,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
 
   if (!mounted || !jobId) return null;
 
-  const jobType = jobActivityTitle(events);
+  const jobTypeKey = jobActivityTitle(events);
   const files = extractFiles(events);
   const latestTool = latestToolName(events);
   const isFinished = status === 'completed' || status === 'failed';
@@ -118,7 +118,7 @@ export function ProgressToast({ jobId, onClose }: ProgressToastProps) {
           <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
             <StatusIcon status={status} />
             <span className="flex-1 text-sm font-medium text-foreground">
-              {jobType}
+              {t(jobTypeKey)}
               {status === 'completed' && ` — ${t('jobs.done')}`}
               {status === 'failed' && ` — ${wasCancelled ? t('jobs.cancelled') : t('jobs.failed')}`}
             </span>

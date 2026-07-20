@@ -42,6 +42,8 @@ interface SourceItem {
   description?: string;
 }
 
+const UNCATEGORIZED_GROUP = '__uncategorized__';
+
 function isMetaPage(page: PageItem): boolean {
   return (page.tags ?? []).includes('meta');
 }
@@ -63,11 +65,10 @@ function groupKeyFor(page: PageItem): string {
   if (path.includes('/')) return path.split('/')[0];
   const slug = page.slug ?? '';
   if (slug.includes('/')) return slug.split('/')[0];
-  return 'Uncategorized';
+  return UNCATEGORIZED_GROUP;
 }
 
 function formatGroupName(raw: string): string {
-  if (!raw) return 'Uncategorized';
   return raw.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -204,6 +205,9 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
           <div className="px-2 space-y-2">
             {groups.map(([groupKey, items]) => {
               const collapsed = collapsedGroups[groupKey] === true;
+              const groupName = groupKey === UNCATEGORIZED_GROUP
+                ? t('nav.uncategorized')
+                : formatGroupName(groupKey);
               return (
                 <div key={groupKey}>
                   <button
@@ -216,14 +220,14 @@ export function Sidebar({ onNavigate }: SidebarProps = {}) {
                       <ChevronDown
                         className={cn('h-3 w-3 transition-transform', collapsed && '-rotate-90')}
                       />
-                      {groupKey === 'Uncategorized' ? t('nav.uncategorized') : formatGroupName(groupKey)}
+                      {groupName}
                     </span>
                     <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
                       {items.length}
                     </span>
                   </button>
                   {!collapsed && (
-                    <nav aria-label={t('nav.groupPages', { group: groupKey })} className="mt-0.5">
+                    <nav aria-label={t('nav.groupPages', { group: groupName })} className="mt-0.5">
                       {items.map((page) => (
                         <Link
                           key={page.slug}

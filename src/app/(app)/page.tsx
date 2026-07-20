@@ -14,17 +14,14 @@ import { Tag } from '@/components/ui/tag';
 import type { Subject } from '@/lib/contracts';
 import { ArrowUpRight, BookOpenText, Database, Link2 } from 'lucide-react';
 import { getServerI18n } from '@/lib/i18n/server';
+import { GraphLoadingState } from '@/components/graph/empty-graph-state';
 
 const SUBJECT_COOKIE = 'wiki_subject';
 
 const MiniGraphView = dynamic(
   () => import('@/components/graph/mini-graph-view').then((m) => ({ default: m.MiniGraphView })),
   {
-    loading: () => (
-      <div className="w-full h-full rounded-md border border-border bg-canvas flex items-center justify-center text-xs text-foreground-tertiary">
-        Loading graph…
-      </div>
-    ),
+    loading: () => <GraphLoadingState />,
   },
 );
 
@@ -74,7 +71,7 @@ function getStats(subjectId: string) {
 }
 
 export default async function DashboardPage() {
-  const { t } = await getServerI18n();
+  const { t, formatDate } = await getServerI18n();
   const subject = await resolveActiveSubject();
   const stats = getStats(subject.id);
   const recentPages = getRecentPages(subject.id);
@@ -155,7 +152,7 @@ export default async function DashboardPage() {
       <section aria-labelledby="wiki-graph-heading">
         <div className="flex items-center justify-between mb-2">
           <SectionLabel id="wiki-graph-heading">
-            Wiki Graph — <span className="font-mono normal-case">{subject.slug}</span>
+            {t('graph.title')} — <span className="font-mono normal-case">{subject.slug}</span>
           </SectionLabel>
         </div>
         <div className="h-80 overflow-hidden rounded-md border border-border bg-canvas shadow-xs">
@@ -186,15 +183,4 @@ function DashboardStat({
       </dd>
     </div>
   );
-}
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return iso;
-  }
 }

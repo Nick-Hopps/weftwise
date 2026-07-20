@@ -176,7 +176,7 @@ export function ArticleToc({
         <nav aria-label={t('wiki.toc.label')} className="sticky top-7 max-h-[calc(100vh-7rem)] overflow-y-auto pr-2">
           <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground-tertiary">
             <ListTree className="h-3.5 w-3.5" aria-hidden />
-            On this page
+            {t('wiki.toc.onThisPage')}
           </div>
           <TocLinks headings={headings} activeId={activeId} onNavigate={navigate} />
         </nav>
