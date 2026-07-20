@@ -404,6 +404,26 @@ export const researchApprovals = sqliteTable(
   }),
 );
 
+export const researchApprovalAttempts = sqliteTable(
+  'research_approval_attempts',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => researchRuns.id, { onDelete: 'cascade' }),
+    approvalId: text('approval_id').notNull(),
+    approvalJson: text('approval_json').notNull(),
+    deliveriesJson: text('deliveries_json').notNull(),
+    archivedAt: text('archived_at').notNull(),
+  },
+  (t) => ({
+    runApprovalUnique: uniqueIndex('research_approval_attempts_run_approval_unique')
+      .on(t.runId, t.approvalId),
+    runArchivedIdx: index('research_approval_attempts_run_archived_idx')
+      .on(t.runId, t.archivedAt),
+  }),
+);
+
 export const researchCandidates = sqliteTable(
   'research_candidates',
   {

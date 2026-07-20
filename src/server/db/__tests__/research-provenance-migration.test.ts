@@ -52,7 +52,7 @@ function insertRun(
 }
 
 describe('Research provenance schema', () => {
-  it('创建五张 provenance 表与 Subject maintenance 字段', async () => {
+  it('创建 provenance 表、审批尝试归档与 Subject maintenance 字段', async () => {
     const db = await database();
     const tables = db.prepare(`
       SELECT name FROM sqlite_master
@@ -64,6 +64,7 @@ describe('Research provenance schema', () => {
       'research_run_findings',
       'research_candidates',
       'research_approvals',
+      'research_approval_attempts',
       'research_candidate_ingests',
     ]));
 

@@ -641,6 +641,15 @@ function migrateResearchProvenance(): void {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS research_approval_attempts (
+      id TEXT PRIMARY KEY NOT NULL,
+      run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE CASCADE,
+      approval_id TEXT NOT NULL,
+      approval_json TEXT NOT NULL,
+      deliveries_json TEXT NOT NULL,
+      archived_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS research_candidates (
       id TEXT PRIMARY KEY NOT NULL,
       run_id TEXT NOT NULL REFERENCES research_runs(id) ON DELETE CASCADE,
@@ -878,6 +887,10 @@ function ensureIndexes(): void {
       ON research_approvals(id, run_id);
     CREATE UNIQUE INDEX IF NOT EXISTS research_approvals_run_idempotency_unique
       ON research_approvals(run_id, idempotency_key);
+    CREATE UNIQUE INDEX IF NOT EXISTS research_approval_attempts_run_approval_unique
+      ON research_approval_attempts(run_id, approval_id);
+    CREATE INDEX IF NOT EXISTS research_approval_attempts_run_archived_idx
+      ON research_approval_attempts(run_id, archived_at);
     CREATE UNIQUE INDEX IF NOT EXISTS research_candidates_run_url_unique
       ON research_candidates(run_id, normalized_url);
     CREATE UNIQUE INDEX IF NOT EXISTS research_candidates_id_run_unique

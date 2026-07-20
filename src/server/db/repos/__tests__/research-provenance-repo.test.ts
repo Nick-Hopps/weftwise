@@ -482,6 +482,7 @@ describe('research-provenance-repo delivery 租约', () => {
     const context = await setup();
     const candidates = context.provenance.prepareResearchCandidates([
       { url: 'https://example.com/a', title: 'A', snippet: 'a', score: 3, reason: null },
+      { url: 'https://example.com/b', title: 'B', snippet: 'b', score: 2, reason: null },
     ]);
     const stored = context.repo.persistResearchRun({
       subjectId: 's1', researchJobId: 'research-delivery', origin: 'topic', lintJobId: null,
@@ -642,6 +643,7 @@ describe('research-provenance-repo failed run 导入重试', () => {
     const context = await setup();
     const candidates = context.provenance.prepareResearchCandidates([
       { url: 'https://example.com/a', title: 'A', snippet: 'a', score: 3, reason: null },
+      { url: 'https://example.com/b', title: 'B', snippet: 'b', score: 2, reason: null },
     ]);
     const stored = context.repo.persistResearchRun({
       subjectId: 's1', researchJobId: 'research-retry', origin: 'topic', lintJobId: null,
@@ -675,6 +677,101 @@ describe('research-provenance-repo failed run 导入重试', () => {
     )).toBe(true);
     return { ...context, runId: stored.run.id, approvalId, candidateId };
   }
+
+  it('归档失败审批后解冻候选，并允许同一 run 重新批准其他候选', async () => {
+    const { repo, sqlite, runId, approvalId } = await createFailedTopicRun();
+    const before = repo.findResearchRunById(runId, 's1')!;
+    const replacementCandidateId = before.candidates[1]!.id;
+
+    const reopened = repo.reselectResearchRunAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+      now: new Date('2026-07-14T02:00:00.000Z'),
+    });
+
+    expect(reopened.run).toMatchObject({
+      status: 'awaiting-approval',
+      version: before.run.version + 1,
+      completedAt: null,
+      errorJson: null,
+    });
+    expect(reopened.approval).toBeNull();
+    expect(reopened.deliveries).toEqual([]);
+    expect(reopened.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ decision: 'pending', approvalId: null, decidedAt: null }),
+    ]));
+    expect(reopened.candidates.every((candidate) => candidate.decision === 'pending')).toBe(true);
+
+    const archived = sqlite.prepare(`
+      SELECT approval_id, approval_json, deliveries_json, archived_at
+      FROM research_approval_attempts WHERE run_id = ?
+    `).get(runId) as {
+      approval_id: string;
+      approval_json: string;
+      deliveries_json: string;
+      archived_at: string;
+    };
+    expect(archived.approval_id).toBe(approvalId);
+    expect(JSON.parse(archived.approval_json)).toMatchObject({ id: approvalId, runId });
+    expect(JSON.parse(archived.deliveries_json)).toEqual([
+      expect.objectContaining({ approvalId, status: 'failed' }),
+    ]);
+    expect(archived.archived_at).toBe('2026-07-14T02:00:00.000Z');
+
+    const approved = repo.approveResearchRunAtomic({
+      runId,
+      subjectId: 's1',
+      candidateIds: [replacementCandidateId],
+      expectedVersion: reopened.run.version,
+      idempotencyKey: 'approve-replacement',
+    });
+    expect(approved.stored.approval).toMatchObject({
+      selectedCandidateIdsJson: JSON.stringify([replacementCandidateId]),
+    });
+    expect(approved.stored.approval!.id).not.toBe(approvalId);
+    expect(approved.stored.deliveries).toEqual([
+      expect.objectContaining({ candidateId: replacementCandidateId, status: 'pending' }),
+    ]);
+  });
+
+  it('版本陈旧、verification 后失败或仍有非终态 delivery 时拒绝重新选择', async () => {
+    const { repo, sqlite, runId } = await createFailedTopicRun();
+    const before = repo.findResearchRunById(runId, 's1')!;
+
+    expect(() => repo.reselectResearchRunAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version + 1,
+    })).toThrow(/stale/);
+    expect(() => repo.reselectResearchRunAtomic({
+      runId: 'missing',
+      subjectId: 's1',
+      expectedVersion: 1,
+    })).toThrow(/not found/);
+
+    sqlite.prepare("UPDATE research_runs SET verification_lint_job_id = 'lint-x' WHERE id = ?").run(runId);
+    expect(() => repo.reselectResearchRunAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+    })).toThrow(/verification/);
+    sqlite.prepare('UPDATE research_runs SET verification_lint_job_id = NULL WHERE id = ?').run(runId);
+
+    sqlite.prepare("UPDATE research_candidate_ingests SET status = 'running' WHERE run_id = ?").run(runId);
+    expect(() => repo.reselectResearchRunAtomic({
+      runId,
+      subjectId: 's1',
+      expectedVersion: before.run.version,
+    })).toThrow(/terminal/);
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM research_approval_attempts WHERE run_id = ?
+    `).get(runId)).toEqual({ count: 0 });
+    expect(repo.findResearchRunById(runId, 's1')!.run).toMatchObject({
+      status: 'failed',
+      version: before.run.version,
+    });
+  });
 
   async function createFailedChildTopicRun() {
     const context = await setup();
