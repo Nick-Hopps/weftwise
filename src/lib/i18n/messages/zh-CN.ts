@@ -779,6 +779,8 @@ export const zhCN = {
   'health.error.snapshotChanged': '健康检查结果已更新，请重新确认后再继续。',
   'health.error.remediationStatus': '处置请求失败（{status}）。',
   'health.error.remediationRetry': '处置请求失败，请重试。',
+  'health.error.cancelStatus': '停止请求失败（{status}）。',
+  'health.error.cancelRetry': '停止请求失败，请重试。',
   'health.error.deleteSource': '删除来源失败，请重试。',
   'health.error.sourceInFlight': '来源的采集任务仍在运行，无法删除。',
   'health.error.sourceReferenced': '该来源现已被页面引用，无法删除。',

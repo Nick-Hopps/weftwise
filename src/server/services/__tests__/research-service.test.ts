@@ -6,6 +6,7 @@ vi.mock('@/server/jobs/worker', () => ({ registerHandler: vi.fn() }));
 const queueMock = vi.hoisted(() => ({
   get: vi.fn(() => null as Job | null),
   list: vi.fn(() => [] as Job[]),
+  isCancelRequested: vi.fn(() => false),
 }));
 vi.mock('@/server/jobs/queue', () => queueMock);
 
@@ -30,6 +31,7 @@ const provenanceRepoMock = vi.hoisted(() => ({
 vi.mock('@/server/db/repos/research-provenance-repo', () => provenanceRepoMock);
 
 import { findingId } from '../finding-identity';
+import { AgentCancelled } from '../../agents/runtime/errors';
 import { runResearchJob } from '../research-service';
 import {
   ResearchScopeError,
@@ -303,6 +305,8 @@ describe('runResearchJob', () => {
     queueMock.get.mockReturnValue(lintJob());
     queueMock.list.mockReset();
     queueMock.list.mockReturnValue([]);
+    queueMock.isCancelRequested.mockReset();
+    queueMock.isCancelRequested.mockReturnValue(false);
     provenanceRepoMock.findResearchRunByJobId.mockReset();
     provenanceRepoMock.findResearchRunByJobId.mockReturnValue(null);
     provenanceRepoMock.persistResearchRun.mockReset();
@@ -335,6 +339,41 @@ describe('runResearchJob', () => {
     })]);
     expect(result.topics).toEqual(['Rust async runtimes']);
     expect(emit).toHaveBeenCalledWith('research:complete', expect.any(String), expect.any(Object));
+  });
+
+  it('query、搜索与 triage 共用同一个 job abort signal', async () => {
+    genMock.generateStructuredOutput
+      .mockResolvedValueOnce({ queries: ['cancel propagation'] })
+      .mockResolvedValueOnce({ results: [] });
+    searchMock.webSearch.mockResolvedValueOnce([
+      { title: 'A', url: 'https://a.com', snippet: 'a' },
+    ]);
+
+    await runResearchJob(researchJob({ topic: 'x' }), vi.fn());
+
+    const querySignal = genMock.generateStructuredOutput.mock.calls[0][5]?.abortSignal;
+    const triageSignal = genMock.generateStructuredOutput.mock.calls[1][5]?.abortSignal;
+    expect(querySignal).toBeInstanceOf(AbortSignal);
+    expect(triageSignal).toBe(querySignal);
+    expect(searchMock.webSearch).toHaveBeenCalledWith('cancel propagation', querySignal);
+  });
+
+  it('triage 后收到取消时抛 AgentCancelled，且不持久化 Research run', async () => {
+    let cancelled = false;
+    queueMock.isCancelRequested.mockImplementation(() => cancelled);
+    genMock.generateStructuredOutput
+      .mockResolvedValueOnce({ queries: ['cancel before persist'] })
+      .mockImplementationOnce(async () => {
+        cancelled = true;
+        return { results: [] };
+      });
+    searchMock.webSearch.mockResolvedValueOnce([
+      { title: 'A', url: 'https://a.com', snippet: 'a' },
+    ]);
+
+    await expect(runResearchJob(researchJob({ topic: 'x' }), vi.fn()))
+      .rejects.toBeInstanceOf(AgentCancelled);
+    expect(provenanceRepoMock.persistResearchRun).not.toHaveBeenCalled();
   });
 
   it('findingIds 分支使用指定快照并接受一致的规范化处置上下文', async () => {

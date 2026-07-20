@@ -7,10 +7,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  */
 
 const mocks = vi.hoisted(() => ({
+  generateObject: vi.fn(),
   generateText: vi.fn(),
   resolveTask: vi.fn(() => ({
     task: 'curate',
     logLabel: 'test-model',
+    provider: { provider: 'openai' },
     timeoutMs: 60_000,
     maxTokens: 1000,
     temperature: 0,
@@ -28,8 +30,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('ai', () => ({
   embedMany: vi.fn(),
-  generateObject: vi.fn(),
+  generateObject: mocks.generateObject,
   generateText: mocks.generateText,
+  NoObjectGeneratedError: { isInstance: () => false },
   streamText: vi.fn(),
   stepCountIs: (n: number) => ({ stepCount: n }),
 }));
@@ -43,12 +46,13 @@ vi.mock('../provider-factory', () => ({
   getEmbeddingModel: vi.fn(),
 }));
 
-import { generateTextWithTools } from '../provider-registry';
+import { generateStructuredOutput, generateTextWithTools } from '../provider-registry';
 import { AgentCancelled } from '../../agents/runtime/agent-loop';
 
 describe('generateTextWithTools — shouldCancel 轮询', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    mocks.generateObject.mockReset();
     mocks.generateText.mockReset();
     mocks.resolveTask.mockClear();
     mocks.getLanguageModel.mockClear();
@@ -148,5 +152,34 @@ describe('generateTextWithTools — shouldCancel 轮询', () => {
     expect(result).toEqual({ text: 'ok' });
     expect(setIntervalSpy).not.toHaveBeenCalled();
     setIntervalSpy.mockRestore();
+  });
+
+  it('generateStructuredOutput 响应调用方 abortSignal', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let rejectGeneration: ((error: Error) => void) | undefined;
+    mocks.generateObject.mockImplementation((opts: { abortSignal: AbortSignal }) => {
+      capturedSignal = opts.abortSignal;
+      return new Promise((_resolve, reject) => {
+        rejectGeneration = reject;
+      });
+    });
+
+    const controller = new AbortController();
+    const promise = generateStructuredOutput(
+      'research:queries',
+      {} as never,
+      'system',
+      'user',
+      {},
+      { abortSignal: controller.signal },
+    );
+    expect(capturedSignal?.aborted).toBe(false);
+    controller.abort();
+    const signalWasAborted = capturedSignal?.aborted;
+    const error = new Error('external abort');
+    error.name = 'AbortError';
+    rejectGeneration?.(error);
+    await expect(promise).rejects.toBe(error);
+    expect(signalWasAborted).toBe(true);
   });
 });

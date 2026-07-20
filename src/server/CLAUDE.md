@@ -53,12 +53,12 @@ Route Handler / Worker Handler
 | `wiki/wikilinks` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink` |
 | `wiki/indexer` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex`（写 pages + wiki_links + FTS） |
 | `wiki/page-identity` | `parseWikiPath / wikiPathFor(subjectSlug, slug) / normalizeSlug / GENERAL_SUBJECT_SLUG` |
-| `llm/provider-registry` | `generateStructuredOutput / streamTextResponse / generateEmbeddings / isEmbeddingConfigured / embeddingModelId`（⑧） |
+| `llm/provider-registry` | `generateStructuredOutput / streamTextResponse / generateEmbeddings / isEmbeddingConfigured / embeddingModelId`（⑧；结构化输出可选 caller AbortSignal，并与 route timeout 合并） |
 | `llm/task-router` | `resolveTask`（合并 defaults / task / override） |
 | `search/vector-math` | `encodeVector / decodeVector / cosineSimilarity / rrfMerge`（⑧ 向量纯函数） |
 | `search/semantic-search` | `semanticSearch(query, subjectId, model)`（⑧ 向量 topK cosine） |
 | `search/hybrid-retrieval` | `hybridRankSlugs(query, subjectId)`（⑧ FTS + 向量 RRF；未配置回落纯 FTS） |
-| `search/web-search` | `isWebSearchConfigured() / webSearch(query) / extractContent(urls)`（⑨ Tavily HTTP search+extract；配置经 `settings-repo::getWebSearchConfig` 实时读 `app_settings`；未配置抛 `LLMConfigError`） |
+| `search/web-search` | `isWebSearchConfigured() / webSearch(query, abortSignal?) / extractContent(urls)`（⑨ Tavily HTTP search+extract；search 可把调用方取消与 8s timeout 合并；配置经 `settings-repo::getWebSearchConfig` 实时读 `app_settings`；未配置抛 `LLMConfigError`） |
 | `db/client` | `getDb / getRawDb`（启动时自迁移 legacy schema → subject-aware） |
 | `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo / embeddingsRepo` 的 CRUD + FTS search（全部要求 `subjectId`）|
 | `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead / getFileAtCommit / getDiff / getVaultLog / parseGitLog` |
@@ -128,6 +128,7 @@ src/server/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `generateStructuredOutput` 与 `webSearch` 新增可选外部 AbortSignal，并分别与任务 route timeout、Tavily 8 秒 timeout 合并；所有退出路径清理 listener，供 Research 手动中断复用 |
 | 2026-07-17 | 新增 `subjects/` 模块：`subject-archive-core.ts`（manifest 契约 + zip entry 路径安全校验，纯函数）与 `subject-archive.ts`（导出 zip / 导入落盘 + `indexTouchedPages` + 侧车恢复 sources/page_sources + git commit，失败清理回滚）；DB 可再生数据不进归档，与 rebuild 口径一致 |
 | 2026-07-17 | Worker 注册 `image-insert-service`：批准后生图，页面引用与 base64 asset 同一 Saga；生图前后稳定 HEAD/锚点复核、取消 rollback 与 applied operation 幂等恢复 |
 | 2026-04-22 | 初始化：梳理后端分层与交叉引用 |

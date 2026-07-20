@@ -90,6 +90,8 @@ export interface StructuredOutputOptions {
   schemaRetries?: number;
   /** Usage 项目归因；已知 Subject 的调用必须传入。 */
   usageSubjectId?: string;
+  /** 调用方生命周期取消；与 task route timeout 共同终止当前 generateObject。 */
+  abortSignal?: AbortSignal;
 }
 
 function schemaRetrySystemPrompt(systemPrompt: string, detail: string | undefined): string {
@@ -118,6 +120,9 @@ export async function generateStructuredOutput<T>(
   const prefix = `[LLM][Task: ${route.task}][Model: ${route.logLabel}]`;
 
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(options.abortSignal?.reason);
+  if (options.abortSignal?.aborted) abortFromCaller();
+  else options.abortSignal?.addEventListener('abort', abortFromCaller, { once: true });
   const timeoutId = setTimeout(() => {
     console.error(`${prefix} abort: timeout reached after ${route.timeoutMs}ms`);
     controller.abort();
@@ -189,6 +194,7 @@ export async function generateStructuredOutput<T>(
     throw err;
   } finally {
     clearTimeout(timeoutId);
+    options.abortSignal?.removeEventListener('abort', abortFromCaller);
   }
 }
 

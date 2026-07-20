@@ -17,7 +17,10 @@ export function isWebSearchConfigured(): boolean {
 }
 
 /** Tavily search：返回 LLM-接地用的轻量结果（title/url/snippet）。 */
-export async function webSearch(query: string): Promise<WebSearchResult[]> {
+export async function webSearch(
+  query: string,
+  abortSignal?: AbortSignal,
+): Promise<WebSearchResult[]> {
   const cfg = getWebSearchConfig();
   if (!cfg.apiKey.trim()) {
     throw new LLMConfigError('Web search is not configured (empty apiKey)');
@@ -27,7 +30,7 @@ export async function webSearch(query: string): Promise<WebSearchResult[]> {
     query,
     max_results: cfg.maxResults,
     search_depth: 'basic',
-  })) as { results?: Array<Record<string, unknown>> };
+  }, abortSignal)) as { results?: Array<Record<string, unknown>> };
 
   const rows = Array.isArray(res?.results) ? res.results : [];
   return rows
@@ -62,8 +65,15 @@ export async function extractContent(
     .filter((r) => r.url.length > 0 && r.content.length > 0);
 }
 
-async function fetchJson(url: string, body: unknown): Promise<unknown> {
+async function fetchJson(
+  url: string,
+  body: unknown,
+  abortSignal?: AbortSignal,
+): Promise<unknown> {
   const ctrl = new AbortController();
+  const abortFromCaller = () => ctrl.abort(abortSignal?.reason);
+  if (abortSignal?.aborted) abortFromCaller();
+  else abortSignal?.addEventListener('abort', abortFromCaller, { once: true });
   const timer = setTimeout(() => ctrl.abort(), SEARCH_TIMEOUT_MS);
   try {
     const resp = await fetch(url, {
@@ -76,5 +86,6 @@ async function fetchJson(url: string, body: unknown): Promise<unknown> {
     return await resp.json();
   } finally {
     clearTimeout(timer);
+    abortSignal?.removeEventListener('abort', abortFromCaller);
   }
 }
