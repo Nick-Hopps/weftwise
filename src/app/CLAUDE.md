@@ -47,6 +47,7 @@
 | `/api/research` | POST | 入队 `research` 任务（缺口/薄页/主题→联网研究候选快照，只发现不写入）；body 二选一 `{ findingIds, lintJobId, subjectId }` 或 `{ topic, subjectId }`；完成后持久化 run/candidate/finding evidence，job result 只用 `runId` 定位；旧 `gapIds` 400，web search 未配置 422 |
 | `/api/research-runs/[id]` | GET | 按 required subject 读取脱敏 `ResearchRunView`；包含稳定 candidate ID、批准、逐 candidate delivery lineage 与逐 finding 验证结果，跨 subject/不存在统一 404 |
 | `/api/research-runs/[id]/approve` | POST | 只接受 `{ candidateIds, expectedVersion, idempotencyKey, subjectId }`；candidate ID 必须为稳定 64 位 hex，服务端回读 URL 快照；原子 CAS 批准并创建唯一 `research-import` coordinator，首次 202、幂等 replay 200 |
+| `/api/research-runs/[id]/reselect` | POST | 导入阶段失败且尚未 verification 的 run 可携带 `{ expectedVersion, subjectId }` 回到候选选择；事务内归档失败审批/delivery、解冻原候选并 CAS 回 `awaiting-approval`，不重新搜索或接受客户端 URL |
 | `/api/research-runs/[id]/dismiss` | POST | 显式忽略仍为 awaiting-approval 的 run；普通 UI 关闭不会调用；写请求要求 auth + CSRF + required subject |
 | `/api/research-backlog` | GET | 🆕 T3.2：列出当前 subject 待研究问题队列（`?status=open\|researched\|dismissed` 过滤，缺省返回全部） |
 | `/api/research-backlog/[id]` | PATCH | 🆕 T3.2：更新一条待研究问题状态（`{ status, researchJobId? }`）；跨 subject/不存在 → 404 |
