@@ -627,7 +627,8 @@
   top: 21px;
   left: 0;
 }
-.callout-diagram > p:first-child {
+/* 图标 span 会被前置为容器首子元素，因此图注/图注尾注按 p 的 of-type 计数定位 */
+.callout-diagram > p:first-of-type {
   margin: 0 0 10px !important;
   color: rgb(var(--color-fg-secondary));
   font-size: 13px;
@@ -635,7 +636,7 @@
   line-height: 20px;
   padding-left: 24px;
 }
-.callout-diagram > p:last-child:not(:first-child) {
+.callout-diagram > p:last-of-type:not(:first-of-type) {
   margin: 12px 0 0 !important;
   padding-top: 12px;
   border-top: 1px solid rgb(var(--color-border-subtle));
