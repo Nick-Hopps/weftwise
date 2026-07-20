@@ -107,6 +107,10 @@ export interface RetryResearchRunServiceResult {
   coordinatorJobId: string;
 }
 
+export interface ReselectResearchRunServiceResult {
+  run: ResearchRunView;
+}
+
 export interface RetryResearchIngestJobServiceInput {
   runId: string;
   subjectId: string;
@@ -144,6 +148,21 @@ export function retryResearchRunImport(
     return {
       run: mapStoredResearchRunToView(result.stored),
       coordinatorJobId: result.coordinatorJobId,
+    };
+  } catch (error) {
+    throw mapApprovalError(error, input.runId, input.subjectId);
+  }
+}
+
+/** failed run 的候选重选：归档旧审批后回到 awaiting-approval。 */
+export function reselectResearchRun(
+  input: RetryResearchRunServiceInput,
+): ReselectResearchRunServiceResult {
+  try {
+    return {
+      run: mapStoredResearchRunToView(
+        researchRepo.reselectResearchRunAtomic(input),
+      ),
     };
   } catch (error) {
     throw mapApprovalError(error, input.runId, input.subjectId);

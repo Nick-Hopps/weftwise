@@ -84,6 +84,13 @@ export interface ApproveResearchRunResult {
   replayed: boolean;
 }
 
+export interface ReselectResearchRunInput {
+  runId: string;
+  subjectId: SubjectId;
+  expectedVersion: number;
+  now?: Date;
+}
+
 export interface ClaimResearchDeliveryInput {
   approvalId: string;
   candidateId: string;
@@ -776,7 +783,14 @@ export function finalizeTopicResearchRunAtomic(runId: string, now = new Date()):
       SET status = ?, version = version + 1, updated_at = ?, completed_at = ?
       WHERE id = ? AND status = 'importing' AND origin = 'topic'
     `).run(status, nowIso, nowIso, runId);
-    return update.changes === 1;
+    if (update.changes !== 1) return false;
+    sqlite.prepare(`
+      UPDATE research_backlog SET status = ?
+      WHERE research_job_id = (
+        SELECT research_job_id FROM research_runs WHERE id = ?
+      ) AND status IN ('open', 'researched')
+    `).run(status === 'failed' ? 'open' : 'researched', runId);
+    return true;
   });
   return transaction.immediate();
 }
@@ -1065,6 +1079,118 @@ export function retryResearchRunImportAtomic(
     const latest = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
     if (!latest) throw new Error('Failed to reload retried Research run');
     return { stored: latest, coordinatorJobId };
+  });
+  return transaction.immediate();
+}
+
+/**
+ * 导入失败后把活跃审批完整归档，再将同一候选快照解冻回待批准状态。
+ * 归档、解冻、旧 delivery 清理与 run CAS 必须处于同一 IMMEDIATE transaction。
+ */
+export function reselectResearchRunAtomic(
+  input: ReselectResearchRunInput,
+): StoredResearchRun {
+  if (!Number.isInteger(input.expectedVersion) || input.expectedVersion < 1) {
+    throw new ResearchProvenanceRepoError(
+      'run-stale',
+      'Research reselect expectedVersion must be a positive integer',
+    );
+  }
+
+  const sqlite = getRawDb();
+  const transaction = sqlite.transaction((): StoredResearchRun => {
+    const stored = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
+    if (!stored) {
+      throw new ResearchProvenanceRepoError('run-not-found', 'Research run not found');
+    }
+    if (stored.run.version !== input.expectedVersion) {
+      throw new ResearchProvenanceRepoError('run-stale', 'Research run version is stale');
+    }
+    if (stored.run.status !== 'failed') {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run is not in a reselectable state',
+      );
+    }
+    if (
+      stored.run.verificationLintJobId !== null
+      || stored.findings.some((finding) => finding.verificationStatus !== 'pending')
+    ) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run failed after verification and cannot reselect candidates',
+      );
+    }
+    if (!stored.approval || stored.deliveries.length === 0) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run has no failed candidate imports to reselect',
+      );
+    }
+    if (stored.deliveries.some(
+      (delivery) => delivery.status !== 'completed' && delivery.status !== 'failed',
+    )) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research candidate imports must be terminal before reselection',
+      );
+    }
+    if (!stored.deliveries.some((delivery) => delivery.status === 'failed')) {
+      throw new ResearchProvenanceRepoError(
+        'run-not-retryable',
+        'Research run has no failed candidate imports to reselect',
+      );
+    }
+
+    const nowIso = (input.now ?? new Date()).toISOString();
+    sqlite.prepare(`
+      INSERT INTO research_approval_attempts (
+        id, run_id, approval_id, approval_json, deliveries_json, archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      input.runId,
+      stored.approval.id,
+      JSON.stringify(stored.approval),
+      JSON.stringify(stored.deliveries),
+      nowIso,
+    );
+
+    const candidatesUpdate = sqlite.prepare(`
+      UPDATE research_candidates
+      SET decision = 'pending', approval_id = NULL, decided_at = NULL
+      WHERE run_id = ? AND approval_id = ?
+    `).run(input.runId, stored.approval.id);
+    if (candidatesUpdate.changes !== stored.candidates.length) {
+      throw new ResearchProvenanceRepoError(
+        'run-stale',
+        'Research candidate decisions changed concurrently',
+      );
+    }
+
+    const approvalDelete = sqlite.prepare(`
+      DELETE FROM research_approvals WHERE id = ? AND run_id = ?
+    `).run(stored.approval.id, input.runId);
+    if (approvalDelete.changes !== 1) {
+      throw new ResearchProvenanceRepoError(
+        'run-stale',
+        'Research approval changed concurrently',
+      );
+    }
+
+    const runUpdate = sqlite.prepare(`
+      UPDATE research_runs
+      SET status = 'awaiting-approval', version = version + 1, updated_at = ?,
+          completed_at = NULL, error_json = NULL
+      WHERE id = ? AND subject_id = ? AND status = 'failed' AND version = ?
+    `).run(nowIso, input.runId, input.subjectId, input.expectedVersion);
+    if (runUpdate.changes !== 1) {
+      throw new ResearchProvenanceRepoError('run-stale', 'Research run version changed concurrently');
+    }
+
+    const latest = findResearchRunByIdRaw(sqlite, input.runId, input.subjectId);
+    if (!latest) throw new Error('Failed to reload reselected Research run');
+    return latest;
   });
   return transaction.immediate();
 }

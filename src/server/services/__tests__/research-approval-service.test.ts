@@ -13,6 +13,7 @@ const repoMock = vi.hoisted(() => ({
   findResearchRunsByJobIds: vi.fn(),
   approveResearchRunAtomic: vi.fn(),
   dismissResearchRunAtomic: vi.fn(),
+  reselectResearchRunAtomic: vi.fn(),
   retryResearchRunImportAtomic: vi.fn(),
   retryResearchIngestJobAtomic: vi.fn(),
 }));
@@ -46,6 +47,7 @@ import {
   getResearchRunsByJobIds,
   mapStoredResearchRunToView,
   ResearchApprovalServiceError,
+  reselectResearchRun,
   retryResearchIngestJob,
 } from '../research-approval-service';
 import { ResearchProvenanceRepoError } from '@/server/db/repos/research-provenance-repo';
@@ -320,6 +322,40 @@ describe('Research approval service', () => {
       httpStatus: 409,
       run: expect.objectContaining({ id: 'run-1' }),
     }));
+  });
+
+  it('重新选择返回解冻后的 subject-scoped run view', () => {
+    const stored = fixture();
+    stored.run.status = 'awaiting-approval';
+    stored.run.version = 3;
+    stored.run.verificationLintJobId = null;
+    stored.run.completedAt = null;
+    stored.run.errorJson = null;
+    stored.findings.forEach((finding) => {
+      finding.verificationStatus = 'pending';
+      finding.verifiedAt = null;
+      finding.verificationSnapshotJson = null;
+    });
+    stored.approval = null;
+    stored.deliveries = [];
+    stored.candidates.forEach((candidate) => {
+      candidate.decision = 'pending';
+      candidate.approvalId = null;
+      candidate.decidedAt = null;
+    });
+    repoMock.reselectResearchRunAtomic.mockReturnValue(stored);
+
+    const input = { runId: 'run-1', subjectId: 's1', expectedVersion: 2 };
+    const result = reselectResearchRun(input);
+
+    expect(repoMock.reselectResearchRunAtomic).toHaveBeenCalledWith(input);
+    expect(result.run).toMatchObject({
+      id: 'run-1',
+      status: 'awaiting-approval',
+      version: 3,
+      approval: null,
+    });
+    expect(result.run.candidates.every((candidate) => candidate.decision === 'pending')).toBe(true);
   });
 
   it.each([

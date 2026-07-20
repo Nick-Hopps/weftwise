@@ -95,14 +95,14 @@
 - `health-view.tsx` —— 🆕 知识库体检工作台；复用 `workspace-page` 的统一宽度、页头、五项摘要、sticky 工具栏和状态区；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；「整理/修复/研究」在 pending/running 时原位切为 Stop，刷新恢复出的 active job 同样可取消，成功后等待权威 SSE 终态释放 action gate，失败保留可重试入口；Fix/Curate 完成后仅刷新已物化 postcondition 的 Health 快照投影，不再自动入队 lint；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/legacy verifying，终态刷新 pages/lint-latest/active jobs
 - `finding-row.tsx` —— 单条 finding 采用稳定的摘要/状态/动作三段布局，长描述限制两行，建议与 plan reason 按需展开；内部 status 映射为用户态文案（如 `awaiting-approval` → `Needs action`）；无 plan 时显示 `Plan unavailable`，不按 finding type 猜测动作；`review-source` 只导航
 - `remediation-ui.ts` —— 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy；恢复 remediation job 只恢复 workflow，不排队修后 lint；统一派生处置按钮的 idle/starting/running/cancelling 四态并解析通用 job cancel 响应（409 按已终态幂等收敛）；Fix 完成摘要只统计 `perFindingOutcomes`，不把 `writes` 解释为 finding 或页面数；同时严格解析 Research job locator/run view，并构造不含 URL 的批准 body
-- `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可操作，持久展示 importing/verifying/terminal 与 child delivery
+- `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可勾选；持久展示 importing/verifying/terminal 与 child delivery，导入失败时同时提供重试原选择与重新选择原候选
 - `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
 
 **Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API；404 按已删除幂等收敛，409/500 在工作区显示可操作错误。
 
 **刷新恢复与 subject 隔离**：当前 subject 以 React Query 严格按 `pending → running` 顺序读取 active jobs，避免 claim 窗口遗漏；首次成功 hydrate 前四类 action 安全禁用。合法 Fix/Curate/Research 按 job type 恢复，Re-ingest 还要求严格 context。每个 workflow 按 `createdAt + id` 选最新 job；queued plan 是 active 列表短暂缺失时的兜底，awaiting-approval Research plan 也可恢复已完成 discovery job，再由其 `runId` 读取持久化审批事实。
 
-所有异步请求都捕获 `{ generation, subjectId, scope }` origin；切换 subject/scope 同步作废旧响应、候选 view 和批准幂等键。manual/backlog/remediation Research 共用同步 action gate。批准请求只发 candidate IDs/version/idempotency key；同 selection 的不确定结果保留同一 key 并 GET run 对账，不盲目换 selection 重发。普通关闭只隐藏弹窗，显式 Dismiss 才改变 run。importing/verifying 每 2 秒刷新，终态同时失效 pages、active-jobs 与 lint-latest。
+所有异步请求都捕获 `{ generation, subjectId, scope }` origin；切换 subject/scope 同步作废旧响应、候选 view 和批准幂等键。manual/backlog/remediation Research 共用同步 action gate。批准请求只发 candidate IDs/version/idempotency key；同 selection 的不确定结果保留同一 key 并 GET run 对账，不盲目换 selection 重发。导入阶段 failed run 保留原 finding；重新选择会归档旧审批、解冻同一候选快照并清空旧批准幂等键。普通关闭只隐藏弹窗，显式 Dismiss 才改变 run。importing/verifying 每 2 秒刷新，终态同时失效 pages、active-jobs 与 lint-latest。
 
 ### `history/`
 

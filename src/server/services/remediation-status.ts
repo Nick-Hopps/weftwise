@@ -191,6 +191,7 @@ function readRecentOutcome(
   if (context.action === 'research') {
     const run = researchRunsByJob.get(researchJobKey(job.subjectId!, job.id));
     if (!run) return null;
+    if (researchRunImportFailed(run)) return null;
     const outcome = researchRunOutcome(run, findingId);
     return outcome === 'fixed' || outcome === 'failed' || outcome === 'skipped'
       ? outcome
@@ -237,6 +238,7 @@ function readHandledOutcome(
     if (!completedAfterSnapshot(job.completedAt, context.lintJobId, lint)) return null;
     return researchOutcome(job.resultJson) === 'skipped' ? 'skipped' : null;
   }
+  if (researchRunImportFailed(run)) return null;
   if (
     !['completed', 'partial', 'failed', 'dismissed', 'empty'].includes(run.status)
     || !completedAfterSnapshot(run.completedAt, context.lintJobId, lint)
@@ -244,6 +246,12 @@ function readHandledOutcome(
     return null;
   }
   return researchRunOutcome(run, findingId);
+}
+
+function researchRunImportFailed(run: ResearchRunView): boolean {
+  return run.status === 'failed'
+    && run.verificationLintJobId === null
+    && run.findings.every((finding) => finding.verificationStatus === 'pending');
 }
 
 function completedAfterSnapshot(

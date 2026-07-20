@@ -374,6 +374,26 @@ describe('buildHealthSnapshot', () => {
     },
   );
 
+  it('导入阶段失败且尚未 verification 时保留原 finding 供恢复', () => {
+    const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: JSON.stringify({ runId: 'run-1' }),
+    });
+    const run = researchRun('failed');
+
+    const snapshot = buildHealthSnapshot(current, [related], { researchRuns: [run] });
+
+    expect(snapshot.findings.map((item) => item.id)).toEqual(['finding-1']);
+    expect(snapshot.remediations['finding-1']).toMatchObject({
+      status: 'failed',
+      jobId: 'job-1',
+    });
+    expect(snapshot.recentOutcomes).toEqual({});
+  });
+
   it('Research 终态早于新 lint 时不隐藏重新发现的 finding', () => {
     const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
     const related = remediationJob('job-1', ['finding-1'], {

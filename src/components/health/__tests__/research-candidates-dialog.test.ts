@@ -19,6 +19,7 @@ vi.mock('@/components/i18n-provider', async () => {
 import {
   defaultResearchCandidateIds,
   ResearchCandidatesDialog,
+  researchRunReselectable,
   researchRunRetryable,
 } from '../research-candidates-dialog';
 
@@ -180,23 +181,27 @@ describe('ResearchCandidatesDialog', () => {
     };
   }
 
-  it('failed run 且存在 failed delivery 时提供 Retry 按钮', () => {
+  it('failed run 且存在 failed delivery 时同时提供重试与重新选择', () => {
     expect(researchRunRetryable(failedRun())).toBe(true);
+    expect(researchRunReselectable(failedRun())).toBe(true);
     const html = renderToStaticMarkup(React.createElement(ResearchCandidatesDialog, {
       run: failedRun(),
       onClose: vi.fn(),
       onApprove: vi.fn(),
       onDismiss: vi.fn(),
       onRetry: vi.fn(),
+      onReselect: vi.fn(),
       acting: false,
     }));
 
     expect(html).toContain('Retry failed imports');
+    expect(html).toContain('Choose different candidates');
     expect(html).not.toContain('Approve 1');
   });
 
   it('非 failed run、verification 后失败或无 failed delivery 均不可重试', () => {
     expect(researchRunRetryable(run('failed'))).toBe(false);
+    expect(researchRunReselectable(run('failed'))).toBe(false);
     expect(researchRunRetryable(run('partial'))).toBe(false);
     expect(researchRunRetryable(run('importing'))).toBe(false);
     expect(researchRunRetryable({
@@ -294,6 +299,7 @@ describe('ResearchCandidatesDialog', () => {
       onApprove: vi.fn(),
       onDismiss: vi.fn(),
       onRetry: vi.fn(),
+      onReselect: vi.fn(),
       acting: false,
     }));
 
@@ -302,5 +308,6 @@ describe('ResearchCandidatesDialog', () => {
     expect(importingHtml).toContain('正在导入');
     expect(failedHtml).toContain('导入失败');
     expect(failedHtml).toContain('重试失败的导入');
+    expect(failedHtml).toContain('重新选择候选项');
   });
 });
