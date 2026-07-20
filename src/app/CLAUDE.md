@@ -53,6 +53,7 @@
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
 | `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源查询 active 优先，故即使存在更新 terminal，只要任意旧 pending/running 仍返回 409 `in-flight`）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
 | `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试：普通 failed Ingest 直接 requeue；携带服务端 `researchProvenance` 的 Research child 经 run/delivery/job 原子状态机恢复同一 job 与 checkpoint；cancelled、source 已删除、provenance 损坏或已进入 verification 均 409 |
+| `/api/jobs/[id]/url-auth` | POST | 当前 Subject 下普通 failed URL Ingest 的 401/403 恢复入口：校验最新 `ingest:auth-required` challenge，创建 job/source/origin 绑定的短期加密 grant，并以 grant ID 原子重排同一 job；Research child 拒绝走此通用入口 |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：复用 `services/history-tools` 从 preHead 重建 inverse changeset、锁内核对当前 HEAD、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -146,6 +147,7 @@ src/app/
     ├── jobs/[id]/route.ts
     ├── jobs/[id]/events/route.ts        # SSE
     ├── jobs/[id]/retry/route.ts         # 🆕 POST 重试（含 source 存在性校验，防重试已删 source 的孤儿 job）
+    ├── jobs/[id]/url-auth/route.ts      # 🆕 POST URL 登录态授权并重排同一 job
     ├── pages/route.ts
     ├── pages/[...slug]/route.ts
     ├── search/route.ts
@@ -165,6 +167,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | 新增 `POST /api/jobs/[id]/url-auth`：只接受当前 Subject 的普通 failed URL Ingest 与最新 401/403 challenge，敏感头写短期 AES-GCM grant，job params 只保存 grant ID；CAS 失败补偿密文，Research child 保持 provenance 专用 retry 边界。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |
 | 2026-07-20 | URL Source 改为链接型实体：`POST /api/ingest` 与 Research 导入只保存规范化 URL 并原子入队，worker 开始 Ingest 时才临时抓取并写回网页标题/描述；左侧 Sources 列表展示标题+描述；`/sources/[id]` 与页面 Sources 分栏直接在无同源权限的远程 sandbox iframe 中加载原网页，默认禁用脚本，显式允许后也只开放 `allow-scripts`；旧 `originUrl` sidecar 自动兼容。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-live-preview.md |
 | 2026-07-20 | 新增 `GET /api/maintenance/due-pages`（到期页面明细预览，最多 100 条 + total）：`maturity-repo.listDueDetailed` JOIN pages/subjects，scope 与 `/api/maintenance/status` 同源；Settings Maintenance 状态行新增 View 展开列表。spec/plan 见 docs/{specs,plans}/2026-07-20-maintenance-due-pages-preview.md |
 | 2026-07-20 | `GET /api/usage` 新增可选 `subjectId` 项目筛选与存在性校验；不传项目时保持全局统计，旧版未归因用量不会被错误归入任一项目 |

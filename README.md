@@ -201,8 +201,13 @@ data/
 │   └── .llm-wiki/
 │       ├── sources/<subject>/*.json
 │       └── skills/*.md
-└── wiki.db                        # SQLite 索引、任务、事件与应用状态
+├── wiki.db                        # SQLite 索引、任务、事件与应用状态
+├── .source-auth-key               # URL 登录态临时 grant 主密钥（0600）
+└── source-auth/                   # 任务级 AES-GCM 临时密文（成功/过期清理）
 ```
+
+需要登录的 URL 只把短期 Cookie/Authorization 加密保存在数据库同目录；这些凭证不会进入
+vault/Git 或明文 SQLite，也不会自动复用于其他来源。
 
 默认路径可以通过环境变量覆盖：
 

@@ -316,7 +316,14 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   }
 
   if (sourceAuthGrantId) {
-    deleteSourceAuthGrant(sourceAuthGrantId);
+    try {
+      deleteSourceAuthGrant(sourceAuthGrantId);
+    } catch {
+      emit(
+        'ingest:warn',
+        'Authentication grant cleanup failed; it will expire automatically',
+      );
+    }
   }
 
   return result as unknown as Record<string, unknown>;

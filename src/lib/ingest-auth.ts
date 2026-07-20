@@ -1,0 +1,64 @@
+import type { JobStreamEvent } from '@/hooks/use-job-stream';
+
+export interface UrlAuthChallenge {
+  status: 401 | 403;
+  authOrigin: string;
+  sourceId: string;
+}
+
+/**
+ * 从持久化 SSE 历史中归约当前认证挑战。旧 challenge 后只要出现 retry 就失效；
+ * 新一轮 401/403 会追加在 retry 后并重新生效。
+ */
+export function currentUrlAuthChallenge(
+  events: ReadonlyArray<Pick<JobStreamEvent, 'type' | 'data'>>,
+): UrlAuthChallenge | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index]!;
+    if (event.type === 'job:retrying') return null;
+    if (event.type !== 'ingest:auth-required') continue;
+    const payload = nestedPayload(event.data);
+    if (
+      payload.code !== 'url-auth-required'
+      || (payload.status !== 401 && payload.status !== 403)
+      || typeof payload.authOrigin !== 'string'
+      || !isHttpOrigin(payload.authOrigin)
+      || typeof payload.sourceId !== 'string'
+      || !payload.sourceId.trim()
+    ) return null;
+    return {
+      status: payload.status,
+      authOrigin: payload.authOrigin,
+      sourceId: payload.sourceId,
+    };
+  }
+  return null;
+}
+
+/** 列表恢复只读取安全 error code；具体 origin/source 仍以持久化 SSE challenge 为准。 */
+export function jobResultRequiresUrlAuth(resultJson: string | null | undefined): boolean {
+  if (!resultJson) return false;
+  try {
+    const value = JSON.parse(resultJson) as { error?: { code?: unknown } };
+    return value?.error?.code === 'url-auth-required';
+  } catch {
+    return false;
+  }
+}
+
+function nestedPayload(data: Record<string, unknown>): Record<string, unknown> {
+  const value = data.data;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function isHttpOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'http:' || url.protocol === 'https:')
+      && (value === url.origin || value === `${url.origin}/`);
+  } catch {
+    return false;
+  }
+}

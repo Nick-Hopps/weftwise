@@ -205,6 +205,31 @@ describe('jobs-repo.listLatestCompletedLint', () => {
 
 const NOW = '2026-01-01T00:00:00Z';
 
+describe('jobs-repo.failJob URL auth error', () => {
+  it('只持久化可恢复 code/status/origin，不复制敏感请求头', async () => {
+    const repo = await import('../jobs-repo');
+    const job = repo.enqueueJob('ingest', { sourceId: 'source-1' });
+    const error = Object.assign(new Error('Authentication required (HTTP 401)'), {
+      code: 'url-auth-required',
+      status: 401,
+      authOrigin: 'https://example.com',
+      cookie: 'session=must-not-persist',
+      authorization: 'Bearer must-not-persist',
+    });
+
+    expect(repo.failJob(job.id, error)).toBe(true);
+    const resultJson = repo.getJob(job.id)!.resultJson!;
+    expect(JSON.parse(resultJson)).toMatchObject({
+      error: {
+        code: 'url-auth-required',
+        status: 401,
+        authOrigin: 'https://example.com',
+      },
+    });
+    expect(resultJson).not.toContain('must-not-persist');
+  });
+});
+
 describe('jobs-repo.findLatestIngestJobForSource', () => {
   async function setupJobs() {
     const { getRawDb } = await import('../../client');

@@ -373,6 +373,37 @@ describe('ingest-service', () => {
     );
   });
 
+  it('Wiki 已提交后 grant 清理失败不覆盖成功结果，交给 TTL 并发 warning', async () => {
+    mockLoadedKind = 'url';
+    mockReadSourceAuthGrant.mockReturnValue({
+      id: '11111111-1111-4111-8111-111111111111',
+      authOrigin: 'https://example.com',
+      cookie: 'session=secret',
+      expiresAt: '2026-07-20T02:00:00.000Z',
+    });
+    mockDeleteSourceAuthGrant.mockImplementationOnce(() => {
+      throw new Error('/private/path must not leak');
+    });
+    const handler = handlers.get('ingest')!;
+    const job = {
+      ...makeJob(),
+      paramsJson: JSON.stringify({
+        sourceId: 'url-src',
+        filename: 'web-example.html',
+        subjectId: 's1',
+        sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
+      }),
+    };
+    const emit = vi.fn();
+
+    await expect(handler(job, emit)).resolves.toMatchObject({ commitSha: 'sha-1' });
+    expect(emit).toHaveBeenCalledWith(
+      'ingest:warn',
+      'Authentication grant cleanup failed; it will expire automatically',
+    );
+    expect(JSON.stringify(emit.mock.calls)).not.toContain('/private/path');
+  });
+
   it('401/403 发结构化 auth-required 事件，且失败时保留 grant', async () => {
     mockReadSourceAuthGrant.mockReturnValue({
       id: '11111111-1111-4111-8111-111111111111',

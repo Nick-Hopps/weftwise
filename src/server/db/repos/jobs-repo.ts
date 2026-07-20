@@ -477,6 +477,15 @@ export function failJob(id: string, error: unknown, expectedAttempt?: number): b
 
   if (error && typeof error === 'object') {
     const e = error as Record<string, unknown>;
+    if (
+      e.code === 'url-auth-required'
+      && (e.status === 401 || e.status === 403)
+      && typeof e.authOrigin === 'string'
+    ) {
+      errorObj.code = e.code;
+      errorObj.status = e.status;
+      errorObj.authOrigin = e.authOrigin;
+    }
     if (e.usage) errorObj.usage = e.usage;
     if (e.finishReason) errorObj.finishReason = e.finishReason;
     if (e.text) errorObj.responseText = String(e.text).slice(0, 2000);

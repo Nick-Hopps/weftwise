@@ -10,11 +10,13 @@ import {
   Clock,
   GitCommitHorizontal,
   ListChecks,
+  KeyRound,
   Loader2,
   Minimize2,
   PenLine,
   Plus,
   ScanText,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   Square,
@@ -45,6 +47,7 @@ interface IngestLiveViewProps {
   onRetry?: () => void;
   retrying?: boolean;
   retryLabel?: string;
+  retryKind?: 'retry' | 'authenticate';
   /** Manually terminate the job — stop a running ingest or abandon a failed one
    *  (clears its checkpoints so it can't be resumed). */
   onTerminate?: () => void;
@@ -155,6 +158,7 @@ export function IngestLiveView({
   onRetry,
   retrying = false,
   retryLabel,
+  retryKind = 'retry',
   onTerminate,
   terminating = false,
   queued = false,
@@ -295,11 +299,14 @@ export function IngestLiveView({
             <span className="h-5 w-px bg-border" aria-hidden />
             {done || failed ? (
               <>
-                {failed && onRetry && (
-                  <Button intent="primary" onClick={onRetry} loading={retrying} disabled={retrying}>
-                    {retryLabel ?? t('common.retry')}
-                  </Button>
-                )}
+                  {failed && onRetry && (
+                    <Button intent="primary" onClick={onRetry} loading={retrying} disabled={retrying}>
+                      {retryKind === 'authenticate'
+                        ? <KeyRound className="h-3.5 w-3.5" aria-hidden />
+                        : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+                      {retryLabel ?? t('common.retry')}
+                    </Button>
+                  )}
                 {failed && onTerminate && (
                   <Button
                     intent="ghost"

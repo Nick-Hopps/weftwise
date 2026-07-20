@@ -28,6 +28,11 @@ worker-entry.ts
 
 `source-loader.ts` 先按 source 类型加载输入：上传文件从 `vault/raw/<subject>/` 读取；URL Source 从 sidecar 回读规范化地址，并在 worker 内通过 `fetchUrlSource()` 临时抓取、解析，不把 HTML 写入 vault；解析得到的网页标题/描述写回 source sidecar 与 SQLite cache，供左侧列表直接展示。随后执行预清洗 → 切块 → 预算预检（超 `agentMaxTokensPerJob` 则启动前 fail-fast）→ 自适应流水线（≤25k token 走 inline；超过则先 map 逐块摘要）；planner 标注 `sourceRefs`，orchestrator 按其注入 `relevantChunks` 给 writer；常量在 `ingest-prep.ts`。
 
+URL 抓取 401/403 时，handler 发 `ingest:auth-required {code,status,authOrigin,sourceId}` 并让
+job 失败；用户授权后 job params 只增加 `sourceAuthGrantId`。worker 按 job/source 解密 grant，
+把 Cookie/Authorization 作为 exact-origin credentials 交给 loader；下游失败保留 grant 供同
+job retry，完整提交成功后删除。凭证本身不进入事件、job result 或 source sidecar。
+
 调用 `runPipeline(...)` 执行 **4 个内容 skill 阶段**（全部结构化输出、无写盘工具，只往 `ctx.pending` 暂存），随后由 service 层 `finalizeIngest` 收口提交：
 
 1. **`ingest-planner`**（sequence）：读原始源文件，产出页面变更计划（`ChangesetEntry[]` 骨架）。
@@ -306,6 +311,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Ingest worker 接入 URL 登录态 grant：401/403 发结构化恢复事件；重排后按 job/source 解密 exact-origin Cookie/Authorization；下游失败保留、完整提交成功清理，Research child 不绕过 provenance 状态机 |
 | 2026-07-20 | URL Source 改为链接型输入：Ingest worker 通过 `source-loader` 执行时临时抓取解析并写回网页标题/描述，URL 重试清空旧 checkpoint；Research coordinator 只持久化候选 URL 与 child lineage，不再下载 HTML |
 | 2026-07-20 | `embed-index` 接线 `maturityRepo.pruneOrphans`（原为从未调用的死代码）：每次写后自愈清理 `page_maturity` 孤儿行，放在 embedding 配置守卫之前、未配置也生效；修复删页/merge 残留导致维护 dueCount 虚高、到期预览显示裸 slug、sweep 给已删页入队必失败 re-enrich 的问题 |
 | 2026-07-20 | `image-insert` 改为在可信锚点后直接写标准 Markdown 图片，不再用无标题 `[!diagram]` callout 包装，Saga、恢复与取消边界保持不变 |
