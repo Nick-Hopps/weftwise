@@ -3,13 +3,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronRight, Loader2, ListTodo, Square, Trash2, X } from 'lucide-react';
+import { Check, ChevronRight, KeyRound, Loader2, ListTodo, Square, Trash2, X } from 'lucide-react';
 import { useJobStream } from '@/hooks/use-job-stream';
 import type { JobStreamStatus } from '@/hooks/job-stream-logic';
 import { apiFetch } from '@/lib/api-fetch';
 import { IconButton } from '@/components/ui/icon-button';
 import { cn } from '@/lib/cn';
 import { latestToolName, stripLegacyToolActivityIcon } from '@/lib/tool-activity';
+import { currentUrlAuthChallenge, type UrlAuthSubmissionResult } from '@/lib/ingest-auth';
+import { dispatchJobStarted } from '@/lib/job-started-event';
+import { dispatchResearchRunUpdated } from '@/lib/research-run-updated-event';
+import { IngestAuthDialog } from '@/app/(app)/_components/ingest-auth-dialog';
 import { JobDetailDialog } from './job-detail-dialog';
 import { ToolActivityIcon } from './tool-activity-icon';
 import {
@@ -18,6 +22,13 @@ import {
   summarizeJobsPanel,
   type TrackedJob,
 } from './jobs-panel-state';
+import {
+  finishUrlAuthRecovery,
+  initialUrlAuthRecoveryState,
+  observeUrlAuthChallenge,
+  reopenUrlAuthChallenge,
+  type UrlAuthRecoveryRequest,
+} from './url-auth-recovery-state';
 import { useI18n } from '@/components/i18n-provider';
 
 export type { TrackedJob } from './jobs-panel-state';
@@ -35,10 +46,14 @@ function JobRow({
   job,
   onRemove,
   onStatusChange,
+  onAuthRequired,
+  onOpenAuth,
 }: {
   job: TrackedJob;
   onRemove: (id: string) => void;
   onStatusChange: (id: string, status: JobStreamStatus) => void;
+  onAuthRequired: (request: UrlAuthRecoveryRequest) => void;
+  onOpenAuth: (request: UrlAuthRecoveryRequest) => void;
 }) {
   const { t } = useI18n();
   // pending 行不建 SSE（浏览器每域 SSE 连接有限；轮询会在其转 running 后接上）
@@ -54,10 +69,21 @@ function JobRow({
   const isFailed = status === 'failed';
   const wasCancelled = events.some((e) => e.type === 'job:cancelled');
   const latestTool = latestToolName(events);
+  const authChallenge = useMemo(() => currentUrlAuthChallenge(events), [events]);
+  const authRequest = useMemo<UrlAuthRecoveryRequest | null>(() => authChallenge ? {
+    jobId: job.id,
+    subjectId: job.subjectId,
+    label: job.label,
+    challenge: authChallenge,
+  } : null, [authChallenge, job.id, job.label, job.subjectId]);
 
   useEffect(() => {
     onStatusChange(job.id, status);
   }, [job.id, onStatusChange, status]);
+
+  useEffect(() => {
+    if (isFailed && authRequest) onAuthRequired(authRequest);
+  }, [authRequest, isFailed, onAuthRequired]);
 
   // 任一 job 完成 → 失效列表缓存（保持旧 GlobalJobTracker 语义）
   useEffect(() => {
@@ -110,6 +136,17 @@ function JobRow({
               data-tip={t('jobs.stop')}
             >
               <Square />
+            </IconButton>
+          )}
+          {isFailed && authRequest && (
+            <IconButton
+              size="sm"
+              onClick={() => onOpenAuth(authRequest)}
+              aria-label={t('ingest.auth.action')}
+              className="tip tip-l"
+              data-tip={t('ingest.auth.action')}
+            >
+              <KeyRound />
             </IconButton>
           )}
           {(isCompleted || isFailed) && (
@@ -169,6 +206,36 @@ export function JobsPanel({
   const [collapsed, setCollapsed] = useState(false);
   const [visible, setVisible] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, JobStreamStatus>>({});
+  const [authRecovery, setAuthRecovery] = useState(initialUrlAuthRecoveryState);
+
+  const handleAuthRequired = useCallback((request: UrlAuthRecoveryRequest) => {
+    setAuthRecovery((current) => observeUrlAuthChallenge(current, request));
+  }, []);
+
+  const handleOpenAuth = useCallback((request: UrlAuthRecoveryRequest) => {
+    setAuthRecovery((current) => reopenUrlAuthChallenge(current, request));
+  }, []);
+
+  const activeAuthRequest = authRecovery.queue[0] ?? null;
+  const finishActiveAuth = useCallback(() => {
+    if (!activeAuthRequest) return;
+    setAuthRecovery((current) => finishUrlAuthRecovery(
+      current,
+      activeAuthRequest.challenge.challengeId,
+    ));
+  }, [activeAuthRequest]);
+
+  const handleAuthenticated = useCallback((result: UrlAuthSubmissionResult) => {
+    if (!activeAuthRequest) return;
+    if (result.researchRun) dispatchResearchRunUpdated(result.researchRun);
+    dispatchJobStarted({
+      jobId: activeAuthRequest.jobId,
+      type: 'ingest',
+      label: activeAuthRequest.label,
+      queueStatus: 'pending',
+    });
+    finishActiveAuth();
+  }, [activeAuthRequest, finishActiveAuth]);
 
   const handleStatusChange = useCallback((id: string, status: JobStreamStatus) => {
     setStatuses((current) => current[id] === status ? current : { ...current, [id]: status });
@@ -207,7 +274,8 @@ export function JobsPanel({
   if (jobs.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-0 z-sheet pointer-events-none">
+    <>
+      <div className="fixed bottom-4 right-0 z-sheet pointer-events-none">
       <div
         role="status"
         aria-live="polite"
@@ -256,6 +324,8 @@ export function JobsPanel({
               job={job}
               onRemove={onRemove}
               onStatusChange={handleStatusChange}
+              onAuthRequired={handleAuthRequired}
+              onOpenAuth={handleOpenAuth}
             />
           ))}
         </ul>
@@ -286,6 +356,15 @@ export function JobsPanel({
           {jobs.length}
         </span>
       </button>
-    </div>
+      </div>
+      <IngestAuthDialog
+        open={activeAuthRequest !== null}
+        jobId={activeAuthRequest?.jobId ?? ''}
+        subjectId={activeAuthRequest?.subjectId}
+        challenge={activeAuthRequest?.challenge ?? null}
+        onClose={finishActiveAuth}
+        onAuthenticated={handleAuthenticated}
+      />
+    </>
   );
 }

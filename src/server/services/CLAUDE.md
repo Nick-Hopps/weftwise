@@ -311,6 +311,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Research child URL 登录态授权复用 `retryResearchIngestJob` 的精确对账与原子恢复：可选 grant ID 只进入 child params，run/delivery/job 继续同进同退；Health 接收授权响应中的最新 run 后恢复既有 importing 轮询 |
 | 2026-07-20 | Research discovery 接入 job 级取消：同一 AbortSignal 覆盖 query LLM、并行 Tavily 搜索与 triage LLM，`allSettled` 后和 provenance 写入前重验取消，统一抛 `AgentCancelled` 且不落候选 run；供 Health 三类处置 Stop 闭环使用 |
 | 2026-07-20 | Ingest worker 接入 URL 登录态 grant：401/403 发结构化恢复事件；重排后按 job/source 解密 exact-origin Cookie/Authorization；下游失败保留、完整提交成功清理，Research child 不绕过 provenance 状态机 |
 | 2026-07-20 | URL Source 改为链接型输入：Ingest worker 通过 `source-loader` 执行时临时抓取解析并写回网页标题/描述，URL 重试清空旧 checkpoint；Research coordinator 只持久化候选 URL 与 child lineage，不再下载 HTML |

@@ -1,9 +1,14 @@
+import type { Job } from '@/lib/contracts';
+import type { MessageKey } from '@/lib/i18n/messages';
+import { jobResultRequiresUrlAuth } from '@/lib/ingest-auth';
+
 export type TrackedJobStatus = 'idle' | 'streaming' | 'completed' | 'failed';
 
 export interface TrackedJob {
   id: string;
   type: string;
   label: string;
+  subjectId: string | null;
   queueStatus: 'running' | 'pending';
   reconnectKey: number;
 }
@@ -42,6 +47,14 @@ export function shouldRefreshPageForCompletedJob(
   status: TrackedJobStatus,
 ): boolean {
   return type === 'image-insert' && status === 'completed';
+}
+
+export function isRecoverableUrlAuthJob(
+  job: Pick<Job, 'type' | 'status' | 'resultJson'>,
+): boolean {
+  return job.type === 'ingest'
+    && job.status === 'failed'
+    && jobResultRequiresUrlAuth(job.resultJson);
 }
 
 export function summarizeJobsPanel(
@@ -95,4 +108,3 @@ export function recoverUnlistedTrackedJobs(
     return [{ ...job, queueStatus: 'running' as const }];
   });
 }
-import type { MessageKey } from '@/lib/i18n/messages';

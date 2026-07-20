@@ -5,7 +5,7 @@ import { JobsPanel, type TrackedJob } from './jobs-panel';
 import { apiFetch } from '@/lib/api-fetch';
 import type { Job } from '@/lib/contracts';
 import { JOB_STARTED_EVENT, type JobStartedEventDetail } from '@/lib/job-started-event';
-import { recoverUnlistedTrackedJobs } from './jobs-panel-state';
+import { isRecoverableUrlAuthJob, recoverUnlistedTrackedJobs } from './jobs-panel-state';
 
 /** 从 job params 提取一行可读摘要（文件名 / URL / slug），兜底 job 类型名。 */
 function jobLabel(job: Pick<Job, 'type' | 'paramsJson'>): string {
@@ -38,16 +38,21 @@ export function GlobalJobTracker() {
 
   const checkActiveJobs = useCallback(async () => {
     try {
-      const [runningRes, pendingRes] = await Promise.all([
+      const [runningRes, pendingRes, failedAuthRes] = await Promise.all([
         apiFetch('/api/jobs?status=running'),
         apiFetch('/api/jobs?status=pending'),
+        apiFetch('/api/jobs?status=failed&type=ingest'),
       ]);
-      if (!runningRes.ok || !pendingRes.ok) return;
+      if (!runningRes.ok || !pendingRes.ok || !failedAuthRes.ok) return;
       const running = (await runningRes.json()) as Job[];
       const pending = (await pendingRes.json()) as Job[];
+      const failedAuth = ((await failedAuthRes.json()) as Job[])
+        .filter(isRecoverableUrlAuthJob);
       const active = [
         ...running.map((j) => ({ job: j, queueStatus: 'running' as const })),
         ...pending.map((j) => ({ job: j, queueStatus: 'pending' as const })),
+        // 终态行用 running 订阅模式回放 SSE，读取持久化 auth challenge 后自动恢复。
+        ...failedAuth.map((j) => ({ job: j, queueStatus: 'running' as const })),
       ];
       setJobs((prev) => {
         const prevById = new Map(prev.map((t) => [t.id, t]));
@@ -57,6 +62,7 @@ export function GlobalJobTracker() {
           .map((a) => ({
             id: a.job.id,
             type: a.job.type,
+            subjectId: a.job.subjectId,
             // 事件已携带即时 label；轮询拿到权威 params 后保留稳定标签，避免闪变。
             label:
               prevById.get(a.job.id)?.label && prevById.get(a.job.id)!.label !== 'Starting…'
@@ -98,6 +104,7 @@ export function GlobalJobTracker() {
                   ...t,
                   type,
                   label,
+                  subjectId: t.subjectId,
                   queueStatus,
                   reconnectKey: t.reconnectKey + 1,
                 }
@@ -106,7 +113,7 @@ export function GlobalJobTracker() {
         }
         return [
           ...prev,
-          { id: jobId, type, label, queueStatus, reconnectKey: 0 },
+          { id: jobId, type, label, subjectId: null, queueStatus, reconnectKey: 0 },
         ];
       });
     }

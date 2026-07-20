@@ -54,7 +54,7 @@
 | `/api/sources/[id]/reingest` | POST | 🆕 孤儿 source 重摄入：有可续传 failed job → requeue（checkpoint 续传）；查无 job/completed/cancelled → 新建 ingest job；已被页面引用 409 `already-referenced`、在途 409 `in-flight`；source 本身已被删（`id` 查无）404 |
 | `/api/sources/[id]` | DELETE | 🆕 删除孤儿 source（零关联守卫 409 `already-referenced`；同源查询 active 优先，故即使存在更新 terminal，只要任意旧 pending/running 仍返回 409 `in-flight`）：vault 锁内删 raw 文件+sidecar（best-effort）→ 删 sources 行 → git commit `[subject:<slug>]` |
 | `/api/jobs/[id]/retry` | POST | ingest workbench 通用重试：普通 failed Ingest 直接 requeue；携带服务端 `researchProvenance` 的 Research child 经 run/delivery/job 原子状态机恢复同一 job 与 checkpoint；cancelled、source 已删除、provenance 损坏或已进入 verification 均 409 |
-| `/api/jobs/[id]/url-auth` | POST | 当前 Subject 下普通 failed URL Ingest 的 401/403 恢复入口：校验最新 `ingest:auth-required` challenge，创建 job/source/origin 绑定的短期加密 grant，并以 grant ID 原子重排同一 job；Research child 拒绝走此通用入口 |
+| `/api/jobs/[id]/url-auth` | POST | failed URL Ingest 的 401/403 恢复入口：校验任务自身 Subject 与最新 `ingest:auth-required` challenge，创建 job/source/origin 绑定的短期加密 grant；普通 Ingest 以 grant ID 原子重排，Research child 则经 provenance 原语同步恢复同一 job/delivery/run |
 | `/api/history` | GET | 列出当前 subject 操作时间线（rowid DESC，类型/受影响页/时间，status=applied 或 reverted） |
 | `/api/history/[id]/diff` | GET | 单次操作的 unified diff（从 preHead → postHead）；404 未知/跨 subject |
 | `/api/history/[id]/revert` | POST | 回滚操作（前向 Saga 还原：复用 `services/history-tools` 从 preHead 重建 inverse changeset、锁内核对当前 HEAD、apply、commit）；requireAuth+requireCsrf+resolveSubject；404 未知/跨 subject，409 已回滚，422 校验失败 |
@@ -168,6 +168,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | URL 登录态授权扩展到 Research child：`POST /api/jobs/[id]/url-auth` 识别服务端 provenance 后把 grant ID 与 job/delivery/run 放在同一事务恢复，失败补偿新 grant；响应附最新 run 供 Health 即时恢复 importing 轮询。spec/plan 见 docs/{specs,plans}/2026-07-20-url-auth-auto-recovery-research.md |
 | 2026-07-20 | URL Source 增加本地阅读模式：`/sources/[id]` 与页面 Sources 分栏均可在实时 sandbox iframe 和摄入时保存的 Markdown 正文间切换；只读预览不重新联网，旧 sidecar 从 chunks 去重回退。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-reader-mode.md |
 | 2026-07-20 | 新增 `POST /api/jobs/[id]/url-auth`：只接受当前 Subject 的普通 failed URL Ingest 与最新 401/403 challenge，敏感头写短期 AES-GCM grant，job params 只保存 grant ID；CAS 失败补偿密文，Research child 保持 provenance 专用 retry 边界。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |
 | 2026-07-20 | URL Source 改为链接型实体：`POST /api/ingest` 与 Research 导入只保存规范化 URL 并原子入队，worker 开始 Ingest 时才临时抓取并写回网页标题/描述；左侧 Sources 列表展示标题+描述；`/sources/[id]` 与页面 Sources 分栏直接在无同源权限的远程 sandbox iframe 中加载原网页，默认禁用脚本，显式允许后也只开放 `allow-scripts`；旧 `originUrl` sidecar 自动兼容。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-live-preview.md |

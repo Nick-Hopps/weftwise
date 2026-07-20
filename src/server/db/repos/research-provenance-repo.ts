@@ -834,6 +834,7 @@ export interface RetryResearchIngestJobInput {
   approvalId: string;
   candidateId: string;
   ingestJobId: string;
+  sourceAuthGrantId?: string;
   now?: Date;
 }
 
@@ -880,12 +881,13 @@ export function retryResearchIngestJobAtomic(
     }
 
     const job = sqlite.prepare(`
-      SELECT type, status, subject_id, cancel_requested, result_json
+      SELECT type, status, subject_id, params_json, cancel_requested, result_json
       FROM jobs WHERE id = ?
     `).get(input.ingestJobId) as {
       type: string;
       status: string;
       subject_id: string | null;
+      params_json: string;
       cancel_requested: number | null;
       result_json: string | null;
     } | undefined;
@@ -913,14 +915,36 @@ export function retryResearchIngestJobAtomic(
       );
     }
 
+    let nextParamsJson = job.params_json;
+    if (input.sourceAuthGrantId !== undefined) {
+      if (!input.sourceAuthGrantId.trim()) {
+        throw new ResearchProvenanceRepoError(
+          'run-not-retryable',
+          'Research child ingest authentication grant is invalid',
+        );
+      }
+      let params: Record<string, unknown>;
+      try {
+        const parsed: unknown = JSON.parse(job.params_json);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+        params = parsed as Record<string, unknown>;
+      } catch {
+        throw new ResearchProvenanceRepoError(
+          'run-not-retryable',
+          'Research child ingest parameters are invalid',
+        );
+      }
+      nextParamsJson = JSON.stringify({ ...params, sourceAuthGrantId: input.sourceAuthGrantId });
+    }
+
     const nowIso = (input.now ?? new Date()).toISOString();
     const jobUpdate = sqlite.prepare(`
       UPDATE jobs
-      SET status = 'pending', result_json = NULL, completed_at = NULL,
+      SET params_json = ?, status = 'pending', result_json = NULL, completed_at = NULL,
           lease_expires_at = NULL, heartbeat_at = NULL, cancel_requested = 0
       WHERE id = ? AND type = 'ingest' AND status = 'failed'
         AND subject_id = ? AND cancel_requested = 0
-    `).run(input.ingestJobId, input.subjectId);
+    `).run(nextParamsJson, input.ingestJobId, input.subjectId);
     if (jobUpdate.changes !== 1) {
       throw new ResearchProvenanceRepoError(
         'run-not-retryable',

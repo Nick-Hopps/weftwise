@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { currentUrlAuthChallenge, jobResultRequiresUrlAuth } from '../ingest-auth';
+import {
+  buildUrlAuthSubmissionBody,
+  currentUrlAuthChallenge,
+  jobResultRequiresUrlAuth,
+} from '../ingest-auth';
 
-function event(type: string, data?: Record<string, unknown>) {
+function event(type: string, data?: Record<string, unknown>, id = `event-${type}`) {
   return {
+    id,
     type,
     data: {
       message: type,
@@ -25,6 +30,7 @@ describe('currentUrlAuthChallenge', () => {
       event('ingest:auth-required', challenge),
       event('job:failed'),
     ])).toEqual({
+      challengeId: 'event-ingest:auth-required',
       status: 401,
       authOrigin: 'https://example.com',
       sourceId: 'source-1',
@@ -42,9 +48,10 @@ describe('currentUrlAuthChallenge', () => {
     expect(currentUrlAuthChallenge([
       event('ingest:auth-required', challenge),
       event('job:retrying'),
-      event('ingest:auth-required', { ...challenge, status: 403 }),
+      event('ingest:auth-required', { ...challenge, status: 403 }, 'challenge-2'),
       event('job:failed'),
     ])).toEqual({
+      challengeId: 'challenge-2',
       status: 403,
       authOrigin: 'https://example.com',
       sourceId: 'source-1',
@@ -65,6 +72,13 @@ describe('currentUrlAuthChallenge', () => {
       event('ingest:auth-required', { ...challenge, sourceId: '' }),
     ])).toBeNull();
   });
+
+  it('缺少持久化 event ID 时不产生可自动恢复的 challenge', () => {
+    expect(currentUrlAuthChallenge([{
+      type: 'ingest:auth-required',
+      data: { message: 'auth', data: challenge },
+    }])).toBeNull();
+  });
 });
 
 describe('jobResultRequiresUrlAuth', () => {
@@ -77,5 +91,18 @@ describe('jobResultRequiresUrlAuth', () => {
     }))).toBe(false);
     expect(jobResultRequiresUrlAuth('{broken')).toBe(false);
     expect(jobResultRequiresUrlAuth(null)).toBe(false);
+  });
+});
+
+describe('buildUrlAuthSubmissionBody', () => {
+  it('使用 job 自身 Subject 并只提交规范化后的非空凭证', () => {
+    expect(buildUrlAuthSubmissionBody({
+      subjectId: 'research-subject',
+      cookie: '  session=secret  ',
+      authorization: '   ',
+    })).toEqual({
+      subjectId: 'research-subject',
+      cookie: 'session=secret',
+    });
   });
 });

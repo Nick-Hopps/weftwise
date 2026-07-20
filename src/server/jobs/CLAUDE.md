@@ -122,6 +122,7 @@ src/server/jobs/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | 全局任务恢复查询会额外读取 failed Ingest，并只依据 `result.error.code=url-auth-required` 纳入 SSE 回放；具体 origin/source/challenge 身份继续取持久化 job event，凭证不进入 jobs/job_events |
 | 2026-07-20 | `failJob` 对 `url-auth-required` 只持久化安全的 code/status/authOrigin，供无 checkpoint 的认证失败 Ingest 在刷新后恢复；Cookie/Authorization 不复制到 result/event/job params |
 | 2026-07-17 | 新增独占型 `image-insert` job：PendingAction 批准事务原子入队，worker 轮询取消并注册专用 handler；前端按真实类型追踪而非伪装成 ingest |
 | 2026-07-14 | Saga/Worker 终态一致性：状态迁移成功后才发布 completed/failed/retrying/cancelled，CAS/fencing 未命中静默退出；重复取消幂等；job_events 按 rowid 插入顺序读取与续播，并以真实 SQLite trigger 锁定 Saga 失败顺序 |

@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   createGrant: vi.fn(),
   deleteGrant: vi.fn(),
   emit: vi.fn(),
+  retryResearchIngestJob: vi.fn(),
 }));
 
 vi.mock('@/server/middleware/auth', () => ({
@@ -31,6 +32,10 @@ vi.mock('@/server/db/repos/sources-repo', () => ({
 }));
 vi.mock('@/server/db/repos/jobs-repo', () => ({
   getJobEvents: (...args: unknown[]) => mocks.getJobEvents(...args),
+}));
+vi.mock('@/server/services/research-approval-service', () => ({
+  retryResearchIngestJob: (...args: unknown[]) => mocks.retryResearchIngestJob(...args),
+  ResearchApprovalServiceError: class ResearchApprovalServiceError extends Error {},
 }));
 vi.mock('@/server/sources/source-auth-grant', async (importOriginal) => {
   const original = await importOriginal<typeof import('@/server/sources/source-auth-grant')>();
@@ -106,6 +111,9 @@ beforeEach(() => {
     expiresAt: '2026-07-20T02:00:00.000Z',
   });
   mocks.requeueJobWithParams.mockReturnValue({ ...failedJob, status: 'pending' });
+  mocks.retryResearchIngestJob.mockReturnValue({
+    run: { id: 'run-1', subjectId: 'sub-1', status: 'importing', version: 3 },
+  });
 });
 
 describe('POST /api/jobs/[id]/url-auth', () => {
@@ -162,13 +170,14 @@ describe('POST /api/jobs/[id]/url-auth', () => {
     expect(mocks.createGrant).not.toHaveBeenCalled();
   });
 
-  it('422：Research child ingest 不能绕过 provenance retry 状态机', async () => {
+  it('202：Research child 把 grant ID 交给 provenance 原子恢复并返回最新 run', async () => {
     mocks.getJob.mockReturnValue({
       ...failedJob,
       paramsJson: JSON.stringify({
         sourceId: 'source-1',
         filename: 'web-example.html',
         subjectId: 'sub-1',
+        sourceAuthGrantId: 'old-grant',
         researchProvenance: {
           runId: 'run-1',
           approvalId: 'approval-1',
@@ -176,8 +185,56 @@ describe('POST /api/jobs/[id]/url-auth', () => {
         },
       }),
     });
-    expect((await call({ cookie: 'session=secret' })).status).toBe(422);
-    expect(mocks.createGrant).not.toHaveBeenCalled();
+    const response = await call({ cookie: 'session=secret' });
+
+    expect(response.status).toBe(202);
+    expect(mocks.retryResearchIngestJob).toHaveBeenCalledWith({
+      runId: 'run-1',
+      subjectId: 'sub-1',
+      approvalId: 'approval-1',
+      candidateId: 'candidate-1',
+      ingestJobId: 'job-1',
+      sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(mocks.requeueJobWithParams).not.toHaveBeenCalled();
+    expect(mocks.deleteGrant).toHaveBeenCalledWith('old-grant');
+    expect(mocks.emit).toHaveBeenCalledWith(
+      'job-1',
+      'job:retrying',
+      expect.any(String),
+      { manual: true, authenticated: true, research: true, runId: 'run-1' },
+    );
+    await expect(response.json()).resolves.toMatchObject({
+      jobId: 'job-1',
+      status: 'pending',
+      researchRun: { id: 'run-1', status: 'importing' },
+    });
+  });
+
+  it('Research 原子恢复失败时补偿删除新 grant，不清理旧 grant', async () => {
+    mocks.getJob.mockReturnValue({
+      ...failedJob,
+      paramsJson: JSON.stringify({
+        sourceId: 'source-1',
+        filename: 'web-example.html',
+        subjectId: 'sub-1',
+        sourceAuthGrantId: 'old-grant',
+        researchProvenance: {
+          runId: 'run-1',
+          approvalId: 'approval-1',
+          candidateId: 'candidate-1',
+        },
+      }),
+    });
+    mocks.retryResearchIngestJob.mockImplementation(() => {
+      throw new Error('stale research run');
+    });
+
+    const response = await call({ cookie: 'session=secret' });
+    expect(response.status).toBe(500);
+    expect(mocks.deleteGrant).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteGrant).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111');
+    expect(mocks.emit).not.toHaveBeenCalled();
   });
 
   it('409：重排 CAS 失败时补偿删除新 grant', async () => {

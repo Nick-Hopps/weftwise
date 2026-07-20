@@ -10,7 +10,11 @@ import {
   X,
 } from 'lucide-react';
 import { apiFetch } from '@/lib/api-fetch';
-import type { UrlAuthChallenge } from '@/lib/ingest-auth';
+import {
+  buildUrlAuthSubmissionBody,
+  type UrlAuthChallenge,
+  type UrlAuthSubmissionResult,
+} from '@/lib/ingest-auth';
 import { useUIStore } from '@/stores/ui-store';
 import { useI18n } from '@/components/i18n-provider';
 import { Button, buttonVariants } from '@/components/ui/button';
@@ -21,15 +25,17 @@ import { cn } from '@/lib/cn';
 export function IngestAuthDialog({
   open,
   jobId,
+  subjectId: jobSubjectId,
   challenge,
   onClose,
   onAuthenticated,
 }: {
   open: boolean;
   jobId: string;
+  subjectId?: string | null;
   challenge: UrlAuthChallenge | null;
   onClose: () => void;
-  onAuthenticated: () => void;
+  onAuthenticated: (result: UrlAuthSubmissionResult) => void;
 }) {
   const { t } = useI18n();
   const [cookie, setCookie] = useState('');
@@ -63,21 +69,21 @@ export function IngestAuthDialog({
     setSubmitting(true);
     setError(null);
     try {
-      const subjectId = useUIStore.getState().currentSubjectId;
+      const subjectId = jobSubjectId ?? useUIStore.getState().currentSubjectId;
       const response = await apiFetch(`/api/jobs/${jobId}/url-auth`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(subjectId ? { subjectId } : {}),
-          ...(cookie.trim() ? { cookie: cookie.trim() } : {}),
-          ...(authorization.trim() ? { authorization: authorization.trim() } : {}),
-        }),
+        body: JSON.stringify(buildUrlAuthSubmissionBody({
+          subjectId,
+          cookie,
+          authorization,
+        })),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { error?: string };
         throw new Error(body.error || `Authentication failed (${response.status})`);
       }
-      onAuthenticated();
+      onAuthenticated(await response.json() as UrlAuthSubmissionResult);
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : String(submitError));
     } finally {

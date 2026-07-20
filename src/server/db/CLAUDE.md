@@ -220,6 +220,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | `retryResearchIngestJobAtomic` 可在既有 lineage 校验内合并 `sourceAuthGrantId`：grant params、failed job→pending、delivery→queued、run→importing 同属一个 IMMEDIATE transaction，任一 CAS 失败整体回滚 |
 | 2026-07-20 | `maturity-repo` 新增 `listDueDetailed(nowIso, limit, subjectIds?)`：WHERE/ORDER 与 `listDue` 同口径，LEFT JOIN pages 取标题（孤儿行 title=null）、JOIN subjects 取 slug/name，供 `GET /api/maintenance/due-pages` 到期预览 |
 | 2026-07-20 | `llm_usage` 新增可空 `subject_id` 与项目时间复合索引；已知 Subject 的 LLM/Embedding/图片调用显式归因，删除 Subject 时归因置空保留用量，历史未归因记录只进入全局汇总 |
 | 2026-07-17 | conversations repo 将既有 `messages.citations_json` 明确为 role-aware 消息证据容器：用户消息恢复到 `references`，Assistant 消息继续恢复到 `citations`；旧 NULL/Assistant JSON 无迁移兼容 |
