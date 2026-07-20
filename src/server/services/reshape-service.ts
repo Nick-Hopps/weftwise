@@ -3,7 +3,7 @@ import { tool } from 'ai';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import type { Image, Node, Parent, Root } from 'mdast';
-import { streamTextResponse, streamTextWithTools } from '@/server/llm/provider-registry';
+import { streamTextWithTools } from '@/server/llm/provider-registry';
 import { getWikiLanguage } from '@/server/db/repos/settings-repo';
 import {
   generateImageAsset,
@@ -13,9 +13,7 @@ import {
 import type { StylePrefs } from '@/server/profile/style';
 import {
   RESHAPE_PAGE_SYSTEM_PROMPT,
-  RESHAPE_SECTION_SYSTEM_PROMPT,
   buildReshapePageUserPrompt,
-  buildReshapeSectionUserPrompt,
 } from '@/server/llm/prompts/reshape-prompt';
 import type { PromptContext } from '@/server/llm/prompts/prompt-context';
 
@@ -69,20 +67,6 @@ function referencedAssets(markdown: string, generated: ReshapeAsset[]): ReshapeA
   return generated.filter((asset) => referencedIds.has(asset.id));
 }
 
-/** 用文本流收全文成字符串（本服务对外是 JSON 响应，不流式）。 */
-async function collect(
-  task: 'reshape:page' | 'reshape:section',
-  system: string,
-  user: string,
-  subjectId: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  const res = streamTextResponse(task, system, user, signal, {}, subjectId);
-  let out = '';
-  for await (const chunk of res.textStream) out += chunk;
-  return out.trim();
-}
-
 function assetIdFromPath(path: string): string {
   const filename = path.split('/').at(-1) ?? '';
   return filename.replace(/\.[^.]+$/, '');
@@ -127,23 +111,4 @@ export async function reshapePageBody(input: {
   body = body.trim();
   if (!body) throw new Error('Reshape produced empty Markdown');
   return { body, model: null, assets: referencedAssets(body, assets) };
-}
-
-/** 段级自由重塑。 */
-export async function reshapeSection(input: {
-  subject: Subject;
-  block: string;
-  direction: 'simpler' | 'deeper';
-  profile: ProfileLite;
-  context?: string;
-}): Promise<{ block: string; fallback: boolean }> {
-  const ctx = ctxFor(input.subject);
-  const user = buildReshapeSectionUserPrompt(input.block, input.direction, input.profile, ctx, input.context);
-  const out = await collect(
-    'reshape:section',
-    RESHAPE_SECTION_SYSTEM_PROMPT,
-    user,
-    input.subject.id,
-  );
-  return { block: out, fallback: false };
 }

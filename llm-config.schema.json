@@ -46,8 +46,7 @@
         "ingest:verifier-triage": { "$ref": "#/$defs/taskRoute", "description": "Ingest: select claims that need web verification." },
         "ingest:verifier-apply": { "$ref": "#/$defs/taskRoute", "description": "Ingest: apply evidence-driven verification edits." },
         "reenrich:supplement": { "$ref": "#/$defs/taskRoute", "description": "Re-enrich: supplement gaps in an existing page." },
-        "reshape:page": { "$ref": "#/$defs/taskRoute", "description": "Cognitive Lens: reshape a full-page reading rendition." },
-        "reshape:section": { "$ref": "#/$defs/taskRoute", "description": "Cognitive Lens: reshape a section reading rendition." }
+        "reshape:page": { "$ref": "#/$defs/taskRoute", "description": "Cognitive Lens: reshape a full-page reading rendition." }
       }
     },
     "providers": {

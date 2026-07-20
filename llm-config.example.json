@@ -123,12 +123,6 @@
       "model": "claude-sonnet-4-6",
       "maxTokens": 8192,
       "temperature": 0.2
-    },
-    "reshape:section": {
-      "profile": "anthropic-default",
-      "model": "claude-sonnet-4-6",
-      "maxTokens": 2048,
-      "temperature": 0.2
     }
   },
   "providers": {

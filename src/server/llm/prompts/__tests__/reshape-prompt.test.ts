@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   RESHAPE_PAGE_SYSTEM_PROMPT,
   buildReshapePageUserPrompt,
-  buildReshapeSectionUserPrompt,
 } from '../reshape-prompt';
 import { DEFAULT_STYLE_PREFS } from '@/server/profile/style';
 import type { PromptContext } from '../prompt-context';
@@ -30,9 +29,10 @@ describe('reshape-prompt', () => {
     expect(p).toContain('正文 [[X]]'); // canonical body
   });
 
-  it('section user prompt 含 direction 与待改块', () => {
-    const p = buildReshapeSectionUserPrompt('某段', 'simpler', profile, ctx, '上文');
-    expect(p).toMatch(/simpler|更简单|简单/i);
-    expect(p).toContain('某段');
+  it('不暴露未实现的段级重塑 Prompt', async () => {
+    const promptExports = await import('../reshape-prompt');
+
+    expect(promptExports).not.toHaveProperty('RESHAPE_SECTION_SYSTEM_PROMPT');
+    expect(promptExports).not.toHaveProperty('buildReshapeSectionUserPrompt');
   });
 });

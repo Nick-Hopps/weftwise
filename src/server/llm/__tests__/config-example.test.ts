@@ -36,7 +36,7 @@ describe('llm-config.example.json', () => {
       'research:queries', 'research:triage',
       'ingest:planner', 'ingest:chunk-summarizer', 'ingest:writer', 'ingest:enricher', 'ingest:image',
       'ingest:verifier', 'ingest:verifier-triage', 'ingest:verifier-apply',
-      'reenrich:supplement', 'reshape:page', 'reshape:section',
+      'reenrich:supplement', 'reshape:page',
     ];
 
     expect(new Set(Object.keys(example.tasks))).toEqual(new Set(expected));
@@ -45,12 +45,17 @@ describe('llm-config.example.json', () => {
     expect(example.tasks).not.toHaveProperty('curate:auto');
   });
 
+  it('不预留未实现的段级重塑路由', () => {
+    expect(example.tasks).not.toHaveProperty('reshape:section');
+    expect(jsonSchemaText).not.toContain('"reshape:section"');
+  });
+
   it('编辑器 JSON Schema 接受 adaptive/effort 且不再包含 indexer', () => {
     expect(jsonSchemaText).not.toContain('ingest:indexer');
     expect(jsonSchemaText).toContain('"adaptive"');
     expect(jsonSchemaText).toContain('"effort"');
     expect(jsonSchemaText).toContain('"research:queries"');
-    expect(jsonSchemaText).toContain('"reshape:section"');
+    expect(jsonSchemaText).not.toContain('"reshape:section"');
     expect(jsonSchemaText).toContain('"ingest:image"');
   });
 });

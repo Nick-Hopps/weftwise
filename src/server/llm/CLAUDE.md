@@ -35,7 +35,6 @@
 | 阶段 | `ingest:verifier-apply` | ingest：联网核查 apply（证据驱动改 callout） |
 | 阶段 | `reenrich:supplement` | Re-enrich：补充现有页面正文缺口 |
 | 阶段 | `reshape:page` | Cognitive Lens：整页读侧重塑 |
-| 阶段 | `reshape:section` | Cognitive Lens：段落读侧重塑 |
 
 > **没有 `ingest` 这个整体 task**——multi-agent 重构后流水线按 `ingest:<stage>` 逐阶段路由（由 `agent-loop::skillTaskKey(skill.id)` 把 skill id `ingest-<stage>` 的首个连字符换冒号派生；id/文件名仍用连字符，冒号只在路由 key）。`<pipeline>:<stage>` 是**开放命名空间**（schema 正则 `^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$`），上表 8 个 ingest 阶段是 `examples/skills/` 与 enrich 生图工具使用的路由。每个阶段的 task 配置**可选**：缺省则继承 `defaults`，skill frontmatter 可再覆盖（合并序 `defaults < tasks['<pipeline>:<stage>'] < frontmatter`）。`llm-config.example.json` 把 8 个阶段全列出作参考，并演示按阶段分层路由（机械阶段如 summarizer / triage 走便宜模型，重推理阶段走强模型）。
 
@@ -253,7 +252,7 @@ src/server/llm/
 | 2026-06-25 | `provider-registry` 新增 `streamTextWithTools` / `generateTextWithTools`（工具循环版 stream/generate，底层 AI SDK `streamText`/`generateText` with tools+maxSteps）；`query-prompt.ts` 新增 `QUERY_AGENTIC_SYSTEM_PROMPT` + `buildAgenticUserContent`（agentic 工具循环问答用），供 `query-service` agentic 重构使用 |
 | 2026-06-26 | 路由命名空间统一：skill 阶段 task key `skill:ingest-xxx` → `ingest:xxx`（`agent-loop::skillTaskKey` 把 id 首个连字符换冒号派生）；移除已无用的内置 `ingest` task（生产零引用，仅旧测试用过）；`LLMTaskSchema` 正则 `^skill:…` → 通用 `^[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9-]*$`；`llm-config.example.json` 同步改 `ingest:*`；顺修文档：skill frontmatter 模型覆盖字段实为 `model:`（非 `llm_override:`），router mode 值为 `task-router-only`（非 `config-only`）|
 | 2026-06-26 | `prompt-context.ts` 新增 `renderExpositionDirective(level)`（writer 讲解深度指令，`off`=纯忠实）；`renderAugmentationDirective` guidance 收窄为四类脚手架（intuition/example 下沉 writer 正文）。配合 ingest writer v6 / enricher v3 / verifier v2 |
-| 2026-06-27 | Cognitive Lens：新增 `prompts/reshape-prompt.ts` 与画像/语言注入；`provider-registry` 加 `isReshapeConfigured()`；`reshape:page`/`reshape:section` 走开放 `<pipeline>:<stage>` 路由 |
+| 2026-06-27 | Cognitive Lens：新增 `prompts/reshape-prompt.ts` 与画像/语言注入；`provider-registry` 加 `isReshapeConfigured()`；`reshape:page` 走开放 `<pipeline>:<stage>` 路由 |
 | 2026-07-17 | Reshape Prompt 改为自由个性化阅读版本：允许按画像重组、删改、扩缩原文，明确禁止退化为只追加说明；整页任务可调用 `image_generate` 并在 Markdown 中嵌入返回图片 URL |
 | 2026-07-17 | Query 新增选区意图结构化分类 schema/prompt，复用 `query` task 输出 `image-insert/other`；Agentic system prompt 最终按 `read/propose/image-insert` mode 动态构造，模型不再看到未实际下发的 mutation 工具 |
 | 2026-06-30 | `fix-prompt.ts` 重写为 agentic tool-loop 版本：新增 `FIX_AGENTIC_SYSTEM_PROMPT` + `buildFixAgenticUserPrompt`；退休 `FixPageSchema`/`FIX_SYSTEM_PROMPT`/`buildFixPageUserPrompt`（Spec 3 fix→tool-loop）|

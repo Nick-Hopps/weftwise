@@ -990,7 +990,7 @@ describe('llm-config.example.json', () => {
       'query', 'lint', 'merge', 'split', 'curate', 'fix', 'embedding',
       'research:queries', 'research:triage', 'ingest:planner', 'ingest:chunk-summarizer',
       'ingest:writer', 'ingest:enricher', 'ingest:verifier', 'ingest:verifier-triage',
-      'ingest:verifier-apply', 'reenrich:supplement', 'reshape:page', 'reshape:section',
+      'ingest:verifier-apply', 'reenrich:supplement', 'reshape:page',
     ];
     expect(new Set(Object.keys(example.tasks))).toEqual(new Set(expected));
     expect(jsonSchemaText).not.toContain('ingest:indexer');
@@ -1061,7 +1061,6 @@ task 描述显式列出当前 19 个 route，并把 ingest stages 改为 7 个�
 | 阶段 | `research:triage` | Research：候选评分与筛选 |
 | 阶段 | `reenrich:supplement` | Re-enrich：补充正文缺口 |
 | 阶段 | `reshape:page` | Cognitive Lens：整页读侧重塑 |
-| 阶段 | `reshape:section` | Cognitive Lens：段落读侧重塑 |
 ```
 
 Run:

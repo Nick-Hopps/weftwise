@@ -18,8 +18,6 @@ OUTPUT RULES:
 - Produce a coherent standalone page, not notes about how you would reshape it.
 - Match the requested output language and the reader's background, reading level, verbosity, example density, and formality.`;
 
-export const RESHAPE_SECTION_SYSTEM_PROMPT = `Rewrite ONE block of a wiki page for one reader. Freely simplify, deepen, reorganize, expand, or compress the block to fit the reader profile. Return only the complete reshaped block Markdown.`;
-
 function renderProfile(profile: { backgroundSummary: string; stylePrefs: StylePrefs }): string {
   const s = profile.stylePrefs;
   return [
@@ -47,31 +45,5 @@ export function buildReshapePageUserPrompt(
     '',
     '=== OUTPUT ===',
     'Return the reshaped markdown body only.',
-  ].join('\n');
-}
-
-export function buildReshapeSectionUserPrompt(
-  block: string,
-  direction: 'simpler' | 'deeper',
-  profile: { backgroundSummary: string; stylePrefs: StylePrefs },
-  ctx: PromptContext,
-  context?: string,
-): string {
-  return [
-    renderLanguageDirective(ctx.language),
-    '',
-    renderProfile(profile),
-    '',
-    '=== DIRECTION ===',
-    direction === 'simpler'
-      ? 'Make this block SIMPLER / easier to grasp for this reader.'
-      : 'Make this block DEEPER / more thorough for this reader.',
-    context ? `\n=== SURROUNDING CONTEXT (do not rewrite) ===\n${context}` : '',
-    '',
-    '=== BLOCK TO RESHAPE ===',
-    block,
-    '',
-    '=== OUTPUT ===',
-    'Return the reshaped block markdown only.',
   ].join('\n');
 }

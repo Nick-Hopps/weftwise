@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const mocks = vi.hoisted(() => ({ stream: vi.fn(), generateImage: vi.fn() }));
 vi.mock('@/server/llm/provider-registry', () => ({
   streamTextWithTools: (...args: unknown[]) => mocks.stream(...args),
-  streamTextResponse: (...args: unknown[]) => mocks.stream(...args),
 }));
 vi.mock('@/server/agents/tools/builtin/image-generate', async (loadOriginal) => {
   const original = await loadOriginal<typeof import('@/server/agents/tools/builtin/image-generate')>();
@@ -40,6 +39,12 @@ beforeEach(() => {
 });
 
 describe('reshapePageBody', () => {
+  it('不暴露未实现的段级重塑服务', async () => {
+    const serviceExports = await import('../reshape-service');
+
+    expect(serviceExports).not.toHaveProperty('reshapeSection');
+  });
+
   it('直接返回模型自由重塑的正文', async () => {
     mocks.stream.mockReturnValueOnce(fakeStream('重塑：见 [[Alpha]]'));
     const { reshapePageBody } = await import('../reshape-service');
