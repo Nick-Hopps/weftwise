@@ -4,23 +4,52 @@ import { isIP } from 'node:net';
 export interface ResolvedAddress {
   address: string;
   family: 4 | 6;
+  provenance?: 'system-fake-ip';
 }
 
 export type HostResolver = (hostname: string) => Promise<ResolvedAddress[]>;
+
+export type SystemHostLookup = (
+  hostname: string,
+) => Promise<Array<{ address: string; family: number }>>;
 
 export interface PublicHttpTarget extends ResolvedAddress {
   url: URL;
   hostname: string;
 }
 
-const defaultResolver: HostResolver = async (hostname) => {
-  const addresses = await lookup(hostname, { all: true, verbatim: true });
-  return addresses.flatMap((entry): ResolvedAddress[] =>
-    entry.family === 4 || entry.family === 6
-      ? [{ address: entry.address, family: entry.family }]
-      : [],
-  );
-};
+const SYSTEM_FAKE_IP_SENTINEL = 'example.com';
+
+const nodeSystemLookup: SystemHostLookup = (hostname) =>
+  lookup(hostname, { all: true, verbatim: true });
+
+/**
+ * 识别系统 DNS 的 RFC 2544 Fake-IP 模式，并给映射结果附加来源标记。
+ * 只有目标与固定公网哨兵都完全落入代理池时才标记，其他保留地址保持不可信。
+ */
+export function createSystemHostResolver(
+  lookupHost: SystemHostLookup = nodeSystemLookup,
+): HostResolver {
+  return async (hostname) => {
+    const addresses = normalizeLookupAddresses(await lookupHost(hostname));
+    if (!areAllFakeIpProxyAddresses(addresses)) return addresses;
+
+    let sentinelAddresses: ResolvedAddress[];
+    try {
+      sentinelAddresses = normalizeLookupAddresses(await lookupHost(SYSTEM_FAKE_IP_SENTINEL));
+    } catch {
+      return addresses;
+    }
+    if (!areAllFakeIpProxyAddresses(sentinelAddresses)) return addresses;
+
+    return addresses.map((entry) => ({
+      ...entry,
+      provenance: 'system-fake-ip' as const,
+    }));
+  };
+}
+
+const defaultResolver = createSystemHostResolver();
 
 /**
  * 解析 http(s) URL，并拒绝 userinfo、内部专用 hostname 与不可公开路由的 IP literal。
@@ -59,7 +88,7 @@ export function validateHttpUrl(raw: string): URL {
   return url;
 }
 
-/** 每一跳都解析全部 DNS 答案；任一答案不公开即拒绝，并固定使用首个已验证地址。 */
+/** 每一跳都解析全部 DNS 答案；仅接受全公网或全已验证 Fake-IP，并固定首个地址。 */
 export async function resolvePublicHttpTarget(
   raw: string | URL,
   resolver: HostResolver = defaultResolver,
@@ -75,14 +104,18 @@ export async function resolvePublicHttpTarget(
   if (addresses.length === 0) {
     throw new Error(`URL hostname did not resolve: ${hostname}`);
   }
-  for (const entry of addresses) {
-    if (
-      (entry.family !== 4 && entry.family !== 6)
-      || isIP(entry.address) !== entry.family
-      || !isPublicIpAddress(entry.address)
-    ) {
-      throw new Error(`URL hostname must resolve exclusively to public addresses: ${hostname}`);
-    }
+  const allPublic = addresses.every((entry) => (
+    isValidResolvedAddress(entry) && isPublicIpAddress(entry.address)
+  ));
+  const allSystemFakeIp = addresses.every((entry) => (
+    isValidResolvedAddress(entry)
+    && entry.provenance === 'system-fake-ip'
+    && isFakeIpProxyAddress(entry.address)
+  ));
+  if (!allPublic && !allSystemFakeIp) {
+    throw new Error(
+      `URL hostname must resolve exclusively to public or verified system Fake-IP addresses: ${hostname}`,
+    );
   }
 
   return { url, hostname, ...addresses[0]! };
@@ -114,6 +147,35 @@ function bareHostname(hostname: string): string {
   return hostname.startsWith('[') && hostname.endsWith(']')
     ? hostname.slice(1, -1)
     : hostname;
+}
+
+function normalizeLookupAddresses(
+  entries: Array<{ address: string; family: number }>,
+): ResolvedAddress[] {
+  return entries.flatMap((entry): ResolvedAddress[] =>
+    entry.family === 4 || entry.family === 6
+      ? [{ address: entry.address, family: entry.family }]
+      : [],
+  );
+}
+
+function isValidResolvedAddress(entry: ResolvedAddress): boolean {
+  return (entry.family === 4 || entry.family === 6)
+    && isIP(entry.address) === entry.family;
+}
+
+function areAllFakeIpProxyAddresses(addresses: ResolvedAddress[]): boolean {
+  return addresses.length > 0
+    && addresses.every((entry) => entry.family === 4 && isFakeIpProxyAddress(entry.address));
+}
+
+/** RFC 2544 benchmark range；仅能由系统 Fake-IP 一致性探测提升为代理映射。 */
+function isFakeIpProxyAddress(address: string): boolean {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  return parts[0] === 198 && (parts[1] === 18 || parts[1] === 19);
 }
 
 function isPublicIpv4(address: string): boolean {

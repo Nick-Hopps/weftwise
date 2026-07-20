@@ -35,6 +35,11 @@ function fakeTransport(opts: {
 }
 
 const publicResolver = async () => [{ address: '93.184.216.34', family: 4 as const }];
+const fakeIpResolver = async () => [{
+  address: '198.18.0.42',
+  family: 4 as const,
+  provenance: 'system-fake-ip' as const,
+}];
 
 describe('URL_FETCH_USER_AGENT', () => {
   it('使用 weftwise 作为对外抓取标识', () => {
@@ -77,6 +82,22 @@ describe('fetchUrlSource', () => {
       hostname: 'example.com',
     }));
   });
+
+  it('系统 Fake-IP 模式把已标记映射地址固定交给 transport', async () => {
+    const transport = fakeTransport({ body: '<h1>Proxy Doc</h1>' });
+
+    await expect(fetchUrlSource('https://example.com/doc', {
+      transport,
+      resolver: fakeIpResolver,
+    })).resolves.toMatchObject({ content: '<h1>Proxy Doc</h1>' });
+    expect(transport).toHaveBeenCalledWith(expect.objectContaining({
+      address: '198.18.0.42',
+      family: 4,
+      hostname: 'example.com',
+      provenance: 'system-fake-ip',
+    }));
+  });
+
   it('markdown content-type 存为 .md', async () => {
     const transport = fakeTransport({ contentType: 'text/markdown', body: '# hi' });
     const out = await fetchUrlSource('https://example.com/readme', { transport, resolver: publicResolver });
