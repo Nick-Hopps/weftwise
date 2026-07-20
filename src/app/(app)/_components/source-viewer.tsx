@@ -7,6 +7,7 @@ import { renderMarkdown } from '@/lib/markdown-client';
 import { Tag } from '@/components/ui/tag';
 import { cn } from '@/lib/cn';
 import { HtmlSourceFrame } from '@/components/wiki/html-source-frame';
+import { UrlSourcePreview } from '@/components/wiki/url-source-preview';
 import type { PageSourceFormat, HtmlSafety } from '@/lib/contracts';
 import { useI18n } from '@/components/i18n-provider';
 import type { MessageKey } from '@/lib/i18n/messages';
@@ -36,6 +37,9 @@ interface SourceViewerProps {
   htmlSafety?: HtmlSafety;
   /** URL Source：直接在沙箱 iframe 中加载原站。 */
   sourceUrl?: string;
+  /** URL Source：摄入时保存的本地 Markdown 阅读正文。 */
+  readerText?: string;
+  readerTextTruncated?: boolean;
 }
 
 const FORMAT_LABEL: Record<PageSourceFormat, MessageKey> = {
@@ -45,7 +49,16 @@ const FORMAT_LABEL: Record<PageSourceFormat, MessageKey> = {
   text: 'source.format.text',
 };
 
-export function SourceViewer({ id, filename, format, content, htmlSafety, sourceUrl }: SourceViewerProps) {
+export function SourceViewer({
+  id,
+  filename,
+  format,
+  content,
+  htmlSafety,
+  sourceUrl,
+  readerText,
+  readerTextTruncated,
+}: SourceViewerProps) {
   const { t } = useI18n();
   const rawUrl = `/api/sources/${id}/raw`;
   const viewUrl = sourceUrl ?? rawUrl;
@@ -87,6 +100,14 @@ export function SourceViewer({ id, filename, format, content, htmlSafety, source
       {/* body */}
       {format === 'pdf' ? (
         <iframe src={rawUrl} title={filename} className="min-h-0 flex-1 border-0 bg-canvas" />
+      ) : format === 'html' && sourceUrl ? (
+        <UrlSourcePreview
+          src={sourceUrl}
+          title={filename}
+          readerText={readerText}
+          readerTextTruncated={readerTextTruncated}
+          className="min-h-0 flex-1"
+        />
       ) : format === 'html' ? (
         <HtmlSourceFrame
           src={viewUrl}

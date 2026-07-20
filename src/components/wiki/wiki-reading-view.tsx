@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import PageRenderer from './page-renderer';
 import { HtmlSourceFrame } from './html-source-frame';
+import { UrlSourcePreview } from './url-source-preview';
 import { LensFeedback } from './lens-feedback';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
@@ -374,12 +375,22 @@ function SourceBody({ source }: { source: PageSourceDoc }) {
   }
 
   if (source.format === 'html') {
+    if (source.sourceUrl) {
+      return (
+        <UrlSourcePreview
+          src={source.sourceUrl}
+          title={source.name}
+          readerText={source.text}
+          readerTextTruncated={source.readerTextTruncated}
+          className="h-[80vh] lg:h-full"
+        />
+      );
+    }
     return (
       <HtmlSourceFrame
-        src={source.sourceUrl ?? rawUrl}
+        src={rawUrl}
         title={source.name}
         safety={source.htmlSafety}
-        remote={Boolean(source.sourceUrl)}
         className="h-[80vh] lg:h-full"
       />
     );
