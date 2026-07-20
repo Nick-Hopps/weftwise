@@ -53,12 +53,17 @@ export function researchRunRetryable(run: ResearchRunView): boolean {
     && run.candidates.some((candidate) => candidate.delivery?.status === 'failed');
 }
 
+export function researchRunReselectable(run: ResearchRunView): boolean {
+  return researchRunRetryable(run);
+}
+
 export function ResearchCandidatesDialog({
   run,
   onClose,
   onApprove,
   onDismiss,
   onRetry,
+  onReselect,
   acting,
 }: {
   run: ResearchRunView;
@@ -66,6 +71,7 @@ export function ResearchCandidatesDialog({
   onApprove: (candidateIds: string[]) => void;
   onDismiss: () => void;
   onRetry: () => void;
+  onReselect?: () => void;
   acting: boolean;
 }) {
   const { t } = useI18n();
@@ -203,13 +209,13 @@ export function ResearchCandidatesDialog({
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
+        <div className="flex flex-col items-stretch gap-2 px-4 py-3 border-t border-border sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-foreground-tertiary">
             {approvable
               ? t('health.researchCandidates.selected', { count: selectedIds.length })
               : t(RUN_STATUS_MESSAGE[run.status])}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {approvable ? (
               <>
                 <Button intent="secondary" onClick={onDismiss} disabled={acting}>
@@ -229,6 +235,11 @@ export function ResearchCandidatesDialog({
               </>
             ) : (
               <>
+                {researchRunReselectable(run) && onReselect && (
+                  <Button intent="secondary" onClick={onReselect} disabled={acting}>
+                    {t('health.researchCandidates.reselect')}
+                  </Button>
+                )}
                 {researchRunRetryable(run) && (
                   <Button intent="primary" onClick={onRetry} loading={acting}>
                     {t('health.researchCandidates.retryFailedImports')}

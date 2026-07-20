@@ -609,6 +609,9 @@ export function HealthView() {
           : current);
         if (isTerminalResearchRun(run)) {
           queryClient.invalidateQueries({ queryKey: ['pages'] });
+          queryClient.invalidateQueries({
+            queryKey: ['research-backlog', result.origin.subjectId],
+          });
           invalidateWorkflowLifecycle(result.origin);
           return;
         }
@@ -920,6 +923,49 @@ export function HealthView() {
         showResearchError(
           result.run.origin === 'findings' ? 'remediation' : 'manual',
           error instanceof Error ? error.message : t('health.error.retry'),
+        );
+      }
+    } finally {
+      const held = researchActionOriginRef.current;
+      if (held && isHealthOriginCurrent(held, result.origin)) {
+        researchActionOriginRef.current = null;
+        if (isCurrentOrigin(result.origin)) setResearchActing(false);
+      }
+    }
+  }
+
+  async function reselectResearchCandidates() {
+    const result = candidateResult;
+    if (
+      !result
+      || result.run.status !== 'failed'
+      || !isCurrentOrigin(result.origin)
+      || researchActionOriginRef.current
+    ) return;
+    researchActionOriginRef.current = result.origin;
+    setResearchActing(true);
+    try {
+      const response = await apiFetch(
+        `/api/research-runs/${encodeURIComponent(result.run.id)}/reselect`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subjectId: result.run.subjectId,
+            expectedVersion: result.run.version,
+          }),
+        },
+      );
+      const run = await readResearchRun(response, t);
+      if (!isCurrentOrigin(result.origin)) return;
+      researchApprovalAttemptRef.current = null;
+      setCandidateResult({ run, origin: result.origin });
+      invalidateWorkflowLifecycle(result.origin);
+    } catch (error) {
+      if (isCurrentOrigin(result.origin)) {
+        showResearchError(
+          result.run.origin === 'findings' ? 'remediation' : 'manual',
+          error instanceof Error ? error.message : t('health.error.reselect'),
         );
       }
     } finally {
@@ -1355,6 +1401,7 @@ export function HealthView() {
           onApprove={approveResearchCandidates}
           onDismiss={dismissResearchCandidates}
           onRetry={retryResearchCandidates}
+          onReselect={reselectResearchCandidates}
           acting={researchActing}
         />
       )}

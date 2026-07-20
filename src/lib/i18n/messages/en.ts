@@ -789,6 +789,7 @@ export const en = {
   'health.error.approval': 'Research approval failed.',
   'health.error.dismiss': 'Research dismiss failed.',
   'health.error.retry': 'Research retry failed.',
+  'health.error.reselect': 'Could not reopen the Research candidates.',
   'health.error.snapshotChanged': 'Health results changed. Review them again before continuing.',
   'health.error.remediationStatus': 'Remediation request failed ({status}).',
   'health.error.remediationRetry': 'Remediation request failed. Please try again.',
@@ -828,6 +829,7 @@ export const en = {
   'health.researchCandidates.cancel': 'Cancel',
   'health.researchCandidates.approve': 'Approve {count}',
   'health.researchCandidates.retryFailedImports': 'Retry failed imports',
+  'health.researchCandidates.reselect': 'Choose different candidates',
 } as const;
 
 export type MessageKey = keyof typeof en;

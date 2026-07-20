@@ -776,6 +776,7 @@ export const zhCN = {
   'health.error.approval': '研究批准失败。',
   'health.error.dismiss': '忽略研究失败。',
   'health.error.retry': '重试研究失败。',
+  'health.error.reselect': '无法重新打开研究候选项。',
   'health.error.snapshotChanged': '健康检查结果已更新，请重新确认后再继续。',
   'health.error.remediationStatus': '处置请求失败（{status}）。',
   'health.error.remediationRetry': '处置请求失败，请重试。',
@@ -815,4 +816,5 @@ export const zhCN = {
   'health.researchCandidates.cancel': '取消',
   'health.researchCandidates.approve': '批准 {count} 项',
   'health.researchCandidates.retryFailedImports': '重试失败的导入',
+  'health.researchCandidates.reselect': '重新选择候选项',
 } as const satisfies Record<MessageKey, string>;

@@ -658,6 +658,11 @@ describe('research-provenance-repo failed run 导入重试', () => {
     });
     const approvalId = approved.stored.approval!.id;
     const candidateId = stored.candidates[0]!.id;
+    context.sqlite.prepare(`
+      INSERT INTO research_backlog (
+        id, subject_id, question, source, status, research_job_id, created_at
+      ) VALUES ('backlog-retry', 's1', 'A', 'manual', 'researched', 'research-retry', ?)
+    `).run('2026-07-14T00:30:00.000Z');
     const claim = context.repo.claimResearchDelivery({
       approvalId,
       candidateId,
@@ -675,6 +680,9 @@ describe('research-provenance-repo failed run 导入重试', () => {
       stored.run.id,
       new Date('2026-07-14T01:00:02.000Z'),
     )).toBe(true);
+    expect(context.sqlite.prepare(`
+      SELECT status FROM research_backlog WHERE id = 'backlog-retry'
+    `).get()).toEqual({ status: 'open' });
     return { ...context, runId: stored.run.id, approvalId, candidateId };
   }
 
@@ -733,6 +741,19 @@ describe('research-provenance-repo failed run 导入重试', () => {
     expect(approved.stored.deliveries).toEqual([
       expect.objectContaining({ candidateId: replacementCandidateId, status: 'pending' }),
     ]);
+
+    sqlite.prepare(`
+      UPDATE research_candidate_ingests
+      SET status = 'completed', completed_at = '2026-07-14T03:00:00.000Z'
+      WHERE approval_id = ? AND candidate_id = ?
+    `).run(approved.stored.approval!.id, replacementCandidateId);
+    expect(repo.finalizeTopicResearchRunAtomic(
+      runId,
+      new Date('2026-07-14T03:00:01.000Z'),
+    )).toBe(true);
+    expect(sqlite.prepare(`
+      SELECT status FROM research_backlog WHERE id = 'backlog-retry'
+    `).get()).toEqual({ status: 'researched' });
   });
 
   it('版本陈旧、verification 后失败或仍有非终态 delivery 时拒绝重新选择', async () => {

@@ -98,7 +98,7 @@ describe('POST /api/research-runs/[id]/reselect', () => {
         'RESEARCH_RUN_NOT_RETRYABLE',
         'Research run cannot be retried.',
         409,
-        { id: 'run-1', status: 'failed' },
+        { id: 'run-1', status: 'failed' } as never,
       );
     });
     const response = await call();

@@ -2,7 +2,7 @@
 
 ## 背景
 
-Research 在用户批准搜索候选后，会冻结候选决策并创建 `research-import` 协调任务。当前导入失败的 run 只支持重置原失败 delivery 后重试，无法回到候选选择阶段。与此同时，Health 投影把导入阶段失败的 finding 当作已处理结果隐藏，用户关闭失败弹窗后也无法从原待研究项恢复。
+Research 在用户批准搜索候选后，会冻结候选决策并创建 `research-import` 协调任务。当前导入失败的 run 只支持重置原失败 delivery 后重试，无法回到候选选择阶段。与此同时，Health 投影把导入阶段失败的 finding 当作已处理结果隐藏；Research backlog 又在 discovery job 入队时提前标为 `researched`，导入失败后没有恢复为 `open`，用户关闭失败弹窗后也无法从原待研究项恢复。
 
 ## 目标
 
@@ -11,6 +11,7 @@ Research 在用户批准搜索候选后，会冻结候选决策并创建 `resear
 - 失败审批与 delivery lineage 不被覆盖或丢弃，保留可审计快照。
 - 重新选择、审批归档、候选解冻和 run 状态迁移在同一 SQLite `IMMEDIATE` transaction 内完成。
 - 导入失败不再从 Health 当前 findings 中消失；显式忽略、空结果和验证终态仍沿用既有投影语义。
+- backlog 发起的 topic Research 全部导入失败时，原条目原子恢复为 `open`；后续重试或重选成功后再标回 `researched`。
 - 既有“重试失败导入”继续保留，用户可在重试原候选和重新选择之间决定。
 
 ## 非目标
@@ -26,6 +27,7 @@ Research 在用户批准搜索候选后，会冻结候选决策并创建 `resear
 2. failed run 的现有恢复原语只把 failed delivery 重置为 `pending`，选择集合不变。
 3. `readHandledOutcome()` 将 `failed` Research run 视为已完成处置，导致 baseline finding 被移入近期结果并从当前列表隐藏。
 4. Health 刷新只从 active job 或 `awaiting-approval` plan 恢复候选弹窗；失败 run 关闭后没有恢复入口。
+5. Research backlog 在 Research discovery job 入队后立即写成 `researched`，topic run 导入失败不会反向恢复该条目。
 
 ## 方案比较
 
@@ -105,6 +107,8 @@ Research 在用户批准搜索候选后，会冻结候选决策并创建 `resear
 
 Health 投影仅在 Research 真正完成验证、显式忽略或空结果时隐藏 finding。导入前失败且 verification 仍为 pending 时保持 finding 可见，并显示失败状态。
 
+topic run 聚合终态与关联 backlog 状态在同一事务内更新：`failed` 将匹配 `research_job_id` 的 `researched` 条目恢复为 `open`，`completed/partial` 将重试期间的 `open` 条目标回 `researched`。前端观察到 run 终态后刷新 backlog query，普通关闭不改变任何持久化状态。
+
 ## 成功标准
 
 - failed run 点击重新选择后，同一 run ID 变为 `awaiting-approval`、version 增加、候选恢复可选。
@@ -112,5 +116,5 @@ Health 投影仅在 Research 真正完成验证、显式忽略或空结果时隐
 - 旧审批与 delivery 仍可从归档表完整读取。
 - 陈旧版本、跨 subject、验证后失败、仍有非终态 delivery 均 fail closed。
 - 关闭失败弹窗并刷新 Health 后，原 finding 仍存在。
+- backlog topic 全失败后刷新页面，原待研究条目仍以 `open` 展示；恢复成功后不再重复展示。
 - 原重试路径与普通首次批准行为测试保持通过。
-

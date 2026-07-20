@@ -65,8 +65,9 @@ VAULT_PATH=/tmp/agentic-wiki-research-reselect-vault npm exec vitest -- run src/
 1. 先写失败测试：导入前 failed run 不隐藏 finding；失败弹窗展示重新选择；恢复后候选重新可勾选。
 2. 确认测试按预期失败。
 3. 收窄 Research handled outcome 终态，并调用 `/reselect` 更新同一 `candidateResult`。
-4. 清理旧批准幂等尝试，补充中英文文案与组件文档。
-5. 运行 Health 定向测试转绿。
+4. topic run 全失败时原子重开关联 backlog，恢复成功后标回 `researched`；前端终态刷新 backlog。
+5. 清理旧批准幂等尝试，补充中英文文案与组件文档。
+6. 运行 Health 定向测试转绿。
 
 验证命令：
 

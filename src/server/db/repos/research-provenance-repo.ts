@@ -783,7 +783,14 @@ export function finalizeTopicResearchRunAtomic(runId: string, now = new Date()):
       SET status = ?, version = version + 1, updated_at = ?, completed_at = ?
       WHERE id = ? AND status = 'importing' AND origin = 'topic'
     `).run(status, nowIso, nowIso, runId);
-    return update.changes === 1;
+    if (update.changes !== 1) return false;
+    sqlite.prepare(`
+      UPDATE research_backlog SET status = ?
+      WHERE research_job_id = (
+        SELECT research_job_id FROM research_runs WHERE id = ?
+      ) AND status IN ('open', 'researched')
+    `).run(status === 'failed' ? 'open' : 'researched', runId);
+    return true;
   });
   return transaction.immediate();
 }
