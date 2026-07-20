@@ -106,6 +106,27 @@ describe('updateSourceChunks', () => {
     }));
   });
 
+  it('把 URL 清洗正文有界写入 sidecar，不扩大 SQLite metadata cache', async () => {
+    const {
+      saveUrlSource,
+      updateUrlSourceReaderText,
+      getSourceMetadata,
+    } = await import('../source-store');
+    const subject = { id: 'sub1', slug: 'general' };
+    const saved = saveUrlSource(subject, 'https://example.com/article');
+    const cleanText = `# Example\n\n${'正文'.repeat(60_000)}`;
+
+    updateUrlSourceReaderText(saved.id, cleanText);
+
+    const meta = getSourceMetadata(saved.id) as {
+      readerText: string;
+      readerTextTruncated: boolean;
+    };
+    expect(meta.readerText).toBe(cleanText.slice(0, 120_000));
+    expect(meta.readerTextTruncated).toBe(true);
+    expect(sourceRepoMocks.upsertSource).not.toHaveBeenCalled();
+  });
+
   it('sidecar 不存在时静默跳过（best-effort）', async () => {
     const { updateSourceChunks } = await import('../source-store');
     expect(() => updateSourceChunks('nonexistent-id', [])).not.toThrow();

@@ -36,4 +36,21 @@ describe('parseHtml 网页展示元数据', () => {
     expect(parseHtml('fallback.html', '<title>Bad &#99999999; entity</title>').title)
       .toBe('Bad &#99999999; entity');
   });
+
+  it('清洗正文时去除脚本、样式和非正文模板内容', () => {
+    const parsed = parseHtml('article.html', `
+      <style>.article { color: red; }</style>
+      <script>window.tracker = "do-not-render";</script>
+      <noscript>请启用脚本</noscript>
+      <template>隐藏模板内容</template>
+      <article><h1>文章标题</h1><p>可阅读正文。</p></article>
+    `);
+
+    expect(parsed.cleanText).toContain('# 文章标题');
+    expect(parsed.cleanText).toContain('可阅读正文。');
+    expect(parsed.cleanText).not.toContain('do-not-render');
+    expect(parsed.cleanText).not.toContain('color: red');
+    expect(parsed.cleanText).not.toContain('请启用脚本');
+    expect(parsed.cleanText).not.toContain('隐藏模板内容');
+  });
 });

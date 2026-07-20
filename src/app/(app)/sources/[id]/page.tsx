@@ -5,6 +5,7 @@ import { getById as getSubjectById } from '@/server/db/repos/subjects-repo';
 import { getRawSourceContent } from '@/server/sources/source-store';
 import { analyzeHtmlSafety } from '@/server/sources/html-safety';
 import { readUrlSourceReference } from '@/server/sources/url-source';
+import { readUrlSourceReaderContent } from '@/server/sources/source-reader';
 import { SourceViewer } from '../../_components/source-viewer';
 import { decodeRouteSegment } from '@/lib/route-params';
 import type { PageSourceFormat } from '@/lib/contracts';
@@ -51,6 +52,9 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
     format === 'html' && !urlReference
       ? analyzeHtmlSafety(getRawSourceContent(subject.slug, source.filename) ?? '')
       : undefined;
+  const readerContent = urlReference
+    ? readUrlSourceReaderContent(source.id)
+    : { text: undefined, truncated: false };
 
   return (
     <SourceViewer
@@ -60,6 +64,8 @@ export default async function SourcePage({ params }: { params: Promise<{ id: str
       content={content}
       htmlSafety={htmlSafety}
       sourceUrl={urlReference?.originUrl}
+      readerText={readerContent.text}
+      readerTextTruncated={readerContent.truncated}
     />
   );
 }

@@ -356,12 +356,14 @@ export interface PageSourceDoc {
   meta?: string;
   /** 仅 markdown/text 有意义：正文按 120K 截断时为 true。pdf/html 直出完整文件，不截断。 */
   truncated?: boolean;
-  /** markdown/text 的正文（已截断）。pdf/html 不下发 payload（由 iframe 渲染）。 */
+  /** markdown/text 正文，或 URL Source 的本地阅读正文（均已按 120K 截断）。 */
   text?: string;
   /** 仅 html 有意义：服务端启发式扫描结论，驱动 iframe sandbox 决策与警告条。 */
   htmlSafety?: HtmlSafety;
   /** URL Source 的规范化原始链接；存在时 iframe 直接加载远程网页，不读取 local raw。 */
   sourceUrl?: string;
+  /** URL Source 的阅读正文是否在持久化或响应阶段被截断。 */
+  readerTextTruncated?: boolean;
 }
 
 export interface IngestResult {

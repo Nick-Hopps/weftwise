@@ -1,6 +1,10 @@
 import path from 'path';
 import * as sourcesRepo from '../db/repos/sources-repo';
-import { getSourceMetadata, getRawSourceContent } from './source-store';
+import {
+  getSourceMetadata,
+  getRawSourceContent,
+  SOURCE_READER_TEXT_CAP,
+} from './source-store';
 import { analyzeHtmlSafety } from './html-safety';
 import { readUrlSourceReference } from './url-source';
 import type { PageSourceDoc, PageSourceFormat, Subject } from '@/lib/contracts';
@@ -18,6 +22,57 @@ interface SidecarChunk {
 interface SourceSidecar {
   savedAt?: string;
   chunks?: SidecarChunk[];
+  readerText?: string;
+  readerTextTruncated?: boolean;
+}
+
+export interface UrlSourceReaderContent {
+  text?: string;
+  truncated: boolean;
+}
+
+const LEGACY_OVERLAP_MIN = 24;
+const LEGACY_OVERLAP_MAX = 4_000;
+
+function exactSuffixPrefixOverlap(left: string, right: string): number {
+  const max = Math.min(left.length, right.length, LEGACY_OVERLAP_MAX);
+  for (let length = max; length >= LEGACY_OVERLAP_MIN; length -= 1) {
+    if (left.endsWith(right.slice(0, length))) return length;
+  }
+  return 0;
+}
+
+function reconstructLegacyReaderText(chunks: SidecarChunk[]): string {
+  let result = '';
+  for (const chunk of chunks) {
+    if (typeof chunk.text !== 'string' || !chunk.text) continue;
+    if (!result) {
+      result = chunk.text;
+      continue;
+    }
+    const overlap = exactSuffixPrefixOverlap(result, chunk.text);
+    result += chunk.text.slice(overlap);
+    if (result.length > SOURCE_READER_TEXT_CAP) break;
+  }
+  return result;
+}
+
+function readerContentFromSidecar(sidecar: SourceSidecar): UrlSourceReaderContent {
+  const persisted = typeof sidecar.readerText === 'string' ? sidecar.readerText : null;
+  const full = persisted ?? reconstructLegacyReaderText(
+    Array.isArray(sidecar.chunks) ? sidecar.chunks : [],
+  );
+  const text = full ? full.slice(0, SOURCE_READER_TEXT_CAP) : undefined;
+  return {
+    ...(text ? { text } : {}),
+    truncated:
+      sidecar.readerTextTruncated === true || full.length > SOURCE_READER_TEXT_CAP,
+  };
+}
+
+export function readUrlSourceReaderContent(sourceId: string): UrlSourceReaderContent {
+  const sidecar = (getSourceMetadata(sourceId) as SourceSidecar | null) ?? {};
+  return readerContentFromSidecar(sidecar);
 }
 
 function formatFor(filename: string): PageSourceFormat {
@@ -56,10 +111,13 @@ export function readPageSources(
     const base = { id: src.id, name: src.filename, format, added } as PageSourceDoc;
 
     if (urlReference) {
+      const readerContent = readerContentFromSidecar(sidecar);
       docs.push({
         ...base,
         meta: 'Web',
         sourceUrl: urlReference.originUrl,
+        ...(readerContent.text ? { text: readerContent.text } : {}),
+        readerTextTruncated: readerContent.truncated,
       });
       continue;
     }

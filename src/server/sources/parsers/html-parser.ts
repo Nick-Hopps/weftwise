@@ -6,6 +6,7 @@ const turndown = new TurndownService({
   codeBlockStyle: 'fenced',
   bulletListMarker: '-',
 });
+turndown.remove(['script', 'style', 'noscript', 'template']);
 
 const HTML_ENTITY_RE = /&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi;
 
