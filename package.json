@@ -1,8 +1,9 @@
 {
   "name": "weftwise",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "dev": "next dev",
     "dev:all": "concurrently --names next,worker --prefix-colors blue,green \"next dev\" \"node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx src/server/worker-entry.ts\"",
     "build": "next build",

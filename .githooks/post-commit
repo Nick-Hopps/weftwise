@@ -1,0 +1,4 @@
+#!/bin/sh
+# 根据提交类型自动自增 package.json 版本号（SemVer，beta 阶段规则），amend 回同一提交。
+# 逻辑见 scripts/version/post-commit-bump.ts；SKIP_VERSION_BUMP=1 可跳过。
+NODE_OPTIONS="--no-deprecation" exec npx --no-install tsx "$(git rev-parse --show-toplevel)/scripts/version/post-commit-bump.ts"
