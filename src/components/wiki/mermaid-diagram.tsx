@@ -41,11 +41,11 @@ export default function MermaidDiagram({ code }: { code: string }) {
           ref={triggerRef}
           type="button"
           intent="outline"
-          size="base"
+          size="sm"
           onClick={() => setPreviewOpen(true)}
           aria-label={t('wiki.diagram.openPreview')}
           data-tip={t('wiki.diagram.openPreview')}
-          className="tip tip-l absolute right-1 top-1 z-10 bg-surface/90 opacity-100 shadow-xs backdrop-blur-sm sm:opacity-0 sm:group-hover/diagram:opacity-100 sm:focus:opacity-100"
+          className="tip tip-l !absolute right-1 -top-4 z-10 bg-surface/90 opacity-100 shadow-xs backdrop-blur-sm sm:opacity-0 sm:group-hover/diagram:opacity-100 sm:focus:opacity-100"
         >
           <Maximize2 aria-hidden />
         </IconButton>

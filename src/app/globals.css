@@ -578,6 +578,7 @@
   display: block;
   margin-bottom: 4px;
   font-size: 11px;
+  line-height: 15px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
@@ -587,7 +588,7 @@
 .callout[data-callout] { position: relative; }
 .callout-icon {
   position: absolute;
-  top: 15px;
+  top: 14px;
   left: 18px;
   display: inline-flex;
   color: rgb(var(--color-fg-secondary));

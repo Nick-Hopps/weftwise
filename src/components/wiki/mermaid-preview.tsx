@@ -133,13 +133,13 @@ export function MermaidPreview({
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-overlay flex flex-col bg-overlay/50 p-3 backdrop-blur-sm animate-fade-in sm:p-5"
+      className="fixed inset-0 z-overlay flex items-center justify-center bg-overlay/50 p-3 backdrop-blur-sm animate-fade-in sm:p-5"
     >
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-canvas shadow-lg"
+        className="flex max-h-full max-w-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-canvas shadow-lg"
       >
         <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-surface px-3 sm:px-4">
           <h2 id={titleId} className="truncate text-sm font-semibold text-foreground">
