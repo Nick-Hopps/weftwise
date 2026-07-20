@@ -92,9 +92,9 @@
 
 ### `health/`
 
-- `health-view.tsx` —— 🆕 知识库体检工作台；复用 `workspace-page` 的统一宽度、页头、五项摘要、sticky 工具栏和状态区；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；Fix/Curate 完成后仅刷新已物化 postcondition 的 Health 快照投影，不再自动入队 lint；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/legacy verifying，终态刷新 pages/lint-latest/active jobs
+- `health-view.tsx` —— 🆕 知识库体检工作台；复用 `workspace-page` 的统一宽度、页头、五项摘要、sticky 工具栏和状态区；消费 `HealthSnapshot.remediations` 驱动逐条/批量动作；「整理/修复/研究」在 pending/running 时原位切为 Stop，刷新恢复出的 active job 同样可取消，成功后等待权威 SSE 终态释放 action gate，失败保留可重试入口；Fix/Curate 完成后仅刷新已物化 postcondition 的 Health 快照投影，不再自动入队 lint；Research job 完成后由 `result.runId` GET 持久化 run，按 candidate ID 批准/忽略并轮询 importing/legacy verifying，终态刷新 pages/lint-latest/active jobs
 - `finding-row.tsx` —— 单条 finding 采用稳定的摘要/状态/动作三段布局，长描述限制两行，建议与 plan reason 按需展开；内部 status 映射为用户态文案（如 `awaiting-approval` → `Needs action`）；无 plan 时显示 `Plan unavailable`，不按 finding type 猜测动作；`review-source` 只导航
-- `remediation-ui.ts` —— 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy；恢复 remediation job 只恢复 workflow，不排队修后 lint；Fix 完成摘要只统计 `perFindingOutcomes`，不把 `writes` 解释为 finding 或页面数；同时严格解析 Research job locator/run view，并构造不含 URL 的批准 body
+- `remediation-ui.ts` —— 客户端纯 helper：从服务端 actions 收集 finding IDs、同步 action gate、subject/generation origin 隔离、active job 严格解析与 hydration busy；恢复 remediation job 只恢复 workflow，不排队修后 lint；统一派生处置按钮的 idle/starting/running/cancelling 四态并解析通用 job cancel 响应（409 按已终态幂等收敛）；Fix 完成摘要只统计 `perFindingOutcomes`，不把 `writes` 解释为 finding 或页面数；同时严格解析 Research job locator/run view，并构造不含 URL 的批准 body
 - `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可操作，持久展示 importing/verifying/terminal 与 child delivery
 - `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
 
@@ -189,6 +189,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Health「整理/修复/研究」三个处置按钮支持手动停止：运行态原位切换 Square + Stop，pending/running 与刷新恢复 job 复用通用 cancel API；请求失败可见且可重试，成功等待 `job:cancelled` SSE 清理，不把主动取消 Research 误报为普通失败。spec/plan 见 `docs/{specs,plans}/2026-07-20-health-actions-manual-cancel.md` |
 | 2026-07-20 | Ingest URL 登录态恢复：`use-job-stream` 注册 `ingest:auth-required`；工作台把无 checkpoint 的认证失败 job 纳入刷新恢复，失败主操作切为 Sign in；新增 `ingest-auth-dialog`，打开精确 origin 登录页并提交默认遮蔽的 Cookie/可选 Authorization，成功后复用同一 job SSE。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |
 | 2026-07-20 | URL Source 预览改为直接加载原网页：左侧 Sources 列表展示已持久化的网页标题+描述；source 独立页与 Wiki Sources 分栏复用远程 sandbox iframe，显示 Web/Open original，默认禁用脚本且永不开放同源权限；上传 HTML 继续走本地 raw+CSP 预览 |
 | 2026-07-20 | Settings Maintenance 状态行新增到期页面预览：`Pages due now` 计数 >0 时显示 View/Hide 切换，展开行 footer 懒加载 `GET /api/maintenance/due-pages`（React Query `['maintenance-due-pages']`，10s stale）渲染有界列表——标题（孤儿行回退 slug）+ 项目名 + 相对到期时间，条目 Link 到 `/wiki/<slug>?s=` 并关闭弹窗，超上限提示剩余条数。spec/plan 见 `docs/{specs,plans}/2026-07-20-maintenance-due-pages-preview.md` |

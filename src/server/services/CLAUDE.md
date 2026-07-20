@@ -139,7 +139,7 @@ Research finding 的 immutable `snapshot_json` 必须无损覆盖 finding identi
 
 ### Research approval provenance Phase 2C
 
-`research-service.ts` 完成查询与 triage 后，不再把 job `resultJson.candidates` 当批准事实，而是用稳定 run/candidate ID 持久化候选快照、finding 快照、topics 与 queries；客户端与审批链路只将 job result 的 `runId` 作为权威定位，兼容字段不能参与批准。`research-approval-service.ts` 将存储行严格映射为脱敏 `ResearchRunView`，批准 API 只接受 candidate ID、expectedVersion 与 idempotency key；repo 在单个 `IMMEDIATE` transaction 内 CAS run、写 approval、冻结 selected/rejected decision、建立每候选 delivery 并创建唯一 `research-import` coordinator。
+`research-service.ts` 完成查询与 triage 后，不再把 job `resultJson.candidates` 当批准事实，而是用稳定 run/candidate ID 持久化候选快照、finding 快照、topics 与 queries；客户端与审批链路只将 job result 的 `runId` 作为权威定位，兼容字段不能参与批准。job 级 AbortController 每秒轮询取消标记，同一 signal 贯穿 query 生成、全部 Tavily 搜索与 triage；阶段边界及 provenance 写入前再次 fail closed，取消统一抛 `AgentCancelled`，不得继续持久化候选 run。`research-approval-service.ts` 将存储行严格映射为脱敏 `ResearchRunView`，批准 API 只接受 candidate ID、expectedVersion 与 idempotency key；repo 在单个 `IMMEDIATE` transaction 内 CAS run、写 approval、冻结 selected/rejected decision、建立每候选 delivery 并创建唯一 `research-import` coordinator。
 
 `research-import-service.ts` 只接受 run/approval/subject ID，URL 必须回读服务端候选快照。每条 delivery 用 claim token + lease CAS；coordinator 不再抓取 HTML，而是在同一事务重验 token 后完成 URL Source get-or-create、sourceId 回写和 child Ingest 入队，真正抓取由 child worker 的 `source-loader` 执行。child params 的 `researchProvenance` 由服务端注入，通用 Ingest API 不接受客户端 provenance。`research-provenance-reconciler.ts` 汇总 coordinator/child 终态，物化 source、Ingest job、operation IDs、touched pages、commit SHA 与安全错误；finding run 至少一条导入成功后唯一入队 verification lint，并用 exact finding ID 或稳定 locus 物化 `fixed/residual/unverifiable`。worker 终态 hook、启动扫描和维护 tick 共用同一幂等对账原语，补偿取消与崩溃窗口。工作台手动重试 failed child 时，`research-approval-service::retryResearchIngestJob` 先精确对账，再由 repo 在一个 IMMEDIATE transaction 内恢复同一 job、delivery 与 run；job ID、attempt 保留；URL child 因活网页面可能变化会在执行时清空旧 checkpoint，已取消、source 缺失、lineage 不匹配或 verification 已物化时 fail-closed。
 
@@ -311,6 +311,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-20 | Research discovery 接入 job 级取消：同一 AbortSignal 覆盖 query LLM、并行 Tavily 搜索与 triage LLM，`allSettled` 后和 provenance 写入前重验取消，统一抛 `AgentCancelled` 且不落候选 run；供 Health 三类处置 Stop 闭环使用 |
 | 2026-07-20 | Ingest worker 接入 URL 登录态 grant：401/403 发结构化恢复事件；重排后按 job/source 解密 exact-origin Cookie/Authorization；下游失败保留、完整提交成功清理，Research child 不绕过 provenance 状态机 |
 | 2026-07-20 | URL Source 改为链接型输入：Ingest worker 通过 `source-loader` 执行时临时抓取解析并写回网页标题/描述，URL 重试清空旧 checkpoint；Research coordinator 只持久化候选 URL 与 child lineage，不再下载 HTML |
 | 2026-07-20 | `embed-index` 接线 `maturityRepo.pruneOrphans`（原为从未调用的死代码）：每次写后自愈清理 `page_maturity` 孤儿行，放在 embedding 配置守卫之前、未配置也生效；修复删页/merge 残留导致维护 dueCount 虚高、到期预览显示裸 slug、sweep 给已删页入队必失败 re-enrich 的问题 |
