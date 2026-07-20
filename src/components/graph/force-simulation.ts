@@ -26,10 +26,7 @@ export interface ForceParams {
 export function startForceSimulation(cy: cytoscape.Core, params: ForceParams): SimulationHandle {
   let rafId: number | null = null;
   let grabbedNodeId: string | null = null;
-  // cose already produced and fitted the initial layout. Keep it stable until
-  // direct manipulation reheats the simulation; otherwise a second force pass
-  // expands the graph after the viewport has been fitted.
-  let alpha = 0;
+  let alpha = 1;
   const ALPHA_DECAY = 0.008;
   const ALPHA_MIN = 0.001;
   const ALPHA_REHEAT = 0.25;

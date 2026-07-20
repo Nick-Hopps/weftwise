@@ -453,7 +453,7 @@ export const zhCN = {
   'graph.expand': '展开图谱全屏视图',
   'graph.title': 'Wiki 图谱',
   'graph.nodes': '{count} 个节点',
-  'graph.relationships': '{count} 条关系',
+  'graph.links': '{count} 条链接',
   'graph.orphans': '{count} 个孤立页面',
   'graph.currentPage': '当前页面',
   'graph.active': '活动节点',

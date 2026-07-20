@@ -3,14 +3,13 @@ import * as pagesRepo from '@/server/db/repos/pages-repo';
 import { isMetaPage } from '@/server/db/repos/pages-repo';
 import { requireAuth } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
-import { buildGraphProjection } from './graph-data';
 
 export const runtime = 'nodejs';
 
 /**
  * GET /api/graph
- * Returns { nodes, edges } for the active subject. Repeated references between
- * the same directed page pair are aggregated; cross-subject edges are dropped.
+ * Returns { nodes, edges } for the active subject. Cross-subject edges are
+ * dropped — the graph view is one workspace at a time.
  */
 export async function GET(request: NextRequest) {
   const authError = requireAuth(request);
@@ -25,7 +24,31 @@ export async function GET(request: NextRequest) {
     .filter((p) => !isMetaPage(p));
   const links = pagesRepo.getAllLinks(subject.id);
 
-  const { nodes, edges, referenceCount } = buildGraphProjection(pages, links, subject.id);
+  const inboundCount = new Map<string, number>();
+  for (const link of links) {
+    if (link.targetSubjectId !== subject.id) continue;
+    inboundCount.set(link.targetSlug, (inboundCount.get(link.targetSlug) || 0) + 1);
+  }
+
+  const slugSet = new Set(pages.map((p) => p.slug));
+
+  const nodes = pages.map((p) => ({
+    id: p.slug,
+    label: p.title,
+    linkCount: inboundCount.get(p.slug) || 0,
+  }));
+
+  const edges = links
+    .filter(
+      (l) =>
+        l.targetSubjectId === subject.id &&
+        slugSet.has(l.sourceSlug) &&
+        slugSet.has(l.targetSlug)
+    )
+    .map((l) => ({
+      source: l.sourceSlug,
+      target: l.targetSlug,
+    }));
 
   return NextResponse.json({
     nodes,
@@ -35,7 +58,6 @@ export async function GET(request: NextRequest) {
       status: 'ready',
       nodeCount: nodes.length,
       edgeCount: edges.length,
-      referenceCount,
       subjectId: subject.id,
       subjectSlug: subject.slug,
     },

@@ -158,7 +158,7 @@ export default async function DashboardPage() {
             Wiki Graph — <span className="font-mono normal-case">{subject.slug}</span>
           </SectionLabel>
         </div>
-        <div className="h-[28rem] overflow-hidden rounded-md border border-border bg-canvas shadow-xs md:h-[32rem] lg:h-[36rem]">
+        <div className="h-80 overflow-hidden rounded-md border border-border bg-canvas shadow-xs">
           <MiniGraphView key={subject.id} fill />
         </div>
       </section>

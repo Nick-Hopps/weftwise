@@ -463,7 +463,7 @@ export const en = {
   'graph.expand': 'Expand graph to fullscreen',
   'graph.title': 'Wiki Graph',
   'graph.nodes': '{count} nodes',
-  'graph.relationships': '{count} relationships',
+  'graph.links': '{count} links',
   'graph.orphans': '{count} orphans',
   'graph.currentPage': 'Current page',
   'graph.active': 'Active',
