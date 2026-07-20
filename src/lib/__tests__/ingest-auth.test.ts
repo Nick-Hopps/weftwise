@@ -58,6 +58,14 @@ describe('currentUrlAuthChallenge', () => {
     });
   });
 
+  it('用户取消任务后旧 challenge 失效', () => {
+    expect(currentUrlAuthChallenge([
+      event('ingest:auth-required', challenge),
+      event('job:failed'),
+      event('job:cancelled'),
+    ])).toBeNull();
+  });
+
   it('非法 code/status/origin/source fail closed', () => {
     expect(currentUrlAuthChallenge([
       event('ingest:auth-required', { ...challenge, code: 'other' }),
@@ -86,6 +94,10 @@ describe('jobResultRequiresUrlAuth', () => {
     expect(jobResultRequiresUrlAuth(JSON.stringify({
       error: { code: 'url-auth-required', message: 'Authentication required' },
     }))).toBe(true);
+    expect(jobResultRequiresUrlAuth(JSON.stringify({
+      error: { code: 'url-auth-required', message: 'Authentication required' },
+      cancelled: true,
+    }))).toBe(false);
     expect(jobResultRequiresUrlAuth(JSON.stringify({
       error: { message: 'Authentication required' },
     }))).toBe(false);

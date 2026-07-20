@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   isRecoverableUrlAuthJob,
   jobTypeVerb,
   recoverUnlistedTrackedJobs,
+  requestTrackedJobCancel,
   shouldRefreshPageForCompletedJob,
   summarizeJobsPanel,
 } from '../jobs-panel-state';
@@ -81,6 +82,34 @@ describe('isRecoverableUrlAuthJob', () => {
     expect(isRecoverableUrlAuthJob({
       type: 'ingest', status: 'failed', resultJson: JSON.stringify({ error: { message: '401' } }),
     })).toBe(false);
+    expect(isRecoverableUrlAuthJob({
+      type: 'ingest',
+      status: 'failed',
+      resultJson: JSON.stringify({
+        error: { code: 'url-auth-required' },
+        cancelled: true,
+      }),
+    })).toBe(false);
+  });
+});
+
+describe('requestTrackedJobCancel', () => {
+  it('调用通用取消 API 终结失败授权任务', async () => {
+    const apiFetch = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+
+    await requestTrackedJobCancel('job/1', apiFetch);
+
+    expect(apiFetch).toHaveBeenCalledWith('/api/jobs/job%2F1/cancel', { method: 'POST' });
+  });
+
+  it('取消失败时抛错并保留调用方的任务行', async () => {
+    const apiFetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'Cannot cancel this job' }),
+      { status: 409, headers: { 'Content-Type': 'application/json' } },
+    ));
+
+    await expect(requestTrackedJobCancel('job-1', apiFetch))
+      .rejects.toThrow('Cannot cancel this job');
   });
 });
 

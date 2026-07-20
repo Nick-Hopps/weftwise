@@ -30,15 +30,15 @@ export function buildUrlAuthSubmissionBody(input: {
 }
 
 /**
- * 从持久化 SSE 历史中归约当前认证挑战。旧 challenge 后只要出现 retry 就失效；
- * 新一轮 401/403 会追加在 retry 后并重新生效。
+ * 从持久化 SSE 历史中归约当前认证挑战。旧 challenge 后出现 retry 或 cancel 即失效；
+ * retry 后若再次收到 401/403，新事件会成为新的当前 challenge。
  */
 export function currentUrlAuthChallenge(
   events: ReadonlyArray<Pick<JobStreamEvent, 'type' | 'data' | 'id'>>,
 ): UrlAuthChallenge | null {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]!;
-    if (event.type === 'job:retrying') return null;
+    if (event.type === 'job:retrying' || event.type === 'job:cancelled') return null;
     if (event.type !== 'ingest:auth-required') continue;
     if (typeof event.id !== 'string' || !event.id.trim()) return null;
     const payload = nestedPayload(event.data);
@@ -64,8 +64,12 @@ export function currentUrlAuthChallenge(
 export function jobResultRequiresUrlAuth(resultJson: string | null | undefined): boolean {
   if (!resultJson) return false;
   try {
-    const value = JSON.parse(resultJson) as { error?: { code?: unknown } };
-    return value?.error?.code === 'url-auth-required';
+    const value = JSON.parse(resultJson) as {
+      cancelled?: unknown;
+      error?: { code?: unknown };
+    };
+    return value?.cancelled !== true
+      && value?.error?.code === 'url-auth-required';
   } catch {
     return false;
   }
