@@ -11,6 +11,8 @@ import {
   deleteSourceAuthGrant,
   normalizeSourceAuthHeaders,
 } from '@/server/sources/source-auth-grant';
+import { retryResearchIngestJob } from '@/server/services/research-approval-service';
+import { researchRunErrorResponse } from '../../../research-runs/error-response';
 
 export const runtime = 'nodejs';
 
@@ -72,10 +74,15 @@ export async function POST(
   if (!jobParams) {
     return NextResponse.json({ error: 'Ingest job parameters are invalid' }, { status: 409 });
   }
-  if (Object.prototype.hasOwnProperty.call(jobParams, 'researchProvenance')) {
+  const hasResearchProvenance = Object.prototype.hasOwnProperty.call(
+    jobParams,
+    'researchProvenance',
+  );
+  const researchProvenance = parseResearchProvenance(jobParams.researchProvenance);
+  if (hasResearchProvenance && !researchProvenance) {
     return NextResponse.json(
-      { error: 'Research ingest authentication must remain in the Research approval workflow' },
-      { status: 422 },
+      { error: 'Research provenance for this ingest is invalid.' },
+      { status: 409 },
     );
   }
   const sourceId = typeof jobParams.sourceId === 'string' ? jobParams.sourceId : '';
@@ -104,13 +111,28 @@ export async function POST(
     return NextResponse.json({ error: 'Could not store URL authentication' }, { status: 500 });
   }
 
-  const requeued = queue.requeueJobWithParams(id, { sourceAuthGrantId: grant.id });
-  if (!requeued) {
-    deleteSourceAuthGrant(grant.id);
-    return NextResponse.json(
-      { error: 'The ingest changed before authentication could be applied' },
-      { status: 409 },
-    );
+  let researchRun: ReturnType<typeof retryResearchIngestJob>['run'] | undefined;
+  if (researchProvenance) {
+    try {
+      researchRun = retryResearchIngestJob({
+        ...researchProvenance,
+        ingestJobId: id,
+        subjectId: resolution.subject.id,
+        sourceAuthGrantId: grant.id,
+      }).run;
+    } catch (error) {
+      deleteSourceAuthGrant(grant.id);
+      return researchRunErrorResponse(error);
+    }
+  } else {
+    const requeued = queue.requeueJobWithParams(id, { sourceAuthGrantId: grant.id });
+    if (!requeued) {
+      deleteSourceAuthGrant(grant.id);
+      return NextResponse.json(
+        { error: 'The ingest changed before authentication could be applied' },
+        { status: 409 },
+      );
+    }
   }
 
   const previousGrantId = typeof jobParams.sourceAuthGrantId === 'string'
@@ -124,12 +146,18 @@ export async function POST(
     }
   }
 
-  events.emit(id, 'job:retrying', 'Authentication supplied — retrying URL ingest', {
+  events.emit(id, 'job:retrying', 'Authentication supplied - retrying URL ingest', {
     manual: true,
     authenticated: true,
+    ...(researchProvenance ? { research: true, runId: researchProvenance.runId } : {}),
   });
   return NextResponse.json(
-    { jobId: id, status: 'pending', expiresAt: grant.expiresAt },
+    {
+      jobId: id,
+      status: 'pending',
+      expiresAt: grant.expiresAt,
+      ...(researchRun ? { researchRun } : {}),
+    },
     { status: 202 },
   );
 }
@@ -169,4 +197,21 @@ function parseRecord(json: string | null | undefined): Record<string, unknown> |
   } catch {
     return null;
   }
+}
+
+function parseResearchProvenance(value: unknown): {
+  runId: string;
+  approvalId: string;
+  candidateId: string;
+} | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (
+    keys.length !== 3
+    || !keys.every((key) => ['runId', 'approvalId', 'candidateId'].includes(key))
+    || ![record.runId, record.approvalId, record.candidateId]
+      .every((candidate) => typeof candidate === 'string' && candidate.trim().length > 0)
+  ) return null;
+  return record as { runId: string; approvalId: string; candidateId: string };
 }

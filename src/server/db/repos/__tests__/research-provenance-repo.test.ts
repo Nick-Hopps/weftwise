@@ -872,6 +872,7 @@ describe('research-provenance-repo failed run 导入重试', () => {
       approvalId: context.approvalId,
       candidateId: context.candidateId,
       ingestJobId: context.ingestJobId,
+      sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
       now: new Date('2026-07-14T02:00:00.000Z'),
     });
 
@@ -888,15 +889,32 @@ describe('research-provenance-repo failed run 导入重试', () => {
       completedAt: null,
       errorJson: null,
     });
-    expect(context.sqlite.prepare(`
-      SELECT status, result_json, completed_at, attempt_count, cancel_requested
+    const job = context.sqlite.prepare(`
+      SELECT status, params_json, result_json, completed_at, attempt_count, cancel_requested
       FROM jobs WHERE id = ?
-    `).get(context.ingestJobId)).toEqual({
+    `).get(context.ingestJobId) as {
+      status: string;
+      params_json: string;
+      result_json: string | null;
+      completed_at: string | null;
+      attempt_count: number;
+      cancel_requested: number;
+    };
+    expect(job).toMatchObject({
       status: 'pending',
       result_json: null,
       completed_at: null,
       attempt_count: 2,
       cancel_requested: 0,
+    });
+    expect(JSON.parse(job.params_json)).toMatchObject({
+      sourceId: 'source-child-retry',
+      sourceAuthGrantId: '11111111-1111-4111-8111-111111111111',
+      researchProvenance: {
+        runId: context.runId,
+        approvalId: context.approvalId,
+        candidateId: context.candidateId,
+      },
     });
     expect(context.sqlite.prepare(`
       SELECT COUNT(*) AS count FROM ingest_checkpoints WHERE job_id = ?

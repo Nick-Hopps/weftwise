@@ -117,6 +117,7 @@ export interface RetryResearchIngestJobServiceInput {
   approvalId: string;
   candidateId: string;
   ingestJobId: string;
+  sourceAuthGrantId?: string;
 }
 
 export interface RetryResearchIngestJobServiceResult {
