@@ -45,6 +45,43 @@ describe('jobs-repo.requestCancel / isCancelRequested', () => {
     expect(checkpointsRepo.getCheckpoints(job.id)).toHaveLength(0);
   });
 
+  it('取消提交后拒绝 worker 迟到写回 checkpoint', async () => {
+    const { jobsRepo, checkpointsRepo } = await repos();
+    const job = jobsRepo.enqueueJob('ingest', { f: 'x' }, null);
+    jobsRepo.claimNextJob();
+
+    expect(jobsRepo.requestCancel(job.id)).toBe('cancelled');
+
+    // 模拟 worker 已越过上一次 cancelled() 检查，取消事务提交后才写入阶段结果。
+    checkpointsRepo.putCheckpoint(job.id, 'plan', '', {
+      plan: { pages: [{ slug: 'late-page' }] },
+    });
+
+    expect(checkpointsRepo.getCheckpoints(job.id)).toEqual([]);
+    expect(checkpointsRepo.getProgress(job.id)).toBeNull();
+  });
+
+  it('历史遗留的 cancelled checkpoint 不再暴露为可续传进度', async () => {
+    const { jobsRepo, checkpointsRepo } = await repos();
+    const { getRawDb } = await import('../../client');
+    const job = jobsRepo.enqueueJob('ingest', { f: 'x' }, null);
+    jobsRepo.claimNextJob();
+    expect(jobsRepo.requestCancel(job.id)).toBe('cancelled');
+
+    // 直接构造旧版本竞态已经留下的脏数据，验证读取侧可以自我防御。
+    getRawDb().prepare(`
+      INSERT INTO ingest_checkpoints (job_id, kind, key, data_json, created_at)
+      VALUES (?, 'plan', '', ?, ?)
+    `).run(
+      job.id,
+      JSON.stringify({ plan: { pages: [{ slug: 'legacy-page' }] } }),
+      new Date().toISOString(),
+    );
+
+    expect(checkpointsRepo.getCheckpoints(job.id)).toHaveLength(1);
+    expect(checkpointsRepo.getProgress(job.id)).toBeNull();
+  });
+
   it('取消 pending 任务：直接落 failed', async () => {
     const { jobsRepo } = await repos();
     const job = jobsRepo.enqueueJob('ingest', {}, null);

@@ -24,12 +24,15 @@ export function putCheckpoint(jobId: string, kind: string, key: string, data: un
   sqlite
     .prepare(
       `INSERT INTO ingest_checkpoints (job_id, kind, key, data_json, created_at)
-       VALUES (?, ?, ?, ?, ?)
+       SELECT ?, ?, ?, ?, ?
+       WHERE NOT EXISTS (
+         SELECT 1 FROM jobs WHERE id = ? AND cancel_requested = 1
+       )
        ON CONFLICT(job_id, kind, key) DO UPDATE SET
          data_json = excluded.data_json,
          created_at = excluded.created_at`,
     )
-    .run(jobId, kind, key, JSON.stringify(data), new Date().toISOString());
+    .run(jobId, kind, key, JSON.stringify(data), new Date().toISOString(), jobId);
 }
 
 export function deleteCheckpoints(jobId: string): void {
@@ -45,35 +48,42 @@ export function deleteCheckpoint(jobId: string, kind: string, key: string): void
 
 export function getProgress(jobId: string): CheckpointProgress | null {
   const sqlite = getRawDb();
-  const counts = sqlite
-    .prepare(`SELECT kind, COUNT(*) AS n FROM ingest_checkpoints WHERE job_id = ? GROUP BY kind`)
-    .all(jobId) as Array<{ kind: string; n: number }>;
-  if (counts.length === 0) return null;
+  const progress = sqlite
+    .prepare(`
+      SELECT
+        COUNT(*) AS total,
+        COALESCE(SUM(CASE WHEN kind = 'plan' THEN 1 ELSE 0 END), 0) AS plans,
+        COALESCE(SUM(CASE WHEN kind = 'chunk-summary' THEN 1 ELSE 0 END), 0) AS chunk_summaries,
+        COALESCE(SUM(CASE WHEN kind = 'writer-page' THEN 1 ELSE 0 END), 0) AS writer_pages,
+        MAX(CASE WHEN kind = 'plan' AND key = '' THEN data_json END) AS plan_json
+      FROM ingest_checkpoints
+      WHERE job_id = ?
+        AND NOT EXISTS (
+          SELECT 1 FROM jobs WHERE id = ? AND cancel_requested = 1
+        )
+    `)
+    .get(jobId, jobId) as {
+      total: number;
+      plans: number;
+      chunk_summaries: number;
+      writer_pages: number;
+      plan_json: string | null;
+    };
+  if (progress.total === 0) return null;
 
-  let plan = false;
-  let chunkSummaries = 0;
-  let writerPages = 0;
-  for (const c of counts) {
-    if (c.kind === 'plan') plan = c.n > 0;
-    else if (c.kind === 'chunk-summary') chunkSummaries = c.n;
-    else if (c.kind === 'writer-page') writerPages = c.n;
-  }
+  const plan = progress.plans > 0;
+  const chunkSummaries = progress.chunk_summaries;
+  const writerPages = progress.writer_pages;
 
   let totalPages: number | null = null;
-  if (plan) {
-    // plan 每个 job 仅一份，落盘时 key 固定为空串（见 checkpoint.ts putPlan）
-    const row = sqlite
-      .prepare(`SELECT data_json FROM ingest_checkpoints WHERE job_id = ? AND kind = 'plan' AND key = ''`)
-      .get(jobId) as { data_json: string } | undefined;
-    if (row) {
-      try {
-        const parsed = JSON.parse(row.data_json) as { plan?: { pages?: unknown[] } };
-        if (parsed?.plan?.pages && Array.isArray(parsed.plan.pages)) {
-          totalPages = parsed.plan.pages.length;
-        }
-      } catch {
-        // plan 反序列化失败时 totalPages 留 null（不致命）
+  if (plan && progress.plan_json) {
+    try {
+      const parsed = JSON.parse(progress.plan_json) as { plan?: { pages?: unknown[] } };
+      if (parsed?.plan?.pages && Array.isArray(parsed.plan.pages)) {
+        totalPages = parsed.plan.pages.length;
       }
+    } catch {
+      // plan 反序列化失败时 totalPages 留 null（不致命）
     }
   }
 
