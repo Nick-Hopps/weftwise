@@ -107,7 +107,7 @@ const config: Config = {
 
       fontFamily: {
         sans: ['var(--font-inter)', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        prose: ['var(--font-lxgw-wenkai)', 'LXGW WenKai TC', 'LXGW WenKai', 'ui-serif', 'serif'],
+        prose: ['LXGW WenKai', 'ui-serif', 'serif'],
         mono: ['var(--font-jetbrains-mono)', 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
         display: ['var(--font-space-grotesk)', 'Space Grotesk', 'var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
