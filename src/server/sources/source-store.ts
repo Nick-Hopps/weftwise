@@ -5,11 +5,10 @@ import { vaultPath } from '../config/env';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import type { Subject, SubjectId } from '@/lib/contracts';
 import {
-  createUrlSourceIdentity,
-  normalizeUrlSourcePresentation,
-  URL_SOURCE_KIND,
-  type UrlSourcePresentation,
-} from './url-source';
+  normalizeSourcePresentation,
+  type SourcePresentation,
+} from './source-presentation';
+import { createUrlSourceIdentity, URL_SOURCE_KIND } from './url-source';
 
 export interface SavedSourceResult {
   id: string;
@@ -39,6 +38,9 @@ interface SourceMetadataFile {
   /** URL Source 摄入时生成的有界 Markdown 阅读正文。 */
   readerText?: string;
   readerTextTruncated?: boolean;
+  /** 展示元数据：网页标题与描述（与实体类型无关，见 source-presentation.ts）。 */
+  title?: string;
+  description?: string;
 }
 
 function rawDirFor(subjectSlug: string): string {
@@ -60,7 +62,7 @@ export function saveRawSource(
   subject: Pick<Subject, 'id' | 'slug'>,
   filename: string,
   content: Buffer | string,
-  extra?: { originUrl?: string },
+  extra?: { originUrl?: string; presentation?: SourcePresentation },
 ): SavedSourceResult {
   const safeFilename = path.basename(filename);
   if (!safeFilename || safeFilename === '.' || safeFilename === '..') {
@@ -98,6 +100,9 @@ export function saveRawSource(
     const metaDir = sourcesMetaDirFor(subject.slug);
     fs.mkdirSync(metaDir, { recursive: true });
     candidateMetaPath = path.join(metaDir, `${id}.json`);
+    const presentation = extra?.presentation
+      ? normalizeSourcePresentation(extra.presentation)
+      : {};
     const metaContent: SourceMetadataFile = {
       id,
       subjectId: subject.id,
@@ -106,6 +111,8 @@ export function saveRawSource(
       contentHash,
       savedAt: new Date().toISOString(),
       ...(extra?.originUrl ? { originUrl: extra.originUrl } : {}),
+      ...(presentation.title ? { title: presentation.title } : {}),
+      ...(presentation.description ? { description: presentation.description } : {}),
     };
     fs.writeFileSync(candidateMetaPath, JSON.stringify(metaContent, null, 2), 'utf-8');
 
@@ -223,16 +230,19 @@ export function saveUrlSource(
   }
 }
 
-/** worker 抓取完成后写回 URL Source 的纯文本展示元数据；失败不阻塞主摄入。 */
-export function updateUrlSourcePresentation(
+/**
+ * 写回 Source 的纯文本展示元数据（标题 / 描述）；失败不阻塞主摄入。
+ * URL Source 由 worker 抓取后调用，存量网页快照 Source 由回填脚本调用。
+ */
+export function updateSourcePresentation(
   sourceId: string,
-  presentation: UrlSourcePresentation,
+  presentation: SourcePresentation,
 ): void {
   const source = sourcesRepo.getSource(sourceId);
   const meta = getSourceMetadata(sourceId);
   if (!source || !meta) return;
 
-  const normalized = normalizeUrlSourcePresentation(presentation);
+  const normalized = normalizeSourcePresentation(presentation);
   const updated: Record<string, unknown> = { ...meta };
   if (normalized.title) updated.title = normalized.title;
   else delete updated.title;

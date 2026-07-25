@@ -5,7 +5,7 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import {
   updateSourceChunks,
-  updateUrlSourcePresentation,
+  updateSourcePresentation,
   updateUrlSourceReaderText,
   saveRawSource,
 } from '../sources/source-store';
@@ -131,7 +131,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     throw error;
   }
   if (loadedSource.kind === 'url') {
-    updateUrlSourcePresentation(sourceId, {
+    updateSourcePresentation(sourceId, {
       title: loadedSource.title,
       description: loadedSource.description,
     });

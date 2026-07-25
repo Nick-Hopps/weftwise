@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Source } from '@/lib/contracts';
+import { normalizeSourcePresentation } from './source-presentation';
 import { deriveUrlFilename } from './url-fetcher';
 import { validateHttpUrl } from './url-safety';
 
@@ -15,32 +16,6 @@ export interface UrlSourceReference {
   originUrl: string;
   title?: string;
   description?: string;
-}
-
-export const URL_SOURCE_TITLE_MAX_LENGTH = 300;
-export const URL_SOURCE_DESCRIPTION_MAX_LENGTH = 1000;
-
-export interface UrlSourcePresentation {
-  title?: string;
-  description?: string;
-}
-
-function normalizePresentationText(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  return normalized ? normalized.slice(0, maxLength) : undefined;
-}
-
-export function normalizeUrlSourcePresentation(
-  presentation: { title?: unknown; description?: unknown },
-): UrlSourcePresentation {
-  return {
-    title: normalizePresentationText(presentation.title, URL_SOURCE_TITLE_MAX_LENGTH),
-    description: normalizePresentationText(
-      presentation.description,
-      URL_SOURCE_DESCRIPTION_MAX_LENGTH,
-    ),
-  };
 }
 
 export function urlSourceDisplayTitle(reference: UrlSourceReference): string {
@@ -80,7 +55,7 @@ export function readUrlSourceReference(
   try {
     return {
       originUrl: validateHttpUrl(metadata.originUrl).toString(),
-      ...normalizeUrlSourcePresentation({
+      ...normalizeSourcePresentation({
         title: metadata.title,
         description: metadata.description,
       }),
