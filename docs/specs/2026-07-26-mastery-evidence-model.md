@@ -197,7 +197,7 @@ struggling  有近期负证据 —— 「试过并卡住了」，不是「更不
 | 序 | 条件 | 结果 |
 |---|---|---|
 | 1 | 无任何证据 | `unknown` / `none` |
-| 2 | 衰减窗口内存在**强负证据**（`quiz-wrong` / `selection-ask` / `self-report-hard`） | `struggling` / 强证据≥2 则 `high`，否则 `low` |
+| 2 | 衰减窗口内存在**强负证据**（`quiz-wrong` / `selection-ask` / `self-report-hard` / `concept-unknown`） | `struggling` / 强证据≥2 则 `high`，否则 `low` |
 | 3 | 存在未过期的正证据，**且（含 ≥1 条 strong 或 ≥2 条 weak）** | `mastered` / 含 strong 则 `high`，纯 weak 则 `low` |
 | 4 | 存在 exposure 证据、已过期的正证据、**或不足以支撑规则 3 的孤立 weak 正证据** | `exposed` / `low` |
 | 5 | 只有弱负证据（`citation-hit` / `reshape-request`） | `exposed` / `low` |
@@ -456,14 +456,23 @@ INDEX page_evidence_scope_idx ON (user_id, subject_id, created_at)
 | `quiz-correct` | positive | strong / **weak** | D1 揭晓后判分 / 无答案自评 | quizId |
 | `quiz-wrong` | negative | strong | D1 判分或自评（两者同权，见决策 5） | quizId |
 | `selection-ask` | negative | strong | D2 选区追问 | section |
-| `self-report-hard` | negative | strong | 原 `too_hard` | — |
-| `self-report-easy` | positive | weak | 原 `too_easy` | — |
+| `self-report-hard` | negative | strong | 原 `too_hard`（**整页讲法太难**） | — |
+| `self-report-easy` | positive | weak | 原 `too_easy`（**整页讲法太浅**） | — |
+| `concept-unknown` | negative | strong | spec ② E3 的「这个我其实不懂」 | — |
 | `citation-hit` | negative | weak | D3 回答引用命中 | — |
 | `reshape-request` | negative | weak | D4 重塑请求 | — |
 | `page-read` | exposure | weak | D5 读完 | — |
 | `own-source` | exposure | weak | D6 自己 ingest 的源产出的页 | — |
 
 `self-report-easy` 定为 weak positive：说「太浅」不等于掌握，只是不觉得难。
+
+**`concept-unknown` 必须与 `self-report-hard` 分开，不能复用后者**，尽管两者都是
+strong negative。因为 `self-report-hard` 是 **style-bearing** 的（它就是原来的
+`too_hard`，要喂给风格 reducer 调 `readingLevel`），而 E3 说的是
+「**别的那一页**讲的那个概念我不懂」——跟当前页的讲法难度毫无关系。
+复用会让每一次纠错都顺手把全库讲解深度往下推一格，正是决策 3 白名单要防的那类污染。
+
+`concept-unknown` 只进掌握度派生，不进 reducer。
 
 ### `user_profiles` 加一列（A 组，非后置）
 
@@ -473,6 +482,17 @@ style_prefs_updated_at TEXT   -- 仅在旋钮真的变化时推进；reducer 的
 
 与既有 `updated_at` 分开——后者任何画像写入都会变（改背景自述、onboarding 提交），
 拿它当边界会误清信号窗口。
+
+> **给既有表加列不能只靠 `ensureTables`。** `client.ts::ensureTables` 用的是
+> `CREATE TABLE IF NOT EXISTS`——对已存在的表**什么都不做**，既有安装升级后拿不到新列，
+> 读写立刻 SQL 报错。必须走项目已有的守卫式 ALTER 模式：
+> `PRAGMA table_info(<table>)` 检测列缺失 → `ALTER TABLE … ADD COLUMN`。
+> 仓库里有多处先例（`subjects.augmentation_level` / `jobs` 的补列循环 /
+> `operations.subject_id` / `llm_usage`）。
+>
+> 本设计有**两处**加列，两处都在既有表上，都适用这条：
+> `user_profiles.style_prefs_updated_at`（本 spec）与
+> `page_renditions.known_concepts_json`（spec ② E4）。
 
 ### `user_profiles` 的 subject 化（分期后置，见分期一节）
 
@@ -686,7 +706,7 @@ GET /api/mastery?s=<subject>
 |---|---|
 | `src/server/db/schema.ts` | **新** `page_evidence` 表 |
 | `src/server/db/client.ts::ensureTables` | 补 `CREATE TABLE IF NOT EXISTS` + 两个索引 |
-| `drizzle/0013_*.sql` | 结构性迁移 |
+| `drizzle/00xx_*.sql` | 结构性迁移（编号由 `npm run db:generate` 自动分配；两份 spec 都不要写死，谁先落地谁占号） |
 | `src/server/db/repos/evidence-repo.ts` | **新** |
 | `src/server/profile/mastery.ts` | **新** 四态派生纯函数 + 常量 |
 | `src/server/profile/signal-reducer.ts` | 改：输入换 EvidenceRow、加时间窗/消费边界、三维解耦 |

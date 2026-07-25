@@ -36,9 +36,14 @@
   `subject_id` FK → `subjects` ON DELETE CASCADE）；
   `userProfiles` 加 `style_prefs_updated_at TEXT`（reducer 的消费边界专用，
   **不能复用 `updated_at`**——后者改背景自述也会变，会误清信号窗口）。
-- `src/server/db/client.ts::ensureTables`：补 `CREATE TABLE IF NOT EXISTS` +
-  `page_evidence_page_idx` / `page_evidence_scope_idx` 两个索引。
-- `npm run db:generate` 产出 `drizzle/0013_*.sql`。
+- `src/server/db/client.ts::ensureTables`：`page_evidence` 补
+  `CREATE TABLE IF NOT EXISTS` + `page_evidence_page_idx` / `page_evidence_scope_idx`；
+  **`user_profiles.style_prefs_updated_at` 必须走守卫式 ALTER**——
+  `PRAGMA table_info(user_profiles)` 检测列缺失 → `ALTER TABLE … ADD COLUMN`。
+  `CREATE TABLE IF NOT EXISTS` 对**已存在**的表什么都不做，只写它等于既有安装升级后
+  拿不到新列、读写立刻 SQL 报错。仓库有多处先例（`subjects.augmentation_level` /
+  `jobs` 补列循环 / `operations.subject_id` / `llm_usage`）。
+- `npm run db:generate` 产出迁移文件（编号自动分配，勿写死——plan ② 若先落地会占用前一个号）。
 - 新增 `src/server/db/__tests__/page-evidence-table.test.ts`：真实 SQLite 建表、
   两个索引存在、`subject_id` CASCADE 生效（删 subject 后证据行消失）。
 - 验证：`npx vitest run src/server/db/__tests__/page-evidence-table.test.ts`
@@ -201,7 +206,7 @@
 - **`page-identity-migration.ts:85` 的 `profile_signals.slug` 迁移块必须同步删除**——
   表已 DROP 而迁移仍在 `UPDATE profile_signals`，move 页面会直接 SQL 报错。
   这是全 plan 最容易漏的一处：它不在任何 signals 相关目录下。
-- `drizzle/0014_*.sql`：`DROP TABLE profile_signals`。
+- `npm run db:generate` 产出 `DROP TABLE profile_signals` 迁移（编号自动分配）。
 - 全仓 grep `profile_signals` 确认零残留引用。
 - 验证：`npm test`（全量）+ **`npx vitest run src/server/wiki/__tests__/page-move-integration.test.ts`**
   （专门覆盖上一条，确认删表后 move 仍成功）

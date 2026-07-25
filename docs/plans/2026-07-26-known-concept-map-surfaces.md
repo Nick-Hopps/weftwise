@@ -94,8 +94,12 @@
 
 没有这一步，纠错入口在刷新后全部消失，且纠错完页面毫无反应——E 的闭环断在这里。
 
-- `src/server/db/schema.ts` + `client.ts::ensureTables` + `drizzle/00xx_*.sql`：
-  `page_renditions` 加 `known_concepts_json TEXT`（可空）。
+- `src/server/db/schema.ts` + `drizzle/00xx_*.sql`：`page_renditions` 加
+  `known_concepts_json TEXT`（可空）。
+- **`client.ts` 走守卫式 ALTER，不是 `ensureTables` 的 `CREATE TABLE IF NOT EXISTS`**：
+  `PRAGMA table_info(page_renditions)` 检测列缺失 → `ALTER TABLE … ADD COLUMN`。
+  `CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做——只改它等于**所有既有安装升级后
+  这一列根本不存在**，读写当场 SQL 报错。仓库先例见 `subjects.augmentation_level` 等。
 - `src/server/db/repos/renditions-repo.ts`：`replaceRendition` / `getLatestRendition`
   读写新列。
 - **`src/server/wiki/page-identity-migration.ts:68`：把新列加进 `page_renditions` 的
@@ -125,7 +129,7 @@
   `<PageRenderer content slug titleSlugMap />`，一旦就地构造，编辑器预览立刻获得纠错入口。
   能力由最外层知道语境的调用方显式授予。
 - `src/components/wiki/wiki-link.tsx`：新增「这个我其实不懂」入口，
-  点击 `POST /api/evidence { kind:'self-report-hard' }`；失败 `console.error`，
+  点击 `POST /api/evidence { kind:'concept-unknown' }`；失败 `console.error`，
   UI 保持乐观态。
 - `src/lib/contracts.ts` `LensResult` 加 `assumedKnown?: string[]`；
   `src/hooks/use-lens.ts` 透传；
@@ -165,6 +169,10 @@
   改元素集会摧毁 cose 布局与力导向模拟。
 - **退出全屏时 `mode` 重置回 `structure`**（spec ② F1b）：切换入口只在全屏顶栏，
   持久化会让 Dashboard / Context 面板的 mini-graph 停在无法切回的掌握度配色里。
+- **tap handler 的模式分支读 `modeRef.current`，不读 state**：既有
+  `cy.on('tap','node', …)` 注册在 `[]` 一次性 effect 里，闭包会把挂载时的 `mode` 钉死，
+  切到掌握度后 tap 仍然跳转。该文件已因同类闭包问题留过注释（`currentSlug` 被钉在挂载
+  时刻，所以焦点高亮拆成了独立 effect）——同一个坑不要踩第二次。
 - 取数失败：保持结构模式并提示一次，不影响既有 graph。
 - 测试：切换模式后 `cy` 实例同一、元素数不变、节点坐标不变；取数失败时 mode 回落 structure；
   **退出全屏后 mode 为 structure**。

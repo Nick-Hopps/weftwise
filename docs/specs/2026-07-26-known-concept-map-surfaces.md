@@ -151,7 +151,7 @@ Anything not listed here: assume unfamiliar and explain it normally.
 ### E3：纠错入口挂在「被判为已掌握」的 wikilink 上
 
 E2 的第一段是模型被明确告知「不必重讲」的概念。渲染重塑版时，对这些 slug 的 `[[X]]`
-挂一个轻量纠错入口「这个我其实不懂」——点击写入一条 `self-report-hard` 负证据，
+挂一个轻量纠错入口「这个我其实不懂」——点击写入一条 `concept-unknown` 负证据，
 按 ① 的决策 3，负证据压过正证据，下一次重塑该概念立即重新展开。
 
 **怎么知道哪些被跳过了？** 不问模型（不可靠且要改输出契约），而是用我们自己给出的清单：
@@ -357,6 +357,12 @@ tap 选中并在面板显示证据，面板内提供「打开页面」链接。
 模式不同交互不同是可接受的——模式是用户显式切换的，且面板内保留了导航出口。
 触屏下这比 hover 方案可用。（列为待评审决策 2。）
 
+> **tap handler 分支必须读 ref，不能读 state。** 现有 `cy.on('tap','node', …)` 注册在
+> `use-wiki-graph.ts` 的 `[]` 一次性 effect 里，闭包会把挂载时的 `mode` 永久钉死——
+> 用户切到掌握度模式后，tap 仍然跳转。该文件**已经因为同类问题留过注释**
+> （数据 effect 的闭包会把 `currentSlug` 钉在挂载时刻，所以焦点高亮才被拆到独立 effect）。
+> 同一个坑，第二次踩。`mode` 存 ref，handler 读 `modeRef.current`。
+
 ---
 
 ## 七、数据流
@@ -392,7 +398,7 @@ GET /api/lens/[...slug]
 
 ```
 读者在重塑版里点某个 [[X]] 的「这个我其实不懂」
-  → POST /api/evidence { slug: X, kind: 'self-report-hard' }   （spec ① 已有路由）
+  → POST /api/evidence { slug: X, kind: 'concept-unknown' }    （spec ① 已有路由）
   → 该页地图随即变化 → 下次 GET 即 stale:true，状态行显示 Update available
   → 用户点 Refresh 重塑：X 进 struggling 段，重新展开解释
 ```
