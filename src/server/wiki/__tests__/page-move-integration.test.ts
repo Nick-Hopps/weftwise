@@ -95,6 +95,11 @@ describe('wiki.move Saga integration', () => {
     db.prepare(`
       INSERT INTO page_rendition_assets VALUES ('old-asset', ?, 'old-page', 'image/png', 'YQ==', 'now')
     `).run(subject.id);
+    db.prepare(`
+      INSERT INTO page_evidence
+        (user_id, subject_id, slug, kind, polarity, strength, anchor, detail_json, created_at)
+      VALUES ('local', ?, 'old-page', 'quiz-correct', 'positive', 'strong', 'q1', NULL, 'now')
+    `).run(subject.id);
 
     const plan = await planPageMove('job-move', subject, {
       slug: 'old-page', newSlug: 'new-page', effectiveAt: '2026-07-14T00:00:00.000Z',
@@ -126,7 +131,7 @@ describe('wiki.move Saga integration', () => {
     expect(sourcesRepo.getSourcesForPage(subject.id, 'new-page').map((source) => source.id))
       .toEqual(['source-1']);
     expect(sourcesRepo.getSourcesForPage(subject.id, 'old-page')).toEqual([]);
-    for (const table of ['page_embeddings', 'page_maturity', 'page_renditions']) {
+    for (const table of ['page_embeddings', 'page_maturity', 'page_renditions', 'page_evidence']) {
       expect(db.prepare(
         `SELECT COUNT(*) AS n FROM ${table} WHERE subject_id = ? AND slug = 'old-page'`,
       ).get(subject.id)).toEqual({ n: 0 });

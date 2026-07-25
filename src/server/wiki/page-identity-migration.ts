@@ -85,4 +85,12 @@ export function migratePageIdentityCaches(
     UPDATE profile_signals SET slug = ?
     WHERE subject_id = ? AND slug = ?
   `).run(toSlug, subjectId, fromSlug);
+
+  // 掌握度证据（append-only，slug 非主键的一部分，直接改列即可）。必须在
+  // indexTouchedPages 之前跑——否则旧 slug 的文件已消失，索引器会先把证据当删页清掉。
+  // 调用方（wiki-transaction）已保证这个顺序。
+  sqlite.prepare(`
+    UPDATE page_evidence SET slug = ?
+    WHERE subject_id = ? AND slug = ?
+  `).run(toSlug, subjectId, fromSlug);
 }

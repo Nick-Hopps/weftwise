@@ -114,6 +114,7 @@ export async function POST(request: NextRequest) {
     sqlite.prepare(`DELETE FROM page_rendition_assets WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM page_renditions WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM page_maturity WHERE subject_id = ?`).run(subject.id);
+    sqlite.prepare(`DELETE FROM page_evidence WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM page_embeddings WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM pages_fts WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM wiki_links WHERE subject_id = ? OR target_subject_id = ?`).run(subject.id, subject.id);
@@ -255,6 +256,7 @@ async function resetAllSubjects(now: string): Promise<NextResponse> {
     sqlite.exec('DELETE FROM page_rendition_assets');
     sqlite.exec('DELETE FROM page_renditions');
     sqlite.exec('DELETE FROM page_maturity');
+    sqlite.exec('DELETE FROM page_evidence');
     sqlite.exec('DELETE FROM page_embeddings');
     sqlite.exec('DELETE FROM pages_fts');
     sqlite.exec('DELETE FROM wiki_links');

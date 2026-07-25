@@ -42,6 +42,8 @@ function seedSubjectData(sqlite: BetterSqlite3.Database, subjectId: string) {
     .run(`rendition-asset-${subjectId}`, subjectId, 'page-a', 'image/png', 'AQ==', now);
   sqlite.prepare(`INSERT INTO profile_signals (user_id, type, subject_id, slug, created_at) VALUES (?,?,?,?,?)`)
     .run('local', 'too-hard', subjectId, 'page-a', now);
+  sqlite.prepare(`INSERT INTO page_evidence (user_id, subject_id, slug, kind, polarity, strength, anchor, detail_json, created_at) VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run('local', subjectId, 'page-a', 'quiz-wrong', 'negative', 'strong', 'q1', null, now);
   sqlite.prepare(`INSERT INTO conversations (id, subject_id, title, created_at, updated_at) VALUES (?,?,?,?,?)`)
     .run(`conv-${subjectId}`, subjectId, 'C', now, now);
   sqlite.prepare(`INSERT INTO messages (id, conversation_id, role, content, citations_json, created_at) VALUES (?,?,?,?,?,?)`)
@@ -61,6 +63,7 @@ function seedSubjectData(sqlite: BetterSqlite3.Database, subjectId: string) {
 const SUBJECT_TABLES = [
   'pages', 'sources', 'page_sources', 'page_aliases', 'wiki_links',
   'page_embeddings', 'page_maturity', 'page_renditions', 'page_rendition_assets', 'profile_signals',
+  'page_evidence',
   'conversations', 'operations', 'jobs', 'pages_fts', 'research_backlog',
 ];
 
