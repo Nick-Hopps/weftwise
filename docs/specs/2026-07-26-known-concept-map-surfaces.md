@@ -207,6 +207,17 @@ GET 时补算当前 `KnownConcepts` 与 `known_concepts_json` 比对，不同即
 `known_concepts_json` 为 null 的旧行（本功能上线前生成的 rendition）不参与地图比对，
 只按既有两项判 stale——避免存量重塑版一上线全部变 stale。
 
+> **加列必须同步改 move 迁移。** `page-identity-migration.ts:68` 迁移 `page_renditions`
+> 用的是**显式列清单**的 `INSERT…SELECT`：
+> ```sql
+> INSERT OR REPLACE INTO page_renditions
+>   (subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at)
+> SELECT subject_id, ?, canonical_hash, profile_version, rendered_md, model, updated_at ...
+> ```
+> 不把 `known_concepts_json` 加进去，**改名一次就把地图快照静默抹成 NULL**——
+> 重塑版的纠错入口全部消失、stale 判定退回旧两项，而且不报任何错。
+> 这是加列时最容易漏的一处：它不在 renditions repo 目录下。
+
 ---
 
 ## 六、关键决策 —— F（Graph 掌握度图层）
@@ -222,6 +233,21 @@ GET 时补算当前 `KnownConcepts` 与 `known_concepts_json` 比对，不同即
 
 `/api/mastery` 已在 spec ① 定义（无 `slug` 时返回全量 `slug → MasteryVerdict`），本 spec
 零新增后端路由。
+
+### F1b：模式是全屏专属，mini-graph 恒为结构模式
+
+`MiniGraphView` 有**两个挂载点**——Dashboard（`(app)/page.tsx:159`）与 Context 面板
+（`context-panel-context-tab.tsx:151`），全屏浮层是从 mini-graph 进入的（同一 cy 实例迁移
+宿主，不重建）。所以 `mode` 状态天然住在 `useWikiGraph` 里，会被 compact 视图共享。
+
+**定为：`mode` 在退出全屏时重置回 `structure`。** 两条理由：
+
+1. 切换入口只在全屏顶栏。若模式跨全屏持久化，compact 视图会停在掌握度着色上，
+   而那里**没有任何切回去的 UI**——用户被困在一个自己看不懂的配色里。
+2. Dashboard 的 mini-graph 是 200px 见方的概览卡片，四态 ramp 在那个尺寸下读不出信息，
+   只会让首页看起来"坏了"。
+
+掌握度是一次**主动的审计动作**，不是常驻视图状态——用完即走是对的。
 
 ### F2：模式切换只换 data + stylesheet，绝不重建元素
 
@@ -416,6 +442,7 @@ buildKnownConceptsForPage(opts: {
 |---|---|
 | `db/schema.ts` + `db/client.ts` + `drizzle/00xx_*.sql` | `page_renditions` 加 `known_concepts_json TEXT`（可空，E4） |
 | `db/repos/renditions-repo.ts` | `replaceRendition` / `getLatestRendition` 读写新列 |
+| `wiki/page-identity-migration.ts` | `page_renditions` 的显式列清单加 `known_concepts_json`（**漏则改名静默丢地图快照**，见 E5） |
 | `llm/prompts/reshape-prompt.ts` | `buildReshapePageUserPrompt` 增可选 `knownConcepts`；system prompt 补「按 KNOWN CONCEPTS 段调整展开深度」+ **`[[slug]]` 书写纪律** |
 | `services/reshape-service.ts` | `reshapePageBody` 入参增 `knownConcepts?` 并透传 |
 | `api/lens/[...slug]/route.ts` | POST 算地图并随 rendition 持久化；**GET 补算并与存储比对判 stale**（E5）；两条路径共用一次 `listForSubject` |
@@ -468,8 +495,14 @@ buildKnownConceptsForPage(opts: {
 8. **E3 挂载隔离**：canonical 视图不传 `assumedKnown` → 无纠错入口；重塑视图才有；
    不在 `assumedKnown` 里的 wikilink 无入口；`EditorPreview` 路径无入口。
 7. **`graph-stylesheet`**：`mode='structure'` 产出与改动前完全一致（零回归）；
-   `mode='mastery'` 下 orphan 填充让位、focus 层级降级为描边、struggling 走 danger 描边。
+   `mode='mastery'` 下 orphan 填充让位、focus 层级降级为描边、struggling 走 danger 描边；
+   **node 没有 `mastery` data 时按 `unknown` 着色**（`/api/mastery` 只返回有证据的 slug，
+   绝大多数节点根本没有这个字段）。
 8. **图层不重建**：切换模式后 `cy` 实例同一、元素数不变、节点位置不变。
+9. **模式归属（F1b）**：退出全屏后 `mode` 回到 `structure`；Dashboard 与 Context 面板的
+   mini-graph 任何时候都不着掌握度色。
+10. **move 不丢地图快照（E5）**：改名一页后，其 rendition 的 `known_concepts_json`
+    仍在，`assumedKnown` 与 stale 判定行为不变。
 
 ---
 

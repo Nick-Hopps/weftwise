@@ -30,10 +30,12 @@
 - 人工验证：删掉本地 `vault/.llm-wiki/skills/ingest-enricher.md` 之外的情况下重启 worker，
   确认 v6 副本被自动升级为 v7 而非报错。
 
-## 任务 2：`page_evidence` 表
+## 任务 2：`page_evidence` 表 + `user_profiles.style_prefs_updated_at`
 
 - `src/server/db/schema.ts`：新增 `pageEvidence`（字段见 spec 第七节；
-  `subject_id` FK → `subjects` ON DELETE CASCADE）。
+  `subject_id` FK → `subjects` ON DELETE CASCADE）；
+  `userProfiles` 加 `style_prefs_updated_at TEXT`（reducer 的消费边界专用，
+  **不能复用 `updated_at`**——后者改背景自述也会变，会误清信号窗口）。
 - `src/server/db/client.ts::ensureTables`：补 `CREATE TABLE IF NOT EXISTS` +
   `page_evidence_page_idx` / `page_evidence_scope_idx` 两个索引。
 - `npm run db:generate` 产出 `drizzle/0013_*.sql`。
@@ -80,9 +82,13 @@
   - `mastered` 过期回落 **`exposed`** 而非 `unknown`；`expiresAt` 仅 `mastered` 时非空
   - **决策 4 两级语义逐档断言**：1→{1,4} / 2→{3,10} / 3→{7,28} / 4→{21,81} / ≥5→{60,120}；
     **`expiryDays` 恒 > `dueDays`**（防退化回「到期即失效」——原设计的阻断级缺陷）
-  - **页级连击**：同页不同 quiz 的正证据累加（不要求同一道题）；一次负证据清零
+  - **连击三条定义**（每条锁一个具体失真）：页级累加（同页不同 quiz，不要求同一道题）；
+    **同一天多条正证据只算 1**（防反复点判分刷到 120 天）；
+    **只有 strong 负证据清零连击**（`citation-hit` 不得打断）
+  - **规则 3 的 strength 门槛**：单条 `self-report-easy`、单条 weak `quiz-correct`
+    都**不足以判 `mastered`** → 落 `exposed`；两条 weak 正证据才到 `mastered/low`；
+    含 strong 则 `mastered/high`
   - 弱负证据单独出现 → `exposed`，**不判 `struggling`**（已定决策 4）
-  - 无答案自评的 `quiz-correct`（weak）不足以单独判 `mastered`
   - `recent` 按时间倒序且截断稳定
 - `src/lib/contracts.ts`：加 `MasteryState` / `MasteryVerdict` / `EvidenceKind` DTO。
 - 验证：`npx vitest run src/server/profile/__tests__/mastery.test.ts`
@@ -146,15 +152,21 @@
 
 ## 任务 10：D5 读完埋点
 
-- `src/components/wiki/reading-progress.tsx`：滚动到底 **且** 停留 ≥30s 时发一条
-  `page-read`；同页去重（一次会话一次），阈值写死常量、不做设置项（已定决策 3）。
-- 纯逻辑（到底判定 + 停留计时 + 去重）抽成纯函数单测，副作用留在组件。
+- **新增 `src/components/wiki/use-page-read-beacon.ts`，由 `wiki-reading-view` 挂载。**
+  不改 `reading-progress.tsx`——它只有 `containerRef` / `useContainerScroll` 两个 prop，
+  是纯展示组件，没有也不该有 `slug` / `subjectSlug`（决策 9 的第二个实例）。
+- hook 复用它已导出的纯函数 `calculateReadingProgress` 做到底判定；滚动到底 **且**
+  停留 ≥30s 发一条 `page-read`；同页一次会话去重；阈值写死常量（已定决策 3）。
+- 纯逻辑（到底判定 + 停留计时 + 去重）抽成纯函数单测，副作用留在 hook。
+- 注意 `wiki-reading-view` 有 split / 普通两个 return 分支，`ReadingProgress` 各渲染一次
+  但互斥；beacon hook 只挂一次，不要跟着分支走。
 - 验证：`npx vitest run src/components/wiki/__tests__/`
 
 ## 任务 11：`GET /api/mastery` + `profile_signals` 并存双写
 
-- 新增 `src/app/api/mastery/route.ts`：无 `slug` 返回当前 subject 全量
-  `slug → MasteryVerdict`；带 `slug` 返回单页（含 `recent`）。
+- 新增 `src/app/api/mastery/route.ts`：无 `slug` 返回全量
+  `slug → MasteryVerdictLite`（**不含 `recent`**，图层用不到，带上会让响应随使用量线性膨胀）；
+  带 `slug` 返回单页完整 `MasteryVerdict`（含 `recent`，供证据面板）。
   **排除 meta 页，与 `/api/graph` 的 `isMetaPage` 同口径**。
 - `src/server/services/apply-signal.ts`：**并存**——继续写 `profile_signals`，
   同时把 style-bearing 信号写一份 `page_evidence`。此时 reducer 仍读旧表，行为不变。

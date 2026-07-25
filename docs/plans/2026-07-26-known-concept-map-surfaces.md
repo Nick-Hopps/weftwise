@@ -95,6 +95,10 @@
   `page_renditions` 加 `known_concepts_json TEXT`（可空）。
 - `src/server/db/repos/renditions-repo.ts`：`replaceRendition` / `getLatestRendition`
   读写新列。
+- **`src/server/wiki/page-identity-migration.ts:68`：把新列加进 `page_renditions` 的
+  显式列清单。** 该处 `INSERT…SELECT` 逐列点名，漏了就是改名一次静默把地图快照抹成 NULL
+  ——纠错入口全消失、stale 退回旧两项，且不报任何错。它不在 renditions repo 目录下，
+  最容易漏。
 - `src/app/api/lens/[...slug]/route.ts`：
   - POST：把注入的 `KnownConcepts` 一并落库
   - GET：`assumedKnown` **从存储列派生，不重算**（必须是当初告诉模型的那份）；
@@ -105,6 +109,7 @@
   - 证据变化后 GET `stale:true`；地图未变时不误报
   - `known_concepts_json` 为 null 的旧行不因地图比对变 stale（存量不炸）
   - GET 地图补算抛错时退回既有两项判 stale，不隐藏已保存重塑版
+  - **改名一页后新列仍在**（锁死上面那条迁移列清单）
 - 验证：`npx vitest run src/app/api/lens/ src/server/db/repos/__tests__/renditions-repo.test.ts`
 
 ## 任务 4：`interactive` 接缝 + E3 纠错入口
@@ -139,7 +144,9 @@
   `unknown` 压暗（复用 `.dimmed` 的 0.22 思路）、**`orphan` 填充与 `.focused` 填充让位**
   （focus 层级降级为仅描边加粗）。
 - 测试（`graph-layout.test.ts` 同目录新增）：**`mode='structure'` 产出与改动前完全一致**
-  （零回归断言，逐条比对选择器与样式）；`mode='mastery'` 下上述四条各断言一次。
+  （零回归断言，逐条比对选择器与样式）；`mode='mastery'` 下上述四条各断言一次；
+  **node 无 `mastery` data 时按 `unknown` 着色**——`/api/mastery` 只返回有证据的 slug，
+  绝大多数节点根本没这个字段，没有兜底会渲染成透明/默认色。
 - 验证：`npx vitest run src/components/graph/__tests__/`
 
 ## 任务 6：掌握度取数 + 模式切换（绝不重建元素）
@@ -149,8 +156,11 @@
   `cy.batch(() => node.data('mastery'/'confidence'))` + `cy.style(buildStylesheet(theme, mode))`。
   **必须走文件底部既有的更新路径**——数据 effect 是 `[]` 一次性（文件内有注释说明），
   改元素集会摧毁 cose 布局与力导向模拟。
+- **退出全屏时 `mode` 重置回 `structure`**（spec ② F1b）：切换入口只在全屏顶栏，
+  持久化会让 Dashboard / Context 面板的 mini-graph 停在无法切回的掌握度配色里。
 - 取数失败：保持结构模式并提示一次，不影响既有 graph。
-- 测试：切换模式后 `cy` 实例同一、元素数不变、节点坐标不变；取数失败时 mode 回落 structure。
+- 测试：切换模式后 `cy` 实例同一、元素数不变、节点坐标不变；取数失败时 mode 回落 structure；
+  **退出全屏后 mode 为 structure**。
 - 验证：`npx vitest run src/components/graph/__tests__/`
 - 人工验证：全屏图切模式，确认布局不跳、四态着色正确。
 

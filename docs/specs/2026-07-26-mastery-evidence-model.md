@@ -197,10 +197,15 @@ struggling  有近期负证据 —— 「试过并卡住了」，不是「更不
 | 序 | 条件 | 结果 |
 |---|---|---|
 | 1 | 无任何证据 | `unknown` / `none` |
-| 2 | 衰减窗口内存在**强负证据**（`quiz-wrong` / `selection-ask`） | `struggling` / 强证据≥2 则 `high`，否则 `low` |
-| 3 | 存在**未过期的正证据** | `mastered` / 来源含 quiz 则 `high`，否则 `low` |
-| 4 | 存在 exposure 证据，或存在已过期的正证据 | `exposed` / `low` |
+| 2 | 衰减窗口内存在**强负证据**（`quiz-wrong` / `selection-ask` / `self-report-hard`） | `struggling` / 强证据≥2 则 `high`，否则 `low` |
+| 3 | 存在未过期的正证据，**且（含 ≥1 条 strong 或 ≥2 条 weak）** | `mastered` / 含 strong 则 `high`，纯 weak 则 `low` |
+| 4 | 存在 exposure 证据、已过期的正证据、**或不足以支撑规则 3 的孤立 weak 正证据** | `exposed` / `low` |
 | 5 | 只有弱负证据（`citation-hit` / `reshape-request`） | `exposed` / `low` |
+
+**规则 3 的 strength 门槛是必须的**，否则一条 `self-report-easy`（读者点一下「太浅」）
+就能把整页判成 `mastered`，重塑从此跳过解释它——正是决策 2 要防的那个最危险失败。
+`quiz-correct`(weak)（无答案自评答对）同理：自我拔高偏差下的单条自陈不足以支撑「不必再讲」。
+两条 weak 正证据（例如同页两道题都自评答对）才够到 `low` 置信度的 `mastered`。
 
 第 5 条是刻意的：弱负证据信噪比不足以判 `struggling`，但足以证明「他接触过这一页」。
 
@@ -232,10 +237,18 @@ expiresAt= dueAt + LADDER[min(i + 1, LADDER.length - 1)]       // 逾期超过�
 
 过期回落 `exposed`（而非 `unknown`——他确实接触过）。
 
-**`consecutivePositives` 是页级，不是题级。** 同一页上任意正证据（不同的 quiz、
-`self-report-easy`）都累加连击；一次负证据清零。理由有二：掌握度本来就是 per-page 的；
-且题级连击要求用户回去重答同一道题——没有任何机制促成，实际不可达。
-页级下，一页有 3 道 quiz 各答对一次即可到达 `+28 天`，这才是现实可达的。
+**`consecutivePositives` 的三条精确定义**（每条都对应一个会让公式失真的具体失败）：
+
+1. **页级，不是题级。** 同一页上任意正证据（不同的 quiz、`self-report-easy`）都累加。
+   题级连击要求用户回去重答同一道题——没有任何机制促成，实际不可达；页级下一页 3 道 quiz
+   各答对一次即到 `+28 天`，这才现实。
+2. **按「天」去重，不按行计数。** 同一天内的多条正证据只算 1。否则读者反复点判分按钮
+   （或误触）就能把连击刷到 5，换来 120 天的 `mastered`——而间隔重复的语义本来就是
+   「隔一段时间再答对一次」，同一分钟点五下不构成五次复习。
+   证据表仍然 append-only 全量保留（审计需要），只是**派生时按天折叠**。
+3. **只有 strong 负证据清零连击。** 若不限定强弱，`citation-hit`（问了个问题、回答引用了
+   这一页，完全正常的事）会把攒了几周的掌握连击打回零。弱负证据只影响规则 5 的落点，
+   不参与连击计算。
 
 > 实现上抽 `masteryWindowDays(consecutivePositives)` 到 `profile/mastery.ts`，
 > 与 `maintenance-policy` 共用常量但**不共用函数**——两者的语义已经分化
@@ -382,7 +395,18 @@ renderMarkdown(content, titleSlugMap, {
 > `PageRenderer` 不得用自己的 `slug` / `subjectSlug` 属性就地构造。**
 > 因为 `editor-preview.tsx` 就是 `<PageRenderer content slug titleSlugMap />`——
 > 只要 PageRenderer 自行构造，编辑器预览立刻获得判分按钮，与上表第三行直接矛盾。
-> 能力必须由**最外层知道语境的调用方**显式授予，不能由中间层推断。
+
+**一般原则：能力由最外层知道语境的调用方显式授予，不能由中间层或展示层推断。**
+
+本 spec 里有两个实例，两处都不是实现细节而是设计约束：
+
+| 组件 | 它有什么 | 为什么不能让它自己决定 |
+|---|---|---|
+| `PageRenderer` | `slug` / `subjectSlug` | 不知道自己是被阅读页还是编辑器预览渲染 |
+| `ReadingProgress` | `containerRef` | 纯展示组件（只渲染一根进度条），本来就没有页面身份；为了埋点给它加 `slug` 会把展示层变成有 IO 的组件 |
+
+所以 D5 的读完埋点不改 `ReadingProgress`，而是新增 `use-page-read-beacon` hook 由
+`wiki-reading-view` 挂载，复用它已导出的纯函数 `calculateReadingProgress` 做到底判定。
 
 **答案折叠在六处都生效**：「不剧透」是内容呈现决定，不是某个页面的 UI 状态。
 只有**发证据**这一能力是阅读页独占的。
@@ -440,6 +464,15 @@ INDEX page_evidence_scope_idx ON (user_id, subject_id, created_at)
 | `own-source` | exposure | weak | D6 自己 ingest 的源产出的页 | — |
 
 `self-report-easy` 定为 weak positive：说「太浅」不等于掌握，只是不觉得难。
+
+### `user_profiles` 加一列（A 组，非后置）
+
+```
+style_prefs_updated_at TEXT   -- 仅在旋钮真的变化时推进；reducer 的消费边界
+```
+
+与既有 `updated_at` 分开——后者任何画像写入都会变（改背景自述、onboarding 提交），
+拿它当边界会误清信号窗口。
 
 ### `user_profiles` 的 subject 化（分期后置，见分期一节）
 
@@ -507,16 +540,25 @@ movePage(subjectId, fromSlug, toSlug): void                    // rename
 
 - 输入从 `ProfileSignal[]` 改为 `EvidenceRow[]`，只筛 style-bearing 的 kind。
 - 加时间窗与衰减：按 `createdAt` 折算权重，超窗证据不参与。
-- 加消费边界：记录 `style_prefs` 上次调整的时间戳，只统计其后的证据——消除棘轮。
+- 加消费边界：只统计**上次旋钮调整之后**的证据——消除棘轮。
 - 解耦三个维度：`readingLevel` / `verbosity` / `exampleDensity` 各自独立阈值，
   不再一次信号同时推动三个。
+
+> **消费边界要一列专用时间戳 `user_profiles.style_prefs_updated_at`，不能复用
+> `updated_at`。** 后者在任何画像写入时都会变——用户改一句背景自述、或 onboarding
+> 提交，都会把信号窗口整个清空，读者会觉得「我明明点过好几次太难，怎么一点反应都没有」。
+> 只有旋钮真的动了才推进边界。
 
 ### API
 
 | 路由 | 方法 | 说明 |
 |---|---|---|
 | `/api/evidence` | POST | 追加一条证据；`requireAuth` + `requireCsrf` + `resolveSubjectFromRequest`；**写前校验 `slug` 在该 subject 内存在**（`getPageBySlug`），不存在 404 |
-| `/api/mastery` | GET | 无 `slug` 返回当前 subject 全量 `slug → MasteryVerdict`；带 `slug` 返回单页含 `recent`。**与 `/api/graph` 同口径排除 meta 页**（`isMetaPage`），避免图层拿到无对应节点的 slug |
+| `/api/mastery` | GET | **无 `slug`**：全量 `slug → MasteryVerdictLite`（`state` / `confidence` / `evidenceCount` / `lastEvidenceAt` / `expiresAt`，**不含 `recent`**）；**带 `slug`**：单页完整 `MasteryVerdict` 含 `recent`。**与 `/api/graph` 同口径排除 meta 页**（`isMetaPage`） |
+
+> 批量响应刻意不带 `recent`：图层只需要着色所需的 state/confidence，逐页塞进最多
+> `MAX_RECENT_EVIDENCE` 条证据会让响应体随使用量线性膨胀，而其中 99% 永远不会被展开看。
+> 证据明细在 tap 节点时按单页取——这也正是审计面的真实交互形状。
 | `/api/profile/signals` | POST | 并存期双写，切换后删除 |
 
 > `/api/evidence` 的存在性校验不是洁癖：没有它，前端一个陈旧的 slug（页面刚被删/改名，
@@ -532,8 +574,11 @@ movePage(subjectId, fromSlug, toSlug): void                    // rename
 - `page-renderer.tsx`：新增 `interactive?` **透传 prop**（自身不构造，见决策 9 的警示）。
 - `wiki-reading-view.tsx`：**唯一**构造并传入 `interactive` 的调用方。
 - `lens-feedback.tsx`：改为只在查看重塑版时渲染（修 A1），发送时带 `viewedSource`。
-- 阅读完成埋点（D5）：复用现有 `reading-progress.tsx` 的滚动进度，
-  到底且停留超阈值发一条 `page-read`，同页去重。
+- 阅读完成埋点（D5）：**新增 `use-page-read-beacon.ts` hook，由 `wiki-reading-view` 挂载**。
+  不改 `reading-progress.tsx`——它只有 `containerRef` / `useContainerScroll` 两个 prop，
+  是纯展示组件（渲染一根进度条），没有也不该有 `slug` / `subjectSlug`。
+  hook 复用 `calculateReadingProgress` 这个已导出的纯函数做到底判定，
+  滚动到底 **且** 停留 ≥30s 时发一条 `page-read`，同页一次会话去重。
 
 ---
 
@@ -598,26 +643,31 @@ GET /api/mastery?s=<subject>
 2. **`masteryWindowDays`（决策 4，回归重点）**：`{dueDays, expiryDays}` 对 1–5+ 连击
    逐档断言（1→{1,4} / 2→{3,10} / 3→{7,28} / 4→{21,81} / ≥5→{60,120}）；
    **`expiryDays` 恒 > `dueDays`**（防再次退化成「到期即失效」）；上限钳制。
-3. **页级连击**：同页不同 quiz 的正证据累加连击（不要求同一道题）；一次负证据清零。
-4. **`fnv1a`**：同输入同输出；不同输入不同输出（抽样）；跨 Node/浏览器一致。
-5. **`createRemarkQuiz`**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
+3. **连击三条定义（决策 4，回归重点）**：页级累加（同页不同 quiz，不要求同一道题）；
+   **同一天多条正证据只算 1**（防反复点判分刷到 120 天）；
+   **只有 strong 负证据清零**（`citation-hit` 这种弱负证据不得打断连击）。
+4. **规则 3 的 strength 门槛**：单条 `self-report-easy` 或单条 weak `quiz-correct`
+   **不足以判 `mastered`**，落 `exposed`；两条 weak 正证据才到 `mastered/low`；
+   含 strong 则 `mastered/high`。
+5. **`fnv1a`**：同输入同输出；不同输入不同输出（抽样）；跨 Node/浏览器一致。
+6. **`createRemarkQuiz`**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
    答案改写不改变 `data-quiz-id`，问题改写则改变（决策 7）；非 quiz callout 不受影响；
    排在 `selectionBlocks` 之后时顶层块 offset 不变（决策 6 的顺序约束）。
-6. **交互接缝隔离（决策 9）**：不传 `interactive` 时渲染结果**不含任何判分按钮**——
+7. **交互接缝隔离（决策 9）**：不传 `interactive` 时渲染结果**不含任何判分按钮**——
    对 Chat / **编辑器预览（`EditorPreview` 经 `PageRenderer` 的那条路径）** /
    Source 查看器三条各断言一次；答案折叠在两种情况下都生效。
-7. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
+8. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
    `BUILTIN_UPGRADE_HASHES` 含 v6 原版 hash（防漏第 3 步导致既有 vault fail-fast）。
-8. **API 边界**：`POST /api/evidence` 对不存在 / 跨 subject 的 slug 返回 404 不落行；
+9. **API 边界**：`POST /api/evidence` 对不存在 / 跨 subject 的 slug 返回 404 不落行；
    `GET /api/mastery` 排除 meta 页，口径与 `/api/graph` 一致。
-9. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
+10. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
    真实 SQLite 覆盖 subject FK CASCADE。
-10. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
+11. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
     `deleteWithContents` 与 `/api/reset` 级联覆盖；**退役 signals 后 move 页面不报错**
     （防漏删迁移块，决策 8）。
-11. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
+12. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
     三维度独立不再联动。
-12. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
+13. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
     子集等价。
 
 ---
@@ -641,6 +691,7 @@ GET /api/mastery?s=<subject>
 | `src/app/api/lens/[...slug]/route.ts` | POST 处追加 `reshape-request` |
 | `src/server/services/page-write.ts` | 删页时 `deleteByPage` |
 | `src/server/wiki/page-identity-migration.ts` | 加 `page_evidence` 迁移块；**退役 signals 时同步删 `profile_signals` 块**（决策 8） |
+| `src/components/wiki/use-page-read-beacon.ts` | **新**：D5 埋点 hook，由 `wiki-reading-view` 挂载（`ReadingProgress` 是纯展示组件，没有也不该有页面身份，见决策 9） |
 | `src/server/db/repos/subjects-repo.ts` | `deleteWithContents` 清单补该表 |
 | `src/app/api/reset/route.ts` | 清理清单补该表 |
 | `examples/skills/ingest-enricher.md` | v6 → **v7**：quiz callout 用 `---` 分隔携带答案 |
