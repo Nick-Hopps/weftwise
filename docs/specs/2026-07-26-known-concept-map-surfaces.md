@@ -46,7 +46,7 @@ spec ① 建立了 `(user, subject, slug)` 粒度的掌握度事实，但事实�
 1. **审计面**——这类功能错了是隐形的（用户只会觉得「重塑版怎么突然看不懂了」，不会归因到
    地图）。必须能看到系统认为你懂什么、依据是哪几条证据。
 2. **纠错入口**——看到误判可以当场翻案。
-3. **导航面**——见决策 F4，这是复用 graph 而非另建视图的最强理由。
+3. **（后置）导航面**——见决策 F4。MVP 只做前两项。
 
 ---
 
@@ -179,19 +179,28 @@ cy.style(buildStylesheet(readGraphTheme(), mode));
 达到同样目的（unknown 不淹没画面）、零重建、零布局扰动，且用户仍能看到整张图的形状——
 「我的已知区域在整体中占多大」本身就是有价值的信息，折叠掉反而丢了。
 
-### F4：图上真正有价值的是**边界**，不是分布
+### F4（**后置，MVP 不做**）：边界导航
 
-`mastered` 节点的邻居里那些还是 `unknown` 的——那就是「你的下一步该学什么」，
-而且是**有依据的**：你已经懂了它的前置。
+`mastered` 节点的邻居里那些还是 `unknown` 的，就是「下一步够得着的概念」——学习科学里的
+最近发展区。它在列表视图里表达不出来（「离已知区域一跳」是拓扑属性），只有图上一眼可见，
+且几乎零成本：`cy` 里已有全部节点与边，F1 又把 mastery 写进了 node data，
+派生就是一遍遍历（`unknown` 且至少一个邻居 `mastered`），一个纯函数 + 一条 stylesheet
+选择器。
 
-这个在列表视图里根本表达不出来，只有在图上一眼可见。**这是复用 graph 而非另建审计视图的
-最强理由**——它把地图从 debug 面变成了学习路径推荐面。
+**但 MVP 不做**，三条理由，重要性递增：
 
-实现上是掌握度模式下的一个额外高亮 class（`.frontier`），确定性派生：
-`unknown 且至少一个邻居是 mastered`。
+1. **冷启动是空的。** 边界依赖 `mastered` 非空，而按 spec ① 的设计 `mastered` 恰恰是最难
+   到达的状态（要 quiz 判分或明确正向证据，还带过期）。现在做大概率一片空白。
+2. **边的语义是「提到了」，不是「需要先学」。** `wiki_links` 不足以支撑「你已经懂了它的
+   前置」这个声称——`[[backprop]]` 链到 `[[chain-rule]]` 可能是前置，也可能只是顺带一提。
+   诚实的表述只能是「和你懂的东西相邻」。
+3. **边界是 F 里唯一一个系统主动下断言的地方**，其余全是如实报告。四态着色说的是「我根据
+   这几条证据认为你懂这个」，边界说的是「你应该学这个」——后者要花掉前者攒下的信任。
+   先让用户看到地图是准的（点节点、证据条条对得上），再让系统开口建议；顺序反了，
+   一次不靠谱的推荐会连带让人不信整张图。
 
-接 research backlog / maintenance / `coverage-gap` 是自然的下一步，但需要新的写入路径，
-本 spec 不做（非目标）。
+**后加零返工**：它是 F 已有数据上的派生 class，没有架构锁定。等地图被验证准确后再加，
+届时再接 research backlog / maintenance / `coverage-gap`。
 
 ### F5：色彩编码 —— ramp + outlier 分开
 
@@ -202,17 +211,17 @@ cy.style(buildStylesheet(readGraphTheme(), mode));
 塞进 ramp 会误导。它走 **danger 描边**（categorical outlier），这也正合项目 2026-07-20
 定下的色彩语义约定：danger 红独占「需要注意的问题」。
 
-`.frontier` 用虚线描边（第三种编码通道，不与前两者冲突）。
-
-新增 4 个主题 token（亮暗各一套，与现有 7 个 `--color-graph-*` 并列）：
+新增 3 个主题 token（亮暗各一套，与现有 7 个 `--color-graph-*` 并列）：
 
 ```
---color-graph-mastery-unknown     现有 orphan 灰复用即可 → 不新增
+unknown                           复用现有 --color-graph-orphan 灰 → 不新增
 --color-graph-mastery-exposed     warp 低明度
 --color-graph-mastery-mastered    warp 高明度
 --color-graph-mastery-struggling  danger（描边用）
---color-graph-mastery-frontier    warp（虚线描边用）
 ```
+
+> F4 后置带走了第四个 token（`--color-graph-mastery-frontier`，虚线描边）。
+> 虚线是第三种编码通道，与填充 ramp 和 danger 描边都不冲突，后加不需要重排色彩方案。
 
 **结构模式下的 `orphan` 填充色在掌握度模式让位**——孤儿是结构属性，归结构模式。
 同理 `.focused` / `.neighbor` 的焦点层级在掌握度模式下降级为仅描边加粗，不抢填充色。
@@ -273,7 +282,6 @@ POST /api/lens/[...slug]
 用户在 graph 切到「掌握度」模式
   → GET /api/mastery?s=<subject>            （spec ① 已有路由）
   → cy.batch(): 逐 node 写 data('mastery'|'confidence')
-                 确定性派生 .frontier class
   → cy.style(buildStylesheet(theme, 'mastery'))
   → 顶栏 stats 与图例切换为四态
   → tap 节点 → GET /api/mastery?s=&slug= → 证据面板
@@ -352,9 +360,8 @@ export function groupByMastery(entries: Array<{ slug; title; verdict: MasteryVer
 6. **E3 挂载隔离**：canonical 视图不传 `assumedKnown` → 无纠错入口；重塑视图才有；
    不在 `assumedKnown` 里的 wikilink 无入口。
 7. **`graph-stylesheet`**：`mode='structure'` 产出与改动前完全一致（零回归）；
-   `mode='mastery'` 下 orphan 填充让位、struggling 走描边、frontier 虚线。
-8. **frontier 派生**：`unknown` 且至少一个邻居 `mastered` 才命中；纯函数单测。
-9. **图层不重建**：切换模式后 `cy` 实例同一、元素数不变、节点位置不变。
+   `mode='mastery'` 下 orphan 填充让位、focus 层级降级为描边、struggling 走 danger 描边。
+8. **图层不重建**：切换模式后 `cy` 实例同一、元素数不变、节点位置不变。
 
 ---
 
@@ -389,13 +396,19 @@ plan ① 任务 7（interactive 接缝）        ← 仅 E3 需要
 
 ---
 
-## 十三、待评审决策
+## 十三、决策状态
+
+**已定（2026-07-26）**
+
+| 议题 | 取值 | 依据 |
+|---|---|---|
+| 边界导航是否进 MVP | **后置** | 冷启动空、边语义不足以支撑「前置」声称、且它是唯一主动下断言的地方——先让地图证明自己准，再让系统开口建议。后加零返工（决策 F4） |
+
+**待评审**
 
 1. **`exposed` 段的措辞强度**。当前定为「一句话回顾即可」。若实测发现模型对 `exposed`
    也大幅压缩解释、导致可读性下降，应改为更弱的表述（如「可以略快带过」）。
-   这是本设计里最可能需要按实感调整的一处。
+   这是本设计里最可能需要按实感调整的一处，建议接入后用同一页对照重塑两次再定。
 2. **掌握度模式下 tap 的语义**（决策 F7）：改为「选中看证据」而非跳转。
    若觉得两种模式交互不一致的代价更大，退回「tap 仍跳转 + hover 看证据」，
    代价是触屏不可用。
-3. **`.frontier` 是否进 MVP**。它是 F 最有价值的部分（决策 F4），但也是唯一一个
-   「系统主动建议你学什么」的地方——若认为过早，可只做四态着色，frontier 留待下一步。

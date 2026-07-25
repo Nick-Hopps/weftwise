@@ -99,6 +99,10 @@
 
 本任务只建接缝与静态形态，**不接网络**——保证接缝隔离可以独立评审。
 
+> **接缝归属**：`RenderOptions.interactive` 由先落地的一方建。若
+> [plan ②](./2026-07-26-known-concept-map-surfaces.md) 的任务 4 已先行完成，
+> 接缝已存在（且已带 `assumedKnown` 字段），本任务只需复用并挂 `<QuizBlock>`。
+
 - `src/lib/markdown-client.ts`：`RenderOptions` 加
   `interactive?: { pageSlug: string; subjectSlug: string }`；`div` 覆盖按 `data-quiz-id`
   挂 `<QuizBlock>` 并透传该上下文。
