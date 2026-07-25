@@ -105,6 +105,15 @@ join 证据算四态。
 
 排除项：自身 slug、meta 页（`META_PAGE_SLUGS`）、跨 subject 目标（本 subject 之外不计）。
 
+**仍需一个硬上界 `MAX_NEIGHBORHOOD = 40`**，按 wikilink 在正文中的**首次出现顺序**截断。
+「与 vault 规模无关」不等于「有界」——一张综述性质的页面链出 150 个概念完全可能，
+那就是 150 行注入。项目在 T2.1 正是因为「prompt 随规模单调膨胀」把 index/log 整个改成了
+确定性渲染；这里必须先把闸门装上，而不是等它长出来。
+
+首次出现顺序是刻意选的：它确定性、零成本，且正文里越早提到的概念通常越核心。
+截断发生时在注入段末尾明说「还有 N 个相关概念未列出」——**不做静默截断**，
+否则模型会把「未列出」误读成「读者不懂」，反而多讲一堆。
+
 ### E2：注入三段清单 + 「未列出即不懂」兜底
 
 ```
@@ -161,6 +170,12 @@ interactive?: {
 `markdown-client.ts` 的 `a` 覆盖（现有 `WikiLinkAnchorRenderer`）在 slug ∈ `assumedKnown`
 时额外渲染入口。**只在重塑视图传 `assumedKnown`**：canonical 没有「跳过解释」这回事，
 传了就是误导。
+
+> **匹配必须同时比对 subject，不能只比 slug。** 该覆盖同时处理
+> `[[slug]]` 与 `[[other-subject:slug]]`（`data-wiki-subject` 属性区分），而
+> `assumedKnown` 里只装当前 subject 的裸 slug。只比 slug 的话，重塑正文里一个指向**别的
+> subject 同名页**的链接会挂上纠错入口——点下去写的是当前 subject 那一页的负证据，
+> 归错了页。跨主题同名 slug 在本项目是合法且常见的（`pages` 复合主键就是为此）。
 
 接缝沿用 spec ① 决策 9 的授权方向：`interactive` 由 `wiki-reading-view` 显式构造并传入，
 `PageRenderer` 只透传、不就地构造——否则 `EditorPreview` 会连带获得纠错入口。
@@ -328,7 +343,9 @@ unknown                           复用现有 --color-graph-orphan 灰 → 不�
 
 - **顶栏 stats 位**（现在是 nodes / links / orphans）在掌握度模式换成四态分布计数
 - **点击节点后的证据面板**：列出该页原始证据条目（kind + 时间 + anchor），
-  以及派生出的 state / confidence
+  以及派生出的 state / confidence。**`kind` 必须经 i18n 映射成人话**
+  （「自测答对」而非 `quiz-correct`）——这是给 vault 主人看的解释面，不是日志；
+  把原始枚举值直接上屏等于没解释，而「可解释」正是 spec ① 目的 2 的硬要求
 
 图例（`fullscreen-graph.tsx` 现成的 `LegendRow`，现在三行）在掌握度模式换成五行。
 
@@ -480,7 +497,8 @@ buildKnownConceptsForPage(opts: {
 
 1. **`selectNeighborhood`**：去重；排除自身与 meta 页；跨 subject 目标不计；
    无 wikilink 返回空；**`[[某某标题]]` 经 titleResolver 解析到真实 slug**，
-   无 resolver 时的错误行为有回归断言（防再次退化）。
+   无 resolver 时的错误行为有回归断言（防再次退化）；
+   **超过 `MAX_NEIGHBORHOOD` 时按首次出现顺序截断且不静默**。
 2. **`groupByMastery`**：四态映射；`unknown` 不出现；**low-confidence `mastered` 降级进
    `exposed`**；空输入。
 3. **`renderKnownConcepts`**：三段渲染；部分段为空时不渲染空标题；**三段全空返回 null**；
@@ -493,7 +511,8 @@ buildKnownConceptsForPage(opts: {
 7. **E5 stale**：证据变化后 GET 返回 `stale:true`；`known_concepts_json` 为 null 的
    旧行不因地图比对变 stale；地图未变时不误报 stale。
 8. **E3 挂载隔离**：canonical 视图不传 `assumedKnown` → 无纠错入口；重塑视图才有；
-   不在 `assumedKnown` 里的 wikilink 无入口；`EditorPreview` 路径无入口。
+   不在 `assumedKnown` 里的 wikilink 无入口；`EditorPreview` 路径无入口；
+   **`[[other-subject:同名slug]]` 不得命中**（跨主题同名合法且常见，只比 slug 会归错页）。
 7. **`graph-stylesheet`**：`mode='structure'` 产出与改动前完全一致（零回归）；
    `mode='mastery'` 下 orphan 填充让位、focus 层级降级为描边、struggling 走 danger 描边；
    **node 没有 `mastery` data 时按 `unknown` 着色**（`/api/mastery` 只返回有证据的 slug，

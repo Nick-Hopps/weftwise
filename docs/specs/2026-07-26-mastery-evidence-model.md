@@ -539,6 +539,14 @@ movePage(subjectId, fromSlug, toSlug): void                    // rename
 ### `signal-reducer` 改造
 
 - 输入从 `ProfileSignal[]` 改为 `EvidenceRow[]`，只筛 style-bearing 的 kind。
+
+> **style-bearing 只有 `self-report-hard` / `self-report-easy` 两种**（即原 `too_hard` /
+> `too_easy`），必须在代码里以显式白名单表达，不能用 polarity 之类的属性顺带筛。
+>
+> 因为其余负证据说的都是**掌握度**而非**讲法**：`quiz-wrong`（这道题答错了）、
+> `selection-ask`（这段没看懂）都不代表「整体讲得太难，请全局降档」。若它们混进 reducer，
+> 读者每答错一道题就把全库 `readingLevel` 往下推一格——这恰恰是本 spec 缺口 1 要修的
+> 「领域无关的全局降档」，会以更隐蔽的形式复发。
 - 加时间窗与衰减：按 `createdAt` 折算权重，超窗证据不参与。
 - 加消费边界：只统计**上次旋钮调整之后**的证据——消除棘轮。
 - 解耦三个维度：`readingLevel` / `verbosity` / `exampleDensity` 各自独立阈值，

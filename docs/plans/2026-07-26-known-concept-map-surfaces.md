@@ -59,11 +59,14 @@
   - `selectNeighborhood`：去重；排除自身 slug 与 `META_PAGE_SLUGS`；跨 subject 目标不计；
     无 wikilink 返回空；**`[[某某标题]]` 经 `titleResolver` 解析到真实 slug**
     （无 resolver 时 `extractWikiLinks` 只能回落 `normalizeSlug(title)`，邻域会静默漏概念
-    且不报错——加一条回归断言锁死 resolver 必传）
+    且不报错——加一条回归断言锁死 resolver 必传）；
+    **超过 `MAX_NEIGHBORHOOD=40` 按首次出现顺序截断**（综述页链出上百概念完全可能，
+    T2.1 的 prompt 膨胀教训要求先装闸门）
   - `groupByMastery`：四态映射；`unknown` 不出现；**`confidence==='low'` 的 `mastered`
     降级进 `exposed` 段**；空输入返回三段全空
   - `renderKnownConcepts`：三段渲染含兜底句；某段为空时不渲染该段标题；
-    **三段全空返回 `null`**；**必含 `[[slug]]` 书写纪律那句**（缺了 E3 就没锚点可挂）
+    **三段全空返回 `null`**；**必含 `[[slug]]` 书写纪律那句**（缺了 E3 就没锚点可挂）；
+    **截断发生时段末明说「还有 N 个未列出」**（静默截断会让模型把未列出误读成不懂）
 - 验证：`npx vitest run src/server/profile/__tests__/concept-map.test.ts`
 
 ## 任务 3：地图注入重塑 prompt
@@ -128,9 +131,13 @@
   `src/hooks/use-lens.ts` 透传；
   `src/components/wiki/wiki-reading-view.tsx` **仅 `usingReshaped` 时**传入
   （canonical 没有「跳过解释」这回事）。
+- **匹配同时比对 subject**：`a` 覆盖也处理 `[[other-subject:slug]]`（`data-wiki-subject`），
+  而 `assumedKnown` 只装当前 subject 的裸 slug；只比 slug 会让指向别的 subject 同名页的
+  链接挂上入口，点下去把负证据写到当前 subject 那一页——跨主题同名在本项目合法且常见。
 - 测试：canonical 视图无纠错入口；重塑视图才有；不在 `assumedKnown` 里的 wikilink 无入口；
-  不传 `interactive` 的五个消费方一律无入口——**`EditorPreview` 那条经 `PageRenderer`
-  的路径单独断言一次**（它是唯一会被「就地构造」误伤的消费方）。
+  **`[[other-subject:同名slug]]` 不命中**；不传 `interactive` 的五个消费方一律无入口
+  ——**`EditorPreview` 那条经 `PageRenderer` 的路径单独断言一次**
+  （它是唯一会被「就地构造」误伤的消费方）。
 - 验证：`npx vitest run src/lib/__tests__/ src/components/wiki/__tests__/`
 
 ## 任务 5：graph 主题 token + `buildStylesheet(theme, mode)`
@@ -171,7 +178,9 @@
   - 顶栏 stats 在掌握度模式换成四态分布计数（替代 nodes/links/orphans）
   - 图例（现成 `LegendRow`，三行）换成四行
   - 新增证据面板：掌握度模式下 tap 节点 → 选中并显示该页
-    `state / confidence / 原始证据条目（kind + 时间 + anchor）`，面板内提供「打开页面」
+    `state / confidence / 原始证据条目（kind + 时间 + anchor）`，面板内提供「打开页面」；
+    **`kind` 经 i18n 映射成人话**（「自测答对」而非 `quiz-correct`），
+    `state` / `confidence` 同理
 - **tap 语义**：结构模式保持 `router.push` 不变；掌握度模式改为选中看证据
   （spec ② 待评审 2，先按此实现，评审后可回退）。
 - `src/lib/i18n/messages/{zh-CN,en}.ts`：新增文案。

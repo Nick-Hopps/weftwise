@@ -179,9 +179,13 @@
 - **A1/A2/A7**：`lens-feedback.tsx` 改为只在查看重塑版时渲染；发送时带
   `viewedSource`；「看原文」切换补 `view_original` 埋点。
 - **A3/A4/A5**：`signal-reducer.ts` 输入换 `EvidenceRow[]`，加时间窗与衰减、
-  加「只统计上次调整之后的证据」消费边界、三个维度各自独立阈值（不再联动）。
-- **A6**：`apply-signal.ts` 不再为未 onboarding 用户写出 `onboardedAt` 仍为 null
-  的画像（否则 onboarding 弹窗持续弹）。
+  加「只统计 `style_prefs_updated_at` 之后的证据」消费边界、三个维度各自独立阈值。
+  **style-bearing kind 用显式白名单 `['self-report-hard','self-report-easy']`**——
+  `quiz-wrong` / `selection-ask` 说的是掌握度不是讲法，混进来就等于「答错一道题
+  全库降一档」，是缺口 1 的隐蔽复发。加一条断言锁死白名单。
+- **A6**：`apply-signal.ts` 对**尚无画像行**的用户只落证据、**跳过 `upsertProfile`**。
+  现状是它照写不误，结果 `version` 涨到 1 而 `onboardedAt` 仍为 null，onboarding 弹窗
+  持续弹。证据不丢——用户真的完成 onboarding 后，reducer 自然消费到这些历史证据。
 - **A8**：`formality` 明确只手动可调——在 `style.ts` 加注释说明，并在 reducer 测试里
   断言任何信号都不改动它。
 - 测试：同向连点不再每次降档（棘轮消失）；超窗证据不参与；三维度独立；
