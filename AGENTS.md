@@ -160,6 +160,7 @@ LLM 配置存放于 `llm-config.json`（参考 `llm-config.example.json`），�
 | `npm run db:migrate` | drizzle-kit 应用迁移 |
 | `npm run db:migrate-subjects` | 一次性脚本：legacy DB/vault → subject-aware（备份 → backfill → git mv）|
 | `npm run db:rebuild` | 灾难恢复：从 vault 全量重建 SQLite 缓存（`scripts/rebuild-cache.ts`，运行前自动抢 vault 写锁，抢不到会报错提示先停 worker）|
+| `npm run db:backfill-source-presentation` | 存量回填：为 Ingest 联网核查导入的 `web-*.md` 网页快照补写标题/描述（`scripts/backfill-source-presentation.ts`，支持 `--dry-run` / `--force`，只写展示字段、可重复执行）|
 | `npm run eval:retrieval` | 检索评估基线：临时 DB/vault 上跑 FTS / 向量 / 混合 RRF 三路 recall@5/10 + MRR（`scripts/eval-retrieval.ts` + `scripts/fixtures/retrieval-golden.json`，未配置 embedding 时向量路跳过、混合路退化为纯 FTS）|
 
 ---
