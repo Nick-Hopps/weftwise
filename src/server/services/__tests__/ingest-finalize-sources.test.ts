@@ -47,6 +47,37 @@ describe('buildWebSourceImports', () => {
     expect(plan.links).toHaveLength(1);
   });
 
+  it('把网页标题与搜索摘要作为展示元数据传给 saveSource', () => {
+    const presentations: unknown[] = [];
+    buildWebSourceImports({
+      cites,
+      subjectSlug: 'general',
+      contentFor: () => 'FULL EXTRACTED',
+      saveSource: (filename, _content, _url, presentation) => {
+        presentations.push(presentation);
+        return { id: 'src-1', filename };
+      },
+    });
+    expect(presentations).toEqual([{ title: 'A', description: 'snippet-a' }]);
+  });
+
+  it('标题缺失回退 hostname，摘要缺失回退正文首段', () => {
+    const untitled: CitedSource[] = [
+      { url: 'https://www.news.gmw.cn/a/b.htm', title: '', citedBy: ['p1'], fallbackContent: '' },
+    ];
+    let captured: unknown;
+    buildWebSourceImports({
+      cites: untitled,
+      subjectSlug: 'general',
+      contentFor: () => '第一段正文。\n\n第二段正文。',
+      saveSource: (filename, _content, _url, presentation) => {
+        captured = presentation;
+        return { id: 'src-1', filename };
+      },
+    });
+    expect(captured).toEqual({ title: 'news.gmw.cn', description: '第一段正文。' });
+  });
+
   it('skips a source whose saveSource throws (does not abort others)', () => {
     const many: CitedSource[] = [
       { url: 'https://bad.com', title: 'Bad', citedBy: ['p1'], fallbackContent: 's' },
