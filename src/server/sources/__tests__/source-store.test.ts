@@ -78,7 +78,7 @@ describe('updateSourceChunks', () => {
   });
 
   it('把 worker 解析到的网页标题和描述同时写回 sidecar 与 SQLite cache', async () => {
-    const { saveUrlSource, updateUrlSourcePresentation, getSourceMetadata } = await import('../source-store');
+    const { saveUrlSource, updateSourcePresentation, getSourceMetadata } = await import('../source-store');
     const subject = { id: 'sub1', slug: 'general' };
     const saved = saveUrlSource(subject, 'https://example.com/article');
     const source = {
@@ -91,7 +91,7 @@ describe('updateSourceChunks', () => {
     };
     sourceRepoMocks.getSource.mockReturnValue(source);
 
-    updateUrlSourcePresentation(saved.id, {
+    updateSourcePresentation(saved.id, {
       title: ' Example article ',
       description: ' A useful summary. ',
     });
@@ -104,6 +104,44 @@ describe('updateSourceChunks', () => {
       id: saved.id,
       metadataJson: expect.stringContaining('Example article'),
     }));
+  });
+
+  it('raw Source 保存时写入网页标题与描述（sidecar + SQLite metadata cache）', async () => {
+    const { saveRawSource, getSourceMetadata } = await import('../source-store');
+    const { id } = saveRawSource({ id: 'sub1', slug: 'general' }, 'web-a-1234.md', '# A\n\nbody', {
+      presentation: { title: '  网页  标题 ', description: ' 一句话描述 ' },
+    });
+
+    expect(getSourceMetadata(id)).toMatchObject({
+      title: '网页 标题',
+      description: '一句话描述',
+    });
+    expect(sourceRepoMocks.insertSourceOrGetWinner).toHaveBeenLastCalledWith(
+      expect.objectContaining({ metadataJson: expect.stringContaining('网页 标题') }),
+    );
+  });
+
+  it('内容去重命中已有 Source 时不新写 sidecar，保留既有展示字段', async () => {
+    const { saveRawSource, getSourceMetadata } = await import('../source-store');
+    const subject = { id: 'sub1', slug: 'general' };
+    const first = saveRawSource(subject, 'web-a-1234.md', '# A\n\nbody', {
+      presentation: { title: '原标题', description: '原描述' },
+    });
+    sourceRepoMocks.getSourceByIdentity.mockReturnValue({
+      id: first.id,
+      subjectId: subject.id,
+      filename: 'web-a-1234.md',
+      contentHash: first.contentHash,
+      parsedAt: null,
+      metadataJson: JSON.stringify(getSourceMetadata(first.id)),
+    });
+
+    const second = saveRawSource(subject, 'web-a-1234.md', '# A\n\nbody', {
+      presentation: { title: '新标题', description: '新描述' },
+    });
+
+    expect(second).toMatchObject({ id: first.id, created: false });
+    expect(getSourceMetadata(first.id)).toMatchObject({ title: '原标题', description: '原描述' });
   });
 
   it('把 URL 清洗正文有界写入 sidecar，不扩大 SQLite metadata cache', async () => {

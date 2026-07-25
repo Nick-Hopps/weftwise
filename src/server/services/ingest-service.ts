@@ -5,10 +5,15 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import * as sourcesRepo from '../db/repos/sources-repo';
 import {
   updateSourceChunks,
-  updateUrlSourcePresentation,
+  updateSourcePresentation,
   updateUrlSourceReaderText,
   saveRawSource,
 } from '../sources/source-store';
+import {
+  firstMeaningfulParagraph,
+  normalizeSourcePresentation,
+  type SourcePresentation,
+} from '../sources/source-presentation';
 import { loadSourceForIngest } from '../sources/source-loader';
 import { deriveUrlFilename, UrlAuthenticationRequiredError } from '../sources/url-fetcher';
 import {
@@ -131,7 +136,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
     throw error;
   }
   if (loadedSource.kind === 'url') {
-    updateUrlSourcePresentation(sourceId, {
+    updateSourcePresentation(sourceId, {
       title: loadedSource.title,
       description: loadedSource.description,
     });
@@ -419,7 +424,8 @@ async function finalizeIngest(
       cites,
       subjectSlug: ctx.subject.slug,
       contentFor: (url) => extractedByUrl.get(url) ?? null,
-      saveSource: (filename, content) => saveRawSource(ctx.subject, filename, content),
+      saveSource: (filename, content, _url, presentation) =>
+        saveRawSource(ctx.subject, filename, content, { presentation }),
     });
     if (plan.links.length > 0) {
       webSources = { links: plan.links, extraStagePaths: plan.extraStagePaths };
@@ -443,13 +449,19 @@ export interface WebSourceImportPlan {
 /**
  * 把核查累积的网页引用源组装为导入计划（纯逻辑，IO 经回调注入便于测试）。
  * - contentFor(url): extract 正文或 null（null 则用 fallbackContent=snippet）。
- * - saveSource(filename, content, url): 落盘 source，返回 { id }；抛错则跳过该源。
+ * - saveSource(filename, content, url, presentation): 落盘 source，返回 { id }；抛错则跳过该源。
+ *   presentation 即左侧 Sources 列表展示用的网页标题与描述。
  */
 export function buildWebSourceImports(args: {
   cites: CitedSource[];
   subjectSlug: string;
   contentFor: (url: string) => string | null;
-  saveSource: (filename: string, content: string, url: string) => { id: string };
+  saveSource: (
+    filename: string,
+    content: string,
+    url: string,
+    presentation: SourcePresentation,
+  ) => { id: string };
 }): WebSourceImportPlan {
   const links: Array<{ sourceId: string; pageSlugs: string[] }> = [];
   const extraStagePaths: string[] = [];
@@ -458,8 +470,9 @@ export function buildWebSourceImports(args: {
     const filename = filenameFromUrl(c.url);
     const body = args.contentFor(c.url) ?? c.fallbackContent;
     const fileContent = `# ${c.title}\n\nSource: ${c.url}\n\n${body}`;
+    const presentation = deriveWebSourcePresentation(c, body);
     try {
-      const saved = args.saveSource(filename, fileContent, c.url);
+      const saved = args.saveSource(filename, fileContent, c.url, presentation);
       links.push({ sourceId: saved.id, pageSlugs: c.citedBy });
       extraStagePaths.push(
         `raw/${args.subjectSlug}/${filename}`,
@@ -472,3 +485,28 @@ export function buildWebSourceImports(args: {
   }
   return { links, extraStagePaths, filenames };
 }
+
+/**
+ * 网页引用源的展示元数据（纯函数）：
+ * - 标题取搜索结果标题，缺失回退 hostname（再缺失回退 URL 原文）；
+ * - 描述取搜索 snippet，缺失回退正文首个非空段落。
+ * 归一化与长度上限由 `normalizeSourcePresentation` 统一负责。
+ */
+export function deriveWebSourcePresentation(
+  cite: Pick<CitedSource, 'url' | 'title' | 'fallbackContent'>,
+  body: string,
+): SourcePresentation {
+  return normalizeSourcePresentation({
+    title: cite.title.trim() || hostnameForDisplay(cite.url),
+    description: cite.fallbackContent.trim() || firstMeaningfulParagraph(body),
+  });
+}
+
+function hostnameForDisplay(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '') || url;
+  } catch {
+    return url;
+  }
+}
+

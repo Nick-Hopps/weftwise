@@ -4,6 +4,7 @@ import { requireAuth } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { readPageSources } from '@/server/sources/source-reader';
 import { listSourcesForSubject } from '@/server/db/repos/sources-repo';
+import { readSourcePresentation } from '@/server/sources/source-presentation';
 import { readUrlSourceReference, urlSourceDisplayTitle } from '@/server/sources/url-source';
 
 export const runtime = 'nodejs';
@@ -36,12 +37,16 @@ export async function GET(request: NextRequest) {
   if (!slug) {
     const sources = listSourcesForSubject(resolution.subject.id).map((s) => {
       const urlReference = readUrlSourceReference(s);
+      // 展示字段与实体类型无关：worker 抓取的 URL Source 与采集自主检索导入的网页
+      // 快照都持久化了标题/描述；缺失时 URL Source 回退 hostname，其余回退 filename。
+      const presentation = readSourcePresentation(s);
+      const fallbackTitle = urlReference ? urlSourceDisplayTitle(urlReference) : s.filename;
       return {
         id: s.id,
         filename: s.filename,
         format: urlReference ? 'Web' : formatLabelFor(s.filename),
-        title: urlReference ? urlSourceDisplayTitle(urlReference) : s.filename,
-        ...(urlReference?.description ? { description: urlReference.description } : {}),
+        title: presentation.title ?? fallbackTitle,
+        ...(presentation.description ? { description: presentation.description } : {}),
       };
     });
     return NextResponse.json({ sources });

@@ -58,6 +58,33 @@ describe('GET /api/sources 侧栏列表', () => {
     });
   });
 
+  it('采集自主检索导入的网页源展示已持久化标题与描述', async () => {
+    mocks.listSources.mockReturnValue([{
+      id: 'web-1',
+      subjectId: 'sub-1',
+      filename: 'web-news.gmw.cn-content_36241753-9fe1f0aa.md',
+      contentHash: 'hash',
+      parsedAt: null,
+      metadataJson: JSON.stringify({
+        filename: 'web-news.gmw.cn-content_36241753-9fe1f0aa.md',
+        title: '从"国家"概念的出现到近代的全球史',
+        description: '这篇文章讨论了国家概念的起源。',
+      }),
+    }]);
+
+    const response = await GET(new NextRequest('http://localhost/api/sources'));
+
+    expect(await response.json()).toEqual({
+      sources: [{
+        id: 'web-1',
+        filename: 'web-news.gmw.cn-content_36241753-9fe1f0aa.md',
+        format: 'Markdown',
+        title: '从"国家"概念的出现到近代的全球史',
+        description: '这篇文章讨论了国家概念的起源。',
+      }],
+    });
+  });
+
   it('待抓取 URL 回退 hostname，普通文件继续回退 filename', async () => {
     mocks.listSources.mockReturnValue([
       {

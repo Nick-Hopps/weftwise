@@ -73,16 +73,31 @@ getRawSourceContent(sourceId): string | null
 getRawSourceBuffer(sourceId): Buffer | null
 updateSourcePageLinks(sourceId, pageSlugs)    // 写 page_sources 多对多
 updateSourceChunks(sourceId, chunks)          // chunk 持久化到 metadata sidecar
-updateUrlSourcePresentation(sourceId, metadata) // 网页标题/描述写回 sidecar + SQLite cache
+updateSourcePresentation(sourceId, presentation) // 网页标题/描述写回 sidecar + SQLite cache
 updateUrlSourceReaderText(sourceId, cleanText) // URL Source 有界 Markdown 阅读正文
 ```
+
+`saveRawSource` 的 `extra.presentation` 可在创建 canonical source 时直接写入展示元数据
+（Ingest 联网核查导入的网页快照走此路径）；命中内容去重时不覆盖既有展示字段。
+
+### `source-presentation.ts`
+
+```ts
+normalizeSourcePresentation(input): SourcePresentation   // 空白折叠 + 300/1000 字符上限
+readSourcePresentation(source): SourcePresentation       // 从 metadataJson 读，损坏返回空
+firstMeaningfulParagraph(markdown): string | undefined   // 跳过图片/纯链接/导航噪声的首段
+```
+
+展示元数据（`title` / `description`）与实体类型无关，是 sidebar Sources 列表的唯一数据源：
+链接型 URL Source 由 worker 抓取后写回，Ingest 自主检索导入的网页快照在 finalize 时写入。
+`url-source.ts` 的展示字段归一化复用本模块，不再自持一份实现。
 
 ### `url-source.ts` / `source-loader.ts`
 
 - `url-source.ts` 是 URL Source 身份与兼容读取的唯一入口；新 sidecar 写 `kind:'url' + originUrl`，历史仅有 `originUrl` 的 sidecar 仍按 URL Source 读取。
 - `source-loader.ts` 是 Ingest 内容加载边界：raw Source 读 vault 文件；URL Source 调 `fetchUrlSource()`，将响应只保留在 worker 内存中并交给 HTML parser 生成 `cleanText`。
 - URL Source 的 `cleanText` 除切块外还会以最多 120K 字符的 `readerText` 写入权威 sidecar，供 CSP/X-Frame-Options 拒绝 iframe 时的本地阅读模式使用；旧 sidecar 由 `source-reader.ts` 对 chunks overlap 做有界精确去重后回退重建，预览阶段不重新联网。
-- URL loader 同时返回真实网页标题与描述；Ingest handler 通过 `updateUrlSourcePresentation` 写回 sidecar 与 SQLite。左侧列表只读取已持久化字段，不因渲染列表额外联网。
+- URL loader 同时返回真实网页标题与描述；Ingest handler 通过 `updateSourcePresentation` 写回 sidecar 与 SQLite。左侧列表只读取已持久化字段，不因渲染列表额外联网。
 - URL 身份按规范化地址确定，不按抓取内容 hash；同一 Subject 重复提交同一地址复用 source。
 
 ### `url-safety.ts` / `url-fetcher.ts`
@@ -155,6 +170,7 @@ src/server/sources/
 ├── source-store.ts                  # 持久化 + 去重 + page_sources
 ├── source-loader.ts                 # worker 侧 raw/URL 内容加载边界
 ├── source-auth-grant.ts             # URL 登录态短期 AES-GCM grant
+├── source-presentation.ts           # 展示元数据（标题/描述）归一化、读取与首段提取
 ├── url-source.ts                    # URL 身份、规范化与 sidecar 兼容读取
 ├── url-safety.ts                    # URL/DNS/IP 公网判定与固定目标解析
 ├── url-fetcher.ts                   # 逐跳 SSRF 校验 + IP 固定 + 超时/5MB/content-type 守卫
@@ -169,6 +185,7 @@ src/server/sources/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | 展示元数据从 URL Source 泛化到全部 Source：新增 `source-presentation.ts`（归一化/读取/首段提取单一真实源），`saveRawSource` 支持创建时写入 `presentation`，`updateUrlSourcePresentation` 更名 `updateSourcePresentation`；Ingest 联网核查导入的网页快照因此在侧栏显示网页标题与描述，存量数据由 `npm run db:backfill-source-presentation` 回填。spec/plan 见 `docs/{specs,plans}/2026-07-26-web-citation-source-presentation.md` |
 | 2026-07-20 | Research URL child 接入同一短期加密 grant，但授权后必须经 provenance 事务恢复；API/service 失败删除新 grant，成功接管后 best-effort 清理旧 grant |
 | 2026-07-20 | URL Source 增加阅读正文持久化：worker 把有界 cleanText 写入 sidecar，`source-reader` 优先读取 readerText 并兼容从旧 chunks 去重重建；页面预览不重新抓取远程网页 |
 | 2026-07-21 | URL SSRF 守卫兼容 macOS resolver 对 Fake-IP 同时返回 IPv4 与 `::ffff:<IPv4>` / `::ffff:0:<IPv4>` 的结果；嵌入地址必须解码后仍落入 `198.18.0.0/15`，私网和未标记结果继续拒绝 |
