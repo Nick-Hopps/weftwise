@@ -33,10 +33,10 @@ describe('ingest-writer skill 契约（v6 讲解者）', () => {
   });
 });
 
-describe('ingest-enricher skill 契约（v6 学习脚手架 + 可信图片工具）', () => {
+describe('ingest-enricher skill 契约（v7 quiz 携带答案 + 可信图片工具）', () => {
   const src = readSkill('ingest-enricher');
-  it('版本抬到 6', () => {
-    expect(versionOf(src)).toBe(6);
+  it('版本抬到 7', () => {
+    expect(versionOf(src)).toBe(7);
   });
   it('移除 intuition / example 两类（已属 writer 正文）', () => {
     expect(src).not.toContain('[!intuition]');
