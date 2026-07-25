@@ -30,6 +30,35 @@ export function normalizeSourcePresentation(
   };
 }
 
+const MIN_PROSE_LENGTH = 30;
+const MIN_SENTENCE_LENGTH = 6;
+const SENTENCE_END = /[.。!！?？]\s*$/;
+
+/** 去掉 Markdown 语法只留可读文本，用于判断一段内容是正文还是导航噪声。 */
+function plainTextOf(paragraph: string): string {
+  return paragraph
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')       // 图片
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')     // 链接保留文字
+    .replace(/^\s*(#{1,6}|>|[-*+]|\d+\.)\s*/gm, '') // 标题/引用/列表标记
+    .replace(/[*_`~|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * 取网页正文 Markdown 中第一段“像正文”的段落，供缺省描述使用。
+ * 判据：去 Markdown 语法后足够长，或较短但有句末标点；纯图片/纯导航链接被跳过。
+ */
+export function firstMeaningfulParagraph(markdown: string): string | undefined {
+  for (const paragraph of markdown.split(/\n\s*\n/)) {
+    const text = plainTextOf(paragraph);
+    if (!text) continue;
+    if (text.length >= MIN_PROSE_LENGTH) return text;
+    if (text.length >= MIN_SENTENCE_LENGTH && SENTENCE_END.test(text)) return text;
+  }
+  return undefined;
+}
+
 /** 从 SQLite metadata cache 读取展示字段；损坏或非对象元数据一律返回空展示。 */
 export function readSourcePresentation(
   source: Pick<Source, 'metadataJson'>,

@@ -3,7 +3,10 @@
  *
  * Usage:
  *   npm run db:backfill-source-presentation
- *   npx tsx scripts/backfill-source-presentation.ts [--dry-run]
+ *   npx tsx scripts/backfill-source-presentation.ts [--dry-run] [--force]
+ *
+ *   --dry-run  只打印将要写入的标题，不落盘。
+ *   --force    连同已有标题的网页快照一并重新派生（描述规则调整后重跑用）。
  *
  * 背景：Ingest 的联网核查阶段会把被引用的网页导入为 `web-<host>-<hash>.md` 快照
  * Source。2026-07-26 之前这些 Source 没有持久化标题/描述，左侧 Sources 列表只能显示
@@ -16,7 +19,11 @@
 
 import { listSubjects } from '../src/server/db/repos/subjects-repo';
 import { listSourcesForSubject } from '../src/server/db/repos/sources-repo';
-import { readSourcePresentation, type SourcePresentation } from '../src/server/sources/source-presentation';
+import {
+  firstMeaningfulParagraph,
+  readSourcePresentation,
+  type SourcePresentation,
+} from '../src/server/sources/source-presentation';
 import { getRawSourceContent, updateSourcePresentation } from '../src/server/sources/source-store';
 
 const WEB_SNAPSHOT_FILENAME = /^web-.+\.md$/;
@@ -35,14 +42,10 @@ export function parseWebSnapshotPresentation(raw: string): SourcePresentation | 
   const url = lines[sourceLineIndex].trim().replace(/^Source:\s*/i, '');
 
   const body = lines.slice(sourceLineIndex + 1).join('\n');
-  const description = body
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .find((paragraph) => paragraph.length > 0);
 
   return {
     title: heading || hostnameForDisplay(url),
-    description: description || undefined,
+    description: firstMeaningfulParagraph(body),
   };
 }
 
@@ -56,6 +59,7 @@ function hostnameForDisplay(url: string): string {
 
 function main(): void {
   const dryRun = process.argv.includes('--dry-run');
+  const force = process.argv.includes('--force');
   let scanned = 0;
   let updated = 0;
 
@@ -63,7 +67,7 @@ function main(): void {
     for (const source of listSourcesForSubject(subject.id)) {
       if (!WEB_SNAPSHOT_FILENAME.test(source.filename)) continue;
       scanned += 1;
-      if (readSourcePresentation(source).title) continue;
+      if (!force && readSourcePresentation(source).title) continue;
 
       const raw = getRawSourceContent(subject.slug, source.filename);
       if (!raw) {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   SOURCE_DESCRIPTION_MAX_LENGTH,
   SOURCE_TITLE_MAX_LENGTH,
+  firstMeaningfulParagraph,
   normalizeSourcePresentation,
   readSourcePresentation,
 } from '../source-presentation';
@@ -31,6 +32,30 @@ describe('normalizeSourcePresentation', () => {
       title: undefined,
       description: undefined,
     });
+  });
+});
+
+describe('firstMeaningfulParagraph', () => {
+  it('跳过图片、纯链接与导航噪声，取到第一段正文', () => {
+    const markdown = [
+      '![](/static/images/icons/enwiki-25.svg)',
+      '',
+      '[Skip to content](#main)',
+      '',
+      'From Wikipedia, the free encyclopedia. 这是正文首段。',
+    ].join('\n');
+    expect(firstMeaningfulParagraph(markdown)).toBe(
+      'From Wikipedia, the free encyclopedia. 这是正文首段。',
+    );
+  });
+
+  it('短句只要有句末标点即可作为描述', () => {
+    expect(firstMeaningfulParagraph('# 标题\n\n第一段正文。\n\n第二段。')).toBe('第一段正文。');
+  });
+
+  it('全是噪声时返回 undefined', () => {
+    expect(firstMeaningfulParagraph('![](a.png)\n\n[Home](/)\n\n- 列表项')).toBeUndefined();
+    expect(firstMeaningfulParagraph('')).toBeUndefined();
   });
 });
 

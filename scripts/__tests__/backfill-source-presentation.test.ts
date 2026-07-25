@@ -20,10 +20,26 @@ describe('parseWebSnapshotPresentation', () => {
   });
 
   it('标题为空时回退 Source 行的 hostname', () => {
-    const raw = '# \n\nSource: https://www.worldhistory.org/1-18564/\n\n正文。';
+    const raw = '# \n\nSource: https://www.worldhistory.org/1-18564/\n\n这是一段正文。';
     expect(parseWebSnapshotPresentation(raw)).toEqual({
       title: 'worldhistory.org',
-      description: '正文。',
+      description: '这是一段正文。',
+    });
+  });
+
+  it('正文首段是导航噪声时只回填标题', () => {
+    const raw = [
+      '# Cauchy–Schwarz inequality - Wikipedia',
+      '',
+      'Source: https://en.wikipedia.org/wiki/x',
+      '',
+      '![](/static/images/icons/enwiki-25.svg)',
+      '',
+      '[Skip to content](#main)',
+    ].join('\n');
+    expect(parseWebSnapshotPresentation(raw)).toEqual({
+      title: 'Cauchy–Schwarz inequality - Wikipedia',
+      description: undefined,
     });
   });
 

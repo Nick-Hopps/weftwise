@@ -10,6 +10,7 @@ import {
   saveRawSource,
 } from '../sources/source-store';
 import {
+  firstMeaningfulParagraph,
   normalizeSourcePresentation,
   type SourcePresentation,
 } from '../sources/source-presentation';
@@ -497,7 +498,7 @@ export function deriveWebSourcePresentation(
 ): SourcePresentation {
   return normalizeSourcePresentation({
     title: cite.title.trim() || hostnameForDisplay(cite.url),
-    description: cite.fallbackContent.trim() || firstParagraph(body),
+    description: cite.fallbackContent.trim() || firstMeaningfulParagraph(body),
   });
 }
 
@@ -509,9 +510,3 @@ function hostnameForDisplay(url: string): string {
   }
 }
 
-function firstParagraph(body: string): string {
-  return body
-    .split(/\n\s*\n/)
-    .map((p) => p.trim())
-    .find((p) => p.length > 0) ?? '';
-}
