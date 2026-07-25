@@ -55,7 +55,10 @@
 ## 任务 4：证据的页面生命周期闭合
 
 - `src/server/services/page-write.ts::deletePageInSubject`：删页时 `deleteByPage`。
-- `src/server/wiki/page-identity-migration.ts`：move/rename 时 `movePage`。
+- `src/server/wiki/page-identity-migration.ts::migratePageIdentityCaches`：按既有六项
+  （`page_sources` / `page_embeddings` / `page_maturity` / `page_renditions` /
+  `page_rendition_assets` / `profile_signals`）同一 `INSERT…SELECT + DELETE` 模式
+  加 `page_evidence` 块。
 - `src/server/db/repos/subjects-repo.ts::deleteWithContents`、
   `src/app/api/reset/route.ts`：清理清单补 `page_evidence`。
 - 测试：新增/扩展集成用例——删页后重建同名 slug 得到零证据（**不复活**）；
@@ -67,15 +70,17 @@
 先把全部用例写成失败测试，再实现。
 
 - 新增 `src/server/profile/mastery.ts`：`MasteryState` / `MasteryConfidence` /
-  `EvidenceRow` / `MasteryVerdict`、`deriveMastery(evidence, now)`、
-  `masteryWindowDays(consecutivePositives)`、`NEGATIVE_WINDOW_DAYS`、`MAX_RECENT_EVIDENCE`。
+  `EvidenceRow` / `MasteryVerdict`（含 `expiresAt`）、`deriveMastery(evidence, now)`、
+  `masteryWindowDays(n): { dueDays, expiryDays }`、`NEGATIVE_WINDOW_DAYS`、
+  `MAX_RECENT_EVIDENCE`。
 - 新增 `src/server/profile/__tests__/mastery.test.ts`：
   - 空输入 → `unknown` / `none`
   - 五条优先级（spec 决策 3）各自命中，且顺序正确
   - 负证据压过正证据（quiz 答对过但近期有 `selection-ask` → `struggling`）
-  - `mastered` 过期回落 **`exposed`** 而非 `unknown`
-  - 连续答对延长有效期（`SPACING_LADDER` 阶梯 + 上限钳制）
-  - 一次负证据清零连击计数
+  - `mastered` 过期回落 **`exposed`** 而非 `unknown`；`expiresAt` 仅 `mastered` 时非空
+  - **决策 4 两级语义逐档断言**：1→{1,4} / 2→{3,10} / 3→{7,28} / 4→{21,81} / ≥5→{60,120}；
+    **`expiryDays` 恒 > `dueDays`**（防退化回「到期即失效」——原设计的阻断级缺陷）
+  - **页级连击**：同页不同 quiz 的正证据累加（不要求同一道题）；一次负证据清零
   - 弱负证据单独出现 → `exposed`，**不判 `struggling`**（已定决策 4）
   - 无答案自评的 `quiz-correct`（weak）不足以单独判 `mastered`
   - `recent` 按时间倒序且截断稳定
@@ -116,7 +121,10 @@
 ## 任务 8：`POST /api/evidence` + quiz 判分接线
 
 - 新增 `src/app/api/evidence/route.ts`：`requireAuth` + `requireCsrf` +
-  `resolveSubjectFromRequest(required)`；body `{ slug, kind, anchor?, detail? }`。
+  `resolveSubjectFromRequest(required)`；body `{ slug, kind, anchor?, detail? }`；
+  **写前 `getPageBySlug` 校验 slug 在该 subject 内存在，不存在 404 不落行**
+  （否则陈旧客户端会持续累积指向幽灵页的证据，生命周期闭合兜不住）。
+  `detail_json` 承载 `viewedSource` / `profileVersion` 等归因字段。
 - `quiz-block.tsx`：揭晓后渲染「我答对了 / 我答错了」；按 spec 决策 5 的不对称落 strength
   （有答案判分 → strong；无答案自评答对 → weak、答错 → strong）。失败只 `console.error`。
 - 新增 `src/app/api/evidence/__tests__/route.test.ts`：鉴权/CSRF/subject 必填；
@@ -147,6 +155,7 @@
 
 - 新增 `src/app/api/mastery/route.ts`：无 `slug` 返回当前 subject 全量
   `slug → MasteryVerdict`；带 `slug` 返回单页（含 `recent`）。
+  **排除 meta 页，与 `/api/graph` 的 `isMetaPage` 同口径**。
 - `src/server/services/apply-signal.ts`：**并存**——继续写 `profile_signals`，
   同时把 style-bearing 信号写一份 `page_evidence`。此时 reducer 仍读旧表，行为不变。
 - 测试：mastery 路由的空库（返回 `{}`）与有证据两种情况；双写后两表 style-bearing
@@ -173,9 +182,13 @@
 
 - 删 `src/server/db/repos/signals-repo.ts`、`schema.ts` 的 `profileSignals`、
   `client.ts::migrateProfileSignals`、`src/app/api/profile/signals/route.ts`。
+- **`page-identity-migration.ts:85` 的 `profile_signals.slug` 迁移块必须同步删除**——
+  表已 DROP 而迁移仍在 `UPDATE profile_signals`，move 页面会直接 SQL 报错。
+  这是全 plan 最容易漏的一处：它不在任何 signals 相关目录下。
 - `drizzle/0014_*.sql`：`DROP TABLE profile_signals`。
-- 全仓 grep 确认零残留引用。
-- 验证：`npm test`（全量，确认无遗漏调用点）
+- 全仓 grep `profile_signals` 确认零残留引用。
+- 验证：`npm test`（全量）+ **`npx vitest run src/server/wiki/__tests__/page-move-integration.test.ts`**
+  （专门覆盖上一条，确认删表后 move 仍成功）
 
 ## 任务 14：文档同步
 

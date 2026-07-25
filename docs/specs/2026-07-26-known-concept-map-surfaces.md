@@ -79,7 +79,16 @@ spec ① 建立了 `(user, subject, slug)` 粒度的掌握度事实，但事实�
   「展开解释」变为「直接引用」。
 - 图层能一眼看出四态分布；点任一非 `unknown` 节点能看到支撑它的原始证据条目与时间。
 - 关掉图层（结构模式）后，graph 行为与改动前完全一致。
-- 重塑版里被判为已掌握的 `[[X]]` 都带纠错入口；点击后下一次重塑该概念重新展开。
+- 重塑版里被判为已掌握的 `[[X]]` 都带纠错入口，**且刷新页面后仍在**（E4）；
+  点击后状态行出现 `Update available`（E5），Refresh 后该概念重新展开。
+
+> **「更好」不设客观标准。** 这套系统的前提就是因人而异——不存在跨读者成立的「更好」，
+> 判据只能是 vault 主人的主观感受，N=1、无法 A/B。本 spec 不伪造指标。
+>
+> 其必然推论是 spec ① 已写明的**可逆性优先**，在本 spec 里对应三条硬约束：
+> 「看原文」即时可切（不得退化）、每个被跳过的概念都有纠错入口（E2 的 `[[slug]]` 纪律 +
+> E3）、纠错后立刻可见（E5 的 stale）。**判断权归人，系统只负责让错误代价足够低、
+> 纠正足够快**——这三条任一缺失，本 spec 就不该上线。
 
 ---
 
@@ -100,7 +109,10 @@ join 证据算四态。
 
 ```
 === READER'S KNOWN CONCEPTS (this subject) ===
-Already solid — reference by name, do NOT re-explain:
+When you mention any concept listed below, write it as a [[slug]] wikilink
+using EXACTLY the slug shown — that link is the reader's correction handle.
+
+Already solid — reference as [[slug]], do NOT re-explain:
   [[gradient-descent]] Gradient Descent
 Seen before — a one-line recap is enough:
   [[chain-rule]] The Chain Rule
@@ -108,6 +120,14 @@ Known trouble spot — explain carefully and try a different angle:
   [[backprop]] Backpropagation
 Anything not listed here: assume unfamiliar and explain it normally.
 ```
+
+**开头那句 wikilink 纪律不是可选的。** `RESHAPE_PAGE_SYSTEM_PROMPT` 通篇没提 wikilink，
+而 2026-07-17 那次改动**明确把 reshape 从保真护栏里移除了**（见 `services/CLAUDE.md`），
+模型可以自由增删链接。若不显式要求 `[[slug]]` 语法，模型很可能写成纯文本
+「如你已知的梯度下降」——而 **E3 的纠错入口挂在 wikilink 上，没有 wikilink 就没有入口**，
+唯一的翻案通道断掉。
+
+这条纪律只约束「提到清单内概念时的写法」，不恢复任何保真护栏，也不限制模型增删其他链接。
 
 映射：`mastered` → 第一段，`exposed` → 第二段，`struggling` → 第三段，
 `unknown` → **不出现**。
@@ -141,6 +161,51 @@ interactive?: {
 `markdown-client.ts` 的 `a` 覆盖（现有 `WikiLinkAnchorRenderer`）在 slug ∈ `assumedKnown`
 时额外渲染入口。**只在重塑视图传 `assumedKnown`**：canonical 没有「跳过解释」这回事，
 传了就是误导。
+
+接缝沿用 spec ① 决策 9 的授权方向：`interactive` 由 `wiki-reading-view` 显式构造并传入，
+`PageRenderer` 只透传、不就地构造——否则 `EditorPreview` 会连带获得纠错入口。
+
+### E4：地图随重塑产物一起持久化
+
+`assumedKnown` 在 **POST**（生成重塑）时算出，但 `use-lens.ts` 挂载时走的是 **GET**
+（`loadSavedLens`）——而 `page_renditions` 现有列是
+`subjectId/slug/canonicalHash/profileVersion/renderedMd/model/updatedAt`，没地方存。
+不处理的话：生成当次有纠错入口，**刷新或重访就全没了**，而重访恰恰是最常见路径。
+
+**不能在 GET 时重算**——证据可能已经变了，重算出的清单和当初真正告诉模型的那份对不上，
+纠错入口会挂到模型其实展开讲过的概念上。
+
+`page_renditions` 新增一列：
+
+```
+known_concepts_json TEXT   -- 生成该 rendition 时注入的 KnownConcepts 对象（可空=旧行/无地图）
+```
+
+一列同时解决两件事：
+
+- **`assumedKnown`** 从它的 `mastered` 段派生，GET / POST 同源
+- **stale 判定**（下一条）拿它与当前地图比对
+
+### E5：rendition 的 stale 判定必须感知地图变化
+
+现状：
+
+```ts
+stale: saved.canonicalHash !== current || saved.profileVersion !== current
+```
+
+掌握度变化**不会**改 `profileVersion`——那个只在 `style_prefs` 变时自增。于是答对一道
+quiz、或点了「这个我其实不懂」之后，旧重塑版照旧显示、不提示 `Update available`，
+E3 的纠错闭环在 UI 上无从触发（用户得自己想到去按 Refresh）。
+
+GET 时补算当前 `KnownConcepts` 与 `known_concepts_json` 比对，不同即 stale。
+
+**成本可接受**：`evidence-repo.listForSubject` 是**一次**索引扫描 + 内存分组，
+之后逐 slug 跑纯函数。因此 `buildKnownConceptsForPage` 要接受一个可选的预取证据 map，
+让 GET / POST 两条路径都只查一次；不要退化成邻域内逐页 `listForPage` 的 N 次查询。
+
+`known_concepts_json` 为 null 的旧行（本功能上线前生成的 rendition）不参与地图比对，
+只按既有两项判 stale——避免存量重塑版一上线全部变 stale。
 
 ---
 
@@ -253,28 +318,43 @@ tap 选中并在面板显示证据，面板内提供「打开页面」链接。
 
 ## 七、数据流
 
-### 7.1 重塑注入（E）
+### 7.1 生成重塑（E，POST）
 
 ```
 POST /api/lens/[...slug]
   → 既有：resolveSubject / 读 canonical body / getProfileOrDefault
-  → 新增：buildKnownConceptsForPage({ userId, subject, body })
-       → selectNeighborhood(body, subject.slug)        纯函数，extractWikiLinks
-       → 批量 getPageBySlug 补 title（缺页跳过）
-       → 批量 evidenceRepo.listForPage → deriveMastery  逐 slug
-       → 按四态分组，low-confidence mastered 降级进 exposed 段
+  → evidenceRepo.listForSubject(userId, subjectId)         一次查询，供下一步复用
+  → buildKnownConceptsForPage({ userId, subject, selfSlug, body, evidenceBySlug })
+       → selectNeighborhood(body, { currentSubjectSlug, selfSlug, titleResolver })
+       → getPageBySlug 补 title（缺页跳过）
+       → 逐 slug deriveMastery → 四态分组，low-confidence mastered 降级进 exposed
   → reshapePageBody({ …, knownConcepts })
        → buildReshapePageUserPrompt 追加 KNOWN CONCEPTS 段（三段全空则整段不注入）
-  → 响应体新增 assumedKnown: string[]（= mastered 段的 slug，供 E3 渲染纠错入口）
+  → replaceRendition({ …, knownConceptsJson })              E4：随产物一起持久化
+  → 响应 assumedKnown = 存储清单的 mastered 段 slug
 ```
 
-### 7.2 纠错回流（E3）
+### 7.2 读取已保存重塑（E，GET —— 最常见路径）
+
+```
+GET /api/lens/[...slug]
+  → getLatestRendition → 无则回落 canonical（同今天）
+  → assumedKnown 从 known_concepts_json 派生     ★ 不重算：必须是当初告诉模型的那份
+  → 补算当前 KnownConcepts（复用同一次 listForSubject）
+  → stale = canonicalHash 变 || profileVersion 变 || 地图变
+            （known_concepts_json 为 null 的旧行不参与地图比对）
+```
+
+### 7.3 纠错回流（E3）
 
 ```
 读者在重塑版里点某个 [[X]] 的「这个我其实不懂」
   → POST /api/evidence { slug: X, kind: 'self-report-hard' }   （spec ① 已有路由）
-  → 下次重塑：X 进 struggling 段，重新展开解释
+  → 该页地图随即变化 → 下次 GET 即 stale:true，状态行显示 Update available
+  → 用户点 Refresh 重塑：X 进 struggling 段，重新展开解释
 ```
+
+E5 的 stale 判定是这条闭环在 UI 上唯一的触发点——没有它，纠错点完了页面毫无反应。
 
 ### 7.3 图层（F）
 
@@ -294,8 +374,16 @@ POST /api/lens/[...slug]
 ### 新增纯函数 `src/server/profile/concept-map.ts`
 
 ```ts
-/** 从正文抽本 subject 内的 1 跳 wikilink 目标（去重、排除自身与 meta 页）。 */
-export function selectNeighborhood(body: string, currentSubjectSlug: string, selfSlug: string): string[];
+/**
+ * 从正文抽本 subject 内的 1 跳 wikilink 目标（去重、排除自身与 meta 页）。
+ * titleResolver 必传：正文里的 `[[某某标题]]` 若没有 resolver，`extractWikiLinks`
+ * 只能回落 `normalizeSlug(title)`，未必等于真实 slug——邻域会静默漏掉概念且不报错。
+ * 由 IO 层用 `pages-repo::getTitleToSlugMap(subjectId)` 供给。
+ */
+export function selectNeighborhood(
+  body: string,
+  opts: { currentSubjectSlug: string; selfSlug: string; titleResolver: TitleResolver },
+): string[];
 
 export interface KnownConcept { slug: string; title: string; state: MasteryState }
 export interface KnownConcepts { mastered: KnownConcept[]; exposed: KnownConcept[]; struggling: KnownConcept[] }
@@ -311,19 +399,30 @@ export function groupByMastery(entries: Array<{ slug; title; verdict: MasteryVer
 
 ### 新增 IO 层 `src/server/profile/concept-map-io.ts`
 
-`buildKnownConceptsForPage({ userId, subject, selfSlug, body }): KnownConcepts`
-—— 组合上面三者 + `getPageBySlug` + `evidenceRepo.listForPage` + `deriveMastery`。
+```ts
+buildKnownConceptsForPage(opts: {
+  userId; subject; selfSlug; body;
+  /** 可选预取：GET/POST 共用一次 listForSubject，避免邻域内 N 次 listForPage（E5）。 */
+  evidenceBySlug?: Map<string, EvidenceRow[]>;
+}): KnownConcepts
+```
+
+组合三个纯函数 + `getTitleToSlugMap`（供 resolver）+ `getPageBySlug`（补 title，
+页面已删则跳过）+ `evidenceRepo` + `deriveMastery`。
 
 ### 改动
 
 | 位置 | 改动 |
 |---|---|
-| `llm/prompts/reshape-prompt.ts` | `buildReshapePageUserPrompt` 增可选 `knownConcepts`；system prompt 补一句「按 KNOWN CONCEPTS 段调整展开深度」 |
+| `db/schema.ts` + `db/client.ts` + `drizzle/00xx_*.sql` | `page_renditions` 加 `known_concepts_json TEXT`（可空，E4） |
+| `db/repos/renditions-repo.ts` | `replaceRendition` / `getLatestRendition` 读写新列 |
+| `llm/prompts/reshape-prompt.ts` | `buildReshapePageUserPrompt` 增可选 `knownConcepts`；system prompt 补「按 KNOWN CONCEPTS 段调整展开深度」+ **`[[slug]]` 书写纪律** |
 | `services/reshape-service.ts` | `reshapePageBody` 入参增 `knownConcepts?` 并透传 |
-| `api/lens/[...slug]/route.ts` | POST 前算 `knownConcepts`；响应加 `assumedKnown` |
+| `api/lens/[...slug]/route.ts` | POST 算地图并随 rendition 持久化；**GET 补算并与存储比对判 stale**（E5）；两条路径共用一次 `listForSubject` |
 | `lib/contracts.ts` | `LensResult` 加 `assumedKnown?: string[]` |
 | `hooks/use-lens.ts` | 透传 `assumedKnown` |
-| `components/wiki/wiki-reading-view.tsx` | 仅 `usingReshaped` 时把 `assumedKnown` 传进 `interactive` |
+| `components/wiki/wiki-reading-view.tsx` | **唯一**构造 `interactive` 的调用方；仅 `usingReshaped` 时带 `assumedKnown` |
+| `components/wiki/page-renderer.tsx` | `interactive?` 透传 prop，自身不构造（spec ① 决策 9） |
 | `lib/markdown-client.ts` | `interactive` 加 `assumedKnown?`；`a` 覆盖据此挂纠错入口 |
 | `components/wiki/wiki-link.tsx` | 新增纠错 affordance（沿用 quiz 的 best-effort 发送语义） |
 | `components/graph/graph-stylesheet.ts` | `buildStylesheet(theme, mode)`；掌握度选择器族 |
@@ -341,6 +440,9 @@ export function groupByMastery(entries: Array<{ slug; title; verdict: MasteryVer
 | `buildKnownConceptsForPage` 抛错 | 捕获，按「无地图」继续重塑——**不阻断**（重塑本身比地图重要） |
 | 邻域内页面已删 | `getPageBySlug` 返回 null 时跳过该 slug，不进任何段 |
 | 三段全空 | 整段不注入，prompt 与今天逐字节相同 |
+| GET 时地图补算失败（E5） | 退回既有两项判 stale，不因此报错或隐藏已保存重塑版 |
+| `known_concepts_json` 为 null（本功能上线前的旧 rendition） | 不参与地图比对、无 `assumedKnown`；避免存量重塑版一上线全部变 stale |
+| 模型没按纪律写 `[[slug]]`（E2） | 该概念就没有纠错入口——**已知降级**。用户仍可用「看原文」兜底，且下次重塑有机会写对 |
 | `GET /api/mastery` 失败 | 图层保持结构模式并提示一次，不影响既有 graph |
 | 证据面板取数失败 | 面板显示错误行，图本身不受影响 |
 | 纠错入口发送失败 | `console.error`，UI 保持乐观态（与 quiz 同语义） |
@@ -350,15 +452,21 @@ export function groupByMastery(entries: Array<{ slug; title; verdict: MasteryVer
 ## 十、测试策略
 
 1. **`selectNeighborhood`**：去重；排除自身与 meta 页；跨 subject 目标不计；
-   无 wikilink 返回空；别名/标题写法经 `extractWikiLinks` 正确归一。
+   无 wikilink 返回空；**`[[某某标题]]` 经 titleResolver 解析到真实 slug**，
+   无 resolver 时的错误行为有回归断言（防再次退化）。
 2. **`groupByMastery`**：四态映射；`unknown` 不出现；**low-confidence `mastered` 降级进
    `exposed`**；空输入。
-3. **`renderKnownConcepts`**：三段渲染；部分段为空时不渲染空标题；**三段全空返回 null**。
+3. **`renderKnownConcepts`**：三段渲染；部分段为空时不渲染空标题；**三段全空返回 null**；
+   **含 `[[slug]]` 书写纪律那句**（E2，缺了 E3 就没锚点）。
 4. **prompt 快照**：有地图时含三段与兜底句；**无地图时与改动前逐字节相同**（零回归断言）。
 5. **lens 路由**：`assumedKnown` 只含 mastered 段；`buildKnownConceptsForPage` 抛错时
    重塑仍成功。
-6. **E3 挂载隔离**：canonical 视图不传 `assumedKnown` → 无纠错入口；重塑视图才有；
-   不在 `assumedKnown` 里的 wikilink 无入口。
+6. **E4 持久化**：POST 落 `known_concepts_json`；**GET 从存储派生 `assumedKnown`
+   而非重算**（构造「存储清单 ≠ 当前地图」的场景断言取的是存储那份）。
+7. **E5 stale**：证据变化后 GET 返回 `stale:true`；`known_concepts_json` 为 null 的
+   旧行不因地图比对变 stale；地图未变时不误报 stale。
+8. **E3 挂载隔离**：canonical 视图不传 `assumedKnown` → 无纠错入口；重塑视图才有；
+   不在 `assumedKnown` 里的 wikilink 无入口；`EditorPreview` 路径无入口。
 7. **`graph-stylesheet`**：`mode='structure'` 产出与改动前完全一致（零回归）；
    `mode='mastery'` 下 orphan 填充让位、focus 层级降级为描边、struggling 走 danger 描边。
 8. **图层不重建**：切换模式后 `cy` 实例同一、元素数不变、节点位置不变。

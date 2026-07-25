@@ -89,11 +89,26 @@ formality）+ 一段自述文本。这描述的是**怎么讲**，不是**他懂
 
 **成功标准**
 
-- 在一个真实 subject 上使用一周后，能产出非空的四态分布；人工复核 `struggling` 项，
-  确实对应用户卡过的页面。
+- 在一个真实 subject 上使用一周后，能产出非空的四态分布，**且 `mastered` 非空**
+  （决策 4 的有效期若定得过短，这一条会直接失败——它是那条公式的验收闸门）。
+- 人工复核 `struggling` 项，确实对应用户卡过的页面。
 - 任一非 `unknown` 判定都能在 UI 上展开看到支撑它的原始证据条目与时间戳。
 - 删页 / 改名 / 删 subject 后，`page_evidence` 无残留、无错误关联；重建同名 slug 从零开始。
 - `signal-reducer` 的棘轮与无衰减行为消失：同向连点不再每次降档，历史信号按时间衰减。
+
+**关于「重塑是否变得更好」——不设客观标准**
+
+这套系统的前提就是**因人而异**：不存在一个跨读者成立的「更好」，判据只能是 vault 主人的
+主观感受，且 N=1、无法 A/B。本 spec 不伪造可测量指标。
+
+但它有一个必须落实的推论——**正确性不可测量时，可逆性必须是一等公民**。
+这不是安慰性表述，而是三条硬性设计约束：
+
+1. 「看原文」永远即时可切（canonical 本地即得，已是现状，不得退化）。
+2. 每个由地图导致的「跳过解释」都必须有当场翻案的入口（spec ② 的 E3）。
+3. 翻案必须立刻生效——负证据压过正证据（决策 3 第 2 条），下一次重塑即改变。
+
+判断权归人，系统只负责**让错误的代价足够低、纠正足够快**。
 
 ---
 
@@ -189,23 +204,42 @@ struggling  有近期负证据 —— 「试过并卡住了」，不是「更不
 
 第 5 条是刻意的：弱负证据信噪比不足以判 `struggling`，但足以证明「他接触过这一页」。
 
-### 决策 4：`mastered` 有效期复用间隔重复阶梯
+### 决策 4：`mastered` 有效期 = 复习到期 **再逾期一档**才降级
 
 `SPACING_LADDER = [1, 3, 7, 21, 60]`（`maintenance-policy.ts:18`）这套装置库里已经有了，
-只是**接错了对象**——它在给「内容」排增益计划。同一套节律指向 `(user, page)` 就是
-一个现成的记忆模型：
+只是**接错了对象**——它在给「内容」排增益计划。同一套节律指向 `(user, page)` 就是一个现成
+的记忆模型。
+
+**但阶梯本身不是有效期。** 阶梯说的是「什么时候该复习」，不是「知识什么时候失效」——
+到期该复习 ≠ 到期就当作不会了。若直接拿间隔当有效期，答对一次只维持 **1 天**，
+而系统里没有任何机制提示用户回去重答，`mastered` 会几乎恒为空、E 的注入等于没做。
+
+正确的两级语义：
 
 ```
-masteredUntil = lastPositiveAt + SPACING_LADDER[min(consecutivePositives - 1, 4)] 天
+i        = min(consecutivePositives - 1, LADDER.length - 1)
+dueAt    = lastPositiveAt + LADDER[i]                          // 该复习了
+expiresAt= dueAt + LADDER[min(i + 1, LADDER.length - 1)]       // 逾期超过下一档才降级
 ```
 
-连续答对越多，有效期越长；过期回落 `exposed`（而非 `unknown`——他确实接触过）。
+| 连续正证据 | 该复习 | 失效 |
+|---|---|---|
+| 1 | +1 天 | +4 天 |
+| 2 | +3 天 | +10 天 |
+| 3 | +7 天 | +28 天 |
+| 4 | +21 天 | +81 天 |
+| ≥5 | +60 天 | +120 天 |
 
-一次负证据清零 `consecutivePositives`。
+过期回落 `exposed`（而非 `unknown`——他确实接触过）。
+
+**`consecutivePositives` 是页级，不是题级。** 同一页上任意正证据（不同的 quiz、
+`self-report-easy`）都累加连击；一次负证据清零。理由有二：掌握度本来就是 per-page 的；
+且题级连击要求用户回去重答同一道题——没有任何机制促成，实际不可达。
+页级下，一页有 3 道 quiz 各答对一次即可到达 `+28 天`，这才是现实可达的。
 
 > 实现上抽 `masteryWindowDays(consecutivePositives)` 到 `profile/mastery.ts`，
-> 与 `maintenance-policy` 共用常量但**不共用函数**——两者的语义在未来可能分化，
-> 现在耦合会让任一侧的调整误伤另一侧。
+> 与 `maintenance-policy` 共用常量但**不共用函数**——两者的语义已经分化
+> （一个是复习排期，一个是有效期），耦合会让任一侧的调整误伤另一侧。
 
 ### 决策 5：enricher 升 v7 产出答案，前端兼容有 / 无答案两种形态
 
@@ -300,8 +334,16 @@ hash 由 `createRemarkQuiz()`（决策 6）计算。该插件运行在客户端�
 | 事件 | 处理 | 挂载点 |
 |---|---|---|
 | 删页 | 删除该页全部证据 | `page-write.ts::deletePageInSubject` |
-| move / rename slug | 证据迁移到新 slug | `wiki/page-identity-migration.ts`（已在迁移其他 slug 派生数据） |
+| move / rename slug | 证据迁移到新 slug | `page-identity-migration.ts::migratePageIdentityCaches` |
 | 删 subject / reset | 级联清理 | `subject_id` FK CASCADE + `subjects-repo::deleteWithContents` 清单 |
+
+`migratePageIdentityCaches` 已经在迁移 `page_sources` / `page_embeddings` /
+`page_maturity` / `page_renditions` / `page_rendition_assets` / **`profile_signals`**
+六项 slug-keyed 派生数据，`page_evidence` 按同一 `INSERT…SELECT + DELETE` 模式加入即可。
+
+> **退役 `profile_signals` 时必须同步删掉该文件里的 `profile_signals.slug` 迁移块**
+> （`page-identity-migration.ts:85`），否则表已 DROP 而迁移仍在 UPDATE，
+> move 页面会直接 SQL 报错。
 
 ### 决策 9：正文交互块走统一接缝，不在 callout 渲染器里特判
 
@@ -335,6 +377,12 @@ renderMarkdown(content, titleSlugMap, {
   展开开关——零网络、零证据。
 - **传 `interactive`**（只有 Wiki 阅读页）：`<QuizBlock>` 在揭晓后额外渲染判分按钮，
   用上下文里的 `pageSlug` / `subjectSlug` 发证据。
+
+> **`interactive` 必须是 `PageRenderer` 的显式 prop，由 `wiki-reading-view` 传入；
+> `PageRenderer` 不得用自己的 `slug` / `subjectSlug` 属性就地构造。**
+> 因为 `editor-preview.tsx` 就是 `<PageRenderer content slug titleSlugMap />`——
+> 只要 PageRenderer 自行构造，编辑器预览立刻获得判分按钮，与上表第三行直接矛盾。
+> 能力必须由**最外层知道语境的调用方**显式授予，不能由中间层推断。
 
 **答案折叠在六处都生效**：「不剧透」是内容呈现决定，不是某个页面的 UI 状态。
 只有**发证据**这一能力是阅读页独占的。
@@ -372,6 +420,10 @@ INDEX page_evidence_scope_idx ON (user_id, subject_id, created_at)
 
 `polarity` / `strength` 由 `kind` 确定性派生并冗余落列——让「新增 kind」不必回填历史行，
 也让 repo 层聚合查询不依赖应用层映射表。
+
+**`detail_json` 承载 A2 要求的归因字段**：`viewedSource`（`canonical` / `reshape`）、
+`profileVersion`、以及重塑相关证据的 rendition 标识。它们不单独立列——只用于事后审计与
+排查，不参与任何查询或派生，塞进 JSON 是正确的粒度。
 
 ### 证据类型
 
@@ -422,12 +474,15 @@ export interface MasteryVerdict {
   confidence: MasteryConfidence;
   evidenceCount: number;
   lastEvidenceAt: string | null;
+  /** 仅 state==='mastered' 时非空；供审计面解释「何时会降级」（决策 4） */
+  expiresAt: string | null;
   /** 供审计面展示，按时间倒序有界截断 */
   recent: EvidenceRow[];
 }
 
 export function deriveMastery(evidence: EvidenceRow[], now: Date): MasteryVerdict;
-export function masteryWindowDays(consecutivePositives: number): number;
+/** 决策 4 的两级语义，返回 { dueDays, expiryDays }。 */
+export function masteryWindowDays(consecutivePositives: number): { dueDays: number; expiryDays: number };
 export const NEGATIVE_WINDOW_DAYS: number;   // 强负证据的有效窗口
 export const MAX_RECENT_EVIDENCE: number;    // recent 截断上限
 ```
@@ -460,9 +515,13 @@ movePage(subjectId, fromSlug, toSlug): void                    // rename
 
 | 路由 | 方法 | 说明 |
 |---|---|---|
-| `/api/evidence` | POST | 追加一条证据；`requireAuth` + `requireCsrf` + `resolveSubjectFromRequest` |
-| `/api/mastery` | GET | 无 `slug` 返回当前 subject 全量 `slug → MasteryVerdict`；带 `slug` 返回单页含 `recent` |
+| `/api/evidence` | POST | 追加一条证据；`requireAuth` + `requireCsrf` + `resolveSubjectFromRequest`；**写前校验 `slug` 在该 subject 内存在**（`getPageBySlug`），不存在 404 |
+| `/api/mastery` | GET | 无 `slug` 返回当前 subject 全量 `slug → MasteryVerdict`；带 `slug` 返回单页含 `recent`。**与 `/api/graph` 同口径排除 meta 页**（`isMetaPage`），避免图层拿到无对应节点的 slug |
 | `/api/profile/signals` | POST | 并存期双写，切换后删除 |
+
+> `/api/evidence` 的存在性校验不是洁癖：没有它，前端一个陈旧的 slug（页面刚被删/改名，
+> 客户端缓存未刷新）就会持续累积指向幽灵页的证据，而决策 8 的生命周期闭合**只清理已存在
+> 过的页**，兜不住这种从未存在过的 slug。
 
 ### 前端
 
@@ -470,7 +529,8 @@ movePage(subjectId, fromSlug, toSlug): void                    // rename
   （决策 9）；`div` 覆盖按 `data-quiz-id` 挂 `<QuizBlock>` 并透传 interactive 上下文。
 - `src/components/wiki/quiz-block.tsx`（新）：问题 + 答案折叠开关 +（仅 interactive 时）
   判分按钮；兼容有 / 无答案两种形态。
-- `page-renderer.tsx`：**唯一**传入 `interactive` 的调用方。
+- `page-renderer.tsx`：新增 `interactive?` **透传 prop**（自身不构造，见决策 9 的警示）。
+- `wiki-reading-view.tsx`：**唯一**构造并传入 `interactive` 的调用方。
 - `lens-feedback.tsx`：改为只在查看重塑版时渲染（修 A1），发送时带 `viewedSource`。
 - 阅读完成埋点（D5）：复用现有 `reading-progress.tsx` 的滚动进度，
   到底且停留超阈值发一条 `page-read`，同页去重。
@@ -534,23 +594,30 @@ GET /api/mastery?s=<subject>
 
 1. **`deriveMastery`（核心）**：五条优先级各自命中；负证据压正证据；`mastered` 过期回落
    `exposed` 而非 `unknown`；连续答对延长有效期；一次负证据清零连击；空输入返回
-   `unknown/none`；`recent` 截断稳定。
-2. **`masteryWindowDays`**：阶梯边界与上限钳制。
-3. **`fnv1a`**：同输入同输出；不同输入不同输出（抽样）；跨 Node/浏览器一致。
-4. **`createRemarkQuiz`**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
+   `unknown/none`；`recent` 截断稳定；`expiresAt` 仅在 `mastered` 时非空。
+2. **`masteryWindowDays`（决策 4，回归重点）**：`{dueDays, expiryDays}` 对 1–5+ 连击
+   逐档断言（1→{1,4} / 2→{3,10} / 3→{7,28} / 4→{21,81} / ≥5→{60,120}）；
+   **`expiryDays` 恒 > `dueDays`**（防再次退化成「到期即失效」）；上限钳制。
+3. **页级连击**：同页不同 quiz 的正证据累加连击（不要求同一道题）；一次负证据清零。
+4. **`fnv1a`**：同输入同输出；不同输入不同输出（抽样）；跨 Node/浏览器一致。
+5. **`createRemarkQuiz`**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
    答案改写不改变 `data-quiz-id`，问题改写则改变（决策 7）；非 quiz callout 不受影响；
    排在 `selectionBlocks` 之后时顶层块 offset 不变（决策 6 的顺序约束）。
-5. **交互接缝隔离（决策 9）**：不传 `interactive` 时渲染结果**不含任何判分按钮**——
-   对 Chat / 编辑器预览 / Source 查看器三条路径各断言一次；答案折叠在两种情况下都生效。
-6. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
+6. **交互接缝隔离（决策 9）**：不传 `interactive` 时渲染结果**不含任何判分按钮**——
+   对 Chat / **编辑器预览（`EditorPreview` 经 `PageRenderer` 的那条路径）** /
+   Source 查看器三条各断言一次；答案折叠在两种情况下都生效。
+7. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
    `BUILTIN_UPGRADE_HASHES` 含 v6 原版 hash（防漏第 3 步导致既有 vault fail-fast）。
-7. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
+8. **API 边界**：`POST /api/evidence` 对不存在 / 跨 subject 的 slug 返回 404 不落行；
+   `GET /api/mastery` 排除 meta 页，口径与 `/api/graph` 一致。
+9. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
    真实 SQLite 覆盖 subject FK CASCADE。
-8. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
-   `deleteWithContents` 与 `/api/reset` 级联覆盖。
-9. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
-   三维度独立不再联动。
-10. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
+10. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
+    `deleteWithContents` 与 `/api/reset` 级联覆盖；**退役 signals 后 move 页面不报错**
+    （防漏删迁移块，决策 8）。
+11. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
+    三维度独立不再联动。
+12. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
     子集等价。
 
 ---
@@ -573,7 +640,7 @@ GET /api/mastery?s=<subject>
 | `src/app/api/query/route.ts` | 落库处追加 `selection-ask` / `citation-hit`（best-effort） |
 | `src/app/api/lens/[...slug]/route.ts` | POST 处追加 `reshape-request` |
 | `src/server/services/page-write.ts` | 删页时 `deleteByPage` |
-| `src/server/wiki/page-identity-migration.ts` | move 时 `movePage` |
+| `src/server/wiki/page-identity-migration.ts` | 加 `page_evidence` 迁移块；**退役 signals 时同步删 `profile_signals` 块**（决策 8） |
 | `src/server/db/repos/subjects-repo.ts` | `deleteWithContents` 清单补该表 |
 | `src/app/api/reset/route.ts` | 清理清单补该表 |
 | `examples/skills/ingest-enricher.md` | v6 → **v7**：quiz callout 用 `---` 分隔携带答案 |

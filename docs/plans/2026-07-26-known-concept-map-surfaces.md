@@ -51,29 +51,33 @@
 先把用例写成失败测试，再实现。
 
 - 新增 `src/server/profile/concept-map.ts`：
-  `selectNeighborhood(body, currentSubjectSlug, selfSlug)`、
+  `selectNeighborhood(body, { currentSubjectSlug, selfSlug, titleResolver })`、
   `groupByMastery(entries)`、`renderKnownConcepts(k)`。
 - 新增 `src/server/profile/__tests__/concept-map.test.ts`：
   - `selectNeighborhood`：去重；排除自身 slug 与 `META_PAGE_SLUGS`；跨 subject 目标不计；
-    无 wikilink 返回空；`[[Title|alias]]` 与标题写法经 `extractWikiLinks` 正确归一
+    无 wikilink 返回空；**`[[某某标题]]` 经 `titleResolver` 解析到真实 slug**
+    （无 resolver 时 `extractWikiLinks` 只能回落 `normalizeSlug(title)`，邻域会静默漏概念
+    且不报错——加一条回归断言锁死 resolver 必传）
   - `groupByMastery`：四态映射；`unknown` 不出现；**`confidence==='low'` 的 `mastered`
     降级进 `exposed` 段**；空输入返回三段全空
   - `renderKnownConcepts`：三段渲染含兜底句；某段为空时不渲染该段标题；
-    **三段全空返回 `null`**
+    **三段全空返回 `null`**；**必含 `[[slug]]` 书写纪律那句**（缺了 E3 就没锚点可挂）
 - 验证：`npx vitest run src/server/profile/__tests__/concept-map.test.ts`
 
 ## 任务 3：地图注入重塑 prompt
 
 - 新增 `src/server/profile/concept-map-io.ts`：`buildKnownConceptsForPage`
-  （组合任务 2 三函数 + `getPageBySlug` 补 title + `evidenceRepo.listForPage`
+  （组合任务 2 三函数 + `getTitleToSlugMap` 供 resolver + `getPageBySlug` 补 title
   + `deriveMastery`；页面已删则跳过该 slug）。
+  **接受可选 `evidenceBySlug` 预取**——调用方用一次 `listForSubject` 供给，
+  不要退化成邻域内 N 次 `listForPage`。
 - `src/server/llm/prompts/reshape-prompt.ts`：`buildReshapePageUserPrompt` 增可选
-  `knownConcepts`；`RESHAPE_PAGE_SYSTEM_PROMPT` 补一句「按 KNOWN CONCEPTS 段调整展开深度」。
+  `knownConcepts`；`RESHAPE_PAGE_SYSTEM_PROMPT` 补「按 KNOWN CONCEPTS 段调整展开深度」。
 - `src/server/services/reshape-service.ts`：`reshapePageBody` 入参增 `knownConcepts?` 并透传。
 - `src/app/api/lens/[...slug]/route.ts`：POST 前算地图（**try/catch 包裹，抛错按无地图
   继续**），响应加 `assumedKnown`。
 - 测试重点：
-  - prompt 快照：有地图时含三段与兜底句
+  - prompt 快照：有地图时含三段、兜底句与 `[[slug]]` 纪律句
   - **零回归**：无地图时 `buildReshapePageUserPrompt` 输出与改动前**逐字节相同**
   - `buildKnownConceptsForPage` 抛错时重塑仍成功
   - `assumedKnown` 只含 `mastered` 段
@@ -81,11 +85,35 @@
 - 人工验证：任务 1 种子跑完后，对同一页在**种证据前 / 后**各重塑一次，
   肉眼确认已掌握概念从「展开解释」变为「直接引用」。这是 E 是否真的有效的唯一判据。
 
+## 任务 3b：`known_concepts_json` 持久化与 stale 判定（E4 + E5）
+
+没有这一步，纠错入口在刷新后全部消失，且纠错完页面毫无反应——E 的闭环断在这里。
+
+- `src/server/db/schema.ts` + `client.ts::ensureTables` + `drizzle/00xx_*.sql`：
+  `page_renditions` 加 `known_concepts_json TEXT`（可空）。
+- `src/server/db/repos/renditions-repo.ts`：`replaceRendition` / `getLatestRendition`
+  读写新列。
+- `src/app/api/lens/[...slug]/route.ts`：
+  - POST：把注入的 `KnownConcepts` 一并落库
+  - GET：`assumedKnown` **从存储列派生，不重算**（必须是当初告诉模型的那份）；
+    另补算当前地图与之比对，纳入 `stale`
+  - 两条路径共用一次 `evidenceRepo.listForSubject`
+- 测试：
+  - POST 落列；GET 在「存储清单 ≠ 当前地图」时仍返回**存储**那份 `assumedKnown`
+  - 证据变化后 GET `stale:true`；地图未变时不误报
+  - `known_concepts_json` 为 null 的旧行不因地图比对变 stale（存量不炸）
+  - GET 地图补算抛错时退回既有两项判 stale，不隐藏已保存重塑版
+- 验证：`npx vitest run src/app/api/lens/ src/server/db/repos/__tests__/renditions-repo.test.ts`
+
 ## 任务 4：`interactive` 接缝 + E3 纠错入口
 
 - `src/lib/markdown-client.ts`：`RenderOptions` 加
   `interactive?: { pageSlug; subjectSlug; assumedKnown?: string[] }`（本 plan 建接缝）；
   `a` 覆盖（`WikiLinkAnchorRenderer`）在 slug ∈ `assumedKnown` 时透传标记。
+- `src/components/wiki/page-renderer.tsx`：`interactive?` 只做**透传 prop**，
+  **不得用自身的 `slug`/`subjectSlug` 就地构造**——`editor-preview.tsx` 就是
+  `<PageRenderer content slug titleSlugMap />`，一旦就地构造，编辑器预览立刻获得纠错入口。
+  能力由最外层知道语境的调用方显式授予。
 - `src/components/wiki/wiki-link.tsx`：新增「这个我其实不懂」入口，
   点击 `POST /api/evidence { kind:'self-report-hard' }`；失败 `console.error`，
   UI 保持乐观态。
@@ -94,7 +122,8 @@
   `src/components/wiki/wiki-reading-view.tsx` **仅 `usingReshaped` 时**传入
   （canonical 没有「跳过解释」这回事）。
 - 测试：canonical 视图无纠错入口；重塑视图才有；不在 `assumedKnown` 里的 wikilink 无入口；
-  不传 `interactive` 的五个消费方（Chat / 编辑器预览 / Source 查看器等）一律无入口。
+  不传 `interactive` 的五个消费方一律无入口——**`EditorPreview` 那条经 `PageRenderer`
+  的路径单独断言一次**（它是唯一会被「就地构造」误伤的消费方）。
 - 验证：`npx vitest run src/lib/__tests__/ src/components/wiki/__tests__/`
 
 ## 任务 5：graph 主题 token + `buildStylesheet(theme, mode)`
@@ -155,10 +184,14 @@
    （任务 3 的快照断言覆盖）；graph 默认结构模式，行为与改动前一致。
 3. **E 真的有效**：同一页在种证据前 / 后各重塑一次，产出可见地不同。
    若看不出差别，说明注入措辞太弱——回到 spec ② 待评审 1 调整 `exposed` 段强度。
-4. **纠错闭环**：在重塑版点某个已掌握概念的「这个我其实不懂」，再次重塑，
-   该概念从「直接引用」变回「重点展开」。
-5. **图层不破坏布局**：结构 ↔ 掌握度反复切换，节点位置不漂移。
-6. **接缝隔离**：Chat 与编辑器预览里的 wikilink 无纠错入口。
+   （「更好」不设客观判据，见 spec ② 成功标准；此处只验「地图确实改变了产出」。）
+4. **纠错闭环完整走通**：重塑版点某个已掌握概念的「这个我其实不懂」 →
+   **刷新页面纠错入口仍在**（E4）→ 状态行出现 `Update available`（E5）→
+   Refresh 后该概念从「直接引用」变回「重点展开」。四步缺一即闭环断裂。
+5. **`mastered` 非空**：种子数据里连击 1 次的页在 4 天内仍应判 `mastered`
+   （决策 4 的两级有效期；若这条失败，说明公式又退化成了「到期即失效」）。
+6. **图层不破坏布局**：结构 ↔ 掌握度反复切换，节点位置不漂移。
+7. **接缝隔离**：Chat 与编辑器预览里的 wikilink 无纠错入口。
 
 ---
 
