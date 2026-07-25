@@ -245,7 +245,7 @@ masteredUntil = lastPositiveAt + SPACING_LADDER[min(consecutivePositives - 1, 4)
 **不落 `quiz-revealed`**：揭晓答案却不判分（好奇点开、看完就走）要做 unload 兜底 +
 与判分去重 + 竞态处理，复杂度不值当。揭晓不判分就什么都不记。
 
-### 决策 6：答案用 `---` 分隔，不用 HTML
+### 决策 6：答案用 `---` 分隔，切分逻辑收进 `createRemarkQuiz()` 插件
 
 `markdown-client.ts:344` 设了 `allowDangerousHtml: false`——**raw HTML 不渲染**，
 `<details>` 方案直接出局。
@@ -265,11 +265,21 @@ masteredUntil = lastPositiveAt + SPACING_LADDER[min(consecutivePositives - 1, 4)
 选它的理由是**语言无关**：不依赖「答案：」/「Answer:」这类自然语言标记，
 不会随 `wikiLanguage` 漂移。
 
-渲染层在现有 callout 重标插件（`markdown-client.ts:231`）里对 `quiz` 类型检测
-`thematicBreak`：有则按**第一个** `thematicBreak` 切为问题段与答案段，答案段包进默认隐藏的
-容器；无则按旧形态处理。
+切分**不塞进**既有的 callout 重标插件，而是独立成 `createRemarkQuiz()`，与
+`createRemarkCallouts` / `createRemarkSelectionBlocks` 同构：
 
-canonical 正文里答案是明文（编辑器、git、FTS 里都可见），只有阅读渲染折叠——这是对的，
+1. 在 `createRemarkCallouts` **之后**运行，扫 `data.hProperties['data-callout'] === 'quiz'`
+   的节点（复用它已经打好的标记，不重复解析 `[!type]`）
+2. 按**第一个** `thematicBreak` 把 children 切为问题段 / 答案段；无 `thematicBreak`
+   则原样放行（存量页形态）
+3. 答案段包进 `hName:'div'` + `data-quiz-answer` 的容器
+4. 问题段文本经 `fnv1a` 得 `data-quiz-id`，写到 callout 节点的 `hProperties`
+
+**插件顺序约束**：必须排在 `createRemarkSelectionBlocks()` **之后**。选区块依赖解析期的
+`node.position` 计算 offset，而 quiz 会插入没有 position 的包装节点。它只重构 blockquote
+**内部**、不影响顶层块 offset，但排最后是零成本的保险。
+
+canonical 正文里答案是明文（编辑器、git、FTS 里都可见），只有渲染时折叠——这是对的，
 答案属于页面内容，不是 UI 状态。
 
 ### 决策 7：quiz 身份 = **问题段**内容 hash，客户端同步计算
@@ -280,9 +290,8 @@ canonical 正文里答案是明文（编辑器、git、FTS 里都可见），只
 hash 的输入只取**问题段**（决策 6 切分后的前半），不含答案。理由：证据是关于「这道题」的，
 enricher 重跑时润色答案措辞不应该让「他答对过」这件事失效。切分本来就要做，取前半是免费的。
 
-在 `markdown-client.ts` 的 rehype 插件里为 `quiz` 类型写入 `data-quiz-id`。该插件运行在
-客户端，`crypto.subtle` 是异步的不适用，改用同步非加密 hash（FNV-1a）——这只是本地标识，
-不是安全边界。
+hash 由 `createRemarkQuiz()`（决策 6）计算。该插件运行在客户端，`crypto.subtle` 是异步的
+不适用，改用同步非加密 hash（FNV-1a）——这只是本地标识，不是安全边界。
 
 ### 决策 8：证据必须随页面生命周期闭合
 
@@ -293,6 +302,45 @@ enricher 重跑时润色答案措辞不应该让「他答对过」这件事失�
 | 删页 | 删除该页全部证据 | `page-write.ts::deletePageInSubject` |
 | move / rename slug | 证据迁移到新 slug | `wiki/page-identity-migration.ts`（已在迁移其他 slug 派生数据） |
 | 删 subject / reset | 级联清理 | `subject_id` FK CASCADE + `subjects-repo::deleteWithContents` 清单 |
+
+### 决策 9：正文交互块走统一接缝，不在 callout 渲染器里特判
+
+`renderMarkdown()` 目前有 **6 个消费方**：
+
+| 消费方 | 有页面身份？ | 该有 quiz 判分按钮？ |
+|---|---|---|
+| `page-renderer.tsx`（Wiki 阅读页） | 是 | **是** |
+| `message-list.tsx`（Chat 消息） | 否 | 否 |
+| `editor-preview.tsx`（编辑器预览） | 是，但语境是编辑 | 否 |
+| `source-viewer.tsx`（Source 查看器） | 否 | 否 |
+| `url-source-preview.tsx`（URL 阅读模式） | 否 | 否 |
+| `wiki-reading-view.tsx:371`（Sources 分栏） | 否 | 否 |
+
+若直接在既有 `div` 覆盖里「见到 `data-callout==='quiz'` 就挂按钮」，按钮会出现在全部六处，
+而其中四处**根本没有页面身份**——证据要么发不出去，要么归错页。这是必须在设计期消除的缺陷，
+不是实现细节。
+
+quiz 是正文里**第一个**交互块，但不会是最后一个：spec ② 的 E4（重塑版里被跳过解释的
+`[[X]]` 挂「这个我其实不懂」）就是第二个。所以把接缝一次性建好，形状沿用文件里已有的
+按需插件模式（`headingAnchors` / `selectionBlocks` 就是同一套）：
+
+```ts
+renderMarkdown(content, titleSlugMap, {
+  // …既有 headingAnchors / selectionBlocks
+  interactive?: { pageSlug: string; subjectSlug: string },
+})
+```
+
+- **不传 `interactive`**（上表五处）：quiz 照样切分、答案照样折叠，但只有一个纯本地的
+  展开开关——零网络、零证据。
+- **传 `interactive`**（只有 Wiki 阅读页）：`<QuizBlock>` 在揭晓后额外渲染判分按钮，
+  用上下文里的 `pageSlug` / `subjectSlug` 发证据。
+
+**答案折叠在六处都生效**：「不剧透」是内容呈现决定，不是某个页面的 UI 状态。
+只有**发证据**这一能力是阅读页独占的。
+
+按 YAGNI 只做到这一步：**不建插件注册表、不做能力协商**。一个上下文参数 + 每种交互块一个
+remark 插件，N=2 时这是刚好的抽象量；真到第四五种再谈注册表。
 
 `page_evidence` **挂 `subject_id` FK CASCADE**——与 `page_renditions`（故意不挂、靠 repo
 显式清理）不同。理由：证据是 user-owned 事实而非可丢弃缓存，用数据库约束保证比靠 repo
@@ -418,9 +466,11 @@ movePage(subjectId, fromSlug, toSlug): void                    // rename
 
 ### 前端
 
-- `src/components/wiki/quiz-affordance.tsx`（新）：quiz callout 底部的自评行。
-- `markdown-client.ts`：rehype 插件为 quiz 写 `data-quiz-id`；`div` 组件覆盖在
-  `data-callout === 'quiz'` 时挂载 `<QuizAffordance>`。
+- `markdown-client.ts`：新增 `createRemarkQuiz()`（决策 6）+ `RenderOptions.interactive`
+  （决策 9）；`div` 覆盖按 `data-quiz-id` 挂 `<QuizBlock>` 并透传 interactive 上下文。
+- `src/components/wiki/quiz-block.tsx`（新）：问题 + 答案折叠开关 +（仅 interactive 时）
+  判分按钮；兼容有 / 无答案两种形态。
+- `page-renderer.tsx`：**唯一**传入 `interactive` 的调用方。
 - `lens-feedback.tsx`：改为只在查看重塑版时渲染（修 A1），发送时带 `viewedSource`。
 - 阅读完成埋点（D5）：复用现有 `reading-progress.tsx` 的滚动进度，
   到底且停留超阈值发一条 `page-read`，同页去重。
@@ -475,6 +525,7 @@ GET /api/mastery?s=<subject>
 | 证据指向已删页 | 决策 8 保证不会残留；万一出现，`deriveMastery` 不感知页面存在性，由调用方 join 页面时自然丢弃 |
 | quiz 问题变更 | `data-quiz-id` 随之变化，旧证据不再匹配新题——这是正确语义，不做迁移。仅答案改写不影响 id（决策 7） |
 | 页面 quiz 从有答案变回无答案 | 前端按当前渲染结果决定形态；已落证据的 strength 不追溯修改 |
+| 无 `interactive` 上下文（决策 9） | `<QuizBlock>` 不渲染判分按钮，也不持有发证据的能力——不是运行时判空，是根本拿不到 `pageSlug` |
 | 时钟回拨 | `deriveMastery` 对未来时间戳的证据按「已发生」处理，不特殊化 |
 
 ---
@@ -486,18 +537,21 @@ GET /api/mastery?s=<subject>
    `unknown/none`；`recent` 截断稳定。
 2. **`masteryWindowDays`**：阶梯边界与上限钳制。
 3. **`fnv1a`**：同输入同输出；不同输入不同输出（抽样）；跨 Node/浏览器一致。
-4. **quiz 切分**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
-   答案改写不改变 `data-quiz-id`，问题改写则改变（决策 7）。
-5. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
+4. **`createRemarkQuiz`**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
+   答案改写不改变 `data-quiz-id`，问题改写则改变（决策 7）；非 quiz callout 不受影响；
+   排在 `selectionBlocks` 之后时顶层块 offset 不变（决策 6 的顺序约束）。
+5. **交互接缝隔离（决策 9）**：不传 `interactive` 时渲染结果**不含任何判分按钮**——
+   对 Chat / 编辑器预览 / Source 查看器三条路径各断言一次；答案折叠在两种情况下都生效。
+6. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
    `BUILTIN_UPGRADE_HASHES` 含 v6 原版 hash（防漏第 3 步导致既有 vault fail-fast）。
-6. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
+7. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
    真实 SQLite 覆盖 subject FK CASCADE。
-7. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
+8. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
    `deleteWithContents` 与 `/api/reset` 级联覆盖。
-8. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
+9. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
    三维度独立不再联动。
-9. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
-   子集等价。
+10. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
+    子集等价。
 
 ---
 
@@ -527,8 +581,9 @@ GET /api/mastery?s=<subject>
 | `src/server/services/ingest-service.ts` | 版本门 `'ingest-enricher': 6 → 7` |
 | `src/server/services/reenrich-service.ts` | 版本门 `'ingest-enricher': 6 → 7` |
 | `src/server/agents/skills/__tests__/ingest-enricher.load.test.ts` | 版本断言 + 答案段契约 |
-| `src/lib/markdown-client.ts` | quiz 按首个 `thematicBreak` 切分问答段、答案段默认隐藏、写 `data-quiz-id`；div 覆盖挂 QuizAffordance |
-| `src/components/wiki/quiz-affordance.tsx` | **新**（有答案 / 无答案两种形态） |
+| `src/lib/markdown-client.ts` | **新** `createRemarkQuiz()`（排在 `selectionBlocks` 之后）；`RenderOptions` 加 `interactive?`；div 覆盖按 `data-quiz-id` 挂 `<QuizBlock>` 并透传 interactive 上下文 |
+| `src/components/wiki/page-renderer.tsx` | 透传 `interactive={{ pageSlug, subjectSlug }}`（**唯一**传入方） |
+| `src/components/wiki/quiz-block.tsx` | **新**：问题 + 答案折叠开关 + （仅 interactive 时）判分按钮；兼容有 / 无答案两种形态 |
 | `src/components/wiki/lens-feedback.tsx` | 改：仅重塑版渲染、带 `viewedSource` |
 | `src/components/wiki/reading-progress.tsx` | 读完埋点（同页去重） |
 | `src/lib/i18n/messages/{zh-CN,en}.ts` | quiz 自评与证据面板文案 |
