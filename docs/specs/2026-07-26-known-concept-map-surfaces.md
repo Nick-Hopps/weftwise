@@ -215,6 +215,11 @@ E3 的纠错闭环在 UI 上无从触发（用户得自己想到去按 Refresh�
 
 GET 时补算当前 `KnownConcepts` 与 `known_concepts_json` 比对，不同即 stale。
 
+**比对必须建立在确定性序列化上。** 三段内各条目按**邻域顺序**（即 `selectNeighborhood`
+的首次出现顺序）排列，不按 Map 遍历顺序或掌握度排序；序列化时字段顺序固定。
+否则同一份地图两次算出的 JSON 字符串不同，**每一次 GET 都会误报 stale**，
+状态行上挂一个永远消不掉的 `Update available`——比不做这个功能更糟。
+
 **成本可接受**：`evidence-repo.listForSubject` 是**一次**索引扫描 + 内存分组，
 之后逐 slug 跑纯函数。因此 `buildKnownConceptsForPage` 要接受一个可选的预取证据 map，
 让 GET / POST 两条路径都只查一次；不要退化成邻域内逐页 `listForPage` 的 N 次查询。

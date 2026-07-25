@@ -113,7 +113,9 @@
   - 两条路径共用一次 `evidenceRepo.listForSubject`
 - 测试：
   - POST 落列；GET 在「存储清单 ≠ 当前地图」时仍返回**存储**那份 `assumedKnown`
-  - 证据变化后 GET `stale:true`；地图未变时不误报
+  - 证据变化后 GET `stale:true`；**地图未变时连续多次 GET 都不误报**
+    （序列化必须确定性——三段内按邻域顺序、字段顺序固定；不然会挂一个永远消不掉的
+    `Update available`，比不做这功能更糟）
   - `known_concepts_json` 为 null 的旧行不因地图比对变 stale（存量不炸）
   - GET 地图补算抛错时退回既有两项判 stale，不隐藏已保存重塑版
   - **改名一页后新列仍在**（锁死上面那条迁移列清单）
