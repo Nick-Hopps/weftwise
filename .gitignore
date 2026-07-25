@@ -8,6 +8,8 @@ node_modules
 
 # testing
 /coverage
+# 本地测试报告默认输出（npm run test:report）
+/test-report.html
 
 # next.js
 /.next/
