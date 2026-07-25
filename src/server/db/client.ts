@@ -517,17 +517,25 @@ function migratePageMaturity(): void {
 // ── Cognitive Lens（读时内容重塑）三表 ───────────────────────────
 function migrateUserProfiles(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('user_profiles')) return;
-  sqlite.exec(`
-    CREATE TABLE user_profiles (
-      user_id TEXT PRIMARY KEY,
-      background_summary TEXT NOT NULL DEFAULT '',
-      style_prefs TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1,
-      onboarded_at TEXT,
-      updated_at TEXT NOT NULL
-    );
-  `);
+  if (!tableExists('user_profiles')) {
+    sqlite.exec(`
+      CREATE TABLE user_profiles (
+        user_id TEXT PRIMARY KEY,
+        background_summary TEXT NOT NULL DEFAULT '',
+        style_prefs TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        onboarded_at TEXT,
+        updated_at TEXT NOT NULL,
+        style_prefs_updated_at TEXT
+      );
+    `);
+    return;
+  }
+  // 存量库补列：CREATE TABLE IF NOT EXISTS 对已存在的表什么都不做，只靠它的话既有安装
+  // 升级后拿不到新列、读写立刻 SQL 报错（同 migrateJobs 的 ALTER ADD COLUMN 策略）。
+  if (!tableColumns('user_profiles').includes('style_prefs_updated_at')) {
+    sqlite.exec(`ALTER TABLE user_profiles ADD COLUMN style_prefs_updated_at TEXT`);
+  }
 }
 
 // 故意不挂 subjects FK：可丢弃重建的读侧缓存，由 deleteBySubject + 命中校验自洽。
@@ -576,6 +584,29 @@ function migrateProfileSignals(): void {
       slug TEXT,
       created_at TEXT NOT NULL
     );
+  `);
+}
+
+// 逐页掌握度证据流（append-only，掌握度读时派生）。
+function migratePageEvidence(): void {
+  const sqlite = rawSqlite!;
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS page_evidence (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      slug TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      polarity TEXT NOT NULL,
+      strength TEXT NOT NULL,
+      anchor TEXT,
+      detail_json TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS page_evidence_page_idx
+      ON page_evidence(user_id, subject_id, slug, created_at);
+    CREATE INDEX IF NOT EXISTS page_evidence_scope_idx
+      ON page_evidence(user_id, subject_id, created_at);
   `);
 }
 
@@ -936,6 +967,7 @@ function ensureTables() {
       migratePageRenditions();
       migratePageRenditionAssets();
       migrateProfileSignals();
+      migratePageEvidence();
       migrateResearchBacklog();
       migrateResearchProvenance();
       dedupeSourcesForUniqueIdentity();

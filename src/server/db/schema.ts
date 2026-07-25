@@ -271,6 +271,9 @@ export const userProfiles = sqliteTable('user_profiles', {
   version: integer('version').notNull().default(1),
   onboardedAt: text('onboarded_at'),
   updatedAt: text('updated_at').notNull(),
+  // reducer 的消费边界：只在旋钮真的变化时推进。不能复用 updated_at——后者任何画像写入
+  // （改背景自述、onboarding 提交）都会变，拿它当边界会误清整个信号窗口。
+  stylePrefsUpdatedAt: text('style_prefs_updated_at'),
 });
 
 // 重塑版本：每页保存最新一次成功产物；不挂 subjects FK，由 repo 显式级联清理。
@@ -311,6 +314,32 @@ export const profileSignals = sqliteTable('profile_signals', {
   slug: text('slug'),
   createdAt: text('created_at').notNull(),
 });
+
+// 逐页掌握度的唯一真实源：append-only 证据流，掌握度读时由 deriveMastery 纯函数派生。
+// polarity / strength 由 kind 确定性派生后冗余落列——新增 kind 不必回填历史行。
+// 挂 subjects FK CASCADE（与 page_renditions 故意不挂相反）：证据是 user-owned 事实
+// 而非可丢弃缓存，用数据库约束保证比靠 repo 记得清更可靠。
+export const pageEvidence = sqliteTable(
+  'page_evidence',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    userId: text('user_id').notNull(),
+    subjectId: text('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    slug: text('slug').notNull(),
+    kind: text('kind').notNull(),
+    polarity: text('polarity').notNull(), // 'positive' | 'negative' | 'exposure'
+    strength: text('strength').notNull(), // 'strong' | 'weak'
+    anchor: text('anchor'), // quizId / section 标题 / null
+    detailJson: text('detail_json'),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => ({
+    pageIdx: index('page_evidence_page_idx').on(t.userId, t.subjectId, t.slug, t.createdAt),
+    scopeIdx: index('page_evidence_scope_idx').on(t.userId, t.subjectId, t.createdAt),
+  }),
+);
 
 // T3.2：待研究问题队列（Ask AI 未命中信号 + 手动添加），subject-scoped。
 export const researchBacklog = sqliteTable('research_backlog', {
