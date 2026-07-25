@@ -1,6 +1,6 @@
 {
   "name": "weftwise",
-  "version": "0.15.4",
+  "version": "0.16.0",
   "private": true,
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
@@ -16,6 +16,7 @@
     "db:rebuild": "tsx scripts/rebuild-cache.ts",
     "db:backfill-source-presentation": "tsx scripts/backfill-source-presentation.ts",
     "eval:retrieval": "tsx scripts/eval-retrieval.ts",
+    "test:report": "tsx scripts/test-report.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
