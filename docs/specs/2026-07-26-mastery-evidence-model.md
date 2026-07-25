@@ -1,7 +1,7 @@
 # Spec：证据流与逐页掌握度模型
 
 日期：2026-07-26
-状态：待评审
+状态：已定稿（四项待评审决策已于 2026-07-26 定案，见第十四节）
 
 > 本 spec 是「已知概念地图」两份设计中的第 ①份，负责**产生并解释**掌握度事实。
 > 第 ②份（`已知地图的两个消费面`：重塑 prompt 注入 + Graph 掌握度图层）依赖本份产出的
@@ -68,8 +68,8 @@ formality）+ 一段自述文本。这描述的是**怎么讲**，不是**他懂
 - **概念实体抽取**：不建独立概念词表，概念的单位就是 page（详见决策 1）。
 - **多租户**：沿用 `LOCAL_USER_ID` 单例，表结构 user-keyed，未来接 auth 无需迁移。
 - **掌握度的物化缓存**：读时派生，不建缓存表（详见方案取舍）。
-- **enricher 产出 quiz 标准答案**：会显著提高信噪比，但改动扩散到写侧 skill 版本门与既有
-  页面，列为独立后续项（详见决策 5 与待评审决策 2）。
+- **既有页面批量 re-enrich 回填 quiz 答案**：re-enrich 的 supplement 阶段会同时改动正文，
+  代价与副作用都超出本需求。存量页退化为自评形态（详见决策 5）。
 
 ---
 
@@ -207,31 +207,84 @@ masteredUntil = lastPositiveAt + SPACING_LADDER[min(consecutivePositives - 1, 4)
 > 与 `maintenance-policy` 共用常量但**不共用函数**——两者的语义在未来可能分化，
 > 现在耦合会让任一侧的调整误伤另一侧。
 
-### 决策 5：quiz 通电走「自评二选一」，不改写侧
+### 决策 5：enricher 升 v7 产出答案，前端兼容有 / 无答案两种形态
 
-核实 `examples/skills/ingest-enricher.md:50`：enricher 生成的 quiz callout 是
+核实 `examples/skills/ingest-enricher.md:50`：现有 quiz callout 是
 「a question that makes the reader retrieve/apply what the prose taught (optionally a hint)」
-——**只有问题和提示，没有标准答案**。因此「显示答案 → 判分」这条路在现有内容上走不通。
+——**只有问题和提示，没有标准答案**，「先答 → 揭晓 → 判分」在存量内容上走不通。
 
-MVP 采用**自评二选一**：`我答对了` / `我答错了`（第三个 `再想想` 只本地折叠、不发证据）。
-用户自己对照正文判断。
+本 spec 同期把 `ingest-enricher` 升到 **v7**，让新产出的 quiz callout 携带答案：
 
-信噪比诚实评估：这仍属自陈范式，弱于真正的判分。但相比现有的页面级拇指有两个质变——
-**绑定到具体一道题**，且**绑定到具体一页**。足以驱动四态。
+| 内容形态 | 交互 | 证据可信度 |
+|---|---|---|
+| 有答案（v7 产出：新 ingest / 用户主动 re-enrich） | 看答案 → 揭晓 → 我答对了 / 我答错了 | 有客观参照 |
+| 无答案（存量页） | 直接自评二选一 | 自陈 |
 
-让 enricher 额外产出答案（`ingest-enricher v7` + 版本门 + 既有页面无答案的兼容）
-列为独立后续项，不进本 spec。
+三处必改，漏任一处都会让既有 vault 启动即 fail-fast：
 
-### 决策 6：quiz 身份 = 内容 hash，客户端同步计算
+1. `ingest-service.ts:200` 版本门 `'ingest-enricher': 6 → 7`
+2. `reenrich-service.ts:147` 版本门 `'ingest-enricher': 6 → 7`
+3. `skills/builtin-manifest.ts::BUILTIN_UPGRADE_HASHES['ingest-enricher']`
+   **追加当前 v6 原版的完整 SHA-256**
+
+第 3 条最易漏：该白名单是自动升级的**唯一依据**——`registry.ts::upgradeBuiltinSkillFiles`
+只原子替换 hash 精确匹配历史原版的 vault 副本，用户改过的 skill 始终保留。不追加 v6 hash，
+所有未改过 skill 的既有 vault 都会卡在 v6 撞版本门。
+
+**证据 strength 的不对称**（决策 2「保守优先」的直接推论）：
+
+| 场景 | kind | strength | 理由 |
+|---|---|---|---|
+| 揭晓答案后判对 | `quiz-correct` | strong | 有客观参照 |
+| 揭晓答案后判错 | `quiz-wrong` | strong | 有客观参照 |
+| 无答案自评「我答对了」 | `quiz-correct` | **weak** | 自我拔高偏差；且误判 `mastered` 代价最大 |
+| 无答案自评「我答错了」 | `quiz-wrong` | **strong** | 主动承认答错，无拔高动机 |
+
+这个不对称是刻意的：同一个交互，正向降权、负向不降权。
+
+**不落 `quiz-revealed`**：揭晓答案却不判分（好奇点开、看完就走）要做 unload 兜底 +
+与判分去重 + 竞态处理，复杂度不值当。揭晓不判分就什么都不记。
+
+### 决策 6：答案用 `---` 分隔，不用 HTML
+
+`markdown-client.ts:344` 设了 `allowDangerousHtml: false`——**raw HTML 不渲染**，
+`<details>` 方案直接出局。
+
+改用 blockquote 内的 thematic break 分隔（已验证 remark 在 blockquote 内把 `---`
+解析为 `thematicBreak` 子节点）：
+
+```markdown
+> [!quiz] ❓ 自测
+> 为什么反向传播需要保存前向过程的中间激活值？
+>
+> ---
+>
+> 因为链式法则求梯度时要用到每层的输入。丢弃后只能重算，属于时间换空间。
+```
+
+选它的理由是**语言无关**：不依赖「答案：」/「Answer:」这类自然语言标记，
+不会随 `wikiLanguage` 漂移。
+
+渲染层在现有 callout 重标插件（`markdown-client.ts:231`）里对 `quiz` 类型检测
+`thematicBreak`：有则按**第一个** `thematicBreak` 切为问题段与答案段，答案段包进默认隐藏的
+容器；无则按旧形态处理。
+
+canonical 正文里答案是明文（编辑器、git、FTS 里都可见），只有阅读渲染折叠——这是对的，
+答案属于页面内容，不是 UI 状态。
+
+### 决策 7：quiz 身份 = **问题段**内容 hash，客户端同步计算
 
 需要一个跨会话稳定、内容变即变的 quiz 标识。位置索引脆弱（插入一段就全错位），
 内容 hash 语义正确（题目改了就是新题，旧证据自然失效）。
 
-在 `markdown-client.ts` 的 rehype 插件里（现有的 callout 重标点，`:231`）为 `quiz` 类型
-额外写入 `data-quiz-id`。该插件运行在客户端，`crypto.subtle` 是异步的不适用，
-改用同步非加密 hash（FNV-1a）——这只是本地标识，不是安全边界。
+hash 的输入只取**问题段**（决策 6 切分后的前半），不含答案。理由：证据是关于「这道题」的，
+enricher 重跑时润色答案措辞不应该让「他答对过」这件事失效。切分本来就要做，取前半是免费的。
 
-### 决策 7：证据必须随页面生命周期闭合
+在 `markdown-client.ts` 的 rehype 插件里为 `quiz` 类型写入 `data-quiz-id`。该插件运行在
+客户端，`crypto.subtle` 是异步的不适用，改用同步非加密 hash（FNV-1a）——这只是本地标识，
+不是安全边界。
+
+### 决策 8：证据必须随页面生命周期闭合
 
 这是上游讨论未覆盖、但实现必踩的三处：
 
@@ -276,8 +329,8 @@ INDEX page_evidence_scope_idx ON (user_id, subject_id, created_at)
 
 | kind | polarity | strength | 来源 | anchor |
 |---|---|---|---|---|
-| `quiz-correct` | positive | strong | D1 quiz 自评 | quizId |
-| `quiz-wrong` | negative | strong | D1 quiz 自评 | quizId |
+| `quiz-correct` | positive | strong / **weak** | D1 揭晓后判分 / 无答案自评 | quizId |
+| `quiz-wrong` | negative | strong | D1 判分或自评（两者同权，见决策 5） | quizId |
 | `selection-ask` | negative | strong | D2 选区追问 | section |
 | `self-report-hard` | negative | strong | 原 `too_hard` | — |
 | `self-report-easy` | positive | weak | 原 `too_easy` | — |
@@ -419,8 +472,9 @@ GET /api/mastery?s=<subject>
 |---|---|
 | 证据写入失败 | `console.error`，主流程不受影响（沿用 `recordCoverageGap` 的 best-effort 语义） |
 | `/api/mastery` 失败 | 下游按全 `unknown` 处理——即今天的行为，零回归 |
-| 证据指向已删页 | 决策 7 保证不会残留；万一出现，`deriveMastery` 不感知页面存在性，由调用方 join 页面时自然丢弃 |
-| quiz 内容变更 | `data-quiz-id` 随之变化，旧证据不再匹配新题——这是正确语义，不做迁移 |
+| 证据指向已删页 | 决策 8 保证不会残留；万一出现，`deriveMastery` 不感知页面存在性，由调用方 join 页面时自然丢弃 |
+| quiz 问题变更 | `data-quiz-id` 随之变化，旧证据不再匹配新题——这是正确语义，不做迁移。仅答案改写不影响 id（决策 7） |
+| 页面 quiz 从有答案变回无答案 | 前端按当前渲染结果决定形态；已落证据的 strength 不追溯修改 |
 | 时钟回拨 | `deriveMastery` 对未来时间戳的证据按「已发生」处理，不特殊化 |
 
 ---
@@ -432,13 +486,17 @@ GET /api/mastery?s=<subject>
    `unknown/none`；`recent` 截断稳定。
 2. **`masteryWindowDays`**：阶梯边界与上限钳制。
 3. **`fnv1a`**：同输入同输出；不同输入不同输出（抽样）；跨 Node/浏览器一致。
-4. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
+4. **quiz 切分**：有 `---` 正确切分；无 `---` 走旧形态；多个 `---` 只按第一个切；
+   答案改写不改变 `data-quiz-id`，问题改写则改变（决策 7）。
+5. **`ingest-enricher` v7**：版本号断言；skill roundtrip 覆盖带答案的 quiz 契约；
+   `BUILTIN_UPGRADE_HASHES` 含 v6 原版 hash（防漏第 3 步导致既有 vault fail-fast）。
+6. **`evidence-repo`**：append / 按页查 / 按 subject 分组 / `deleteByPage` / `movePage`；
    真实 SQLite 覆盖 subject FK CASCADE。
-5. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
+7. **生命周期集成**：删页后证据清空 → 重建同名 slug 得到 `unknown`；move 后证据跟随；
    `deleteWithContents` 与 `/api/reset` 级联覆盖。
-6. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
+8. **`signal-reducer` 回归**：同向连点不再每次降档（棘轮消失）；超窗证据不参与；
    三维度独立不再联动。
-7. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
+9. **并存期一致性**：双写阶段 `profile_signals` 与 `page_evidence` 的 style-bearing
    子集等价。
 
 ---
@@ -464,8 +522,13 @@ GET /api/mastery?s=<subject>
 | `src/server/wiki/page-identity-migration.ts` | move 时 `movePage` |
 | `src/server/db/repos/subjects-repo.ts` | `deleteWithContents` 清单补该表 |
 | `src/app/api/reset/route.ts` | 清理清单补该表 |
-| `src/lib/markdown-client.ts` | rehype 写 `data-quiz-id`；div 覆盖挂 QuizAffordance |
-| `src/components/wiki/quiz-affordance.tsx` | **新** |
+| `examples/skills/ingest-enricher.md` | v6 → **v7**：quiz callout 用 `---` 分隔携带答案 |
+| `src/server/agents/skills/builtin-manifest.ts` | `BUILTIN_UPGRADE_HASHES` 追加 v6 原版 SHA-256（**漏则既有 vault 全部 fail-fast**） |
+| `src/server/services/ingest-service.ts` | 版本门 `'ingest-enricher': 6 → 7` |
+| `src/server/services/reenrich-service.ts` | 版本门 `'ingest-enricher': 6 → 7` |
+| `src/server/agents/skills/__tests__/ingest-enricher.load.test.ts` | 版本断言 + 答案段契约 |
+| `src/lib/markdown-client.ts` | quiz 按首个 `thematicBreak` 切分问答段、答案段默认隐藏、写 `data-quiz-id`；div 覆盖挂 QuizAffordance |
+| `src/components/wiki/quiz-affordance.tsx` | **新**（有答案 / 无答案两种形态） |
 | `src/components/wiki/lens-feedback.tsx` | 改：仅重塑版渲染、带 `viewedSource` |
 | `src/components/wiki/reading-progress.tsx` | 读完埋点（同页去重） |
 | `src/lib/i18n/messages/{zh-CN,en}.ts` | quiz 自评与证据面板文案 |
@@ -478,9 +541,11 @@ GET /api/mastery?s=<subject>
 
 **MVP（本 spec 的实现计划覆盖）**
 
-1. `page_evidence` 表 + repo + 生命周期闭合（决策 7）
+0. `ingest-enricher` v7 + 两处版本门 + hash 白名单（**先行**：先让新 ingest 开始产出带答案的
+   quiz，后续前端落地时才有真实内容可测；且它与其余任务无耦合，可独立验证）
+1. `page_evidence` 表 + repo + 生命周期闭合（决策 8）
 2. `deriveMastery` 纯函数 + `masteryWindowDays`（可先于采集写完并测透）
-3. D1 quiz 通电（第一批正证据）
+3. D1 quiz 通电（第一批正证据，兼容有 / 无答案两种形态）
 4. D2 选区追问 + D3 引用命中 + D4 重塑请求（服务端已有落库点，改动薄）
 5. D5 读完埋点（区分接触与掌握的必需品）
 6. `GET /api/mastery`（供 spec ② 消费）
@@ -497,14 +562,18 @@ GET /api/mastery?s=<subject>
 
 ---
 
-## 十四、待评审决策
+## 十四、已定决策（2026-07-26）
 
-1. **B 组是否后置？** 见分期。我的建议是后置，理由是地图落地后其边际价值下降。
-   若倾向同期做，主键迁移应在 `page_evidence` 之前落，避免两次改动同一批 repo。
-2. **是否让 enricher 产出 quiz 标准答案？** 会把自评二选一升级为真正的判分，信噪比质变；
-   代价是 `ingest-enricher v7` 版本门 + 既有页面无答案的兼容分支 + 重跑成本。
-   本 spec 按「不改写侧」设计，此项独立。
-3. **`page-read` 的判定阈值**：滚动到底 + 停留时长。阈值取值先拍一个保守值（如 30s），
-   接入后按真实数据调——写死为常量，不做设置项。
-4. **弱负证据是否计入 `struggling`**：本 spec 定为不计入（决策 3 第 5 条）。
-   若实测 `struggling` 过于稀疏，这是第一个该放松的旋钮。
+| # | 议题 | 取值 | 依据 |
+|---|---|---|---|
+| 1 | B 组（画像 subject-scoped） | **后置** | 等 spec ② 的地图接入重塑后，再判断 `readingLevel` 这个三档粗粒度维度是否还值得一次主键迁移。设计已完整写在第七节，随时可启动 |
+| 2 | enricher 产出 quiz 答案 | **同期升 v7** | 把自评升级为有客观参照的判分。不做全库回填，存量页退化为自评（决策 5、6） |
+| 3 | `page-read` 判定 | **滚动到底 + 停留 ≥30s** | 两个条件都要满足才算接触，避免把扫一眼当读过。阈值写死常量，不做设置项 |
+| 4 | 弱负证据计入 `struggling` | **不计入**，只作 `exposed` | 信噪比不足：问到某页可能是查资料，重塑可能只是想换讲法（决策 3 第 5 条） |
+
+### 遗留待观察（不阻塞实现）
+
+- 决策 3 的 30s 阈值：接入后按真实数据调整。
+- 决策 4 的放松条件：若一周真实使用后 `struggling` 计数为 0，改为「累计 ≥3 条弱负证据
+  判 `struggling`」——这是本设计里第一个该放松的旋钮。
+- 决策 2 的下一步：若判分数据表明自评形态明显失真，再评估存量页批量回填。
