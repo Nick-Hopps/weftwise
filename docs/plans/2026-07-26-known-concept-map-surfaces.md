@@ -17,12 +17,14 @@
 |---|---|---|
 | 任务 2 | `page_evidence` 表 | 任务 1 种子脚本 |
 | 任务 3 | `evidence-repo` | 任务 3 取证据 |
+| 任务 4 | 生命周期闭合 | 任务 4 的 E3 会写**真实**证据，删页/改名必须同步清理，否则一开始就攒脏数据 |
 | 任务 5 | `deriveMastery` 纯函数 | 任务 2、3 |
+| 任务 8 的 `POST /api/evidence` 部分 | 证据写入口 | 任务 4 的纠错入口要往它发（quiz 判分接线不在本 plan） |
 | 任务 11 的 `GET /api/mastery` 部分 | 图层数据源 | 任务 6 |
 
-**不需要**的部分：plan ① 任务 1（enricher v7）、任务 4（生命周期闭合）、
-任务 6–10（quiz 通电与采集埋点）、任务 12–13（A 组与 signals 退役）。
-它们与本 plan 无耦合，可后续独立推进。
+**不需要**的部分：plan ① 任务 1（enricher v7）、任务 6–7（`createRemarkQuiz` 与
+`QuizBlock`）、任务 8 的 quiz 判分接线、任务 9–10（采集埋点）、
+任务 12–13（A 组与 signals 退役）。它们与本 plan 无耦合，可后续独立推进。
 
 > **接缝归属**：`RenderOptions.interactive`（spec ① 决策 9）由**先落地的一方建**。
 > 本 plan 的任务 4 需要它，故由本 plan 建；plan ① 任务 7 届时改为「复用已有接缝 +
