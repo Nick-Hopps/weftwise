@@ -451,18 +451,22 @@ INDEX page_evidence_scope_idx ON (user_id, subject_id, created_at)
 
 ### 证据类型
 
-| kind | polarity | strength | 来源 | anchor |
-|---|---|---|---|---|
-| `quiz-correct` | positive | strong / **weak** | D1 揭晓后判分 / 无答案自评 | quizId |
-| `quiz-wrong` | negative | strong | D1 判分或自评（两者同权，见决策 5） | quizId |
-| `selection-ask` | negative | strong | D2 选区追问 | section |
-| `self-report-hard` | negative | strong | 原 `too_hard`（**整页讲法太难**） | — |
-| `self-report-easy` | positive | weak | 原 `too_easy`（**整页讲法太浅**） | — |
-| `concept-unknown` | negative | strong | spec ② E3 的「这个我其实不懂」 | — |
-| `citation-hit` | negative | weak | D3 回答引用命中 | — |
-| `reshape-request` | negative | weak | D4 重塑请求 | — |
-| `page-read` | exposure | weak | D5 读完 | — |
-| `own-source` | exposure | weak | D6 自己 ingest 的源产出的页 | — |
+| kind | polarity | strength | 生产方 | 来源 | anchor |
+|---|---|---|---|---|---|
+| `quiz-correct` | positive | strong / **weak** | 本 spec D1 | 揭晓后判分 / 无答案自评 | quizId |
+| `quiz-wrong` | negative | strong | 本 spec D1 | 判分或自评（两者同权，见决策 5） | quizId |
+| `selection-ask` | negative | strong | 本 spec D2 | 选区追问 | section |
+| `self-report-hard` | negative | strong | 本 spec A 组 | 原 `too_hard`（**整页讲法太难**） | — |
+| `self-report-easy` | positive | weak | 本 spec A 组 | 原 `too_easy`（**整页讲法太浅**） | — |
+| `citation-hit` | negative | weak | 本 spec D3 | 回答引用命中 | — |
+| `reshape-request` | negative | weak | 本 spec D4 | 重塑请求 | — |
+| `page-read` | exposure | weak | 本 spec D5 | 读完 | — |
+| `concept-unknown` | negative | strong | **spec ② E3** | 重塑版里的「这个我其实不懂」 | — |
+| `own-source` | exposure | weak | **后置**（D6） | 自己 ingest 的源产出的页 | — |
+
+「生产方」一列是刻意加的：`concept-unknown` 由 spec ② 写入、本 spec 只定义它的语义与权重，
+`own-source` 则已后置——只看本 spec 的分期会找不到这两者的落地位置。
+枚举本身是**单一真实源**，两份 spec 共用，不得各自扩充。
 
 `self-report-easy` 定为 weak positive：说「太浅」不等于掌握，只是不觉得难。
 
@@ -660,6 +664,7 @@ GET /api/mastery?s=<subject>
 | 页面 quiz 从有答案变回无答案 | 前端按当前渲染结果决定形态；已落证据的 strength 不追溯修改 |
 | 无 `interactive` 上下文（决策 9） | `<QuizBlock>` 不渲染判分按钮，也不持有发证据的能力——不是运行时判空，是根本拿不到 `pageSlug` |
 | 时钟回拨 | `deriveMastery` 对未来时间戳的证据按「已发生」处理，不特殊化 |
+| 纠错后点 Refresh 会顺带写一条 `reshape-request` | **已知且接受**：它是 weak negative，规则 5 只在「只有弱负证据」时生效，页面若已有更强证据则完全不影响判定；只会让 `evidenceCount` 略微虚高。不为它加特例 |
 
 ---
 
