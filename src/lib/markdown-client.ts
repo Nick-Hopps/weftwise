@@ -35,6 +35,7 @@ interface WikiLinkNode {
 }
 
 import { normalizeSlug, SUBJECT_SLUG_RE } from '@/lib/slug';
+import { fnv1a } from '@/lib/stable-hash';
 
 // ---------------------------------------------------------------------------
 // remarkWikiLinks plugin
@@ -300,6 +301,88 @@ function createRemarkSelectionBlocks(): Plugin<[], MdastRoot> {
 }
 
 // ---------------------------------------------------------------------------
+// remarkQuiz plugin
+// ---------------------------------------------------------------------------
+// 把 `[!quiz]` callout 按**第一个** thematicBreak 切成问题段 / 答案段，答案段包进
+// `data-quiz-answer` 容器（渲染时折叠，不剧透），并给 callout 打上 `data-quiz-id`。
+//
+// 为什么用 `---` 而不是 `<details>`：`allowDangerousHtml: false`，raw HTML 根本不渲染。
+// 为什么用 `---` 而不是「答案：」：thematicBreak 是**语言无关**的，不会随 wikiLanguage 漂移。
+//
+// 顺序约束：必须排在 `createRemarkCallouts()`（复用它打好的 `data-callout` 标记，不重复
+// 解析 `[!type]`）**和** `createRemarkSelectionBlocks()` 之后。后者依赖解析期的
+// `node.position` 计算 offset，而本插件会插入没有 position 的包装节点——它只重构
+// blockquote **内部**、不影响顶层块 offset，但排最后是零成本的保险。
+
+function createRemarkQuiz(): Plugin<[], MdastRoot> {
+  return function () {
+    return function transformer(tree: MdastRoot) {
+      visitQuizzes(tree);
+    };
+  };
+}
+
+function visitQuizzes(node: MdastNode): void {
+  if (!isParent(node)) return;
+  for (const child of node.children) {
+    if (isQuizCallout(child)) splitQuizCallout(child as MdastParent & MdastNodeWithData);
+    visitQuizzes(child);
+  }
+}
+
+function isQuizCallout(node: MdastNode): boolean {
+  const data = (node as MdastNodeWithData).data;
+  return data?.hProperties?.['data-callout'] === 'quiz';
+}
+
+function splitQuizCallout(bq: MdastParent & MdastNodeWithData): void {
+  const breakIndex = bq.children.findIndex((c) => c.type === 'thematicBreak');
+
+  // 无分隔符 = 存量页形态：不切分，但仍然给它 quiz 身份（自评交互照样需要）。
+  const question = breakIndex === -1 ? bq.children : bq.children.slice(0, breakIndex);
+  const answer = breakIndex === -1 ? [] : bq.children.slice(breakIndex + 1);
+
+  // hash 只取**问题段**：证据是关于「这道题」的，enricher 重跑时润色答案措辞
+  // 不应该让「他答对过」这件事失效。
+  bq.data = {
+    ...bq.data,
+    hProperties: {
+      ...(bq.data?.hProperties ?? {}),
+      'data-quiz-id': fnv1a(collectPlainText(question)),
+    },
+  };
+
+  if (answer.length === 0) return;
+
+  // 包装节点借用 blockquote 的形状（可容纳块级子节点），由 hName 改渲染成 div。
+  const wrapper: MdastParent & MdastNodeWithData = {
+    type: 'blockquote',
+    children: answer,
+    data: { hName: 'div', hProperties: { 'data-quiz-answer': '' } },
+  } as MdastParent & MdastNodeWithData;
+
+  bq.children = [...question, wrapper as unknown as MdastNode];
+}
+
+/**
+ * 收集子树里的可见文本，**剔除全部空白**——enricher 重跑时换行位置常有变化，
+ * 而重排版不该让「他答对过」这件事失效。不能只折叠空白：CJK 的软换行不含空格，
+ * 折叠成单空格反而会让重排版前后的哈希不同。
+ */
+function collectPlainText(nodes: readonly MdastNode[]): string {
+  const parts: string[] = [];
+  const walk = (node: MdastNode): void => {
+    if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'code') {
+      parts.push((node as MdastText).value);
+      return;
+    }
+    if (isParent(node)) node.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return parts.join('').replace(/\s+/g, '');
+}
+
+// ---------------------------------------------------------------------------
 // Production JSX runtime options for rehype-react
 // ---------------------------------------------------------------------------
 
@@ -338,6 +421,8 @@ export function renderMarkdown(
   if (options?.headingAnchors) remark = remark.use(remarkArticleHeadings);
   remark = remark.use(createRemarkCallouts()).use(createRemarkMermaid()).use(createRemarkWikiLinks(resolver));
   if (options?.selectionBlocks) remark = remark.use(createRemarkSelectionBlocks());
+  // 必须排在 selectionBlocks 之后：本插件会插入没有 position 的包装节点（决策 6）。
+  remark = remark.use(createRemarkQuiz());
 
   // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；
   // throwOnError:false 保证非法 LaTeX 不会让同步 processSync 抛错、整页崩溃。
