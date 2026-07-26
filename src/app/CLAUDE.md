@@ -172,6 +172,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | Lens 接入已知概念地图：`POST /api/lens/[...slug]` 算邻域地图注入重塑 prompt（抛错按无地图继续，**不阻断重塑**）并把快照写进 `page_renditions.known_concepts_json`；`GET` 的 `assumedKnown` **从存储列派生而非重算**（必须是当初真正告诉模型的那一份），并补算当前地图与之比对纳入 `stale`——掌握度变化不改 `profileVersion`，没有这一项纠错闭环在 UI 上无从触发。`known_concepts_json` 为 null 的旧行不参与比对，存量重塑版不会一上线全变 stale。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 证据流与逐页掌握度：新增 `POST /api/evidence`（写前 slug 存在性校验 + style-bearing 证据顺带跑风格 reducer）与 `GET /api/mastery`（全量 lite / 单页含 `recent`，排除 meta 页）；`/api/query` 在既有落库点追加 `selection-ask` / `citation-hit`（跨 subject 引用不记），`POST /api/lens/[...slug]` 成功后追加 `reshape-request`，三处均 best-effort；`/api/profile/signals` **已删除**（`profile_signals` 退役，反馈改走 `/api/evidence`）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-20 | URL 登录态授权扩展到 Research child：`POST /api/jobs/[id]/url-auth` 识别服务端 provenance 后把 grant ID 与 job/delivery/run 放在同一事务恢复，失败补偿新 grant；响应附最新 run 供 Health 即时恢复 importing 轮询。spec/plan 见 docs/{specs,plans}/2026-07-20-url-auth-auto-recovery-research.md |
 | 2026-07-20 | URL Source 增加本地阅读模式：`/sources/[id]` 与页面 Sources 分栏均可在实时 sandbox iframe 和摄入时保存的 Markdown 正文间切换；只读预览不重新联网，旧 sidecar 从 chunks 去重回退。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-reader-mode.md |

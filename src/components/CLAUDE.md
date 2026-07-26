@@ -84,6 +84,9 @@
 ### `graph/`
 
 - `mini-graph-view.tsx` —— 基于 cytoscape 的迷你图（仪表盘 + 上下文 Tab 共用）；外层 `<div key={currentSubjectId}>` 强制 cytoscape 重挂载，避免切换 subject 时闪烁
+- `graph-stylesheet.ts` —— `buildStylesheet(theme, mode)` 双模式：`structure` 与改动前逐条一致；`mastery` 下 `unknown → exposed → mastered` 走同色相（warp）明度 ramp，`struggling` 走 danger 描边（「试过并卡住了」不是「更不懂」，塞进 ramp 会误导），`orphan` 填充让位、focus 层级降级为仅描边；`node[!mastery]` 的兜底不能省——`/api/mastery` 只返回有证据的 slug
+- `mastery-layer.ts` —— 图层纯逻辑：`summarizeMastery`（`unknown` 由节点总数减有证据数推出）/ `applyMasteryData`（**只写 node data，绝不重建元素集**——数据 effect 是 `[]` 一次性，改元素会摧毁 cose 布局与力导向模拟）/ `clearMasteryData`
+- `mastery-inspector.tsx` —— 掌握度模式 tap 节点后的证据面板：state / confidence / 原始证据条目（kind 经 i18n 映射成人话，不上屏原始枚举值）+ 「打开页面」；取数失败只在面板内显示错误行，图本身不受影响
 
 ### `tags/`
 
@@ -192,6 +195,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | Graph 掌握度图层：`use-wiki-graph` 新增 `mode` 状态与 `setMode`（切到 mastery 时额外 fetch `/api/mastery`，`cy.batch` 写 data + `cy.style` 换样式，取数失败回落结构模式），tap handler 读 `modeRef.current`（注册在 `[]` effect 里，读 state 会把挂载时的 mode 永久钉死——该文件已因同类闭包问题留过注释）；退出全屏重置回 `structure`（切换入口只在全屏顶栏，跨全屏持久化会让 mini-graph 困在无法切回的配色里）；`fullscreen-graph` 加模式切换、四态分布 stats、四行图例与证据面板。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 正文首个交互块：新增 `quiz-block.tsx` 与 `use-page-read-beacon.ts`；`page-renderer.tsx` 新增 `interactive?` **透传** prop（**自身不构造**——否则 `editor-preview` 立刻长出判分按钮），`wiki-reading-view.tsx` 是全应用唯一构造方；`lens-feedback.tsx` 改为仅在展示重塑版时渲染并带 `viewedSource` 归因，反馈改走 `/api/evidence`；`hooks/use-profile.ts::useSendSignal` 退役，新增 `hooks/use-evidence.ts::useAppendEvidence`（**刻意不碰 react-query**——QuizBlock 出现在全部六个渲染路径里，在 hook 里 `useQueryClient()` 会让正文渲染硬依赖 Provider）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-21 | failed URL 授权任务改为显式决策：全局任务追踪器仍恢复未取消的结构化 auth-required Ingest，但不再自动弹出授权框；任务行提供 KeyRound“授权后重试”和 CircleX“取消任务”，取消复用通用 cancel API 持久化 `cancelled=true`、清检查点并触发 Research provenance 对账，刷新后不再恢复。spec/plan 见 `docs/{specs,plans}/2026-07-21-failed-url-auth-explicit-choice.md` |
 | 2026-07-20 | URL 登录态恢复改为全局自动提示：`GlobalJobTracker` 同时恢复 active 与结构化 auth-required failed Ingest，`JobsPanel` 按持久化 challenge event ID 去重排队并自动打开授权框，关闭后可用 KeyRound 手动重开；请求携带 job 自身 Subject，Research 授权成功快照同步回 Health 并恢复 importing 轮询。spec/plan 见 docs/{specs,plans}/2026-07-20-url-auth-auto-recovery-research.md |
