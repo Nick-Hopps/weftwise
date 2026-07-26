@@ -11,11 +11,12 @@ import rehypeReact from 'rehype-react';
 import rehypeKatex from 'rehype-katex';
 import * as prod from 'react/jsx-runtime';
 import type { Root as MdastRoot, Text as MdastText, Node as MdastNode, Parent as MdastParent } from 'mdast';
-import type { Code as MdastCode } from 'mdast';
+import type { Code as MdastCode, Blockquote as MdastBlockquote } from 'mdast';
 import type { Plugin } from 'unified';
 import WikiLinkComponent from '@/components/wiki/wiki-link';
 import MermaidDiagram from '@/components/wiki/mermaid-diagram';
 import { CalloutIcon } from '@/components/wiki/callout-icon';
+import { QuizBlock, type QuizInteractiveContext } from '@/components/wiki/quiz-block';
 import { remarkArticleHeadings } from '@/lib/article-toc';
 
 // ---------------------------------------------------------------------------
@@ -355,13 +356,13 @@ function splitQuizCallout(bq: MdastParent & MdastNodeWithData): void {
   if (answer.length === 0) return;
 
   // 包装节点借用 blockquote 的形状（可容纳块级子节点），由 hName 改渲染成 div。
-  const wrapper: MdastParent & MdastNodeWithData = {
+  const wrapper: MdastBlockquote & MdastNodeWithData = {
     type: 'blockquote',
-    children: answer,
+    children: answer as MdastBlockquote['children'],
     data: { hName: 'div', hProperties: { 'data-quiz-answer': '' } },
-  } as MdastParent & MdastNodeWithData;
+  };
 
-  bq.children = [...question, wrapper as unknown as MdastNode];
+  bq.children = [...question, wrapper];
 }
 
 /**
@@ -396,6 +397,21 @@ const prodRuntime = prod as unknown as {
 // renderMarkdown
 // ---------------------------------------------------------------------------
 
+export interface RenderOptions {
+  math?: boolean;
+  headingAnchors?: boolean;
+  selectionBlocks?: boolean;
+  /**
+   * 正文交互块的能力上下文。**只有 Wiki 阅读页会传**——`renderMarkdown` 另外五个
+   * 消费方（Chat / 编辑器预览 / Source 查看器 / URL 阅读模式 / Sources 分栏）
+   * 要么没有页面身份，要么语境是编辑，都不该发证据（决策 9）。
+   *
+   * 不传时 quiz 照样切分、答案照样折叠，只是没有判分按钮——不是运行时判空，
+   * 是 `<QuizBlock>` 根本拿不到 `pageSlug`。
+   */
+  interactive?: QuizInteractiveContext;
+}
+
 /**
  * Render a markdown string (potentially with Obsidian-style YAML frontmatter
  * and [[wikilinks]]) into a React element.
@@ -407,8 +423,9 @@ const prodRuntime = prod as unknown as {
 export function renderMarkdown(
   content: string,
   titleSlugMap?: Record<string, string>,
-  options?: { math?: boolean; headingAnchors?: boolean; selectionBlocks?: boolean },
+  options?: RenderOptions,
 ): React.ReactElement {
+  const interactive = options?.interactive;
   const enableMath = options?.math ?? false;
   const resolver: SlugResolver | undefined = titleSlugMap
     ? (title: string) => titleSlugMap[title] ?? titleSlugMap[title.toLowerCase()]
@@ -468,6 +485,12 @@ export function renderMarkdown(
         div: function CalloutRenderer(props: React.ComponentPropsWithoutRef<'div'>) {
           const calloutType = props['data-callout' as keyof typeof props];
           if (typeof calloutType !== 'string') return createElement('div', props);
+          const quizId = props['data-quiz-id' as keyof typeof props];
+          if (calloutType === 'quiz' && typeof quizId === 'string') {
+            // 能力只从这里流入：`interactive` 是 renderMarkdown 的入参，
+            // QuizBlock 自己既不知道也无从推断当前是阅读页还是编辑器预览。
+            return createElement(QuizBlock, { ...props, quizId, interactive }, props.children);
+          }
           return createElement(
             'div',
             props,

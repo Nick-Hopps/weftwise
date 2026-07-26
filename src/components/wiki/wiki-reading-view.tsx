@@ -130,6 +130,11 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const usingReshaped = reshapeUsable && viewPreference === 'reshape';
   const displayContent = usingReshaped ? reshaped : props.content;
   const tocHeadings = useMemo(() => extractArticleToc(displayContent), [displayContent]);
+  // memo 化：renderMarkdown 的 useMemo 依赖它，每次渲染新建对象会让整篇正文重渲。
+  const interactive = useMemo(
+    () => ({ pageSlug: slug, subjectSlug: props.subjectSlug }),
+    [slug, props.subjectSlug],
+  );
 
   const reshapeState: ReshapeState = lens.state === 'ready'
     ? 'reshaped'
@@ -176,6 +181,9 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
       <div className="wiki-reading-body min-w-0">
         <PageRenderer
           {...rendererProps}
+          // 全应用**唯一**构造 interactive 的地方：只有这里知道「当前语境是阅读」。
+          // 换成 PageRenderer 自己拼，编辑器预览会立刻长出判分按钮（决策 9）。
+          interactive={interactive}
           content={displayContent}
           actions={actions}
           headerExtra={headerExtra}
