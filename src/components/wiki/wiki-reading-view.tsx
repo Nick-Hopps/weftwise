@@ -16,7 +16,6 @@ import PageRenderer from './page-renderer';
 import { HtmlSourceFrame } from './html-source-frame';
 import { UrlSourcePreview } from './url-source-preview';
 import { LensFeedback } from './lens-feedback';
-import { useSendSignal } from '@/hooks/use-profile';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
 import { ReadingProgress } from './reading-progress';
@@ -126,7 +125,6 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   }, [showSplit, docs, slug]);
 
   const lens = useLens(props.subjectSlug, slug);
-  const sendSignal = useSendSignal();
   const reshaped = lens.data?.renderedMd;
   const reshapeUsable = reshaped != null && lens.data?.source !== 'canonical';
   const showOriginal = viewPreference === 'canonical';
@@ -177,10 +175,9 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
           const next = showOriginal ? 'reshape' : 'canonical';
           setViewPreference(next);
           writePageViewPreference(window.localStorage, props.subjectSlug, slug, next);
-          // A7：「看原文」此前完全无埋点——原设计声明了 view_original 信号，
-          // 却没有任何入口会产生它。它不参与风格调整（可能是怀疑而非难度），
-          // 只作事后归因用。
-          if (next === 'canonical') sendSignal.mutate({ type: 'view_original', slug });
+          // A7 的归因需求已由 `viewedSource`（随 self-report 证据落 detail_json）覆盖。
+          // 不再单独记 `view_original`——证据枚举里没有它，也没有任何消费者，
+          // 那正是本设计开篇要修的「声明了信号却没有第二个消费者」。
         }}
         onRefresh={() => void lens.refresh()}
         onCancel={lens.cancel}

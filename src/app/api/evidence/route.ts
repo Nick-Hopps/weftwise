@@ -5,7 +5,8 @@ import { resolveUserId } from '@/server/middleware/user';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { getPageBySlug } from '@/server/db/repos/pages-repo';
 import { appendEvidence } from '@/server/db/repos/evidence-repo';
-import { EVIDENCE_KIND_META, type EvidenceKind } from '@/lib/contracts';
+import { EVIDENCE_KIND_META, STYLE_BEARING_EVIDENCE_KINDS, type EvidenceKind } from '@/lib/contracts';
+import { learnStyleFromEvidence } from '@/server/services/style-learning';
 
 export const runtime = 'nodejs';
 
@@ -48,9 +49,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Page "${body.slug}" not found` }, { status: 404 });
   }
 
+  const userId = resolveUserId(request);
   try {
     appendEvidence({
-      userId: resolveUserId(request),
+      userId,
       subjectId,
       slug: body.slug,
       kind: body.kind,
@@ -63,5 +65,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to record evidence' }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true }, { status: 201 });
+  // 只有「讲法」类证据才推动风格画像；掌握度类证据跑 reducer 纯属浪费，
+  // 且白名单本就会把它们全滤掉。`style` 供客户端决定是否失效 lens 缓存。
+  const style = STYLE_BEARING_EVIDENCE_KINDS.includes(body.kind)
+    ? learnStyleFromEvidence(userId)
+    : { changed: false, version: 0 };
+
+  return NextResponse.json({ ok: true, style }, { status: 201 });
 }

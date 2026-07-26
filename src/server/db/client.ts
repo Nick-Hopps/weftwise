@@ -572,19 +572,10 @@ function migratePageRenditionAssets(): void {
   `);
 }
 
-function migrateProfileSignals(): void {
-  const sqlite = rawSqlite!;
-  if (tableExists('profile_signals')) return;
-  sqlite.exec(`
-    CREATE TABLE profile_signals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      subject_id TEXT,
-      slug TEXT,
-      created_at TEXT NOT NULL
-    );
-  `);
+// profile_signals 已退役（真实源迁到 page_evidence）。存量库直接丢表，
+// 其中的 style-bearing 历史信号在并存期已双写进证据表。
+function dropProfileSignals(): void {
+  rawSqlite!.exec(`DROP TABLE IF EXISTS profile_signals`);
 }
 
 // 逐页掌握度证据流（append-only，掌握度读时派生）。
@@ -966,7 +957,7 @@ function ensureTables() {
       migrateUserProfiles();
       migratePageRenditions();
       migratePageRenditionAssets();
-      migrateProfileSignals();
+      dropProfileSignals();
       migratePageEvidence();
       migrateResearchBacklog();
       migrateResearchProvenance();

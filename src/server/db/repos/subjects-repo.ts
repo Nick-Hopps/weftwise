@@ -308,7 +308,6 @@ export function deleteWithContents(
     sqlite.prepare(`DELETE FROM page_aliases WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM pages WHERE subject_id = ?`).run(id);
     sqlite.prepare(`DELETE FROM sources WHERE subject_id = ?`).run(id);
-    sqlite.prepare(`DELETE FROM profile_signals WHERE subject_id = ?`).run(id);
     // FK CASCADE 也会清掉，但 purge 事务逐表列举是这里的约定——审计「证据清干净了吗」
     // 的人应该在这份清单里找得到它。
     sqlite.prepare(`DELETE FROM page_evidence WHERE subject_id = ?`).run(id);

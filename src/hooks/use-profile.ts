@@ -44,27 +44,3 @@ export function useUpdateProfile() {
     },
   });
 }
-
-export function useSendSignal() {
-  const apiFetch = useApiFetch();
-  const qc = useQueryClient();
-  // POST 不自动注入 subjectId，按约定在 body 显式带（route 仍有 cookie 兜底）。
-  const subjectId = useUIStore((s) => s.currentSubjectId);
-  return useMutation({
-    mutationFn: async (payload: { type: string; slug?: string; viewedSource?: 'canonical' | 'reshape' }) => {
-      const res = await apiFetch('/api/profile/signals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, subjectId: subjectId ?? undefined }),
-      });
-      if (!res.ok) throw new Error(`signal ${res.status}`);
-      return res.json() as Promise<{ changed: boolean; version: number }>;
-    },
-    onSuccess: (data) => {
-      if (data.changed) {
-        qc.invalidateQueries({ queryKey: ['profile'] });
-        qc.invalidateQueries({ queryKey: ['lens'] });
-      }
-    },
-  });
-}

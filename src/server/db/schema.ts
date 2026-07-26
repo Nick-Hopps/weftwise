@@ -305,16 +305,6 @@ export const pageRenditionAssets = sqliteTable(
   (t) => ({ pageIdx: index('page_rendition_assets_page_idx').on(t.subjectId, t.slug) }),
 );
 
-// 反馈信号（append-only，喂确定性 reducer）。
-export const profileSignals = sqliteTable('profile_signals', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  userId: text('user_id').notNull(),
-  type: text('type').notNull(),
-  subjectId: text('subject_id'),
-  slug: text('slug'),
-  createdAt: text('created_at').notNull(),
-});
-
 // 逐页掌握度的唯一真实源：append-only 证据流，掌握度读时由 deriveMastery 纯函数派生。
 // polarity / strength 由 kind 确定性派生后冗余落列——新增 kind 不必回填历史行。
 // 挂 subjects FK CASCADE（与 page_renditions 故意不挂相反）：证据是 user-owned 事实

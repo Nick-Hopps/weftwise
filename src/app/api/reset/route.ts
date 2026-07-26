@@ -121,7 +121,6 @@ export async function POST(request: NextRequest) {
     sqlite.prepare(`DELETE FROM page_aliases WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM pages WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM sources WHERE subject_id = ?`).run(subject.id);
-    sqlite.prepare(`DELETE FROM profile_signals WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM research_backlog WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM pending_actions WHERE subject_id = ?`).run(subject.id);
     sqlite.prepare(`DELETE FROM ingest_checkpoints WHERE job_id IN (SELECT id FROM jobs WHERE subject_id = ?)`).run(subject.id);
@@ -263,7 +262,6 @@ async function resetAllSubjects(now: string): Promise<NextResponse> {
     sqlite.exec('DELETE FROM page_aliases');
     sqlite.exec('DELETE FROM pages');
     sqlite.exec('DELETE FROM sources');
-    sqlite.exec('DELETE FROM profile_signals');
     sqlite.exec('DELETE FROM research_backlog');
     sqlite.exec('DELETE FROM pending_actions');
     sqlite.exec('DELETE FROM job_events');

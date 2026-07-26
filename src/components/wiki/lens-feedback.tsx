@@ -2,7 +2,8 @@
 import { useState } from 'react';
 import { ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useSendSignal } from '@/hooks/use-profile';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAppendEvidence } from '@/hooks/use-evidence';
 import type { SelectionSourceKind } from '@/lib/contracts';
 import { useI18n } from '@/components/i18n-provider';
 
@@ -21,11 +22,20 @@ export function LensFeedback({
   viewedSource: SelectionSourceKind;
 }) {
   const { t } = useI18n();
-  const send = useSendSignal();
+  const qc = useQueryClient();
+  const appendEvidence = useAppendEvidence((result) => {
+    if (!result.style?.changed) return;
+    qc.invalidateQueries({ queryKey: ['profile'] });
+    qc.invalidateQueries({ queryKey: ['lens'] }); // 画像变 → 重塑缓存键变 → 重取
+  });
   const [sent, setSent] = useState<string | null>(null);
 
   const fire = (type: 'too_hard' | 'too_easy') => {
-    send.mutate({ type, slug, viewedSource });
+    appendEvidence({
+      slug,
+      kind: type === 'too_hard' ? 'self-report-hard' : 'self-report-easy',
+      detail: { viewedSource },
+    });
     setSent(type === 'too_hard' ? 'too hard' : 'too easy');
   };
 
@@ -33,10 +43,10 @@ export function LensFeedback({
     <div className="mx-auto w-full px-6 pb-12 max-w-[var(--reading-max-width)]">
       <div className="flex items-center gap-3 border-t border-border pt-6 text-xs text-foreground-tertiary">
         <span>{t('wiki.lens.question')}</span>
-        <Button intent="outline" size="sm" onClick={() => fire('too_hard')} disabled={send.isPending}>
+        <Button intent="outline" size="sm" onClick={() => fire('too_hard')}>
           <ThumbsDown className="h-3.5 w-3.5" /> {t('wiki.lens.tooHard')}
         </Button>
-        <Button intent="outline" size="sm" onClick={() => fire('too_easy')} disabled={send.isPending}>
+        <Button intent="outline" size="sm" onClick={() => fire('too_easy')}>
           <ThumbsUp className="h-3.5 w-3.5" /> {t('wiki.lens.tooEasy')}
         </Button>
         {sent && <span className="text-accent-strong">{t(sent === 'too hard' ? 'wiki.lens.loggedHard' : 'wiki.lens.loggedEasy')}</span>}

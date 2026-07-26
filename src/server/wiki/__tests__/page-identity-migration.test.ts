@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe('migratePageIdentityCaches', () => {
-  it('幂等迁移来源、向量、成熟度、rendition 与画像信号，并可反向迁移', async () => {
+  it('幂等迁移来源、向量、成熟度、rendition 与掌握度证据，并可反向迁移', async () => {
     const { getRawDb } = await import('../../db/client');
     const { migratePageIdentityCaches } = await import('../page-identity-migration');
     const db = getRawDb();
@@ -41,8 +41,9 @@ describe('migratePageIdentityCaches', () => {
       INSERT INTO page_rendition_assets VALUES ('asset-1','s1','old-page','image/png','YQ==','now')
     `).run();
     db.prepare(`
-      INSERT INTO profile_signals (user_id,type,subject_id,slug,created_at)
-      VALUES ('local','helpful','s1','old-page','now')
+      INSERT INTO page_evidence
+        (user_id,subject_id,slug,kind,polarity,strength,anchor,detail_json,created_at)
+      VALUES ('local','s1','old-page','quiz-correct','positive','strong','q1',NULL,'now')
     `).run();
 
     migratePageIdentityCaches('s1', { fromSlug: 'old-page', toSlug: 'new-page' });
@@ -54,7 +55,7 @@ describe('migratePageIdentityCaches', () => {
       ['page_maturity', 'slug'],
       ['page_renditions', 'slug'],
       ['page_rendition_assets', 'slug'],
-      ['profile_signals', 'slug'],
+      ['page_evidence', 'slug'],
     ]) {
       expect(db.prepare(`SELECT ${column} AS slug FROM ${table}`).all())
         .toEqual([{ slug: 'new-page' }]);
