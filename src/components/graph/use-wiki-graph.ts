@@ -7,13 +7,20 @@
  * 容器间迁移（全屏切换）仍由 MiniGraphView 负责。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import cytoscape from 'cytoscape';
 import { useUIStore } from '@/stores/ui-store';
 import { useApiFetch } from '@/lib/api-fetch';
 import { readGraphTheme } from '@/lib/theme/read-theme-vars';
-import { buildStylesheet, applyHighlight } from './graph-stylesheet';
+import { buildStylesheet, applyHighlight, type GraphMode } from './graph-stylesheet';
+import {
+  applyMasteryData,
+  clearMasteryData,
+  summarizeMastery,
+  type MasteryBySlug,
+  type MasteryDistribution,
+} from './mastery-layer';
 import { computeNodeSize, computeLayoutPreset } from './graph-layout';
 import { startForceSimulation, type SimulationHandle } from './force-simulation';
 
@@ -45,6 +52,17 @@ export function useWikiGraph(
   const [isLoading, setIsLoading] = useState(true);
   const [isEmpty, setIsEmpty] = useState(false);
   const [stats, setStats] = useState<GraphStats>({ nodes: 0, edges: 0, orphans: 0 });
+
+  const [mode, setModeState] = useState<GraphMode>('structure');
+  const [masteryDist, setMasteryDist] = useState<MasteryDistribution | null>(null);
+  const [masteryError, setMasteryError] = useState<string | null>(null);
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  /**
+   * tap handler 注册在下面的 `[]` 一次性 effect 里，闭包会把挂载时的 `mode` **永久钉死**
+   * ——切到掌握度模式后 tap 仍然跳转。本文件已经因为同类问题留过注释（数据 effect 的闭包
+   * 把 `currentSlug` 钉在挂载时刻，所以焦点高亮才被拆到独立 effect）。同一个坑不踩第二次。
+   */
+  const modeRef = useRef<GraphMode>('structure');
 
   // Build cy instance once data arrives. Mount into the compact container by
   // default; we migrate the underlying DOM between compact / fullscreen hosts
@@ -101,6 +119,11 @@ export function useWikiGraph(
 
         cy.on('tap', 'node', (evt) => {
           const slug = evt.target.id();
+          // 掌握度模式的主要意图是**审计**而非导航：选中看证据，面板里另有「打开页面」。
+          if (modeRef.current === 'mastery') {
+            setSelectedSlug(slug);
+            return;
+          }
           router.push(`/wiki/${slug}`);
         });
 
@@ -166,9 +189,68 @@ export function useWikiGraph(
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy || isLoading) return;
-    cy.style(buildStylesheet(readGraphTheme()));
+    cy.style(buildStylesheet(readGraphTheme(), mode));
     applyHighlight(cy, currentSlug);
-  }, [darkMode, currentSlug, isLoading]);
+  }, [darkMode, currentSlug, isLoading, mode]);
+
+  /**
+   * 切换图层模式。掌握度模式**额外**取一次 `/api/mastery`——它与图结构生命周期不同
+   * （图结构 mount 时一次性拉，掌握度随证据变化、可随时开关），分开才能只刷新着色
+   * 而不动布局。
+   *
+   * 取数失败保持结构模式并提示一次，不影响既有 graph。
+   */
+  const setMode = useCallback(
+    async (next: GraphMode) => {
+      const cy = cyRef.current;
+      if (!cy) return;
+
+      if (next === 'structure') {
+        clearMasteryData(cy);
+        setMasteryError(null);
+        setSelectedSlug(null);
+        setMasteryDist(null);
+        modeRef.current = 'structure';
+        setModeState('structure');
+        return;
+      }
+
+      try {
+        const res = await subjectFetch('/api/mastery');
+        if (!res.ok) throw new Error(`mastery ${res.status}`);
+        const { masteryBySlug } = (await res.json()) as { masteryBySlug: MasteryBySlug };
+        const nodeIds = cy.nodes().map((n) => n.id());
+
+        applyMasteryData(cy, masteryBySlug ?? {});
+        setMasteryDist(summarizeMastery(nodeIds, masteryBySlug ?? {}));
+        setMasteryError(null);
+        modeRef.current = 'mastery';
+        setModeState('mastery');
+      } catch (error) {
+        console.error('[graph] mastery fetch failed', error);
+        setMasteryError(error instanceof Error ? error.message : String(error));
+        modeRef.current = 'structure';
+        setModeState('structure');
+      }
+    },
+    [subjectFetch],
+  );
+
+  /**
+   * 退出全屏时调用（F1b）。切换入口**只在全屏顶栏**——模式若跨全屏持久化，
+   * Dashboard 与 Context 面板的 mini-graph 会停在掌握度配色上，而那里没有任何切回去的
+   * UI，用户被困在一个自己看不懂的配色里；且 200px 见方的概览卡片上四态 ramp 读不出
+   * 信息，只会让首页看起来「坏了」。
+   */
+  const resetMode = useCallback(() => {
+    const cy = cyRef.current;
+    if (cy) clearMasteryData(cy);
+    modeRef.current = 'structure';
+    setModeState('structure');
+    setMasteryDist(null);
+    setMasteryError(null);
+    setSelectedSlug(null);
+  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -180,5 +262,10 @@ export function useWikiGraph(
     };
   }, []);
 
-  return { cyRef, simRef, isLoading, isEmpty, stats };
+  return {
+    cyRef, simRef, isLoading, isEmpty, stats,
+    mode, setMode, resetMode,
+    masteryDist, masteryError,
+    selectedSlug, setSelectedSlug,
+  };
 }
