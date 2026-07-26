@@ -8,8 +8,12 @@
 import { Compass, Minimize2, Target } from 'lucide-react';
 import { IconButton } from '@/components/ui/icon-button';
 import { Kbd } from '@/components/ui/kbd';
+import { Segmented } from '@/components/ui/segmented';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/components/i18n-provider';
+import { MasteryInspector } from './mastery-inspector';
+import type { GraphMode } from './graph-stylesheet';
+import type { MasteryDistribution } from './mastery-layer';
 
 interface FullscreenGraphProps {
   fullscreenRef: React.RefObject<HTMLDivElement | null>;
@@ -17,6 +21,12 @@ interface FullscreenGraphProps {
   hasCurrent: boolean;
   onRecenter: () => void;
   onClose: () => void;
+  mode: GraphMode;
+  onModeChange: (next: GraphMode) => void;
+  masteryDist: MasteryDistribution | null;
+  masteryError: string | null;
+  selectedSlug: string | null;
+  onCloseInspector: () => void;
 }
 
 export function FullscreenGraph({
@@ -25,8 +35,15 @@ export function FullscreenGraph({
   hasCurrent,
   onRecenter,
   onClose,
+  mode,
+  onModeChange,
+  masteryDist,
+  masteryError,
+  selectedSlug,
+  onCloseInspector,
 }: FullscreenGraphProps) {
   const { t } = useI18n();
+  const mastery = mode === 'mastery';
   return (
     <div
       role="dialog"
@@ -45,18 +62,48 @@ export function FullscreenGraph({
             {t('graph.title')}
           </h2>
           <span className="text-xs text-foreground-tertiary tabular-nums whitespace-nowrap">
-            {t('graph.nodes', { count: stats.nodes })}
-            <span className="mx-1.5 text-foreground-disabled">·</span>
-            {t('graph.links', { count: stats.edges })}
-            {stats.orphans > 0 && (
+            {mastery && masteryDist ? (
+              // 数字不印在节点上（label 已是标题，再叠数字会挤爆；且四态本就不是标量分数，
+              // 印一个「72」是假精度）。分布放这里，明细放证据面板。
               <>
+                {t('graph.mastery.mastered')} {masteryDist.mastered}
                 <span className="mx-1.5 text-foreground-disabled">·</span>
-                <span className="text-foreground-tertiary">{t('graph.orphans', { count: stats.orphans })}</span>
+                {t('graph.mastery.exposed')} {masteryDist.exposed}
+                <span className="mx-1.5 text-foreground-disabled">·</span>
+                {t('graph.mastery.struggling')} {masteryDist.struggling}
+                <span className="mx-1.5 text-foreground-disabled">·</span>
+                {t('graph.mastery.unknown')} {masteryDist.unknown}
+              </>
+            ) : (
+              <>
+                {t('graph.nodes', { count: stats.nodes })}
+                <span className="mx-1.5 text-foreground-disabled">·</span>
+                {t('graph.links', { count: stats.edges })}
+                {stats.orphans > 0 && (
+                  <>
+                    <span className="mx-1.5 text-foreground-disabled">·</span>
+                    <span className="text-foreground-tertiary">{t('graph.orphans', { count: stats.orphans })}</span>
+                  </>
+                )}
               </>
             )}
           </span>
+          {masteryError && (
+            <span className="text-xs text-danger whitespace-nowrap">{t('graph.mastery.loadFailed')}</span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
+          {/* 切换入口**只在这里**——掌握度是一次主动的审计动作，不是常驻视图状态，
+              退出全屏即重置（F1b）。 */}
+          <Segmented<GraphMode>
+            value={mode}
+            onChange={onModeChange}
+            aria-label={t('graph.mode.label')}
+            options={[
+              { value: 'structure', label: t('graph.mode.structure') },
+              { value: 'mastery', label: t('graph.mode.mastery') },
+            ]}
+          />
           <IconButton
             size="base"
             onClick={onRecenter}
@@ -84,10 +131,25 @@ export function FullscreenGraph({
       {/* Floating legend — top-right of canvas area (avoids dev overlay + profile badge) */}
       <div className="pointer-events-none absolute top-16 right-5 z-10 flex flex-col gap-1.5 px-3 py-2 rounded-md bg-surface/90 ring-1 ring-border/60 shadow-sm text-[11px]">
         <span className="text-[9px] uppercase tracking-wider font-medium text-foreground-tertiary">{t('graph.legend')}</span>
-        <LegendRow color="var(--color-graph-active)" label={hasCurrent ? t('graph.currentPage') : t('graph.active')} ring />
-        <LegendRow color="var(--color-graph-node)" label={t('graph.linkedPage')} />
-        <LegendRow color="var(--color-graph-orphan)" label={t('graph.orphan')} />
+        {mastery ? (
+          <>
+            <LegendRow color="var(--color-graph-mastery-mastered)" label={t('graph.mastery.mastered')} />
+            <LegendRow color="var(--color-graph-mastery-exposed)" label={t('graph.mastery.exposed')} />
+            <LegendRow color="var(--color-graph-mastery-struggling)" label={t('graph.mastery.struggling')} ring />
+            <LegendRow color="var(--color-graph-orphan)" label={t('graph.mastery.unknown')} />
+          </>
+        ) : (
+          <>
+            <LegendRow color="var(--color-graph-active)" label={hasCurrent ? t('graph.currentPage') : t('graph.active')} ring />
+            <LegendRow color="var(--color-graph-node)" label={t('graph.linkedPage')} />
+            <LegendRow color="var(--color-graph-orphan)" label={t('graph.orphan')} />
+          </>
+        )}
       </div>
+
+      {mastery && selectedSlug && (
+        <MasteryInspector slug={selectedSlug} onClose={onCloseInspector} />
+      )}
 
       {/* Operation hint — bottom-right */}
       <div className="pointer-events-none absolute bottom-4 right-5 z-10 flex items-center gap-3 text-[11px] text-foreground-tertiary">
@@ -97,7 +159,7 @@ export function FullscreenGraph({
         </HintChip>
         <HintChip>
           <Kbd>{t('graph.input.click')}</Kbd>
-          <span>{t('graph.click')}</span>
+          <span>{mastery ? t('graph.clickInspect') : t('graph.click')}</span>
         </HintChip>
         <HintChip>
           <Kbd>Esc</Kbd>
