@@ -32,6 +32,11 @@ vi.mock('@/server/llm/provider-registry', () => ({ isReshapeConfigured: () => is
 const reshape = vi.fn();
 vi.mock('@/server/services/reshape-service', () => ({ reshapePageBody: (...args: unknown[]) => reshape(...args) }));
 
+const appendEvidence = vi.fn();
+vi.mock('@/server/db/repos/evidence-repo', () => ({
+  appendEvidence: (...args: unknown[]) => appendEvidence(...args),
+}));
+
 const params = { slug: ['a'] };
 const getReq = () => new NextRequest('http://x/api/lens/a');
 const postReq = () => new NextRequest('http://x/api/lens/a?subjectId=s1', { method: 'POST' });
@@ -86,5 +91,45 @@ describe('POST /api/lens/[...slug]', () => {
     const response = await POST(postReq(), { params: Promise.resolve(params) } as never);
     expect(response.status).toBe(502);
     expect(replace).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/lens/[...slug] —— D4 重塑请求证据', () => {
+  it('生成成功后追加一条 reshape-request', async () => {
+    reshape.mockResolvedValue({ body: '重塑版', model: 'm', assets: [] });
+    const { POST } = await import('../route');
+    const response = await POST(postReq(), { params: Promise.resolve(params) } as never);
+
+    expect(response.status).toBe(200);
+    expect(appendEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'local',
+        subjectId: 's1',
+        slug: 'a',
+        kind: 'reshape-request',
+      }),
+    );
+  });
+
+  it('证据写入抛错时主响应不变（best-effort，不阻断已生成的重塑版）', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    reshape.mockResolvedValue({ body: '重塑版', model: 'm', assets: [] });
+    appendEvidence.mockImplementation(() => { throw new Error('db locked'); });
+
+    const { POST } = await import('../route');
+    const response = await POST(postReq(), { params: Promise.resolve(params) } as never);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ renderedMd: '重塑版', source: 'generated', stale: false });
+  });
+
+  it('生成失败时不记证据（没发生的事不该留痕）', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    reshape.mockRejectedValue(new Error('model down'));
+    const { POST } = await import('../route');
+    const response = await POST(postReq(), { params: Promise.resolve(params) } as never);
+
+    expect(response.status).toBe(502);
+    expect(appendEvidence).not.toHaveBeenCalled();
   });
 });

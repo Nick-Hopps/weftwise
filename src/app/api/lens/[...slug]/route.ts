@@ -8,6 +8,7 @@ import { getProfileOrDefault } from '@/server/db/repos/profiles-repo';
 import { computeCanonicalHash } from '@/server/profile/rendition-hash';
 import { getLatestRendition, replaceRendition } from '@/server/db/repos/renditions-repo';
 import { reshapePageBody } from '@/server/services/reshape-service';
+import { recordEvidence } from '@/server/services/record-evidence';
 import { isReshapeConfigured } from '@/server/llm/provider-registry';
 
 export const runtime = 'nodejs';
@@ -85,6 +86,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       renderedMd: result.body,
       model: result.model,
       assets: result.assets,
+    });
+    // D4：主动要求重塑本身就是「原文这样讲我没读顺」的弱信号。best-effort，
+    // 失败不影响已经生成好的重塑版。
+    recordEvidence({
+      userId: resolveUserId(request),
+      subjectId: context.subject.id,
+      slug: context.slug,
+      kind: 'reshape-request',
+      detail: { profileVersion: context.profile.version },
     });
     return NextResponse.json({ renderedMd: result.body, source: 'generated', stale: false });
   } catch (error) {
