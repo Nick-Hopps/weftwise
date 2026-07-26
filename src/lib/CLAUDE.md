@@ -12,10 +12,11 @@
 |------|------|
 | `contracts.ts` | **全应用领域类型单一真实源**：Subject/Wiki/Job/Source/Health/Changeset/Conversation，以及 PendingAction 与 Research run/candidate/approval/delivery/provenance 前后端契约 |
 | `cn.ts` | `tailwind-merge + clsx` 合并器（`cn(...)`） |
+| `stable-hash.ts` | 🆕 `fnv1a(text)`：同步、非加密的 32 位 FNV-1a（UTF-8 字节，8 位小写 hex）。用于 quiz 的跨会话身份——`crypto.subtle` 是异步的，而计算发生在 remark 插件的同步 transformer 里 |
 | `slug.ts` | URL-safe slug 工具（与 `server/wiki/page-identity.ts` 配合） |
 | `path-display.ts` | 路径展示纯函数：安全解码 URL slug，并优先匹配页面元数据标题 |
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
-| `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
+| `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`createRemarkQuiz()` 按 blockquote 内**首个** `thematicBreak` 把 `[!quiz]` 切成问题段 / 答案段（语言无关，不依赖「答案：」这类会随 `wikiLanguage` 漂移的标记），答案段包进 `data-quiz-answer` 容器、问题段文本 hash 写 `data-quiz-id`；`RenderOptions.interactive` 是正文交互块的能力接缝，**只有 Wiki 阅读页会传**；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
 | `tags.ts` | Tags 工作台纯分析：标签摘要/覆盖率/格式变体/组合筛选，以及 `buildTagReviewQueue` / `filterTagReviewQueue` 即时投影格式变体、非重复单次标签与未标记页面；不持久化 Review 状态 |
 | `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
 | `chat-reference.ts` | Ask AI 用户消息引用纯函数：把本轮 Passage 绑定到当前 Subject/page，过滤空摘录并限制最多 40 条，供即时消息展示与 API 持久化共用 |
@@ -167,6 +168,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | 新增 `stable-hash.ts::fnv1a`；`markdown-client.ts` 新增 `createRemarkQuiz()`（排在 `selectionBlocks` **之后**——它会插入没有 `position` 的包装节点）与 `RenderOptions.interactive` 能力接缝；`contracts.ts` 新增 `EvidenceKind` / `EVIDENCE_KIND_META` / `STYLE_BEARING_EVIDENCE_KINDS` / `MasteryState` / `MasteryVerdict(Lite)`——**证据类型枚举是两份 spec 共用的单一真实源，不得各自扩充**。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-18 | `tool-activity.ts` 将 emoji 映射改为稳定语义图标键，worker 事件只写可复制纯文本；`markdown-client.ts` 为 callout 注入 Lucide 图标并在渲染期兼容剥离历史标题 emoji，不改写 vault |
 | 2026-07-17 | `ask-ai-floating-panel.ts` 新增桌面工作面 resize 尺寸约束与视口矩形适配，保证右/下/双轴调整及窗口变化后仍完整可操作 |
 | 2026-07-17 | contracts 新增 `UserMessageReference`（含可选页面标题快照）与 `ConversationMessage.references`；`chat-reference.ts` 统一把发送 Passage 绑定到当前 Subject/page，供用户消息即时展示和持久化恢复 |

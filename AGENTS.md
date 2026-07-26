@@ -61,6 +61,8 @@
 | 源数据 | `vault/.llm-wiki/sources/<subject>/*.json` 同时落地 | SQLite 仅作为可重建缓存 |
 | Subject 隔离 | first-class `subjects` 表 + `pages` 复合 PK `(subject_id, slug)` + `path UNIQUE` | 跨主题同名 slug 合法；fs 路径仍唯一；删除 subject 级联清理全部关联数据（DB 单事务 + vault 目录 + git commit），`general`/active/被跨主题引用者禁删 |
 | Subject 解析 | `src/server/middleware/subject.ts::resolveSubjectFromRequest()`（`?subjectId` > `?s=` > body > cookie `wiki_subject` > general 兜底）| 服务端唯一真实源；前端通过 store + cookie 同步 |
+| 逐页掌握度 | append-only `page_evidence` 证据流 + 读时纯函数派生（`server/profile/mastery.ts`），**不建物化表** | 判定规则一定会迭代，物化就要全量重算；衰减天然按 `now` 计算无需调度；**证据即解释**——任何结论都能回溯到原始条目与时间戳 |
+| 正文交互能力 | 由最外层知道语境的调用方**显式授予**（`renderMarkdown(..., { interactive })`），中间层与展示层不得推断 | `renderMarkdown` 有 6 个消费方，其中 4 个没有页面身份；让 `PageRenderer` 自行构造，编辑器预览会立刻长出判分按钮 |
 
 ### 模块结构图
 

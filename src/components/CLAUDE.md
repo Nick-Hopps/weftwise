@@ -56,6 +56,8 @@
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
 - `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行右侧 `actions` 插槽渲染统一动作条（Edit 已移入 `PageActions`，不再有内置 `editHref`/Edit 按钮）
+- `quiz-block.tsx` 🆕 —— `[!quiz]` callout 的渲染形态：答案折叠开关（用 `hidden` 属性，**六个消费方一视同仁**——「不剧透」是内容呈现决定）+ 判分按钮（**仅传入 `interactive` 时**）。兼容有 / 无答案两种形态：存量页没有 `---`，退化为直接自评。`quizEvidenceFor(outcome, hasAnswer)` 纯函数承载决策 5 的 strength 不对称——揭晓后判对 strong、无答案自评答对 weak、判错恒 strong
+- `use-page-read-beacon.ts` 🆕 —— D5 读完埋点：滚动到底（复用 `reading-progress` 已导出的纯函数 `calculateReadingProgress`）**且**可见停留 ≥30s 才发一条 `page-read`，会话内按 `subject:slug` 去重。**不改 `ReadingProgress`**——它是纯展示组件，没有也不该有页面身份
 - `page-skeleton.tsx` —— loading skeleton
 - `page-editor.tsx` —— 🆕 在线编辑容器：根/loading/error **全高 flex 布局**（`flex flex-col h-full`，去掉旧 `max-w-content` 居中收窄）；拉 raw → md-editor → Save(PUT)/Cancel → 失效缓存 + router.refresh + 跳回读页；额外拉 `['pages',subjectId]` 经 `buildTitleSlugMap` 构建 titleSlugMap 传入预览；错误内联、dirty 守卫
 - `md-editor.tsx` —— `@uiw/react-md-editor/nohighlight` 的 `dynamic(ssr:false)` 轻量封装；动态加载有全高 skeleton，默认 `preview="edit"` 且关闭全文 Prism 高亮，用户仍可用内置工具栏按需切换 Live / Preview；`height="100%"` 撑满父高，`components.preview` 接自定义预览，外层 wrapper 类名 `wiki-md-editor`（供 `globals.css` 工具栏/字号增强定位），data-color-mode 跟随 darkMode
@@ -190,6 +192,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | 正文首个交互块：新增 `quiz-block.tsx` 与 `use-page-read-beacon.ts`；`page-renderer.tsx` 新增 `interactive?` **透传** prop（**自身不构造**——否则 `editor-preview` 立刻长出判分按钮），`wiki-reading-view.tsx` 是全应用唯一构造方；`lens-feedback.tsx` 改为仅在展示重塑版时渲染并带 `viewedSource` 归因，反馈改走 `/api/evidence`；`hooks/use-profile.ts::useSendSignal` 退役，新增 `hooks/use-evidence.ts::useAppendEvidence`（**刻意不碰 react-query**——QuizBlock 出现在全部六个渲染路径里，在 hook 里 `useQueryClient()` 会让正文渲染硬依赖 Provider）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-21 | failed URL 授权任务改为显式决策：全局任务追踪器仍恢复未取消的结构化 auth-required Ingest，但不再自动弹出授权框；任务行提供 KeyRound“授权后重试”和 CircleX“取消任务”，取消复用通用 cancel API 持久化 `cancelled=true`、清检查点并触发 Research provenance 对账，刷新后不再恢复。spec/plan 见 `docs/{specs,plans}/2026-07-21-failed-url-auth-explicit-choice.md` |
 | 2026-07-20 | URL 登录态恢复改为全局自动提示：`GlobalJobTracker` 同时恢复 active 与结构化 auth-required failed Ingest，`JobsPanel` 按持久化 challenge event ID 去重排队并自动打开授权框，关闭后可用 KeyRound 手动重开；请求携带 job 自身 Subject，Research 授权成功快照同步回 Health 并恢复 importing 轮询。spec/plan 见 docs/{specs,plans}/2026-07-20-url-auth-auto-recovery-research.md |
 | 2026-07-20 | URL Source 增加“实时网页 / 阅读模式”共享 Tabs：目标站拒绝 iframe 时可原地阅读 ingest 已清洗的 Markdown；两个 Source 入口复用同一组件，打开原网页继续保留 |
