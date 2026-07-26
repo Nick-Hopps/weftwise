@@ -1,14 +1,13 @@
-import { appendSignal, recentSignals } from '@/server/db/repos/signals-repo';
-import { getProfileOrDefault, upsertProfile } from '@/server/db/repos/profiles-repo';
-import { applySignalsToStyle, type SignalType } from '@/server/profile/signal-reducer';
+import { appendSignal, type SignalType } from '@/server/db/repos/signals-repo';
+import { listStyleEvidence } from '@/server/db/repos/evidence-repo';
+import { getProfile, getProfileOrDefault, upsertProfile } from '@/server/db/repos/profiles-repo';
+import { applyEvidenceToStyle } from '@/server/profile/signal-reducer';
 import { recordEvidence } from '@/server/services/record-evidence';
 import type { EvidenceKind } from '@/lib/contracts';
 
-const RECENT_WINDOW = 8;
-
 /**
- * 并存期双写映射：只有这两种信号是 **style-bearing** 的，也只有它们在证据表里有对应
- * 语义。`view_original` 是归因埋点；`simplify_click` / `deepen_click` 的入口从未实现。
+ * 信号 → 证据的映射：只有这两种是 **style-bearing** 的。
+ * `view_original` 是归因埋点；`simplify_click` / `deepen_click` 的入口从未实现。
  */
 const SIGNAL_TO_EVIDENCE: Partial<Record<SignalType, EvidenceKind>> = {
   too_hard: 'self-report-hard',
@@ -16,28 +15,44 @@ const SIGNAL_TO_EVIDENCE: Partial<Record<SignalType, EvidenceKind>> = {
 };
 
 /**
- * 落一条信号 → 取最近窗口 → 确定性 reducer 评估 → 达阈值才 upsert 新画像。
- * 返回是否变更及当前 version（前端据 changed 决定是否失效 lens 缓存）。
+ * 落一条证据 → 取消费边界之后、时间窗内的 style-bearing 证据 → 确定性 reducer 评估
+ * → 达阈值才 upsert 新画像。返回是否变更及当前 version（前端据 changed 失效 lens 缓存）。
  */
 export function applySignal(
   userId: string,
   type: SignalType,
-  ctx?: { subjectId?: string | null; slug?: string | null },
+  ctx?: { subjectId?: string | null; slug?: string | null; viewedSource?: 'canonical' | 'reshape' | null },
 ): { changed: boolean; version: number } {
+  // 旧表仍在双写（三步替换的第二步：已切读，未删旧）。任务 13 删表时一并移除。
   appendSignal({ userId, type, subjectId: ctx?.subjectId ?? null, slug: ctx?.slug ?? null });
 
-  // 并存加新（三步替换的第一步）：旧表继续是 reducer 的输入，行为不变；
-  // 证据表同步积累一份，等任务 12 的原子切换有数据可用。
-  // 缺 subjectId 或 slug 时跳过——证据必须能归属到确定的页，没有「全局证据」这种东西。
   const evidenceKind = SIGNAL_TO_EVIDENCE[type];
+  // 缺 subjectId 或 slug 时跳过——证据必须能归属到确定的页。
   if (evidenceKind && ctx?.subjectId && ctx?.slug) {
-    recordEvidence({ userId, subjectId: ctx.subjectId, slug: ctx.slug, kind: evidenceKind });
+    recordEvidence({
+      userId,
+      subjectId: ctx.subjectId,
+      slug: ctx.slug,
+      kind: evidenceKind,
+      detail: ctx.viewedSource ? { viewedSource: ctx.viewedSource } : undefined,
+    });
   }
 
-  const recent = recentSignals(userId, RECENT_WINDOW);
-  const current = getProfileOrDefault(userId);
-  const { prefs, changed } = applySignalsToStyle(current.stylePrefs, recent);
-  if (!changed) return { changed: false, version: current.version };
+  // A6：尚无画像行的用户只落证据、**跳过 upsertProfile**。
+  //
+  // 原实现照写不误，结果 `version` 涨到 1 而 `onboardedAt` 仍为 null，onboarding 弹窗
+  // 持续弹。证据不丢——用户真的完成 onboarding 后，reducer 自然消费到这些历史证据
+  // （此时 stylePrefsUpdatedAt 仍为 null，边界不设限）。
+  const existing = getProfile(userId);
+  if (!existing) return { changed: false, version: getProfileOrDefault(userId).version };
+
+  const evidence = listStyleEvidence(userId, existing.stylePrefsUpdatedAt);
+  const { prefs, changed } = applyEvidenceToStyle(existing.stylePrefs, evidence, {
+    now: new Date(),
+    since: existing.stylePrefsUpdatedAt,
+  });
+  if (!changed) return { changed: false, version: existing.version };
+
   const updated = upsertProfile(userId, { stylePrefs: prefs });
   return { changed: true, version: updated.version };
 }

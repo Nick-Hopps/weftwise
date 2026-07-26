@@ -51,7 +51,7 @@ export function useSendSignal() {
   // POST 不自动注入 subjectId，按约定在 body 显式带（route 仍有 cookie 兜底）。
   const subjectId = useUIStore((s) => s.currentSubjectId);
   return useMutation({
-    mutationFn: async (payload: { type: string; slug?: string }) => {
+    mutationFn: async (payload: { type: string; slug?: string; viewedSource?: 'canonical' | 'reshape' }) => {
       const res = await apiFetch('/api/profile/signals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

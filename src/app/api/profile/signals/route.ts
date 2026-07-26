@@ -10,6 +10,8 @@ export const runtime = 'nodejs';
 const Body = z.object({
   type: z.enum(['too_hard', 'too_easy', 'simplify_click', 'deepen_click', 'view_original']),
   slug: z.string().optional(),
+  /** A2 归因：区分「原文太难 / 重塑没生效 / 重塑生成得差」，落进 detail_json。 */
+  viewedSource: z.enum(['canonical', 'reshape']).optional(),
   // 供 resolveSubjectFromRequest 的 body 路径读取（zod 会剥掉未声明字段，故必须显式列出）。
   subjectId: z.string().optional(),
   subjectSlug: z.string().optional(),
@@ -30,6 +32,10 @@ export async function POST(request: NextRequest) {
   const resolution = resolveSubjectFromRequest(request, { body });
   const subjectId = resolution.error ? null : resolution.subject.id;
   const userId = resolveUserId(request);
-  const r = applySignal(userId, body.type, { subjectId, slug: body.slug ?? null });
+  const r = applySignal(userId, body.type, {
+    subjectId,
+    slug: body.slug ?? null,
+    viewedSource: body.viewedSource ?? null,
+  });
   return NextResponse.json(r);
 }

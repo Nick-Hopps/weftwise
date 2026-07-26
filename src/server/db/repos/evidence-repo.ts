@@ -1,8 +1,9 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray } from 'drizzle-orm';
 import { getDb } from '../client';
 import { pageEvidence } from '../schema';
 import {
   EVIDENCE_KIND_META,
+  STYLE_BEARING_EVIDENCE_KINDS,
   isEvidenceKind,
   type EvidenceKind,
   type EvidenceRow,
@@ -108,6 +109,28 @@ export function listForSubject(userId: string, subjectId: string): Map<string, E
     else grouped.set(r.slug, [toRow(r)]);
   }
   return grouped;
+}
+
+/**
+ * 风格 reducer 的输入：跨 subject 取该用户的 style-bearing 证据。
+ *
+ * 跨 subject 是刻意的——`user_profiles` 今天挂在账户层（B 组 subject 化已后置），
+ * 风格偏好本就不分主题。
+ */
+export function listStyleEvidence(userId: string, since: string | null): EvidenceRow[] {
+  const conditions = [
+    eq(pageEvidence.userId, userId),
+    inArray(pageEvidence.kind, [...STYLE_BEARING_EVIDENCE_KINDS]),
+  ];
+  if (since !== null) conditions.push(gt(pageEvidence.createdAt, since));
+
+  return getDb()
+    .select(ROW_COLUMNS)
+    .from(pageEvidence)
+    .where(and(...conditions))
+    .orderBy(asc(pageEvidence.createdAt), asc(pageEvidence.id))
+    .all()
+    .map(toRow);
 }
 
 /**

@@ -1,7 +1,12 @@
 import { desc, eq } from 'drizzle-orm';
 import { getDb } from '../client';
 import { profileSignals } from '../schema';
-import type { SignalType } from '@/server/profile/signal-reducer';
+/**
+ * 反馈信号枚举。**随 `profile_signals` 表一起退役**——真实源已迁到
+ * `contracts.ts::EvidenceKind`，这里只为并存期的旧表保留。
+ */
+export type SignalType =
+  | 'too_hard' | 'too_easy' | 'simplify_click' | 'deepen_click' | 'view_original';
 
 export function appendSignal(sig: {
   userId: string;

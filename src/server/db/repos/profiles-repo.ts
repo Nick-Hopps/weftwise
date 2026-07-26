@@ -10,6 +10,13 @@ export interface UserProfile {
   version: number;
   onboardedAt: string | null;
   updatedAt: string;
+  /**
+   * reducer 的消费边界：仅在旋钮**真的变化**时推进。
+   *
+   * 不能复用 `updatedAt`——后者任何画像写入都会变（改背景自述、onboarding 提交），
+   * 拿它当边界会误清信号窗口，读者会觉得「我明明点过好几次太难，怎么一点反应都没有」。
+   */
+  stylePrefsUpdatedAt: string | null;
 }
 
 function parsePrefs(json: string): StylePrefs {
@@ -30,6 +37,7 @@ export function getProfile(userId: string): UserProfile | null {
     version: row.version,
     onboardedAt: row.onboardedAt ?? null,
     updatedAt: row.updatedAt,
+    stylePrefsUpdatedAt: row.stylePrefsUpdatedAt ?? null,
   };
 }
 
@@ -43,6 +51,7 @@ export function getProfileOrDefault(userId: string): UserProfile {
       version: 0,
       onboardedAt: null,
       updatedAt: '',
+      stylePrefsUpdatedAt: null,
     }
   );
 }
@@ -54,6 +63,10 @@ export function upsertProfile(
 ): UserProfile {
   const existing = getProfile(userId);
   const now = new Date().toISOString();
+  // 只有旋钮真的动了才推进边界；改背景自述不算。
+  const stylePrefsChanged =
+    patch.stylePrefs !== undefined &&
+    JSON.stringify(patch.stylePrefs) !== JSON.stringify(existing?.stylePrefs ?? DEFAULT_STYLE_PREFS);
   const next: UserProfile = {
     userId,
     backgroundSummary: patch.backgroundSummary ?? existing?.backgroundSummary ?? '',
@@ -61,6 +74,7 @@ export function upsertProfile(
     version: (existing?.version ?? 0) + 1,
     onboardedAt: patch.markOnboarded ? (existing?.onboardedAt ?? now) : (existing?.onboardedAt ?? null),
     updatedAt: now,
+    stylePrefsUpdatedAt: stylePrefsChanged ? now : (existing?.stylePrefsUpdatedAt ?? null),
   };
   const values = {
     userId,
@@ -69,6 +83,7 @@ export function upsertProfile(
     version: next.version,
     onboardedAt: next.onboardedAt,
     updatedAt: now,
+    stylePrefsUpdatedAt: next.stylePrefsUpdatedAt,
   };
   getDb()
     .insert(userProfiles)
@@ -81,6 +96,7 @@ export function upsertProfile(
         version: values.version,
         onboardedAt: values.onboardedAt,
         updatedAt: now,
+        stylePrefsUpdatedAt: values.stylePrefsUpdatedAt,
       },
     })
     .run();

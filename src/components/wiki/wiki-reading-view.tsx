@@ -16,6 +16,7 @@ import PageRenderer from './page-renderer';
 import { HtmlSourceFrame } from './html-source-frame';
 import { UrlSourcePreview } from './url-source-preview';
 import { LensFeedback } from './lens-feedback';
+import { useSendSignal } from '@/hooks/use-profile';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
 import { ReadingProgress } from './reading-progress';
@@ -125,6 +126,7 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   }, [showSplit, docs, slug]);
 
   const lens = useLens(props.subjectSlug, slug);
+  const sendSignal = useSendSignal();
   const reshaped = lens.data?.renderedMd;
   const reshapeUsable = reshaped != null && lens.data?.source !== 'canonical';
   const showOriginal = viewPreference === 'canonical';
@@ -175,6 +177,10 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
           const next = showOriginal ? 'reshape' : 'canonical';
           setViewPreference(next);
           writePageViewPreference(window.localStorage, props.subjectSlug, slug, next);
+          // A7：「看原文」此前完全无埋点——原设计声明了 view_original 信号，
+          // 却没有任何入口会产生它。它不参与风格调整（可能是怀疑而非难度），
+          // 只作事后归因用。
+          if (next === 'canonical') sendSignal.mutate({ type: 'view_original', slug });
         }}
         onRefresh={() => void lens.refresh()}
         onCancel={lens.cancel}
@@ -199,7 +205,10 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
           headerExtra={headerExtra}
         />
         <Backlinks backlinks={backlinks} />
-        <LensFeedback slug={slug} />
+        {/* A1：只在**确实在看重塑版**时才征询反馈。此前无条件渲染——
+            读者看的可能是 canonical 原文，点「太难」评价的是原文，
+            却被写进重塑画像。 */}
+        {usingReshaped && <LensFeedback slug={slug} viewedSource="reshape" />}
       </div>
     </div>
   );
