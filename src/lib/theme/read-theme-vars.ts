@@ -17,6 +17,9 @@ export type ThemeSnapshot = {
   active: string;
   accent: string;
   border: string;
+  masteryExposed: string;
+  masteryMastered: string;
+  masteryStruggling: string;
 };
 
 function toRgb(triple: string, alpha = 1): string {
@@ -42,5 +45,8 @@ export function readGraphTheme(): ThemeSnapshot {
     active:     readThemeColor('--color-graph-active'),
     accent:     readThemeColor('--color-accent-primary'),
     border:     readThemeColor('--color-border-default'),
+    masteryExposed:    readThemeColor('--color-graph-mastery-exposed'),
+    masteryMastered:   readThemeColor('--color-graph-mastery-mastered'),
+    masteryStruggling: readThemeColor('--color-graph-mastery-struggling'),
   };
 }

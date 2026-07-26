@@ -14,7 +14,17 @@ import type { ThemeSnapshot } from '@/lib/theme/read-theme-vars';
  * When no slug is active we don't add any of these classes, so the graph
  * reverts to a neutral all-on-one-plane view.
  */
-export function buildStylesheet(theme: ThemeSnapshot): cytoscape.StylesheetStyle[] {
+export type GraphMode = 'structure' | 'mastery';
+
+/**
+ * `mode='mastery'` 时叠一层掌握度着色。**只换 stylesheet，不动元素集**——
+ * `use-wiki-graph.ts` 的数据 effect 是 `[]` 一次性，改元素会摧毁 cose 布局与力导向模拟。
+ */
+export function buildStylesheet(
+  theme: ThemeSnapshot,
+  mode: GraphMode = 'structure',
+): cytoscape.StylesheetStyle[] {
+  const mastery = mode === 'mastery';
   return [
     {
       selector: 'node',
@@ -42,14 +52,18 @@ export function buildStylesheet(theme: ThemeSnapshot): cytoscape.StylesheetStyle
         'z-index': 1,
       },
     },
-    {
-      selector: 'node[orphan = 1]',
-      style: {
-        'background-color': theme.orphan,
-        'border-color': theme.orphan,
-        'text-opacity': 0.35,
-      },
-    },
+    // 孤儿是**结构属性**，归结构模式；掌握度模式下把填充色让给四态 ramp。
+    ...(mastery
+      ? []
+      : [{
+          selector: 'node[orphan = 1]',
+          style: {
+            'background-color': theme.orphan,
+            'border-color': theme.orphan,
+            'text-opacity': 0.35,
+          },
+        } as cytoscape.StylesheetStyle]),
+    ...(mastery ? masteryStyles(theme) : []),
     {
       selector: 'edge',
       style: {
@@ -88,16 +102,27 @@ export function buildStylesheet(theme: ThemeSnapshot): cytoscape.StylesheetStyle
     },
     {
       selector: 'node.focused',
-      style: {
-        'background-color': theme.active,
-        'background-opacity': 1,
-        'border-color': theme.active,
-        'border-opacity': 1,
-        'border-width': 3,
-        'text-opacity': 1,
-        'font-weight': 700,
-        'z-index': 10,
-      },
+      // 掌握度模式下焦点层级降级为**仅描边加粗**：填充色已经承载四态语义，
+      // 再让焦点抢过去，被选中的节点就看不出它是什么状态了。
+      style: mastery
+        ? {
+            'border-color': theme.active,
+            'border-opacity': 1,
+            'border-width': 3,
+            'text-opacity': 1,
+            'font-weight': 700,
+            'z-index': 10,
+          }
+        : {
+            'background-color': theme.active,
+            'background-opacity': 1,
+            'border-color': theme.active,
+            'border-opacity': 1,
+            'border-width': 3,
+            'text-opacity': 1,
+            'font-weight': 700,
+            'z-index': 10,
+          },
     },
     {
       selector: 'node.dimmed',
@@ -112,6 +137,64 @@ export function buildStylesheet(theme: ThemeSnapshot): cytoscape.StylesheetStyle
       style: {
         opacity: 0.08,
         'z-index': 0,
+      },
+    },
+  ];
+}
+
+/**
+ * 掌握度四态着色。
+ *
+ * `unknown → exposed → mastered` 是**有序**的，用同一色相（warp）的明度阶梯；
+ * `struggling` 不是这个梯子的一端（「试过并卡住了」≠「更不懂」），走 danger 描边
+ * 作 categorical outlier。
+ *
+ * `node[!mastery]` 的兜底不能省：`/api/mastery` 只返回**有证据**的 slug，
+ * 绝大多数节点根本没有这个字段，没有兜底会渲染成默认色，看起来像「全都掌握了」。
+ */
+function masteryStyles(theme: ThemeSnapshot): cytoscape.StylesheetStyle[] {
+  return [
+    {
+      // unknown（无证据）压暗，复用 .dimmed 的 0.22 思路：有证据的子图自然浮出来，
+      // 但整张图的形状仍在——「我的已知区域在整体中占多大」本身就是信息。
+      selector: 'node[!mastery]',
+      style: {
+        'background-color': theme.orphan,
+        'background-opacity': 0.22,
+        'border-color': theme.orphan,
+        'border-opacity': 0.3,
+        'text-opacity': 0.25,
+      },
+    },
+    {
+      selector: 'node[mastery = "exposed"]',
+      style: {
+        'background-color': theme.masteryExposed,
+        'background-opacity': 0.95,
+        'border-color': theme.masteryExposed,
+        'border-opacity': 0.9,
+      },
+    },
+    {
+      selector: 'node[mastery = "mastered"]',
+      style: {
+        'background-color': theme.masteryMastered,
+        'background-opacity': 1,
+        'border-color': theme.masteryMastered,
+        'border-opacity': 1,
+        'text-opacity': 0.9,
+      },
+    },
+    {
+      selector: 'node[mastery = "struggling"]',
+      style: {
+        'background-color': theme.canvas,
+        'background-opacity': 1,
+        'border-color': theme.masteryStruggling,
+        'border-opacity': 1,
+        'border-width': 3,
+        'text-opacity': 0.9,
+        'z-index': 4,
       },
     },
   ];
