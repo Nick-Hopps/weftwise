@@ -13,6 +13,7 @@ vi.mock('@/components/wiki/wiki-link', () => ({
 
 import { renderMarkdown } from '@/lib/markdown-client';
 import PageRenderer from '../page-renderer';
+import { quizEvidenceFor } from '../quiz-block';
 import { EditorPreview } from '../editor-preview';
 
 const toHtml = (el: ReactElement) => renderToStaticMarkup(el);
@@ -120,5 +121,23 @@ describe('答案折叠：六个消费方一视同仁（「不剧透」是内容�
     expect(html).toContain('data-callout="pitfall"');
     expect(html).not.toContain(GRADE_MARKER);
     expect(html).not.toContain('data-quiz-reveal');
+  });
+});
+
+describe('quizEvidenceFor —— 决策 5 的 strength 不对称', () => {
+  it('揭晓答案后判对 → strong（有客观参照）', () => {
+    expect(quizEvidenceFor('correct', true)).toEqual({ kind: 'quiz-correct', strength: 'strong' });
+  });
+
+  it('无答案自评「我答对了」→ 不上调，服务端按 kind 落 weak', () => {
+    // 自我拔高偏差；且误判 mastered 是本功能唯一真正危险的失败模式。
+    expect(quizEvidenceFor('correct', false)).toEqual({ kind: 'quiz-correct', strength: undefined });
+  });
+
+  it('判错两种形态同权，且永不上调/降权', () => {
+    // 主动承认答错，无拔高动机 —— strength 交给 kind 决定（strong），
+    // 调用方连表达降权的入口都没有。
+    expect(quizEvidenceFor('wrong', true)).toEqual({ kind: 'quiz-wrong' });
+    expect(quizEvidenceFor('wrong', false)).toEqual({ kind: 'quiz-wrong' });
   });
 });

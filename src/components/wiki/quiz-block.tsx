@@ -11,6 +11,8 @@ import {
 import { Check, ChevronDown, X } from 'lucide-react';
 import { CalloutIcon } from './callout-icon';
 import { useI18n } from '@/components/i18n-provider';
+import { useAppendEvidence } from '@/hooks/use-evidence';
+import type { EvidenceKind, EvidenceStrength } from '@/lib/contracts';
 
 /**
  * 阅读页独占的能力：发证据。由**最外层知道语境的调用方**显式授予，
@@ -26,6 +28,25 @@ export interface QuizBlockProps extends React.ComponentPropsWithoutRef<'div'> {
   quizId: string;
   /** 缺省即「没有发证据的能力」——不是运行时判空，是根本拿不到 pageSlug。 */
   interactive?: QuizInteractiveContext;
+}
+
+/**
+ * 决策 5 的 strength 不对称——同一个交互，正向降权、负向不降权：
+ *
+ * | 场景 | kind | strength | 理由 |
+ * |---|---|---|---|
+ * | 揭晓答案后判对 | `quiz-correct` | strong | 有客观参照 |
+ * | 无答案自评「我答对了」 | `quiz-correct` | **weak** | 自我拔高偏差；误判 mastered 代价最大 |
+ * | 判错（两种形态同权） | `quiz-wrong` | strong | 主动承认答错，无拔高动机 |
+ *
+ * `strength` 返回 undefined 时由服务端按 kind 取缺省（quiz-correct → weak）。
+ */
+export function quizEvidenceFor(
+  outcome: 'correct' | 'wrong',
+  hasAnswer: boolean,
+): { kind: EvidenceKind; strength?: EvidenceStrength } {
+  if (outcome === 'wrong') return { kind: 'quiz-wrong' };
+  return { kind: 'quiz-correct', strength: hasAnswer ? 'strong' : undefined };
 }
 
 function isAnswerElement(child: ReactNode): child is ReactElement<{ hidden?: boolean }> {
@@ -45,6 +66,7 @@ function isAnswerElement(child: ReactNode): child is ReactElement<{ hidden?: boo
  */
 export function QuizBlock({ quizId, interactive, children, ...rest }: QuizBlockProps) {
   const { t } = useI18n();
+  const appendEvidence = useAppendEvidence();
   const [revealed, setRevealed] = useState(false);
   const [graded, setGraded] = useState<'correct' | 'wrong' | null>(null);
 
@@ -59,6 +81,17 @@ export function QuizBlock({ quizId, interactive, children, ...rest }: QuizBlockP
   // 有答案时，判分必须排在揭晓之后（决策 5：先答 → 揭晓 → 判分）。没看过标准答案
   // 就点「我答对了」，那条证据没有客观参照，却会被记成 strong。
   const canGrade = Boolean(interactive) && (!hasAnswer || revealed);
+
+  const grade = (outcome: 'correct' | 'wrong') => {
+    setGraded(outcome);
+    if (!interactive) return;
+    appendEvidence({
+      ...quizEvidenceFor(outcome, hasAnswer),
+      slug: interactive.pageSlug,
+      anchor: quizId,
+      detail: { graded: hasAnswer },
+    });
+  };
 
   return (
     // `rest` 里带着 selectionBlocks 打的 data-md-block-*，吞掉它选区追问就锚不到这一块。
@@ -90,7 +123,7 @@ export function QuizBlock({ quizId, interactive, children, ...rest }: QuizBlockP
               <button
                 type="button"
                 data-quiz-grade="correct"
-                onClick={() => setGraded('correct')}
+                onClick={() => grade('correct')}
                 className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-foreground-secondary transition-colors duration-fast hover:bg-subtle"
               >
                 <Check className="h-3.5 w-3.5" />
@@ -99,7 +132,7 @@ export function QuizBlock({ quizId, interactive, children, ...rest }: QuizBlockP
               <button
                 type="button"
                 data-quiz-grade="wrong"
-                onClick={() => setGraded('wrong')}
+                onClick={() => grade('wrong')}
                 className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-foreground-secondary transition-colors duration-fast hover:bg-subtle"
               >
                 <X className="h-3.5 w-3.5" />
