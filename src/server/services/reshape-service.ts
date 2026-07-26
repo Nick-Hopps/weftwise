@@ -77,10 +77,12 @@ export async function reshapePageBody(input: {
   subject: Subject;
   body: string;
   profile: ProfileLite;
+  /** 已知概念地图的渲染结果；`null`/省略 = 无地图，prompt 与改动前逐字节相同。 */
+  knownConcepts?: string | null;
   abortSignal?: AbortSignal;
 }): Promise<{ body: string; model: string | null; assets: ReshapeAsset[] }> {
   const ctx = ctxFor(input.subject);
-  const user = buildReshapePageUserPrompt(input.body, input.profile, ctx);
+  const user = buildReshapePageUserPrompt(input.body, input.profile, ctx, input.knownConcepts);
   const assets: ReshapeAsset[] = [];
   const imageGenerate = tool({
     description: 'Generate one explanatory image and return the URL to embed in the reshaped Markdown.',

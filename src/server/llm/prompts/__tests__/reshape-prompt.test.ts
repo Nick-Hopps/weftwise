@@ -36,3 +36,34 @@ describe('reshape-prompt', () => {
     expect(promptExports).not.toHaveProperty('buildReshapeSectionUserPrompt');
   });
 });
+
+describe('reshape-prompt —— 已知概念地图注入（E2）', () => {
+  const MAP = [
+    "=== READER'S KNOWN CONCEPTS (this subject) ===",
+    'Already solid — reference as [[slug]], do NOT re-explain:',
+    '  [[gradient-descent]] Gradient Descent',
+    'Anything not listed here: assume unfamiliar and explain it normally.',
+  ].join('\n');
+
+  it('零回归：不传地图时输出与不带该参数逐字节相同', () => {
+    // 冷启动（全 unknown）时地图为 null，prompt 必须与本次改动前一模一样。
+    const base = buildReshapePageUserPrompt('正文', profile, ctx);
+    expect(buildReshapePageUserPrompt('正文', profile, ctx, null)).toBe(base);
+    expect(buildReshapePageUserPrompt('正文', profile, ctx, undefined)).toBe(base);
+    expect(base).not.toMatch(/KNOWN CONCEPTS/);
+  });
+
+  it('传地图时整段插在画像之后、正文之前', () => {
+    const p = buildReshapePageUserPrompt('正文', profile, ctx, MAP);
+    expect(p).toContain(MAP);
+    expect(p.indexOf('READER PROFILE')).toBeLessThan(p.indexOf('KNOWN CONCEPTS'));
+    expect(p.indexOf('KNOWN CONCEPTS')).toBeLessThan(p.indexOf('PAGE BODY TO RESHAPE'));
+  });
+
+  it('system prompt 说明该段只影响展开深度，缺席即照常全讲', () => {
+    expect(RESHAPE_PAGE_SYSTEM_PROMPT).toMatch(/KNOWN CONCEPTS/);
+    expect(RESHAPE_PAGE_SYSTEM_PROMPT).toMatch(/depth of explanation only/i);
+    // 兜底：没有该段时行为不变，这是零回归的语义保证
+    expect(RESHAPE_PAGE_SYSTEM_PROMPT).toMatch(/absence[\s\S]*explain everything normally/i);
+  });
+});
