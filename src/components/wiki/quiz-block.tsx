@@ -21,6 +21,11 @@ import type { EvidenceKind, EvidenceStrength } from '@/lib/contracts';
 export interface QuizInteractiveContext {
   pageSlug: string;
   subjectSlug: string;
+  /**
+   * 被当作已掌握、因而**未展开解释**的 slug（当前 subject 的裸 slug）。
+   * 只在重塑视图传——canonical 没有「跳过解释」这回事。
+   */
+  assumedKnown?: string[];
 }
 
 export interface QuizBlockProps extends React.ComponentPropsWithoutRef<'div'> {

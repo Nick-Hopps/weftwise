@@ -466,12 +466,22 @@ export function renderMarkdown(
               (props['data-wiki-subject' as keyof typeof props] as
                 | string
                 | undefined) ?? null;
+            // E3：只有「被明确告知不必重讲」的概念才挂纠错入口。
+            //
+            // **必须同时比对 subject**：本覆盖同时处理 `[[slug]]` 与
+            // `[[other-subject:slug]]`，而 assumedKnown 里只装当前 subject 的裸 slug。
+            // 只比 slug 的话，指向别的 subject 同名页的链接会挂上入口——点下去把负证据
+            // 写到当前 subject 那一页，归错了页。跨主题同名 slug 在本项目合法且常见。
+            const sameSubject = wikiSubject === null || wikiSubject === interactive?.subjectSlug;
+            const assumedKnown =
+              sameSubject && (interactive?.assumedKnown?.includes(wikiSlug) ?? false);
             return createElement(
               WikiLinkComponent,
               {
                 href: buildWikiLinkHref(wikiSlug, wikiSubject),
                 slug: wikiSlug,
                 subjectSlug: wikiSubject ?? undefined,
+                assumedKnown,
               },
               props.children,
             );

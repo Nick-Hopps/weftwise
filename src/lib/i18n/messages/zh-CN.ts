@@ -253,6 +253,8 @@ export const zhCN = {
   'wiki.reshape.showReshaped': '显示重塑版本',
   'wiki.reshape.showOriginal': '显示原文',
   'wiki.reshape.unavailable': '无法重塑，当前显示原文',
+  'wiki.concept.markUnknown': '这个我其实不懂，下次请展开讲',
+  'wiki.concept.corrected': '已记录，下次会重新展开',
   'wiki.quiz.reveal': '看答案',
   'wiki.quiz.question': '答对了吗？',
   'wiki.quiz.gotItRight': '我答对了',

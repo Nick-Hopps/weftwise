@@ -265,6 +265,8 @@ export const en = {
   'wiki.reshape.showReshaped': 'Show reshaped',
   'wiki.reshape.showOriginal': 'Show original',
   'wiki.reshape.unavailable': 'Couldn’t reshape — showing original',
+  'wiki.concept.markUnknown': 'I don’t actually know this — explain it next time',
+  'wiki.concept.corrected': 'Noted — this will be explained again',
   'wiki.quiz.reveal': 'Show answer',
   'wiki.quiz.question': 'How did you do?',
   'wiki.quiz.gotItRight': 'I got it right',

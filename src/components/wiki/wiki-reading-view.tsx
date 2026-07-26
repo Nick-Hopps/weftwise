@@ -132,9 +132,13 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const displayContent = usingReshaped ? reshaped : props.content;
   const tocHeadings = useMemo(() => extractArticleToc(displayContent), [displayContent]);
   // memo 化：renderMarkdown 的 useMemo 依赖它，每次渲染新建对象会让整篇正文重渲。
+  //
+  // `assumedKnown` **只在展示重塑版时带**——canonical 没有「跳过解释」这回事，
+  // 在原文上挂纠错入口就是误导（那些概念本来就展开讲了）。
+  const assumedKnown = usingReshaped ? lens.data?.assumedKnown : undefined;
   const interactive = useMemo(
-    () => ({ pageSlug: slug, subjectSlug: props.subjectSlug }),
-    [slug, props.subjectSlug],
+    () => ({ pageSlug: slug, subjectSlug: props.subjectSlug, assumedKnown }),
+    [slug, props.subjectSlug, assumedKnown],
   );
 
   // D5 读完埋点。挂一次即可——下面 split / 普通两个 return 分支互斥，

@@ -6,9 +6,17 @@ import { createElement, type ReactElement } from 'react';
 // page-renderer.tsx 等 .tsx 模块经 esbuild 转译为 React.createElement，需要全局 React。
 Object.assign(globalThis, { React });
 
+// 真实 WikiLink 拉进 next/link + ui-store 等浏览器依赖链。这里替换成薄壳，
+// 但**如实透出 `assumedKnown`**——接缝要验的正是「flag 有没有被正确传下来」。
 vi.mock('@/components/wiki/wiki-link', () => ({
-  default: ({ href, children }: { href?: string; children?: React.ReactNode }) =>
-    React.createElement('a', { href }, children),
+  default: ({
+    href, slug, children, assumedKnown,
+  }: { href?: string; slug?: string; children?: React.ReactNode; assumedKnown?: boolean }) =>
+    React.createElement(
+      'a',
+      assumedKnown ? { href, 'data-concept-unknown': slug } : { href },
+      children,
+    ),
 }));
 
 import { renderMarkdown } from '@/lib/markdown-client';
@@ -139,5 +147,56 @@ describe('quizEvidenceFor —— 决策 5 的 strength 不对称', () => {
     // 调用方连表达降权的入口都没有。
     expect(quizEvidenceFor('wrong', true)).toEqual({ kind: 'quiz-wrong' });
     expect(quizEvidenceFor('wrong', false)).toEqual({ kind: 'quiz-wrong' });
+  });
+});
+
+const WIKILINK_MD = '正文提到 [[gradient-descent]] 与 [[chain-rule]]，还有 [[math:gradient-descent]]。';
+const CORRECTION_MARKER = 'data-concept-unknown';
+
+describe('E3 纠错入口：只挂在「被判为已掌握」的 wikilink 上', () => {
+  it('canonical 视图（不传 assumedKnown）没有纠错入口', () => {
+    // canonical 没有「跳过解释」这回事，挂了就是误导。
+    const html = toHtml(renderMarkdown(WIKILINK_MD, undefined, { interactive: INTERACTIVE }));
+    expect(html).not.toContain(CORRECTION_MARKER);
+  });
+
+  it('重塑视图（带 assumedKnown）才有，且只在清单内的 slug 上', () => {
+    const html = toHtml(renderMarkdown(WIKILINK_MD, undefined, {
+      interactive: { ...INTERACTIVE, assumedKnown: ['gradient-descent'] },
+    }));
+    expect(html).toContain(CORRECTION_MARKER);
+    // chain-rule 不在清单里 —— 模型本来就展开讲过它
+    expect(html.match(new RegExp(CORRECTION_MARKER, 'g'))).toHaveLength(1);
+  });
+
+  it('`[[other-subject:同名slug]]` 不得命中 —— 跨主题同名合法且常见', () => {
+    // 只比 slug 的话，指向别的 subject 同名页的链接会挂上入口，
+    // 点下去把负证据写到当前 subject 那一页，归错了页。
+    const html = toHtml(renderMarkdown('只有 [[math:gradient-descent]]。', undefined, {
+      interactive: { ...INTERACTIVE, assumedKnown: ['gradient-descent'] },
+    }));
+    expect(html).not.toContain(CORRECTION_MARKER);
+  });
+
+  it('不传 interactive 的消费方一律无入口（Chat / Source 查看器）', () => {
+    expect(toHtml(renderMarkdown(WIKILINK_MD))).not.toContain(CORRECTION_MARKER);
+  });
+
+  it('EditorPreview 经 PageRenderer 的那条路径无入口', () => {
+    // 唯一会被「就地构造 interactive」误伤的消费方。
+    const html = toHtml(createElement(EditorPreview, { source: WIKILINK_MD, slug: 'backprop' }));
+    expect(html).not.toContain(CORRECTION_MARKER);
+  });
+
+  it('PageRenderer 原样透传 assumedKnown，自身不构造', () => {
+    const html = toHtml(
+      createElement(PageRenderer, {
+        content: WIKILINK_MD,
+        slug: 'backprop',
+        subjectSlug: 'ml',
+        interactive: { ...INTERACTIVE, assumedKnown: ['gradient-descent'] },
+      }),
+    );
+    expect(html).toContain(CORRECTION_MARKER);
   });
 });
