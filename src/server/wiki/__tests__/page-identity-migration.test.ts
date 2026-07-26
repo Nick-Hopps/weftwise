@@ -35,7 +35,7 @@ describe('migratePageIdentityCaches', () => {
       INSERT INTO page_maturity VALUES ('s1','old-page',3,'then',7,'next','active',2,'now')
     `).run();
     db.prepare(`
-      INSERT INTO page_renditions VALUES ('s1','old-page','h',2,'rendered','m','now')
+      INSERT INTO page_renditions VALUES ('s1','old-page','h',2,'rendered','m','now','{"mastered":[]}')
     `).run();
     db.prepare(`
       INSERT INTO page_rendition_assets VALUES ('asset-1','s1','old-page','image/png','YQ==','now')
@@ -60,6 +60,11 @@ describe('migratePageIdentityCaches', () => {
       expect(db.prepare(`SELECT ${column} AS slug FROM ${table}`).all())
         .toEqual([{ slug: 'new-page' }]);
     }
+
+    // 显式列清单漏掉 known_concepts_json 的话，改名一次就把地图快照静默抹成 NULL——
+    // 纠错入口全消失、stale 退回旧两项，且不报任何错。
+    expect(db.prepare(`SELECT known_concepts_json AS j FROM page_renditions`).all())
+      .toEqual([{ j: '{"mastered":[]}' }]);
 
     migratePageIdentityCaches('s1', { fromSlug: 'new-page', toSlug: 'old-page' });
     expect(db.prepare(`SELECT page_slug AS slug FROM page_sources`).all())

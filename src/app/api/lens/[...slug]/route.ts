@@ -24,11 +24,24 @@ interface LensContext {
   canonicalHash: string;
 }
 
+interface MapSnapshot {
+  concepts: KnownConcepts;
+  rendered: string | null;
+  /**
+   * 落库/比对用的确定性序列化。
+   *
+   * 三段内按**邻域顺序**（`selectNeighborhood` 的首次出现顺序）排列、字段顺序固定——
+   * 否则同一份地图两次算出的 JSON 字符串不同，**每一次 GET 都会误报 stale**，
+   * 状态行上挂一个永远消不掉的 `Update available`，比不做这个功能更糟。
+   */
+  serialized: string;
+}
+
 /**
  * 算这一页的已知概念地图。**抛错按「无地图」继续**——重塑本身比地图重要，
  * 不该因为算不出地图就让读者拿不到重塑版。
  */
-function buildMapSafely(context: LensContext): { concepts: KnownConcepts; rendered: string | null } | null {
+function buildMapSafely(context: LensContext): MapSnapshot | null {
   try {
     const { concepts, omitted } = buildKnownConceptsForPage({
       userId: context.userId,
@@ -37,10 +50,37 @@ function buildMapSafely(context: LensContext): { concepts: KnownConcepts; render
       body: context.body,
       evidenceBySlug: loadSubjectEvidence(context.userId, context.subject.id),
     });
-    return { concepts, rendered: renderKnownConcepts(concepts, { omittedCount: omitted }) };
+    return {
+      concepts,
+      rendered: renderKnownConcepts(concepts, { omittedCount: omitted }),
+      serialized: serializeKnownConcepts(concepts),
+    };
   } catch (error) {
     console.error('[lens] known-concept map failed; continuing without it', error);
     return null;
+  }
+}
+
+/** 段顺序、条目顺序、字段顺序全部固定；相同地图恒得相同字符串。 */
+function serializeKnownConcepts(k: KnownConcepts): string {
+  const section = (list: KnownConcepts['mastered']) =>
+    list.map((c) => ({ slug: c.slug, title: c.title, state: c.state }));
+  return JSON.stringify({
+    mastered: section(k.mastered),
+    exposed: section(k.exposed),
+    struggling: section(k.struggling),
+  });
+}
+
+/** 从存储的地图快照里取「被明确告知不必重讲」的 slug。解析失败按无地图处理。 */
+function assumedKnownFrom(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as Partial<KnownConcepts>;
+    return (parsed.mastered ?? []).map((c) => c.slug);
+  } catch {
+    console.error('[lens] stored known_concepts_json is unparseable; ignoring');
+    return [];
   }
 }
 
@@ -72,12 +112,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!saved) {
     return NextResponse.json({ renderedMd: context.body, source: 'canonical', stale: false });
   }
+
+  // 掌握度变化**不会**改 profileVersion（那个只在 style_prefs 变时自增）。没有这一项，
+  // 答对一道 quiz、或点了「这个我其实不懂」之后旧重塑版照旧显示、不提示 Update available，
+  // E3 的纠错闭环在 UI 上无从触发。
+  let mapChanged = false;
+  if (saved.knownConceptsJson !== null) {
+    // 旧行（本功能上线前生成的 rendition）不参与地图比对——否则存量重塑版一上线全变 stale。
+    const current = buildMapSafely(context);
+    // 补算失败时退回既有两项判 stale，不因此隐藏已保存的重塑版。
+    if (current) mapChanged = current.serialized !== saved.knownConceptsJson;
+  }
+
   return NextResponse.json({
     renderedMd: saved.renderedMd,
     source: 'saved',
+    // **从存储派生，不重算**：证据可能已经变了，重算出的清单会和当初真正告诉模型的
+    // 那份对不上，纠错入口就会挂到模型其实展开讲过的概念上。
+    assumedKnown: assumedKnownFrom(saved.knownConceptsJson),
     stale:
       saved.canonicalHash !== context.canonicalHash ||
-      saved.profileVersion !== context.profile.version,
+      saved.profileVersion !== context.profile.version ||
+      mapChanged,
   });
 }
 
@@ -113,6 +169,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       renderedMd: result.body,
       model: result.model,
       assets: result.assets,
+      knownConceptsJson: map?.serialized ?? null,
     });
     // D4：主动要求重塑本身就是「原文这样讲我没读顺」的弱信号。best-effort，
     // 失败不影响已经生成好的重塑版。

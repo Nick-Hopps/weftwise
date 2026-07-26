@@ -287,6 +287,9 @@ export const pageRenditions = sqliteTable(
     renderedMd: text('rendered_md').notNull(),
     model: text('model'),
     updatedAt: text('updated_at').notNull(),
+    // 生成该 rendition 时实际注入模型的 KnownConcepts 快照（可空 = 旧行/无地图）。
+    // `assumedKnown` 从它派生而非重算——必须是当初告诉模型的那一份。
+    knownConceptsJson: text('known_concepts_json'),
   },
   (t) => ({ pk: primaryKey({ columns: [t.subjectId, t.slug] }) })
 );

@@ -1,0 +1,1 @@
+ALTER TABLE `page_renditions` ADD `known_concepts_json` text;

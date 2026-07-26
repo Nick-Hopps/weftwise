@@ -68,8 +68,10 @@ export function migratePageIdentityCaches(
 
   sqlite.prepare(`
     INSERT OR REPLACE INTO page_renditions
-      (subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at)
-    SELECT subject_id, ?, canonical_hash, profile_version, rendered_md, model, updated_at
+      (subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at,
+       known_concepts_json)
+    SELECT subject_id, ?, canonical_hash, profile_version, rendered_md, model, updated_at,
+           known_concepts_json
     FROM page_renditions WHERE subject_id = ? AND slug = ?
   `).run(toSlug, subjectId, fromSlug);
   sqlite.prepare(

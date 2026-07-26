@@ -90,7 +90,7 @@ describe('wiki.move Saga integration', () => {
       INSERT INTO page_maturity VALUES (?, 'old-page', 2, 'then', 7, 'next', 'active', 3, 'now')
     `).run(subject.id);
     db.prepare(`
-      INSERT INTO page_renditions VALUES (?, 'old-page', 'h', 2, 'rendered', 'm', 'now')
+      INSERT INTO page_renditions VALUES (?, 'old-page', 'h', 2, 'rendered', 'm', 'now', NULL)
     `).run(subject.id);
     db.prepare(`
       INSERT INTO page_rendition_assets VALUES ('old-asset', ?, 'old-page', 'image/png', 'YQ==', 'now')

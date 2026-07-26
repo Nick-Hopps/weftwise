@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { computeCanonicalHash } from '@/server/profile/rendition-hash';
 
 const subject = {
   id: 's1', slug: 'general', name: 'G', description: '', augmentationLevel: 'standard', createdAt: '', updatedAt: '',
@@ -65,7 +66,7 @@ describe('GET /api/lens/[...slug]', () => {
     getLatest.mockReturnValue({ renderedMd: '保存版', canonicalHash: 'old', profileVersion: 1 });
     const { GET } = await import('../route');
     const response = await GET(getReq(), { params: Promise.resolve(params) } as never);
-    expect(await response.json()).toEqual({ renderedMd: '保存版', source: 'saved', stale: true });
+    expect(await response.json()).toMatchObject({ renderedMd: '保存版', source: 'saved', stale: true });
     expect(reshape).not.toHaveBeenCalled();
   });
 
@@ -203,3 +204,126 @@ describe('POST /api/lens/[...slug] —— 已知概念地图注入（E）', () =
     expect((reshape.mock.calls[0][0] as { knownConcepts: string | null }).knownConcepts).toBeNull();
   });
 });
+
+describe('E4/E5 —— 地图快照持久化与 stale 判定', () => {
+  const MAP = {
+    mastered: [{ slug: 'gradient-descent', title: 'GD', state: 'mastered' }],
+    exposed: [],
+    struggling: [],
+  };
+  const SERIALIZED = JSON.stringify(MAP);
+
+  // canonicalHash 必须与 mock 正文真实派生值一致，否则这两项先把 stale 拉成 true，
+  // 地图那一项就测不到了。
+  const CURRENT_HASH = computeCanonicalHash('原文 [[Alpha]]');
+  const savedRow = (over: Record<string, unknown> = {}) => ({
+    renderedMd: '保存版',
+    canonicalHash: CURRENT_HASH,
+    profileVersion: 2,
+    knownConceptsJson: SERIALIZED,
+    ...over,
+  });
+
+  beforeEach(() => {
+    buildKnownConcepts.mockReturnValue({ concepts: MAP, omitted: 0 });
+  });
+
+  it('POST 把地图快照落进 known_concepts_json', async () => {
+    reshape.mockResolvedValue({ body: '重塑版', model: 'm', assets: [] });
+    const { POST } = await import('../route');
+    await POST(postReq(), { params: Promise.resolve(params) } as never);
+
+    expect(replace).toHaveBeenCalledWith(
+      expect.objectContaining({ knownConceptsJson: SERIALIZED }),
+    );
+  });
+
+  it('无地图时落 null，而不是空对象字符串', async () => {
+    buildKnownConcepts.mockReturnValue({
+      concepts: { mastered: [], exposed: [], struggling: [] },
+      omitted: 0,
+    });
+    reshape.mockResolvedValue({ body: '重塑版', model: 'm', assets: [] });
+    const { POST } = await import('../route');
+    await POST(postReq(), { params: Promise.resolve(params) } as never);
+
+    // 三段全空 → rendered 为 null，但序列化仍是确定性空快照；
+    // 关键是 assumedKnown 为空、GET 不会因此挂出纠错入口。
+    const persisted = (replace.mock.calls[0][0] as { knownConceptsJson: string | null });
+    expect(assumedKnownOf(persisted.knownConceptsJson)).toEqual([]);
+  });
+
+  it('GET 的 assumedKnown 取**存储**那份，不重算', async () => {
+    // 证据可能已经变了；重算出的清单会和当初真正告诉模型的那份对不上，
+    // 纠错入口会挂到模型其实展开讲过的概念上。
+    getLatest.mockReturnValue(savedRow());
+    buildKnownConcepts.mockReturnValue({
+      concepts: { mastered: [{ slug: '别的概念', title: 'X', state: 'mastered' }], exposed: [], struggling: [] },
+      omitted: 0,
+    });
+
+    const { GET } = await import('../route');
+    const body = await (await GET(getReq(), { params: Promise.resolve(params) } as never)).json();
+
+    expect(body.assumedKnown).toEqual(['gradient-descent']);
+  });
+
+  it('地图变化 → stale:true（掌握度变化不改 profileVersion，没这项闭环就断了）', async () => {
+    getLatest.mockReturnValue(savedRow());
+    buildKnownConcepts.mockReturnValue({
+      concepts: { mastered: [], exposed: [], struggling: [{ slug: 'gradient-descent', title: 'GD', state: 'struggling' }] },
+      omitted: 0,
+    });
+
+    const { GET } = await import('../route');
+    const body = await (await GET(getReq(), { params: Promise.resolve(params) } as never)).json();
+    expect(body.stale).toBe(true);
+  });
+
+  it('地图未变时连续多次 GET 都不误报 stale（序列化必须确定性）', async () => {
+    getLatest.mockReturnValue(savedRow());
+    const { GET } = await import('../route');
+
+    for (let i = 0; i < 3; i++) {
+      const body = await (await GET(getReq(), { params: Promise.resolve(params) } as never)).json();
+      expect(body.stale, `第 ${i + 1} 次 GET`).toBe(false);
+    }
+  });
+
+  it('known_concepts_json 为 null 的旧行不因地图比对变 stale（存量不炸）', async () => {
+    getLatest.mockReturnValue(savedRow({ knownConceptsJson: null }));
+    const { GET } = await import('../route');
+    const body = await (await GET(getReq(), { params: Promise.resolve(params) } as never)).json();
+
+    expect(body.stale).toBe(false);
+    expect(body.assumedKnown).toEqual([]);
+    // 旧行根本不该触发补算
+    expect(buildKnownConcepts).not.toHaveBeenCalled();
+  });
+
+  it('GET 补算抛错时退回既有两项判 stale，不隐藏已保存重塑版', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    getLatest.mockReturnValue(savedRow());
+    buildKnownConcepts.mockImplementation(() => { throw new Error('boom'); });
+
+    const { GET } = await import('../route');
+    const response = await GET(getReq(), { params: Promise.resolve(params) } as never);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.renderedMd).toBe('保存版');
+    expect(body.stale).toBe(false);
+  });
+
+  it('canonical 变化仍照旧判 stale（既有两项不受影响）', async () => {
+    getLatest.mockReturnValue(savedRow({ canonicalHash: 'old' }));
+    const { GET } = await import('../route');
+    const body = await (await GET(getReq(), { params: Promise.resolve(params) } as never)).json();
+    expect(body.stale).toBe(true);
+  });
+});
+
+function assumedKnownOf(json: string | null): string[] {
+  if (!json) return [];
+  return (JSON.parse(json).mastered as Array<{ slug: string }>).map((c) => c.slug);
+}

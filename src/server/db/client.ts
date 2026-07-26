@@ -541,19 +541,27 @@ function migrateUserProfiles(): void {
 // 故意不挂 subjects FK：可丢弃重建的读侧缓存，由 deleteBySubject + 命中校验自洽。
 function migratePageRenditions(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('page_renditions')) return;
-  sqlite.exec(`
-    CREATE TABLE page_renditions (
-      subject_id TEXT NOT NULL,
-      slug TEXT NOT NULL,
-      canonical_hash TEXT NOT NULL,
-      profile_version INTEGER NOT NULL,
-      rendered_md TEXT NOT NULL,
-      model TEXT,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (subject_id, slug)
-    );
-  `);
+  if (!tableExists('page_renditions')) {
+    sqlite.exec(`
+      CREATE TABLE page_renditions (
+        subject_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        canonical_hash TEXT NOT NULL,
+        profile_version INTEGER NOT NULL,
+        rendered_md TEXT NOT NULL,
+        model TEXT,
+        updated_at TEXT NOT NULL,
+        known_concepts_json TEXT,
+        PRIMARY KEY (subject_id, slug)
+      );
+    `);
+    return;
+  }
+  // 存量库补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做，
+  // 只写它等于既有安装升级后这一列根本不存在，读写当场 SQL 报错。
+  if (!tableColumns('page_renditions').includes('known_concepts_json')) {
+    sqlite.exec(`ALTER TABLE page_renditions ADD COLUMN known_concepts_json TEXT`);
+  }
 }
 
 function migratePageRenditionAssets(): void {
