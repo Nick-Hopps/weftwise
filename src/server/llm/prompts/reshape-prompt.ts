@@ -13,6 +13,10 @@ VISUAL EXPLANATIONS:
 - After the tool returns, embed its URL at the most relevant location using Markdown image syntax: \`![descriptive alt](returned-url)\`.
 - Do not generate decorative images or call the tool when prose, code, math, Mermaid, or a table explains the idea better.
 
+KNOWN CONCEPTS:
+- When a "READER'S KNOWN CONCEPTS" section is present, use it to decide how much to expand each concept — reference what the reader already owns, recap what they have merely seen, and take extra care with what they got stuck on.
+- That section is about *depth of explanation only*. It never licenses dropping content the page needs, and its absence means "explain everything normally".
+
 OUTPUT RULES:
 - Return ONLY the complete reshaped Markdown body: no YAML frontmatter, preamble, commentary, or fenced wrapper.
 - Produce a coherent standalone page, not notes about how you would reshape it.
@@ -34,11 +38,17 @@ export function buildReshapePageUserPrompt(
   body: string,
   profile: { backgroundSummary: string; stylePrefs: StylePrefs },
   ctx: PromptContext,
+  /**
+   * 已知概念地图的渲染结果（`renderKnownConcepts` 的返回值）。
+   * **三段全空时调用方传 `null`/省略**，此处整段不注入——零证据时输出与改动前逐字节相同。
+   */
+  knownConcepts?: string | null,
 ): string {
   return [
     renderLanguageDirective(ctx.language),
     '',
     renderProfile(profile),
+    ...(knownConcepts ? ['', knownConcepts] : []),
     '',
     '=== PAGE BODY TO RESHAPE (canonical) ===',
     body,

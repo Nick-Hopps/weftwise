@@ -15,6 +15,8 @@ export const BUILTIN_UPGRADE_HASHES: Partial<Record<BuiltinSkillId, readonly str
   'ingest-enricher': [
     '4285ea81232e1bf7b2a1c98671f200e6c4cfa09d6a8876dda676bf56d327a318',
     'f44633a47747a8628768182ea951d064906477f54445ace2dfb5488cf903f396',
+    // v6 原版（v7 起 quiz callout 用 `---` 携带答案）
+    '80b59ca6cac1379537030d577a4802f25cbed8b050ff48bb6e1f3e60550c9a2d',
   ],
 };
 

@@ -2,7 +2,7 @@
 id: ingest-enricher
 name: Ingest Enricher
 description: Layer study-aid callouts (quizzes, pitfalls, diagrams, prerequisites) onto a teaching article, without altering its prose.
-version: 6
+version: 7
 tools:
   - image.generate
 canDispatch: []
@@ -47,7 +47,7 @@ Before finishing, make an explicit visual-medium decision:
 
 Syntax: a blockquote whose first line is `> [!type] <emoji> <short title>`, then the body on following `>` lines.
 
-- `> [!quiz] ❓ 自测` — a question that makes the reader retrieve/apply what the prose taught (optionally a hint).
+- `> [!quiz] ❓ 自测` — a question that makes the reader retrieve/apply what the prose taught (optionally a hint), **followed by its answer**. See "Quiz callouts carry an answer" below.
 - `> [!pitfall] ⚠ 常见误区` — a common misconception or easy-to-make error, corrected.
 - `> [!diagram] 📊 图示` — a diagram. Choose raster image, Mermaid, or KaTeX using the visual-medium decision above; add a one-line caption.
 - `> [!background] 🔗 前置/背景` — a prerequisite concept or a `[[wikilink]]` to a related page.
@@ -55,6 +55,25 @@ Syntax: a blockquote whose first line is `> [!type] <emoji> <short title>`, then
 (The emoji/title text is natural language — translate per `languageDirective`. The `[!type]` keyword stays ASCII English.)
 
 > Do NOT add intuition or worked-example callouts — those already live in the writer's prose, not here.
+
+## Quiz callouts carry an answer
+
+Every `[!quiz]` callout MUST contain its answer, separated from the question by a lone `---` line inside the blockquote:
+
+```markdown
+> [!quiz] ❓ 自测
+> 为什么反向传播需要保存前向过程的中间激活值？
+>
+> ---
+>
+> 因为链式法则求梯度时要用到每层的输入。丢弃后只能重算，属于时间换空间。
+```
+
+- **Structure**: question (plus optional hint) → `> ---` → answer. Exactly one separator per quiz; the reader's UI folds everything after it.
+- The `---` separator is structural, never translate it, label it (`答案：` / `Answer:`), or replace it with any other marker — the renderer matches the separator itself, not surrounding words.
+- **Answer length**: 1–3 sentences. Enough for the reader to self-check, not a second explanation.
+- **The answer must be derivable from the article's own prose.** Never introduce a fact, number, name, or claim that `draftContent` does not already state. If a good question cannot be answered from the prose, write a different question.
+- Keep answers in the `languageDirective` language, same as the question.
 
 ## Mermaid 语法守则（每张图必须能被 mermaid v11 解析，否则整张图渲染失败）
 

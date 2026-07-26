@@ -1,0 +1,168 @@
+/**
+ * 四态掌握度派生 —— 本模块是纯函数、零 IO，是 `page_evidence` 唯一的解释器。
+ *
+ * 设计要点见 `docs/specs/2026-07-26-mastery-evidence-model.md`：
+ * - 决策 2：四态 + 三档置信度，不落标量分数（从稀疏证据派生的估计，印一个「72」是假精度）
+ * - 决策 3：显式优先级先命中先返回，不用加权求和（权重拍脑袋且结果不可解释）
+ * - 决策 4：`mastered` 有效期 = 复习到期**再逾期一档**才降级
+ *
+ * 贯穿全篇的约束：**默认保守**。无证据即「不懂」；误判「已掌握」会让重塑版跳过解释、
+ * 页面直接读不懂——这是本功能唯一真正危险的失败模式。
+ */
+
+import type {
+  EvidenceRow,
+  MasteryConfidence,
+  MasteryState,
+  MasteryVerdict,
+} from '@/lib/contracts';
+
+export type { EvidenceRow, MasteryConfidence, MasteryState, MasteryVerdict };
+
+const DAY_MS = 86_400_000;
+
+/**
+ * 间隔重复节律。与 `maintenance-policy.ts` 共用同一组常量但**不共用函数**——
+ * 那边给「内容」排增益计划，这边给 `(user, page)` 排记忆有效期，语义已经分化，
+ * 耦合会让任一侧的调整误伤另一侧。
+ */
+export const SPACING_LADDER = [1, 3, 7, 21, 60] as const;
+
+/**
+ * 强负证据的有效窗口（天）。超窗即认为「那次卡住已经过去了」。
+ *
+ * 取 14 天的理由：它必须短于连击 3 的失效期（28 天），否则一次答错会把这一页
+ * 长期钉死在 `struggling`，`mastered` 在有 quiz 的页面上几乎不可达；又要长到
+ * 足以覆盖「这周没空回来看」。接入真实数据后按 `struggling` 的实际分布再调。
+ */
+export const NEGATIVE_WINDOW_DAYS = 14;
+
+/** `recent` 的截断上限：审计面一次展开不会看更多，响应体也不该无界增长。 */
+export const MAX_RECENT_EVIDENCE = 20;
+
+/**
+ * 决策 4 的两级语义。
+ *
+ * 阶梯本身**不是**有效期——它说的是「什么时候该复习」，不是「知识什么时候失效」。
+ * 到期该复习 ≠ 到期就当作不会了。直接拿间隔当有效期的话，答对一次只维持 1 天，
+ * 而系统里没有任何机制提示用户回去重答。
+ */
+export function masteryWindowDays(consecutivePositives: number): {
+  dueDays: number;
+  expiryDays: number;
+} {
+  const last = SPACING_LADDER.length - 1;
+  const i = Math.min(Math.max(consecutivePositives - 1, 0), last);
+  const dueDays = SPACING_LADDER[i];
+  return { dueDays, expiryDays: dueDays + SPACING_LADDER[Math.min(i + 1, last)] };
+}
+
+function isStrongNegative(row: EvidenceRow): boolean {
+  return row.polarity === 'negative' && row.strength === 'strong';
+}
+
+/** UTC 日期键，用于连击的按天折叠。 */
+function dayKey(iso: string): string {
+  return new Date(iso).toISOString().slice(0, 10);
+}
+
+interface Streak {
+  /** 按天折叠后的连续正证据次数。 */
+  count: number;
+  /** 参与本轮连击的正证据（未折叠，供 strength 门槛计数）。 */
+  positives: EvidenceRow[];
+  lastPositiveAt: string | null;
+}
+
+/**
+ * `consecutivePositives` 的三条精确定义，每条都对应一个会让公式失真的具体失败：
+ *
+ * 1. **页级，不是题级**——同一页上任意正证据都累加。题级连击要求用户回去重答同一道题，
+ *    没有任何机制促成，实际不可达。
+ * 2. **按「天」去重，不按行计数**——否则反复点判分按钮就能把连击刷到 5，换来 120 天。
+ *    证据表仍 append-only 全量保留（审计需要），只是派生时折叠。
+ * 3. **只有 strong 负证据清零**——`citation-hit`（问了个问题、回答引用了这一页，完全
+ *    正常的事）不得把攒了几周的连击打回零。
+ */
+function computeStreak(sorted: EvidenceRow[]): Streak {
+  let resetAt: string | null = null;
+  for (const row of sorted) {
+    if (isStrongNegative(row)) resetAt = row.createdAt;
+  }
+
+  const positives = sorted.filter(
+    (r) => r.polarity === 'positive' && (resetAt === null || r.createdAt > resetAt),
+  );
+  const days = new Set(positives.map((r) => dayKey(r.createdAt)));
+
+  return {
+    count: days.size,
+    positives,
+    lastPositiveAt: positives.length ? positives[positives.length - 1].createdAt : null,
+  };
+}
+
+function verdict(
+  state: MasteryState,
+  confidence: MasteryConfidence,
+  base: Pick<MasteryVerdict, 'evidenceCount' | 'lastEvidenceAt' | 'recent'>,
+  expiresAt: string | null = null,
+): MasteryVerdict {
+  return { state, confidence, expiresAt, ...base };
+}
+
+/**
+ * 按决策 3 的优先级表自上而下先命中先返回。任何结论都可以回溯到 `recent` 里的
+ * 具体证据条目与时间——这是「掌握度必须可解释」那条约束的落点。
+ */
+export function deriveMastery(evidence: EvidenceRow[], now: Date): MasteryVerdict {
+  const sorted = [...evidence].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+  const recent = [...evidence]
+    .sort((a, b) => (a.createdAt > b.createdAt ? -1 : a.createdAt < b.createdAt ? 1 : 0))
+    .slice(0, MAX_RECENT_EVIDENCE);
+
+  const base = {
+    evidenceCount: evidence.length,
+    lastEvidenceAt: sorted.length ? sorted[sorted.length - 1].createdAt : null,
+    recent,
+  };
+
+  // 规则 1：无任何证据。长期看这会是绝大多数页面的状态。
+  if (sorted.length === 0) return verdict('unknown', 'none', base);
+
+  // 规则 2：衰减窗口内存在强负证据 → struggling。
+  // 「负证据压过正证据」——哪怕 quiz 答对过；保守方向永远是「多讲一点」。
+  const negativeCutoff = new Date(now.getTime() - NEGATIVE_WINDOW_DAYS * DAY_MS).toISOString();
+  const recentStrongNegatives = sorted.filter(
+    (r) => isStrongNegative(r) && r.createdAt >= negativeCutoff,
+  );
+  if (recentStrongNegatives.length > 0) {
+    return verdict('struggling', recentStrongNegatives.length >= 2 ? 'high' : 'low', base);
+  }
+
+  // 规则 3：存在未过期的正证据，且（含 ≥1 条 strong 或 ≥2 条 weak）。
+  const streak = computeStreak(sorted);
+  if (streak.lastPositiveAt) {
+    // 判定只看 expiresAt；`dueDays`（该复习了）留给未来的复习提醒，不参与四态。
+    const { expiryDays } = masteryWindowDays(streak.count);
+    const expiresAt = new Date(
+      new Date(streak.lastPositiveAt).getTime() + expiryDays * DAY_MS,
+    ).toISOString();
+
+    const strongCount = streak.positives.filter((r) => r.strength === 'strong').length;
+    const weakCount = streak.positives.length - strongCount;
+    // strength 门槛是必须的：否则一条 `self-report-easy`（读者点一下「太浅」）就能把
+    // 整页判成 mastered，重塑从此跳过解释它。自评答对同理——自我拔高偏差下的单条自陈
+    // 不足以支撑「不必再讲」。
+    const sufficient = strongCount >= 1 || weakCount >= 2;
+
+    if (sufficient && now.toISOString() < expiresAt) {
+      return verdict('mastered', strongCount >= 1 ? 'high' : 'low', base, expiresAt);
+    }
+  }
+
+  // 规则 4/5：exposure 证据、已过期的正证据、不足以支撑规则 3 的孤立 weak 正证据，
+  // 或只有弱负证据。都落 exposed——弱负证据信噪比不足以判 struggling，
+  // 但足以证明「他接触过这一页」。
+  return verdict('exposed', 'low', base);
+}

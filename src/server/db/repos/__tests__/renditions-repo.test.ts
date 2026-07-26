@@ -79,3 +79,43 @@ describe('renditions-repo', () => {
     expect(repo.getLatestRendition('s1', 'b')?.renderedMd).toBe('B 版');
   });
 });
+
+describe('known_concepts_json（E4）', () => {
+  it('replaceRendition 落列，getLatestRendition 读回', async () => {
+    const repo = await import('../renditions-repo');
+    const snapshot = JSON.stringify({ mastered: [{ slug: 'gd', title: 'GD', state: 'mastered' }] });
+
+    repo.replaceRendition({
+      subjectId: 's1', slug: 'a', canonicalHash: 'h', profileVersion: 1,
+      renderedMd: 'md', model: null, assets: [], knownConceptsJson: snapshot,
+    });
+
+    expect(repo.getLatestRendition('s1', 'a')?.knownConceptsJson).toBe(snapshot);
+  });
+
+  it('不传时落 null（无地图 / 旧行语义）', async () => {
+    const repo = await import('../renditions-repo');
+    repo.replaceRendition({
+      subjectId: 's1', slug: 'b', canonicalHash: 'h', profileVersion: 1,
+      renderedMd: 'md', model: null, assets: [],
+    });
+    expect(repo.getLatestRendition('s1', 'b')?.knownConceptsJson).toBeNull();
+  });
+
+  it('重新生成时覆盖旧快照，不残留上一次的地图', async () => {
+    const repo = await import('../renditions-repo');
+    const first = JSON.stringify({ mastered: [{ slug: 'a', title: 'A', state: 'mastered' }] });
+    const second = JSON.stringify({ mastered: [] });
+
+    repo.replaceRendition({
+      subjectId: 's1', slug: 'c', canonicalHash: 'h', profileVersion: 1,
+      renderedMd: 'md', model: null, assets: [], knownConceptsJson: first,
+    });
+    repo.replaceRendition({
+      subjectId: 's1', slug: 'c', canonicalHash: 'h2', profileVersion: 2,
+      renderedMd: 'md2', model: null, assets: [], knownConceptsJson: second,
+    });
+
+    expect(repo.getLatestRendition('s1', 'c')?.knownConceptsJson).toBe(second);
+  });
+});

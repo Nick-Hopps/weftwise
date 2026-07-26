@@ -73,6 +73,8 @@
 | `/api/query` | POST | 默认流式分支扩展：body 加 `conversationId?`（无/跨 subject 静默当新会话防泄漏）与 `messageReferences?`（最多 40 条，非空时要求 `pageSlug`）→ 载末 8 条历史注入 prompt → 流末 best-effort 落库 role-aware 消息证据 → done 回传 `{subjectId, conversationId}`；save-as-page/save-to-wiki 模式不持久化 |
 | `/api/maintenance/status` | GET | 只读维护层运行态：开关 / 上次 sweep / 节律 / 范围内到期页数（`dueCount`）；维护是全局调度不绑 subject，仅 `requireAuth` |
 | `/api/maintenance/due-pages` | GET | 🆕 到期页面明细预览：scope 与 status 同源、`total` 与 `dueCount` 同口径；entries 含 subject slug/name、标题（maturity 孤儿行为 null）、`nextDueAt`/priority/state，按 `priority DESC, next_due_at ASC` 最多 100 条 |
+| `/api/evidence` | POST | 追加一条逐页掌握度证据；`requireAuth` + `requireCsrf` + `resolveSubjectFromRequest(required)`；body `{ slug, kind, anchor?, strength?, detail? }`。**写前用 `getPageBySlug` 校验 slug 在该 subject 内存在，不存在 404 不落行**（否则陈旧客户端会持续累积指向幽灵页的证据，生命周期闭合兜不住从未存在过的 slug）。写入 style-bearing 证据（`self-report-hard/easy`）后顺带跑一遍风格 reducer，响应带 `style: { changed, version }` 供客户端决定是否失效 lens 缓存 |
+| `/api/mastery` | GET | **无 `slug`**：全量 `slug → MasteryVerdictLite`（**不含 `recent`**，否则响应体随使用量线性膨胀）；**带 `slug`**：单页完整 `MasteryVerdict` 含 `recent`，供审计面。与 `/api/graph` 同口径排除 meta 页；空库返回 `{}`，下游按全 `unknown` 处理（冷启动零回归） |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
 | `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录；两种模式都按外键顺序清理 Research provenance 五表（需 auth + CSRF） |
 
@@ -153,6 +155,8 @@ src/app/
     ├── pages/[...slug]/route.ts
     ├── search/route.ts
     ├── graph/route.ts
+    ├── evidence/route.ts                 # 🆕 POST 追加掌握度证据（写前存在性校验 + 风格 reducer）
+    ├── mastery/route.ts                  # 🆕 GET 全量 lite / 单页完整 verdict
     ├── session/route.ts
     └── reset/route.ts
 ```
@@ -168,6 +172,8 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | Lens 接入已知概念地图：`POST /api/lens/[...slug]` 算邻域地图注入重塑 prompt（抛错按无地图继续，**不阻断重塑**）并把快照写进 `page_renditions.known_concepts_json`；`GET` 的 `assumedKnown` **从存储列派生而非重算**（必须是当初真正告诉模型的那一份），并补算当前地图与之比对纳入 `stale`——掌握度变化不改 `profileVersion`，没有这一项纠错闭环在 UI 上无从触发。`known_concepts_json` 为 null 的旧行不参与比对，存量重塑版不会一上线全变 stale。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
+| 2026-07-26 | 证据流与逐页掌握度：新增 `POST /api/evidence`（写前 slug 存在性校验 + style-bearing 证据顺带跑风格 reducer）与 `GET /api/mastery`（全量 lite / 单页含 `recent`，排除 meta 页）；`/api/query` 在既有落库点追加 `selection-ask` / `citation-hit`（跨 subject 引用不记），`POST /api/lens/[...slug]` 成功后追加 `reshape-request`，三处均 best-effort；`/api/profile/signals` **已删除**（`profile_signals` 退役，反馈改走 `/api/evidence`）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-20 | URL 登录态授权扩展到 Research child：`POST /api/jobs/[id]/url-auth` 识别服务端 provenance 后把 grant ID 与 job/delivery/run 放在同一事务恢复，失败补偿新 grant；响应附最新 run 供 Health 即时恢复 importing 轮询。spec/plan 见 docs/{specs,plans}/2026-07-20-url-auth-auto-recovery-research.md |
 | 2026-07-20 | URL Source 增加本地阅读模式：`/sources/[id]` 与页面 Sources 分栏均可在实时 sandbox iframe 和摄入时保存的 Markdown 正文间切换；只读预览不重新联网，旧 sidecar 从 chunks 去重回退。spec/plan 见 docs/{specs,plans}/2026-07-20-url-source-reader-mode.md |
 | 2026-07-20 | 新增 `POST /api/jobs/[id]/url-auth`：只接受当前 Subject 的普通 failed URL Ingest 与最新 401/403 challenge，敏感头写短期 AES-GCM grant，job params 只保存 grant ID；CAS 失败补偿密文，Research child 保持 provenance 专用 retry 边界。spec/plan 见 docs/{specs,plans}/2026-07-20-url-authenticated-ingest.md |

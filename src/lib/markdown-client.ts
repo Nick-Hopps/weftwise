@@ -11,11 +11,12 @@ import rehypeReact from 'rehype-react';
 import rehypeKatex from 'rehype-katex';
 import * as prod from 'react/jsx-runtime';
 import type { Root as MdastRoot, Text as MdastText, Node as MdastNode, Parent as MdastParent } from 'mdast';
-import type { Code as MdastCode } from 'mdast';
+import type { Code as MdastCode, Blockquote as MdastBlockquote } from 'mdast';
 import type { Plugin } from 'unified';
 import WikiLinkComponent from '@/components/wiki/wiki-link';
 import MermaidDiagram from '@/components/wiki/mermaid-diagram';
 import { CalloutIcon } from '@/components/wiki/callout-icon';
+import { QuizBlock, type QuizInteractiveContext } from '@/components/wiki/quiz-block';
 import { remarkArticleHeadings } from '@/lib/article-toc';
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,7 @@ interface WikiLinkNode {
 }
 
 import { normalizeSlug, SUBJECT_SLUG_RE } from '@/lib/slug';
+import { fnv1a } from '@/lib/stable-hash';
 
 // ---------------------------------------------------------------------------
 // remarkWikiLinks plugin
@@ -300,6 +302,88 @@ function createRemarkSelectionBlocks(): Plugin<[], MdastRoot> {
 }
 
 // ---------------------------------------------------------------------------
+// remarkQuiz plugin
+// ---------------------------------------------------------------------------
+// 把 `[!quiz]` callout 按**第一个** thematicBreak 切成问题段 / 答案段，答案段包进
+// `data-quiz-answer` 容器（渲染时折叠，不剧透），并给 callout 打上 `data-quiz-id`。
+//
+// 为什么用 `---` 而不是 `<details>`：`allowDangerousHtml: false`，raw HTML 根本不渲染。
+// 为什么用 `---` 而不是「答案：」：thematicBreak 是**语言无关**的，不会随 wikiLanguage 漂移。
+//
+// 顺序约束：必须排在 `createRemarkCallouts()`（复用它打好的 `data-callout` 标记，不重复
+// 解析 `[!type]`）**和** `createRemarkSelectionBlocks()` 之后。后者依赖解析期的
+// `node.position` 计算 offset，而本插件会插入没有 position 的包装节点——它只重构
+// blockquote **内部**、不影响顶层块 offset，但排最后是零成本的保险。
+
+function createRemarkQuiz(): Plugin<[], MdastRoot> {
+  return function () {
+    return function transformer(tree: MdastRoot) {
+      visitQuizzes(tree);
+    };
+  };
+}
+
+function visitQuizzes(node: MdastNode): void {
+  if (!isParent(node)) return;
+  for (const child of node.children) {
+    if (isQuizCallout(child)) splitQuizCallout(child as MdastParent & MdastNodeWithData);
+    visitQuizzes(child);
+  }
+}
+
+function isQuizCallout(node: MdastNode): boolean {
+  const data = (node as MdastNodeWithData).data;
+  return data?.hProperties?.['data-callout'] === 'quiz';
+}
+
+function splitQuizCallout(bq: MdastParent & MdastNodeWithData): void {
+  const breakIndex = bq.children.findIndex((c) => c.type === 'thematicBreak');
+
+  // 无分隔符 = 存量页形态：不切分，但仍然给它 quiz 身份（自评交互照样需要）。
+  const question = breakIndex === -1 ? bq.children : bq.children.slice(0, breakIndex);
+  const answer = breakIndex === -1 ? [] : bq.children.slice(breakIndex + 1);
+
+  // hash 只取**问题段**：证据是关于「这道题」的，enricher 重跑时润色答案措辞
+  // 不应该让「他答对过」这件事失效。
+  bq.data = {
+    ...bq.data,
+    hProperties: {
+      ...(bq.data?.hProperties ?? {}),
+      'data-quiz-id': fnv1a(collectPlainText(question)),
+    },
+  };
+
+  if (answer.length === 0) return;
+
+  // 包装节点借用 blockquote 的形状（可容纳块级子节点），由 hName 改渲染成 div。
+  const wrapper: MdastBlockquote & MdastNodeWithData = {
+    type: 'blockquote',
+    children: answer as MdastBlockquote['children'],
+    data: { hName: 'div', hProperties: { 'data-quiz-answer': '' } },
+  };
+
+  bq.children = [...question, wrapper];
+}
+
+/**
+ * 收集子树里的可见文本，**剔除全部空白**——enricher 重跑时换行位置常有变化，
+ * 而重排版不该让「他答对过」这件事失效。不能只折叠空白：CJK 的软换行不含空格，
+ * 折叠成单空格反而会让重排版前后的哈希不同。
+ */
+function collectPlainText(nodes: readonly MdastNode[]): string {
+  const parts: string[] = [];
+  const walk = (node: MdastNode): void => {
+    if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'code') {
+      parts.push((node as MdastText).value);
+      return;
+    }
+    if (isParent(node)) node.children.forEach(walk);
+  };
+  nodes.forEach(walk);
+  return parts.join('').replace(/\s+/g, '');
+}
+
+// ---------------------------------------------------------------------------
 // Production JSX runtime options for rehype-react
 // ---------------------------------------------------------------------------
 
@@ -313,6 +397,21 @@ const prodRuntime = prod as unknown as {
 // renderMarkdown
 // ---------------------------------------------------------------------------
 
+export interface RenderOptions {
+  math?: boolean;
+  headingAnchors?: boolean;
+  selectionBlocks?: boolean;
+  /**
+   * 正文交互块的能力上下文。**只有 Wiki 阅读页会传**——`renderMarkdown` 另外五个
+   * 消费方（Chat / 编辑器预览 / Source 查看器 / URL 阅读模式 / Sources 分栏）
+   * 要么没有页面身份，要么语境是编辑，都不该发证据（决策 9）。
+   *
+   * 不传时 quiz 照样切分、答案照样折叠，只是没有判分按钮——不是运行时判空，
+   * 是 `<QuizBlock>` 根本拿不到 `pageSlug`。
+   */
+  interactive?: QuizInteractiveContext;
+}
+
 /**
  * Render a markdown string (potentially with Obsidian-style YAML frontmatter
  * and [[wikilinks]]) into a React element.
@@ -324,8 +423,9 @@ const prodRuntime = prod as unknown as {
 export function renderMarkdown(
   content: string,
   titleSlugMap?: Record<string, string>,
-  options?: { math?: boolean; headingAnchors?: boolean; selectionBlocks?: boolean },
+  options?: RenderOptions,
 ): React.ReactElement {
+  const interactive = options?.interactive;
   const enableMath = options?.math ?? false;
   const resolver: SlugResolver | undefined = titleSlugMap
     ? (title: string) => titleSlugMap[title] ?? titleSlugMap[title.toLowerCase()]
@@ -338,6 +438,8 @@ export function renderMarkdown(
   if (options?.headingAnchors) remark = remark.use(remarkArticleHeadings);
   remark = remark.use(createRemarkCallouts()).use(createRemarkMermaid()).use(createRemarkWikiLinks(resolver));
   if (options?.selectionBlocks) remark = remark.use(createRemarkSelectionBlocks());
+  // 必须排在 selectionBlocks 之后：本插件会插入没有 position 的包装节点（决策 6）。
+  remark = remark.use(createRemarkQuiz());
 
   // 桥接到 hast 后进入 rehype 阶段：rehype-katex（可选）渲染 math 节点；
   // throwOnError:false 保证非法 LaTeX 不会让同步 processSync 抛错、整页崩溃。
@@ -364,12 +466,22 @@ export function renderMarkdown(
               (props['data-wiki-subject' as keyof typeof props] as
                 | string
                 | undefined) ?? null;
+            // E3：只有「被明确告知不必重讲」的概念才挂纠错入口。
+            //
+            // **必须同时比对 subject**：本覆盖同时处理 `[[slug]]` 与
+            // `[[other-subject:slug]]`，而 assumedKnown 里只装当前 subject 的裸 slug。
+            // 只比 slug 的话，指向别的 subject 同名页的链接会挂上入口——点下去把负证据
+            // 写到当前 subject 那一页，归错了页。跨主题同名 slug 在本项目合法且常见。
+            const sameSubject = wikiSubject === null || wikiSubject === interactive?.subjectSlug;
+            const assumedKnown =
+              sameSubject && (interactive?.assumedKnown?.includes(wikiSlug) ?? false);
             return createElement(
               WikiLinkComponent,
               {
                 href: buildWikiLinkHref(wikiSlug, wikiSubject),
                 slug: wikiSlug,
                 subjectSlug: wikiSubject ?? undefined,
+                assumedKnown,
               },
               props.children,
             );
@@ -383,6 +495,12 @@ export function renderMarkdown(
         div: function CalloutRenderer(props: React.ComponentPropsWithoutRef<'div'>) {
           const calloutType = props['data-callout' as keyof typeof props];
           if (typeof calloutType !== 'string') return createElement('div', props);
+          const quizId = props['data-quiz-id' as keyof typeof props];
+          if (calloutType === 'quiz' && typeof quizId === 'string') {
+            // 能力只从这里流入：`interactive` 是 renderMarkdown 的入参，
+            // QuizBlock 自己既不知道也无从推断当前是阅读页还是编辑器预览。
+            return createElement(QuizBlock, { ...props, quizId, interactive }, props.children);
+          }
           return createElement(
             'div',
             props,

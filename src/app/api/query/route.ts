@@ -9,6 +9,8 @@ import {
 import { extractCitationsFromAnswer } from '@/server/services/citation-extract';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
+import { resolveUserId } from '@/server/middleware/user';
+import { recordEvidenceBatch } from '@/server/services/record-evidence';
 import * as queue from '@/server/jobs/queue';
 import * as conversationsRepo from '@/server/db/repos/conversations-repo';
 import * as pagesRepo from '@/server/db/repos/pages-repo';
@@ -80,6 +82,7 @@ export async function POST(request: NextRequest) {
   const resolution = resolveSubjectFromRequest(request, { body: parsed.data });
   if (resolution.error) return resolution.error;
   const { subject } = resolution;
+  const userId = resolveUserId(request);
 
   const {
     question,
@@ -205,6 +208,37 @@ export async function POST(request: NextRequest) {
         );
       };
 
+      /**
+       * D2 选区追问 + D3 引用命中：挂在**服务端已有的落库点**上，不新增客户端请求。
+       *
+       * 两者都是 negative——「问到了这一页」说明当时没能自己读懂。但 strength 差一档：
+       * 选区追问是读者明确指着一段说「这里没看懂」（strong）；引用命中可能只是在查资料
+       * （weak，规则 5 只让它落 exposed）。
+       */
+      const recordTurnEvidence = (cits: WikiCitation[]) => {
+        recordEvidenceBatch(
+          messageReferences.map((reference) => ({
+            userId,
+            subjectId: subject.id,
+            slug: reference.pageSlug,
+            kind: 'selection-ask' as const,
+            anchor: reference.section || null,
+          })),
+        );
+        recordEvidenceBatch(
+          cits
+            // 跨 subject 引用不记：证据按 (user, subject, slug) 归属，把外主题的 slug
+            // 挂到当前 subject 上就是凭空造出一条指向不存在页面的证据。
+            .filter((c) => !c.subjectSlug || c.subjectSlug === subject.slug)
+            .map((c) => ({
+              userId,
+              subjectId: subject.id,
+              slug: c.pageSlug,
+              kind: 'citation-hit' as const,
+            })),
+        );
+      };
+
       const persistTurn = (
         answer: string,
         cits: WikiCitation[],
@@ -226,7 +260,9 @@ export async function POST(request: NextRequest) {
         } catch (err) {
           console.error('[query] persist conversation turn failed', err);
         }
+        recordTurnEvidence(cits);
       };
+
 
       const onAbort = () => closeStream();
       request.signal.addEventListener('abort', onAbort, { once: true });

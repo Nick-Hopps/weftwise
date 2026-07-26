@@ -90,6 +90,7 @@ Route Handler / Worker Handler
 | `operations` | Saga changeset 及其 `preHead` / `postHead` / `subject_id`，供崩溃回滚 |
 | `page_embeddings` | 向量嵌入存储（PK `(subject_id, slug)` + model + content_hash + vector BLOB，FK CASCADE）（⑧） |
 | `pages_fts` | FTS5 虚拟表，title + summary + body（含 UNINDEXED `subject_id` / `slug`） |
+| `page_evidence` | 逐页掌握度证据流（append-only；`kind`/`polarity`/`strength`/`anchor`/`detail_json`，FK `subject_id` CASCADE）；掌握度读时由 `profile/mastery.ts::deriveMastery` 纯函数派生，**无物化表**。取代已退役的 `profile_signals` |
 
 ## 测试与质量
 
@@ -128,6 +129,8 @@ src/server/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | 已知概念地图的两个消费面：新增 `profile/concept-map.ts`（`selectNeighborhood` / `groupByMastery` / `renderKnownConcepts` 三个纯函数，邻域取自**正文 wikilink** 而非图查询，硬上界 `MAX_NEIGHBORHOOD=40` 且截断时明说不静默）与 `profile/concept-map-io.ts`（`buildKnownConceptsForPage`，接受预取证据 map 让 GET/POST 只查一次）；`llm/prompts/reshape-prompt.ts` 与 `services/reshape-service.ts` 接受可选 `knownConcepts`（三段全空则整段不注入，零证据时 prompt 逐字节不变）。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
+| 2026-07-26 | 证据流与逐页掌握度模型：新增 `page_evidence` 表 + `db/repos/evidence-repo.ts` + `profile/mastery.ts::deriveMastery`（四态 `unknown/exposed/mastered/struggling` × 三档置信度，显式优先级判定，`mastered` 两级有效期 = 复习到期再逾期一档）；`profile/signal-reducer.ts` 输入换 `EvidenceRow[]` 并加时间窗/衰减/消费边界/三维独立阈值；新增 `services/{record-evidence,style-learning}.ts`；**`profile_signals` 表与 `signals-repo` 已退役**。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-20 | `generateStructuredOutput` 与 `webSearch` 新增可选外部 AbortSignal，并分别与任务 route timeout、Tavily 8 秒 timeout 合并；所有退出路径清理 listener，供 Research 手动中断复用 |
 | 2026-07-17 | 新增 `subjects/` 模块：`subject-archive-core.ts`（manifest 契约 + zip entry 路径安全校验，纯函数）与 `subject-archive.ts`（导出 zip / 导入落盘 + `indexTouchedPages` + 侧车恢复 sources/page_sources + git commit，失败清理回滚）；DB 可再生数据不进归档，与 rebuild 口径一致 |
 | 2026-07-17 | Worker 注册 `image-insert-service`：批准后生图，页面引用与 base64 asset 同一 Saga；生图前后稳定 HEAD/锚点复核、取消 rollback 与 applied operation 幂等恢复 |

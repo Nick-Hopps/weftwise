@@ -330,6 +330,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | `ingest-enricher` 升 **v7**：`[!quiz]` callout 必须用一行 `---` 分隔问题与答案（结构化分隔符，语言无关，不得翻译或替换成「答案：」这类标记；答案 1–3 句且**不得引入正文没有的事实**）。三处同步：`ingest-service` / `reenrich-service` 版本门 6→7，`BUILTIN_UPGRADE_HASHES` 追加 v6 原版 SHA-256（**漏这一条，所有未改过 skill 的既有 vault 都会卡在 v6 撞版本门**）。新增 `builtin-manifest.test.ts` 断言 v6 hash 在白名单内、且当前模板 hash 不在（防自我替换循环） |
 | 2026-07-17 | Query 选区配图采用独立 `image-insert` mode：复用 propose policy，但只编译只读工具与 `wiki.image.insert`；新增 ToolSet JSON Schema 根节点回归，避免无关 union schema 阻断 provider 工具注册 |
 | 2026-07-17 | 新增 `wiki.image.insert` propose builtin 与 Query profile 授权；canonical page/selection 由 ToolContext 绑定，模型不能控制 slug/offset，且 Query 仍不可调用真实 `image.generate` |
 | 2026-07-16 | 修复 re-enrich 生图可靠性：`image.generate` 移除模型提供的 ASCII `pageSlug`，改由运行时绑定 Unicode 页面身份；asset 使用 UUID 文件名；非 Google `ingest:image` 路由 fail-fast；enricher v6 对视觉主题无现有位图时明确生图，并允许未修改 v5 自动升级 |

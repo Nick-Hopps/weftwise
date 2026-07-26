@@ -26,5 +26,7 @@ it('ensureTables 建出认知透镜表与持久化图片表', async () => {
   expect(names).toContain('user_profiles');
   expect(names).toContain('page_renditions');
   expect(names).toContain('page_rendition_assets');
-  expect(names).toContain('profile_signals');
+  // profile_signals 已退役（真实源迁到 page_evidence）
+  expect(names).not.toContain('profile_signals');
+  expect(names).toContain('page_evidence');
 });

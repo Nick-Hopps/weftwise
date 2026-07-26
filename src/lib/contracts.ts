@@ -1149,6 +1149,87 @@ export interface UserProfileDTO {
   onboardedAt: string | null;
 }
 
+// ── 逐页掌握度（证据流 + 读时派生）─────────────────────────────────
+// 证据类型枚举是**单一真实源**：`page_evidence.kind` 的取值域、`POST /api/evidence` 的
+// 校验依据、掌握度派生的权重表都从这里出发，任何一方不得各自扩充。
+export type EvidencePolarity = 'positive' | 'negative' | 'exposure';
+export type EvidenceStrength = 'strong' | 'weak';
+
+export type EvidenceKind =
+  | 'quiz-correct'      // 揭晓后判对 / 无答案自评答对
+  | 'quiz-wrong'        // 判分或自评答错（两者同权）
+  | 'selection-ask'     // 选区追问
+  | 'self-report-hard'  // 原 too_hard：整页讲法太难
+  | 'self-report-easy'  // 原 too_easy：整页讲法太浅
+  | 'citation-hit'      // Ask AI 回答引用命中
+  | 'reshape-request'   // 重塑请求
+  | 'page-read'         // 滚动到底 + 停留 ≥30s
+  | 'concept-unknown';  // 重塑版里的「这个我其实不懂」（由地图纠错入口写入）
+
+interface EvidenceKindMeta {
+  polarity: EvidencePolarity;
+  /** 缺省 strength；保守方向优先。 */
+  strength: EvidenceStrength;
+  /**
+   * 是否允许调用方上调 strength。只有 `quiz-correct` 为 true：同一个交互，
+   * 有客观参照的判分是 strong，无答案自评是 weak（决策 5 的刻意不对称）。
+   * 负向证据一律不可被调用方降权。
+   */
+  strengthOverridable?: boolean;
+}
+
+export const EVIDENCE_KIND_META: Record<EvidenceKind, EvidenceKindMeta> = {
+  'quiz-correct': { polarity: 'positive', strength: 'weak', strengthOverridable: true },
+  'quiz-wrong': { polarity: 'negative', strength: 'strong' },
+  'selection-ask': { polarity: 'negative', strength: 'strong' },
+  'self-report-hard': { polarity: 'negative', strength: 'strong' },
+  'self-report-easy': { polarity: 'positive', strength: 'weak' },
+  'citation-hit': { polarity: 'negative', strength: 'weak' },
+  'reshape-request': { polarity: 'negative', strength: 'weak' },
+  'page-read': { polarity: 'exposure', strength: 'weak' },
+  'concept-unknown': { polarity: 'negative', strength: 'strong' },
+};
+
+export function isEvidenceKind(value: string): value is EvidenceKind {
+  return Object.prototype.hasOwnProperty.call(EVIDENCE_KIND_META, value);
+}
+
+/**
+ * 只有这两种证据说的是「讲法」，其余说的是「掌握度」。
+ * 风格 reducer 必须按显式白名单筛选——若 `quiz-wrong` / `selection-ask` 混进来，
+ * 读者每答错一道题就把全库 readingLevel 往下推一格。
+ */
+export const STYLE_BEARING_EVIDENCE_KINDS: readonly EvidenceKind[] = [
+  'self-report-hard',
+  'self-report-easy',
+];
+
+export type MasteryState = 'unknown' | 'exposed' | 'mastered' | 'struggling';
+export type MasteryConfidence = 'none' | 'low' | 'high';
+
+export interface EvidenceRow {
+  kind: EvidenceKind;
+  polarity: EvidencePolarity;
+  strength: EvidenceStrength;
+  anchor: string | null;
+  createdAt: string;
+}
+
+/** 批量响应用；刻意不含 `recent`，否则响应体随使用量线性膨胀。 */
+export interface MasteryVerdictLite {
+  state: MasteryState;
+  confidence: MasteryConfidence;
+  evidenceCount: number;
+  lastEvidenceAt: string | null;
+  /** 仅 state==='mastered' 时非空；供审计面解释「何时会降级」。 */
+  expiresAt: string | null;
+}
+
+export interface MasteryVerdict extends MasteryVerdictLite {
+  /** 供审计面展示，按时间倒序有界截断。 */
+  recent: EvidenceRow[];
+}
+
 // ---------------------------------------------------------------------------
 // LLM 用量统计（设置页 Usage 面板）
 // ---------------------------------------------------------------------------

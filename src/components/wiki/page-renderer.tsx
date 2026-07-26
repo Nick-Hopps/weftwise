@@ -3,6 +3,7 @@
 import { useMemo, type ReactNode } from 'react';
 import FrontmatterDisplay from './frontmatter-display';
 import { renderMarkdown } from '@/lib/markdown-client';
+import type { QuizInteractiveContext } from './quiz-block';
 
 interface PageRendererProps {
   content: string;
@@ -21,6 +22,14 @@ interface PageRendererProps {
   /** 渲染在 FrontmatterDisplay 之后、正文之前（复用 article 的 reading 宽度）。 */
   headerExtra?: ReactNode;
   subjectSlug?: string;
+  /**
+   * 正文交互块的能力上下文，**原样透传给 renderMarkdown，本组件不得就地构造**。
+   *
+   * 因为 `editor-preview.tsx` 就是 `<PageRenderer content slug titleSlugMap />`——
+   * 只要这里用自己的 `slug` / `subjectSlug` 拼一个 interactive 出来，
+   * 编辑器预览立刻获得判分按钮。能力由最外层知道语境的调用方显式授予（决策 9）。
+   */
+  interactive?: QuizInteractiveContext;
   /**
    * 保留以兼容调用方；正文统一用 `max-w-reading` 宽测度，分栏时由窄栏自然收窄，
    * 不再额外收紧 measure。
@@ -70,14 +79,16 @@ export default function PageRenderer({
   actions,
   headerExtra,
   subjectSlug,
+  interactive,
 }: PageRendererProps) {
   const rendered = useMemo(
     () => renderMarkdown(content, titleSlugMap, {
       math: true,
       headingAnchors: true,
       selectionBlocks: true,
+      interactive,
     }),
-    [content, titleSlugMap],
+    [content, titleSlugMap, interactive],
   );
 
   return (

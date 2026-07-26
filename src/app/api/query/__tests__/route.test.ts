@@ -18,6 +18,7 @@ const mockTouch = vi.fn();
 const mockEnqueue = vi.fn();
 const mockRunQuery = vi.fn();
 const mockGetPageBySlug = vi.fn();
+const mockAppendEvidence = vi.fn();
 
 vi.mock('@/server/middleware/auth', () => ({ requireAuth: () => null, requireCsrf: () => null }));
 vi.mock('@/server/middleware/subject', () => ({
@@ -54,6 +55,10 @@ vi.mock('@/server/db/repos/conversations-repo', () => ({
 }));
 vi.mock('@/server/db/repos/pages-repo', () => ({
   getPageBySlug: (...a: unknown[]) => mockGetPageBySlug(...a),
+}));
+vi.mock('@/server/middleware/user', () => ({ resolveUserId: () => 'local' }));
+vi.mock('@/server/db/repos/evidence-repo', () => ({
+  appendEvidence: (...a: unknown[]) => mockAppendEvidence(...a),
 }));
 
 import { POST } from '../route';
@@ -110,6 +115,7 @@ beforeEach(() => {
   mockEnqueue.mockReset().mockReturnValue({ id: 'job-x' });
   mockRunQuery.mockReset();
   mockGetPageBySlug.mockReset().mockReturnValue({ title: 'Page A' });
+  mockAppendEvidence.mockReset();
 });
 
 describe('POST /api/query 保存到 Wiki', () => {
@@ -598,5 +604,74 @@ describe('POST /api/query 流式持久化', () => {
     expect(sse).toContain(`"decision":"${decision}"`);
     expect(sse).toContain('event: done');
     expect(mockAgentic).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/query —— D2 选区追问 / D3 引用命中证据', () => {
+  const kindsOf = () =>
+    mockAppendEvidence.mock.calls.map((c) => (c[0] as { kind: string }).kind);
+
+  it('每条 messageReference 追加一条 selection-ask，anchor = section', async () => {
+    await readSSE(await call({
+      question: 'q',
+      pageSlug: 'alpha',
+      messageReferences: [{ section: 'Chain rule', excerpt: '这段没看懂' }],
+    }));
+
+    expect(mockAppendEvidence).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'local',
+      subjectId: 's1',
+      slug: 'alpha',
+      kind: 'selection-ask',
+      anchor: 'Chain rule',
+    }));
+  });
+
+  it('无 section 的选区落 anchor: null，不落空串', async () => {
+    await readSSE(await call({
+      question: 'q',
+      pageSlug: 'alpha',
+      messageReferences: [{ section: null, excerpt: '这段没看懂' }],
+    }));
+    expect(mockAppendEvidence).toHaveBeenCalledWith(expect.objectContaining({ anchor: null }));
+  });
+
+  it('回答引用命中追加 citation-hit', async () => {
+    mockExtractCitations.mockReturnValue([{ pageSlug: 'beta', excerpt: 'x' }]);
+    await readSSE(await call({ question: 'q' }));
+
+    expect(mockAppendEvidence).toHaveBeenCalledWith(expect.objectContaining({
+      subjectId: 's1',
+      slug: 'beta',
+      kind: 'citation-hit',
+    }));
+  });
+
+  it('跨 subject 引用不记 —— 否则等于凭空造一条指向不存在页面的证据', async () => {
+    mockExtractCitations.mockReturnValue([
+      { pageSlug: 'beta', excerpt: 'x', subjectSlug: 'general' },
+      { pageSlug: 'foreign', excerpt: 'y', subjectSlug: 'other-subject' },
+    ]);
+    await readSSE(await call({ question: 'q' }));
+
+    const slugs = mockAppendEvidence.mock.calls.map((c) => (c[0] as { slug: string }).slug);
+    expect(slugs).toContain('beta');
+    expect(slugs).not.toContain('foreign');
+  });
+
+  it('无选区无引用时不产生任何证据（零证据回归）', async () => {
+    await readSSE(await call({ question: 'q' }));
+    expect(kindsOf()).toEqual([]);
+  });
+
+  it('证据写入抛错时 SSE 主响应不变', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockExtractCitations.mockReturnValue([{ pageSlug: 'beta', excerpt: 'x' }]);
+    mockAppendEvidence.mockImplementation(() => { throw new Error('db locked'); });
+
+    const sse = await readSSE(await call({ question: 'q' }));
+    expect(sse).toContain('event: citations');
+    expect(sse).toContain('event: done');
+    expect(sse).not.toContain('event: error');
   });
 });

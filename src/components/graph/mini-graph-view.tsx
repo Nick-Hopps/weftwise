@@ -42,7 +42,11 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
   // accumulated drift on repeated toggles.
   const preFullscreenZoomRef = useRef<number | null>(null);
 
-  const { cyRef, simRef, isLoading, isEmpty, stats } = useWikiGraph(compactRef, currentSlug);
+  const {
+    cyRef, simRef, isLoading, isEmpty, stats,
+    mode, setMode, resetMode, masteryDist, masteryError,
+    selectedSlug, setSelectedSlug,
+  } = useWikiGraph(compactRef, currentSlug);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
@@ -118,14 +122,19 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
   useEffect(() => {
     if (!isFullscreen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsFullscreen(false);
+      if (e.key === 'Escape') { resetMode(); setIsFullscreen(false); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [isFullscreen]);
 
   const openFullscreen = useCallback(() => setIsFullscreen(true), []);
-  const closeFullscreen = useCallback(() => setIsFullscreen(false), []);
+  // F1b：模式在退出全屏时重置回 structure。切换入口只在全屏顶栏——若跨全屏持久化，
+  // compact 视图会停在掌握度着色上，而那里没有任何切回去的 UI。
+  const closeFullscreen = useCallback(() => {
+    resetMode();
+    setIsFullscreen(false);
+  }, [resetMode]);
 
   const recenter = useCallback(() => {
     const cy = cyRef.current;
@@ -237,6 +246,12 @@ export function MiniGraphView({ currentSlug, fill = false }: MiniGraphViewProps)
             hasCurrent={!!currentSlug}
             onRecenter={recenter}
             onClose={closeFullscreen}
+            mode={mode}
+            onModeChange={(next) => void setMode(next)}
+            masteryDist={masteryDist}
+            masteryError={masteryError}
+            selectedSlug={selectedSlug}
+            onCloseInspector={() => setSelectedSlug(null)}
           />,
           portalTarget,
         )}

@@ -517,35 +517,51 @@ function migratePageMaturity(): void {
 // ── Cognitive Lens（读时内容重塑）三表 ───────────────────────────
 function migrateUserProfiles(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('user_profiles')) return;
-  sqlite.exec(`
-    CREATE TABLE user_profiles (
-      user_id TEXT PRIMARY KEY,
-      background_summary TEXT NOT NULL DEFAULT '',
-      style_prefs TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 1,
-      onboarded_at TEXT,
-      updated_at TEXT NOT NULL
-    );
-  `);
+  if (!tableExists('user_profiles')) {
+    sqlite.exec(`
+      CREATE TABLE user_profiles (
+        user_id TEXT PRIMARY KEY,
+        background_summary TEXT NOT NULL DEFAULT '',
+        style_prefs TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        onboarded_at TEXT,
+        updated_at TEXT NOT NULL,
+        style_prefs_updated_at TEXT
+      );
+    `);
+    return;
+  }
+  // 存量库补列：CREATE TABLE IF NOT EXISTS 对已存在的表什么都不做，只靠它的话既有安装
+  // 升级后拿不到新列、读写立刻 SQL 报错（同 migrateJobs 的 ALTER ADD COLUMN 策略）。
+  if (!tableColumns('user_profiles').includes('style_prefs_updated_at')) {
+    sqlite.exec(`ALTER TABLE user_profiles ADD COLUMN style_prefs_updated_at TEXT`);
+  }
 }
 
 // 故意不挂 subjects FK：可丢弃重建的读侧缓存，由 deleteBySubject + 命中校验自洽。
 function migratePageRenditions(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('page_renditions')) return;
-  sqlite.exec(`
-    CREATE TABLE page_renditions (
-      subject_id TEXT NOT NULL,
-      slug TEXT NOT NULL,
-      canonical_hash TEXT NOT NULL,
-      profile_version INTEGER NOT NULL,
-      rendered_md TEXT NOT NULL,
-      model TEXT,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (subject_id, slug)
-    );
-  `);
+  if (!tableExists('page_renditions')) {
+    sqlite.exec(`
+      CREATE TABLE page_renditions (
+        subject_id TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        canonical_hash TEXT NOT NULL,
+        profile_version INTEGER NOT NULL,
+        rendered_md TEXT NOT NULL,
+        model TEXT,
+        updated_at TEXT NOT NULL,
+        known_concepts_json TEXT,
+        PRIMARY KEY (subject_id, slug)
+      );
+    `);
+    return;
+  }
+  // 存量库补列：`CREATE TABLE IF NOT EXISTS` 对已存在的表什么都不做，
+  // 只写它等于既有安装升级后这一列根本不存在，读写当场 SQL 报错。
+  if (!tableColumns('page_renditions').includes('known_concepts_json')) {
+    sqlite.exec(`ALTER TABLE page_renditions ADD COLUMN known_concepts_json TEXT`);
+  }
 }
 
 function migratePageRenditionAssets(): void {
@@ -564,18 +580,32 @@ function migratePageRenditionAssets(): void {
   `);
 }
 
-function migrateProfileSignals(): void {
+// profile_signals 已退役（真实源迁到 page_evidence）。存量库直接丢表，
+// 其中的 style-bearing 历史信号在并存期已双写进证据表。
+function dropProfileSignals(): void {
+  rawSqlite!.exec(`DROP TABLE IF EXISTS profile_signals`);
+}
+
+// 逐页掌握度证据流（append-only，掌握度读时派生）。
+function migratePageEvidence(): void {
   const sqlite = rawSqlite!;
-  if (tableExists('profile_signals')) return;
   sqlite.exec(`
-    CREATE TABLE profile_signals (
+    CREATE TABLE IF NOT EXISTS page_evidence (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      subject_id TEXT,
-      slug TEXT,
+      subject_id TEXT NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      slug TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      polarity TEXT NOT NULL,
+      strength TEXT NOT NULL,
+      anchor TEXT,
+      detail_json TEXT,
       created_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS page_evidence_page_idx
+      ON page_evidence(user_id, subject_id, slug, created_at);
+    CREATE INDEX IF NOT EXISTS page_evidence_scope_idx
+      ON page_evidence(user_id, subject_id, created_at);
   `);
 }
 
@@ -935,7 +965,8 @@ function ensureTables() {
       migrateUserProfiles();
       migratePageRenditions();
       migratePageRenditionAssets();
-      migrateProfileSignals();
+      dropProfileSignals();
+      migratePageEvidence();
       migrateResearchBacklog();
       migrateResearchProvenance();
       dedupeSourcesForUniqueIdentity();

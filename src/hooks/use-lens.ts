@@ -7,6 +7,11 @@ export interface LensResult {
   renderedMd: string;
   source: 'saved' | 'generated' | 'canonical';
   stale: boolean;
+  /**
+   * 被当作已掌握、因而未展开解释的 slug（E3 纠错入口的挂载依据）。
+   * 服务端从 `known_concepts_json` 派生——是当初真正告诉模型的那一份，不是重算的。
+   */
+  assumedKnown?: string[];
 }
 
 export type LensRequestState = 'idle' | 'loading' | 'refreshing' | 'ready' | 'unavailable';

@@ -96,6 +96,25 @@
 - `deleteBySlug(subjectId, slug): void` —— 删单页向量（导出备用；当前删除/拆分由 embed-index `pruneOrphans` 统一清理）
 - `pruneOrphans(subjectId, liveSlugs): void` —— 删 slug ∉ liveSlugs 的孤儿向量（embed-index 任务每次调用）
 
+### `evidence-repo.ts` 🆕
+
+逐页掌握度证据流（append-only，`subject_id` FK CASCADE）。`polarity` / `strength` 由 `kind`
+经 `contracts.ts::EVIDENCE_KIND_META` 确定性派生后**冗余落列**——新增 kind 不必回填历史行。
+唯一例外是 `quiz-correct` 的 strength 可被调用方上调（揭晓答案后判分 = strong，
+无答案自评 = weak，见 `EVIDENCE_KIND_META.strengthOverridable`）。
+
+- `appendEvidence(input): void` —— 未知 kind 抛错；`detail` 序列化进 `detail_json`
+- `listForPage(userId, subjectId, slug): EvidenceRow[]` —— 按时间正序
+- `listForSubject(userId, subjectId): Map<slug, EvidenceRow[]>` —— 图层全量，一次索引扫描 + 内存分组
+- `listStyleEvidence(userId, since): EvidenceRow[]` —— 跨 subject 取 style-bearing 证据，供风格 reducer
+- `deleteByPage(subjectId, slug)` / `movePage(subjectId, from, to)` —— **跨全部用户**，因为它们是页面身份操作
+
+> **生命周期闭合**：删页挂在 `wiki/indexer.ts::indexTouchedPages` 的删除分支（与
+> `renditionsRepo.deleteByPage` 同处，覆盖 Saga 删除 / merge / split / rebuild 全部路径）；
+> move 挂在 `wiki/page-identity-migration.ts`（**必须在 `indexTouchedPages` 之前跑**，
+> 否则旧 slug 文件已消失、索引器会先把证据当删页清掉）；删 subject 与 reset 走 FK CASCADE
+> + 显式清单双保险。
+
 ### `settings-repo.ts`（全局键值设置）
 
 通用 key/value 表，承载所有"全 app 单实例"的全局设置（首个使用方：`wikiLanguage`，存语言名字符串如 "English" / "Chinese"）。
@@ -166,6 +185,7 @@
 | `research_candidates` | `id` | `(run_id, normalized_url)` UNIQUE；稳定候选快照、rank、decision 与 approval 复合外键，客户端不能改 URL |
 | `research_approvals` | `id` | 每 run 唯一；保存 canonical candidate ID selection、payload hash、idempotency key 与 coordinator job ID |
 | `research_candidate_ingests` | `(approval_id, candidate_id)` | run/candidate/approval 复合外键；claim token/lease、source/child job、operation/page/commit lineage；`ingest_job_id` UNIQUE |
+| `page_evidence` | `id`（自增） | `(user_id, subject_id, slug, kind, polarity, strength, anchor, detail_json, created_at)`；FK `subject_id` CASCADE；两个索引 `page_evidence_page_idx (user,subject,slug,created_at)` / `page_evidence_scope_idx (user,subject,created_at)`；掌握度**读时派生**，无物化表 |
 | `llm_usage` | `id`（自增） | app 级明细；`subject_id` 可空、FK→subjects ON DELETE SET NULL，一次 LLM 调用一行：`task` + `model` + token 数 + `created_at`；`(subject_id, created_at)` 支持项目筛选，旧记录和全局调用保持未归因；90 天 GC（`pruneOldUsage`，worker 低频 sweep） |
 
 ## 扩展指南
@@ -212,6 +232,7 @@ src/server/db/
     ├── conversations-repo.ts  # 多轮对话 CRUD（⑦）
     ├── embeddings-repo.ts     # 向量语义检索（upsertEmbedding / listForSubject / deleteBySlug / pruneOrphans，⑧）
     ├── maturity-repo.ts       # 页面成熟度 CRUD（listDue/countDue/listDueDetailed 支持可选 Subject 集合过滤，detailed 版 JOIN pages/subjects 供到期预览；其余 get / ensureRow / applyAfterEnrich / bumpNeighbor / pruneOrphans，P5）
+    ├── evidence-repo.ts        # 🆕 逐页掌握度证据流（append/按页/按 subject 分组/style 子集/删页/move）
     ├── research-provenance-repo.ts # Research 五表 run/批准/delivery/验证原子状态机
     └── usage-repo.ts          # LLM 用量明细：recordUsage（best-effort 项目归因）/ summarizeUsage（按项目可选过滤、task+model 聚合）/ pruneOldUsage（90 天 GC）
 ```
@@ -220,6 +241,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-26 | 新增 `page_evidence` 表 + `evidence-repo`（逐页掌握度证据流，append-only，FK CASCADE，两个热路径索引）；`user_profiles` 新增 `style_prefs_updated_at`（reducer 消费边界，**走守卫式 ALTER 补列**，不能只靠 `CREATE TABLE IF NOT EXISTS`）；**`profile_signals` 表退役**（`DROP TABLE`，`signals-repo` 删除）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-21 | checkpoint 写入边界按 `jobs.cancel_requested` 原子拒绝已取消任务的迟到 upsert；`getProgress` 同步屏蔽历史 cancelled checkpoint，避免结束后的 Ingest 刷新复活 |
 | 2026-07-20 | `retryResearchIngestJobAtomic` 可在既有 lineage 校验内合并 `sourceAuthGrantId`：grant params、failed job→pending、delivery→queued、run→importing 同属一个 IMMEDIATE transaction，任一 CAS 失败整体回滚 |
 | 2026-07-20 | `maturity-repo` 新增 `listDueDetailed(nowIso, limit, subjectIds?)`：WHERE/ORDER 与 `listDue` 同口径，LEFT JOIN pages 取标题（孤儿行 title=null）、JOIN subjects 取 slug/name，供 `GET /api/maintenance/due-pages` 到期预览 |

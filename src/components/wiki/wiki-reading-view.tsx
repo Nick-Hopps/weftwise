@@ -19,6 +19,7 @@ import { LensFeedback } from './lens-feedback';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
 import { ReadingProgress } from './reading-progress';
+import { usePageReadBeacon } from './use-page-read-beacon';
 import { ArticleToc } from './article-toc';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
@@ -130,6 +131,24 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
   const usingReshaped = reshapeUsable && viewPreference === 'reshape';
   const displayContent = usingReshaped ? reshaped : props.content;
   const tocHeadings = useMemo(() => extractArticleToc(displayContent), [displayContent]);
+  // memo 化：renderMarkdown 的 useMemo 依赖它，每次渲染新建对象会让整篇正文重渲。
+  //
+  // `assumedKnown` **只在展示重塑版时带**——canonical 没有「跳过解释」这回事，
+  // 在原文上挂纠错入口就是误导（那些概念本来就展开讲了）。
+  const assumedKnown = usingReshaped ? lens.data?.assumedKnown : undefined;
+  const interactive = useMemo(
+    () => ({ pageSlug: slug, subjectSlug: props.subjectSlug, assumedKnown }),
+    [slug, props.subjectSlug, assumedKnown],
+  );
+
+  // D5 读完埋点。挂一次即可——下面 split / 普通两个 return 分支互斥，
+  // ReadingProgress 各渲染一次是因为它是 JSX 节点，hook 不能跟着分支走。
+  usePageReadBeacon({
+    containerRef: articleRef,
+    useContainerScroll: showSplit,
+    slug,
+    subjectSlug: props.subjectSlug,
+  });
 
   const reshapeState: ReshapeState = lens.state === 'ready'
     ? 'reshaped'
@@ -160,6 +179,9 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
           const next = showOriginal ? 'reshape' : 'canonical';
           setViewPreference(next);
           writePageViewPreference(window.localStorage, props.subjectSlug, slug, next);
+          // A7 的归因需求已由 `viewedSource`（随 self-report 证据落 detail_json）覆盖。
+          // 不再单独记 `view_original`——证据枚举里没有它，也没有任何消费者，
+          // 那正是本设计开篇要修的「声明了信号却没有第二个消费者」。
         }}
         onRefresh={() => void lens.refresh()}
         onCancel={lens.cancel}
@@ -176,12 +198,18 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
       <div className="wiki-reading-body min-w-0">
         <PageRenderer
           {...rendererProps}
+          // 全应用**唯一**构造 interactive 的地方：只有这里知道「当前语境是阅读」。
+          // 换成 PageRenderer 自己拼，编辑器预览会立刻长出判分按钮（决策 9）。
+          interactive={interactive}
           content={displayContent}
           actions={actions}
           headerExtra={headerExtra}
         />
         <Backlinks backlinks={backlinks} />
-        <LensFeedback slug={slug} />
+        {/* A1：只在**确实在看重塑版**时才征询反馈。此前无条件渲染——
+            读者看的可能是 canonical 原文，点「太难」评价的是原文，
+            却被写进重塑画像。 */}
+        {usingReshaped && <LensFeedback slug={slug} viewedSource="reshape" />}
       </div>
     </div>
   );

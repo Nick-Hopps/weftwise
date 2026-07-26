@@ -29,7 +29,7 @@ function sha256(content: string): string {
 }
 
 describe('upgradeBuiltinSkillFiles', () => {
-  it('允许把未修改的 ingest-enricher v5 自动升级到 v6', () => {
+  it('未修改的 ingest-enricher v5 原版仍在升级白名单（历史 hash 只增不减）', () => {
     expect(BUILTIN_UPGRADE_HASHES['ingest-enricher']).toContain(
       'f44633a47747a8628768182ea951d064906477f54445ace2dfb5488cf903f396',
     );

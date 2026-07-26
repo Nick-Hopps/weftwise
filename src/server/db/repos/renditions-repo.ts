@@ -8,6 +8,14 @@ export interface StoredRendition {
   renderedMd: string;
   model: string | null;
   updatedAt: string;
+  /**
+   * 生成该 rendition 时**实际注入模型**的 KnownConcepts 序列化结果（可空 = 旧行/无地图）。
+   *
+   * 一列同时解决两件事：`assumedKnown` 从它派生（GET/POST 同源，**不重算**——
+   * 证据可能已经变了，重算出的清单会和当初真正告诉模型的那份对不上，纠错入口
+   * 会挂到模型其实展开讲过的概念上）；stale 判定拿它与当前地图比对。
+   */
+  knownConceptsJson: string | null;
 }
 
 export interface RenditionAssetInput {
@@ -24,6 +32,7 @@ interface RenditionRow {
   rendered_md: string;
   model: string | null;
   updated_at: string;
+  known_concepts_json: string | null;
 }
 
 function toStored(row: RenditionRow): StoredRendition {
@@ -35,13 +44,15 @@ function toStored(row: RenditionRow): StoredRendition {
     renderedMd: row.rendered_md,
     model: row.model,
     updatedAt: row.updated_at,
+    knownConceptsJson: row.known_concepts_json ?? null,
   };
 }
 
 /** 返回该页最后一次成功版本；canonical/画像变化由调用方标为 stale，不隐藏旧版本。 */
 export function getLatestRendition(subjectId: string, slug: string): StoredRendition | null {
   const row = getRawDb().prepare(`
-    SELECT subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at
+    SELECT subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at,
+           known_concepts_json
     FROM page_renditions WHERE subject_id = ? AND slug = ?
   `).get(subjectId, slug) as RenditionRow | undefined;
   return row ? toStored(row) : null;
@@ -56,6 +67,8 @@ export function replaceRendition(row: {
   renderedMd: string;
   model: string | null;
   assets: RenditionAssetInput[];
+  /** 本次注入的地图快照；无地图时传 null。 */
+  knownConceptsJson?: string | null;
 }): void {
   const sqlite = getRawDb();
   const now = new Date().toISOString();
@@ -64,14 +77,16 @@ export function replaceRendition(row: {
       .run(row.subjectId, row.slug);
     sqlite.prepare(`
       INSERT INTO page_renditions
-        (subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (subject_id, slug, canonical_hash, profile_version, rendered_md, model, updated_at,
+         known_concepts_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(subject_id, slug) DO UPDATE SET
         canonical_hash = excluded.canonical_hash,
         profile_version = excluded.profile_version,
         rendered_md = excluded.rendered_md,
         model = excluded.model,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        known_concepts_json = excluded.known_concepts_json
     `).run(
       row.subjectId,
       row.slug,
@@ -80,6 +95,7 @@ export function replaceRendition(row: {
       row.renderedMd,
       row.model,
       now,
+      row.knownConceptsJson ?? null,
     );
     const insertAsset = sqlite.prepare(`
       INSERT INTO page_rendition_assets

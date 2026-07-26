@@ -6,6 +6,7 @@ import { apiFetch } from '@/lib/api-fetch';
 import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/components/i18n-provider';
+import { useAppendEvidence } from '@/hooks/use-evidence';
 
 interface WikiLinkProps {
   href: string;
@@ -14,6 +15,11 @@ interface WikiLinkProps {
   subjectSlug?: string;
   children?: React.ReactNode;
   broken?: boolean;
+  /**
+   * 该概念被重塑 prompt 明确告知「不必重讲」，因而正文里没有展开解释。
+   * 只有这种链接才挂纠错入口——它是读者唯一的翻案通道（E3）。
+   */
+  assumedKnown?: boolean;
 }
 
 interface PagePreview {
@@ -37,8 +43,11 @@ export default function WikiLink({
   subjectSlug,
   children,
   broken = false,
+  assumedKnown = false,
 }: WikiLinkProps) {
   const { t } = useI18n();
+  const appendEvidence = useAppendEvidence();
+  const [corrected, setCorrected] = useState(false);
   const [preview, setPreview] = useState<PagePreview | null>(null);
   const [showPeek, setShowPeek] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -117,6 +126,30 @@ export default function WikiLink({
       >
         {children}
       </Link>
+
+      {assumedKnown && (
+        <button
+          type="button"
+          data-concept-unknown={slug}
+          // 乐观态：点完立刻变成「已记录」，发送失败只 console.error。
+          // 纠错必须让人觉得「按下就生效了」——它是误判「已掌握」时唯一的救济。
+          onClick={() => {
+            setCorrected(true);
+            appendEvidence({ slug, kind: 'concept-unknown' });
+          }}
+          disabled={corrected}
+          title={corrected ? t('wiki.concept.corrected') : t('wiki.concept.markUnknown')}
+          aria-label={corrected ? t('wiki.concept.corrected') : t('wiki.concept.markUnknown')}
+          className={cn(
+            'ml-0.5 align-super text-[0.7em] leading-none transition-colors duration-fast',
+            corrected
+              ? 'text-accent-strong cursor-default'
+              : 'text-foreground-tertiary hover:text-danger',
+          )}
+        >
+          {corrected ? '✓' : '?'}
+        </button>
+      )}
 
       {showPeek && (
         <div

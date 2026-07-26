@@ -172,6 +172,13 @@
   --color-graph-edge:        var(--base-neutral-300);
   --color-graph-label:       var(--base-neutral-900);
   --color-graph-active:      var(--base-warp-500);
+  /* 掌握度图层：unknown → exposed → mastered 是**有序**的，用同一色相（warp）的明度阶梯；
+     unknown 复用 --color-graph-orphan，不新增 token。
+     struggling **不是这个梯子的一端**（语义是「试过并卡住了」，不是「更不懂」），
+     走 danger 描边作 categorical outlier，与 2026-07-20 的色彩语义约定一致。 */
+  --color-graph-mastery-exposed:    var(--base-warp-200);
+  --color-graph-mastery-mastered:   var(--base-warp-500);
+  --color-graph-mastery-struggling: var(--base-danger-500);
 
   /* ─── SEMANTIC · Scrollbar ──────────────────────────────────────────────── */
   /* 默认透明（隐藏），滚动时渐显（见下方 [data-scrolling] 规则）。 */
@@ -251,6 +258,9 @@
   --color-graph-edge:        var(--color-border-strong);
   --color-graph-label:       var(--color-fg-primary);
   --color-graph-active:      var(--base-warp-400);
+  --color-graph-mastery-exposed:    var(--base-warp-600);
+  --color-graph-mastery-mastered:   var(--base-warp-400);
+  --color-graph-mastery-struggling: var(--base-danger-500);
 
   --shadow-xs: 0 1px 1px rgb(0 0 0 / 0.35);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.45);
