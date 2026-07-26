@@ -19,6 +19,7 @@ import { LensFeedback } from './lens-feedback';
 import { PageActions, ReshapeStatus, type ReshapeState } from './page-actions';
 import { SelectionAskButton } from './selection-ask-button';
 import { ReadingProgress } from './reading-progress';
+import { usePageReadBeacon } from './use-page-read-beacon';
 import { ArticleToc } from './article-toc';
 import { SectionLabel } from '@/components/ui/panel';
 import { useApiFetch } from '@/lib/api-fetch';
@@ -135,6 +136,15 @@ export default function WikiReadingView(props: WikiReadingViewProps) {
     () => ({ pageSlug: slug, subjectSlug: props.subjectSlug }),
     [slug, props.subjectSlug],
   );
+
+  // D5 读完埋点。挂一次即可——下面 split / 普通两个 return 分支互斥，
+  // ReadingProgress 各渲染一次是因为它是 JSX 节点，hook 不能跟着分支走。
+  usePageReadBeacon({
+    containerRef: articleRef,
+    useContainerScroll: showSplit,
+    slug,
+    subjectSlug: props.subjectSlug,
+  });
 
   const reshapeState: ReshapeState = lens.state === 'ready'
     ? 'reshaped'
