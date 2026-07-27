@@ -24,6 +24,29 @@ export interface AppendEvidenceInput {
   createdAt?: string;
 }
 
+/**
+ * `detail_json` 的大小闸门（字符）。
+ *
+ * `page_evidence` 是 append-only、**永不删除**的表，而 App Router 的 route handler
+ * 没有默认 body 上限——一次失控写入是永久的。但 `detail` 只用于事后审计、不参与任何
+ * 查询或派生，为它丢掉整条证据与 best-effort 语义矛盾，所以超限截断而非拒绝。
+ *
+ * 闸门装在 repo 层而非路由：`/api/query` 的 `selection-ask` / `citation-hit` 与
+ * `/api/lens` 的 `reshape-request` 都经 `recordEvidence` 直接调这里、绕过路由。
+ */
+export const MAX_DETAIL_BYTES = 4096;
+
+/** 超限时落「这里原本有多大」，而不是被砍半的 JSON——半截 JSON 不可解析也不可解释。 */
+function serializeDetail(detail: unknown, slug: string, kind: EvidenceKind): string | null {
+  if (detail === undefined) return null;
+  const json = JSON.stringify(detail);
+  if (json.length <= MAX_DETAIL_BYTES) return json;
+  console.warn(
+    `[evidence] detail for ${kind}@${slug} is ${json.length} chars (> ${MAX_DETAIL_BYTES}); truncated`,
+  );
+  return JSON.stringify({ truncated: true, bytes: json.length });
+}
+
 /** polarity 与 strength 由 kind 确定性派生后冗余落列——新增 kind 不必回填历史行。 */
 function resolveWeights(
   kind: EvidenceKind,
@@ -50,7 +73,7 @@ export function appendEvidence(input: AppendEvidenceInput): void {
       polarity,
       strength,
       anchor: input.anchor ?? null,
-      detailJson: input.detail === undefined ? null : JSON.stringify(input.detail),
+      detailJson: serializeDetail(input.detail, input.slug, input.kind),
       createdAt: input.createdAt ?? new Date().toISOString(),
     })
     .run();
