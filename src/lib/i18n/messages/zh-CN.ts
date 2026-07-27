@@ -724,6 +724,7 @@ export const zhCN = {
   'health.curate': '整理孤立页面',
   'health.fix': '修复确定性问题',
   'health.research': '研究覆盖缺口',
+  'health.research.batchLimit': '将研究前 {batch} 个主题，每个主题一个任务、依次执行。剩余 {remaining} 个需再次点击。',
   'health.topicPlaceholder': '主题或问题',
   'health.researchTopic': '研究主题',
   'health.restoreError': '无法恢复活动任务。重试期间操作仍保持禁用。',

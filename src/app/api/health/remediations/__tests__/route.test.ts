@@ -61,7 +61,7 @@ beforeEach(() => {
   authMock.mockReturnValue(null);
   csrfMock.mockReturnValue(null);
   subjectMock.mockReturnValue({ subject: SUBJECT, error: null });
-  remediateMock.mockResolvedValue({ jobId: 'job-1', deduplicated: false });
+  remediateMock.mockResolvedValue({ jobIds: ['job-1'], deduplicated: false });
 });
 
 describe('POST /api/health/remediations', () => {
@@ -80,13 +80,33 @@ describe('POST /api/health/remediations', () => {
     const response = await POST(req);
 
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({ jobId: 'job-1', deduplicated: false });
+    await expect(response.json()).resolves.toEqual({ jobIds: ['job-1'], deduplicated: false });
     expect(subjectMock).toHaveBeenCalledWith(req, { required: true, body });
     expect(remediateMock).toHaveBeenCalledWith({
       subject: SUBJECT,
       lintJobId: 'lint-1',
       findingIds: [FINDING_ID],
       action: 'fix',
+    });
+  });
+
+  it('Research 拆分出的多个 jobId 原样透传', async () => {
+    remediateMock.mockResolvedValue({
+      jobIds: ['job-1', 'job-2', 'job-3'],
+      deduplicated: false,
+    });
+
+    const response = await POST(request({
+      lintJobId: 'lint-1',
+      findingIds: [FINDING_ID],
+      action: 'research',
+      subjectId: 's1',
+    }));
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      jobIds: ['job-1', 'job-2', 'job-3'],
+      deduplicated: false,
     });
   });
 

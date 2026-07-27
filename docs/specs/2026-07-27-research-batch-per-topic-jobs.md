@@ -34,7 +34,7 @@ Health 工具栏的批量「研究」按钮**收集范围是全的**（快照里
 - 「一 job 一 run」是 provenance 现有假设（`persistResearchRun` 按 `researchJobId` 落库）。1 主题/job 与它完全兼容，**provenance 层不改**。
 - 手动 topic 与 backlog 的 research 不对应任何 finding 行，必须**保留**「完成后自动打开候选弹窗」这条链，否则候选无处审批。区分依据是已有的 `ResearchJobMeta.source`。
 - 拆分后逐个创建 job 不做补偿事务：`findDuplicateRemediationJob` 保证重试时复用既有 job 而非重复排队，部分创建成功后用户重试是安全的。
-- Web search 未配置的检查必须在**创建任何 job 之前**做一次，不能留下「配置缺失但已排了 3 个 job」的状态。
+- Web search 未配置时不能留下「配置缺失但已排了 3 个 job」的状态。检查**保持在 per-job `beforeCreate`** 里：首个创建尝试就会抛出，零 job 被创建；同时保住既有的刻意行为——一批全部命中 duplicate 时根本不校验配置（`remediation-service.test.ts` 已锁定 `isWebSearchConfigured` 不被调用），in-flight job 不因配置变化被拒。
 
 ## 成功标准
 

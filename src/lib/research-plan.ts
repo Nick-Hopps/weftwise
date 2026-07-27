@@ -8,6 +8,14 @@ import type { ResearchCandidate } from '@/lib/contracts';
 export const MAX_QUERIES = 3;
 export const MAX_CANDIDATES = 12;
 export const MAX_RESULTS = 6;
+/**
+ * 批量 Research 一次最多拆出的单主题 job 数。
+ *
+ * 上面三个预算是**按 job** 分配的，所以合批会让靠后的主题拿不到检索——批量因此改为
+ * 一个主题一个 job。而非 ingest job 由 worker 串行独占执行，上百个排队 job 会把 worker
+ * 堵住数小时，故需要这个上限；服务端校验与工具栏计数共用它，避免两端漂移。
+ */
+export const MAX_RESEARCH_BATCH_JOBS = 10;
 /** triage 保留门槛：score >= 2 才进入最终产出。 */
 export const MIN_TRIAGE_SCORE = 2;
 /** 前端默认勾选门槛：score === 3 才默认选中。 */

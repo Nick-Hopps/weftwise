@@ -4,6 +4,7 @@ import type {
   RemediationContext,
   Subject,
 } from '@/lib/contracts';
+import { MAX_RESEARCH_BATCH_JOBS } from '@/lib/research-plan';
 import * as queue from '../jobs/queue';
 import { isWebSearchConfigured } from '../search/web-search';
 import { selectLatestFindings } from './lint-latest';
@@ -31,6 +32,15 @@ const EXECUTABLE_ACTIONS = new Set<ExecutableRemediationAction>([
   're-ingest',
 ]);
 
+/**
+ * 一次处置请求产生的 job 集合。Research 按主题拆分，其余动作恒为单个；
+ * `deduplicated` 仅在**全部**命中既有 job 时为 true。
+ */
+export interface RemediationResult {
+  jobIds: string[];
+  deduplicated: boolean;
+}
+
 export class RemediationRequestError extends Error {
   constructor(
     readonly status: 400 | 409 | 422,
@@ -47,7 +57,7 @@ export async function remediate(input: {
   lintJobId: string;
   findingIds: string[];
   action: ExecutableRemediationAction;
-}): Promise<{ jobId: string; deduplicated: boolean }> {
+}): Promise<RemediationResult> {
   const lintJobId: unknown = input.lintJobId;
   if (typeof lintJobId !== 'string' || lintJobId.trim().length === 0) {
     throw new RemediationRequestError(
@@ -95,6 +105,16 @@ export async function remediate(input: {
 
   const ids = [...new Set(rawFindingIds as string[])].sort();
   const executableAction = action as ExecutableRemediationAction;
+  if (
+    executableAction === 'research'
+    && ids.length > MAX_RESEARCH_BATCH_JOBS
+  ) {
+    throw new RemediationRequestError(
+      400,
+      'invalid-research-batch',
+      `Research accepts at most ${MAX_RESEARCH_BATCH_JOBS} findings per request`,
+    );
+  }
   const latestLint = queue.listLatestCompletedLint(input.subject.id);
   const lint = selectLatestFindings(latestLint ? [latestLint] : []);
   if (lint.jobId !== lintJobId) {
@@ -154,33 +174,72 @@ export async function remediate(input: {
     action: executableAction,
   });
   if (executableAction === 'fix') {
-    return getOrCreateRemediationJob('fix', {
+    return single(getOrCreateRemediationJob('fix', {
       subjectId: input.subject.id,
       remediationContext: context,
-    }, input.subject.id, context, lint.ranAt);
+    }, input.subject.id, context, lint.ranAt));
   }
 
   if (executableAction === 'curate') {
     const slugs = [...new Set(findings.map((finding) => finding.pageSlug))]
       .sort();
-    return getOrCreateRemediationJob('curate', {
+    return single(getOrCreateRemediationJob('curate', {
       scope: 'pages',
       slugs,
       subjectId: input.subject.id,
       remediationContext: context,
-    }, input.subject.id, context, lint.ranAt);
+    }, input.subject.id, context, lint.ranAt));
   }
 
   if (executableAction === 'research') {
-    return getOrCreateRemediationJob('research', {
-      findingIds: ids,
-      lintJobId,
-      subjectId: input.subject.id,
-      remediationContext: context,
-    }, input.subject.id, context, lint.ranAt, assertWebSearchConfigured);
+    // 一个主题一个 job：整个 research 流水线的 query/候选/结果预算是按 job 分配的
+    // （见 lib/research-plan.ts），合批会让靠后的主题拿不到检索。
+    return researchPerFinding(input.subject.id, lintJobId, ids, lint.ranAt);
   }
 
-  return reingest(input.subject, findings, context);
+  return single(reingest(input.subject, findings, context));
+}
+
+function single(
+  result: { jobId: string; deduplicated: boolean },
+): RemediationResult {
+  return { jobIds: [result.jobId], deduplicated: result.deduplicated };
+}
+
+/**
+ * 按 finding 逐个创建单主题 research job。
+ *
+ * 不做补偿事务：中途抛错时已创建的 job 都是合法可执行的，用户重试会经
+ * `findDuplicateRemediationJob` 复用它们而不是重复排队。Web search 配置检查留在
+ * per-job `beforeCreate` 里——首个创建尝试就会抛出（零 job 落库），同时保住
+ * 「整批命中 duplicate 时不校验配置」的既有语义，in-flight job 不因配置变化被拒。
+ */
+function researchPerFinding(
+  subjectId: string,
+  lintJobId: string,
+  ids: string[],
+  lintRanAt: string | null,
+): RemediationResult {
+  const jobIds: string[] = [];
+  let allDeduplicated = true;
+
+  for (const findingId of ids) {
+    const context = normalizeRemediationContext({
+      lintJobId,
+      findingIds: [findingId],
+      action: 'research',
+    });
+    const result = getOrCreateRemediationJob('research', {
+      findingIds: [findingId],
+      lintJobId,
+      subjectId,
+      remediationContext: context,
+    }, subjectId, context, lintRanAt, assertWebSearchConfigured);
+    jobIds.push(result.jobId);
+    if (!result.deduplicated) allDeduplicated = false;
+  }
+
+  return { jobIds, deduplicated: allDeduplicated };
 }
 
 function getOrCreateRemediationJob(

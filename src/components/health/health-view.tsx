@@ -39,6 +39,7 @@ import {
   RESEARCH_RUN_UPDATED_EVENT,
   type ResearchRunUpdatedEventDetail,
 } from '@/lib/research-run-updated-event';
+import { MAX_RESEARCH_BATCH_JOBS } from '@/lib/research-plan';
 import type {
   Job,
   LintFinding,
@@ -746,10 +747,15 @@ export function HealthView() {
         return;
       }
 
-      const { jobId: remediationJobId } = await response.json() as {
-        jobId: string;
+      const { jobIds } = await response.json() as {
+        jobIds?: unknown;
         deduplicated?: boolean;
       };
+      // Research 按主题拆分后可能返回多个 job；T2 之前只跟踪首个，行为与拆分前一致。
+      const remediationJobId = Array.isArray(jobIds)
+          && typeof jobIds[0] === 'string'
+        ? jobIds[0]
+        : null;
       if (!isCurrentOrigin(origin) || !remediationJobId) return;
       accepted = true;
       const meta = { jobId: remediationJobId, origin };
@@ -1093,6 +1099,9 @@ export function HealthView() {
   const fixFindingIds = data ? actionFindingIds(data, 'fix') : [];
   const curateFindingIds = data ? actionFindingIds(data, 'curate') : [];
   const researchFindingIds = data ? actionFindingIds(data, 'research') : [];
+  // 一个主题一个 job 且 worker 串行执行，一次只提交前 N 条（快照已按严重度排序）。
+  const researchBatchIds = researchFindingIds.slice(0, MAX_RESEARCH_BATCH_JOBS);
+  const researchDeferredCount = researchFindingIds.length - researchBatchIds.length;
   const curateButtonState = healthActionButtonState(
     curating,
     curateJobId,
@@ -1309,19 +1318,33 @@ export function HealthView() {
                 intent={researchButtonState === 'running' || researchButtonState === 'cancelling' ? 'danger' : 'outline'}
                 onClick={() => researchJobId && researchButtonState !== 'idle'
                   ? void cancelHealthAction('research', researchJobId)
-                  : void runRemediation('research', researchFindingIds)}
+                  : void runRemediation('research', researchBatchIds)}
                 loading={researchButtonState === 'starting' || researchButtonState === 'cancelling'}
                 disabled={researchButtonState === 'idle' && (
                   neverRun
-                  || researchFindingIds.length === 0
+                  || researchBatchIds.length === 0
                   || effectiveBusyActions.has('research')
                 )}
-                title={researchButtonState === 'idle' ? t('health.research') : t('jobs.stop')}
+                title={researchButtonState !== 'idle'
+                  ? t('jobs.stop')
+                  : researchDeferredCount > 0
+                    ? t('health.research.batchLimit', {
+                        batch: researchBatchIds.length,
+                        remaining: researchDeferredCount,
+                      })
+                    : t('health.research')}
               >
                 {researchButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
                 {researchButtonState === 'idle' && <Search className="h-3.5 w-3.5" />}
                 {researchButtonState === 'idle'
-                  ? <>{t('health.action.research')} {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}</>
+                  ? <>
+                      {t('health.action.research')}
+                      {researchBatchIds.length > 0 && (
+                        researchDeferredCount > 0
+                          ? ` (${researchBatchIds.length} / ${researchFindingIds.length})`
+                          : ` (${researchBatchIds.length})`
+                      )}
+                    </>
                   : t('jobs.stop')}
               </Button>
             </div>

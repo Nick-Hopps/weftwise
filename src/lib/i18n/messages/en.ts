@@ -737,6 +737,7 @@ export const en = {
   'health.curate': 'Curate orphaned pages',
   'health.fix': 'Fix deterministic findings',
   'health.research': 'Research coverage gaps',
+  'health.research.batchLimit': 'Researches the first {batch} topics — one job each, run in order. {remaining} more need another click.',
   'health.topicPlaceholder': 'Topic or question',
   'health.researchTopic': 'Research topic',
   'health.restoreError': 'Could not restore active jobs. Actions remain disabled while retrying.',

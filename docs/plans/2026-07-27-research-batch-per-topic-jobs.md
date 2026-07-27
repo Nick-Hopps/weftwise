@@ -11,7 +11,7 @@
 **目标**：一次 research 请求创建 N 个单主题 job；同一提交内把前端读值改到新契约，保持可运行（research 暂时仍只跟踪首个 job，行为与今天等价）。
 
 **涉及文件**
-- `src/server/services/remediation-service.ts`：新增 `MAX_RESEARCH_BATCH_JOBS = 10`；research 分支改为逐 finding 创建；`assertWebSearchConfigured()` 提到循环之前调用一次；返回 `{ jobIds, deduplicated }`
+- `src/server/services/remediation-service.ts`：新增 `MAX_RESEARCH_BATCH_JOBS = 10`；research 分支改为逐 finding 创建；`assertWebSearchConfigured` 仍作为 per-job `beforeCreate`（首次创建尝试即抛 → 零 job 创建，且保住「全批 duplicate 不校验配置」）；返回 `{ jobIds, deduplicated }`
 - `src/app/api/health/remediations/route.ts`：透传新返回值（202 不变）
 - `src/components/health/health-view.tsx`：`runRemediation` 读 `jobIds`，取 `jobIds[0]` 喂给现有单 job 状态机
 - `src/server/services/__tests__/remediation-service.test.ts`：新增用例
