@@ -311,6 +311,7 @@ src/server/services/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | `remediation-service.ts` 的 research 分支改为**按 finding 逐个创建单主题 job**（`remediate` 返回 `{ jobIds, deduplicated }`，`deduplicated` 仅在整批复用时为 true）：合批会让靠后主题拿不到检索，因为 `lib/research-plan.ts` 的 query/候选/结果预算是按 job 分配、且候选按压平顺序先到先得截断。新增上限 `MAX_RESEARCH_BATCH_JOBS=10`（服务端资源边界——非 ingest job 由 worker 串行独占，上百个排队 job 会堵住数小时），超限 400 `invalid-research-batch`；web search 检查**保持在 per-job `beforeCreate`**（首个创建尝试即抛 → 零 job 落库，同时保住「整批命中 duplicate 时不校验配置」的既有语义）；逐个创建不做补偿事务，重试安全由 `findDuplicateRemediationJob` 复用保证。`remediation-status.ts::applyCurrentJob` 在读到持久化 run 时把 `run.id` 写入 plan 的新字段 `runId`，供 Health 行内审批入口直接取数。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-20 | Research child URL 登录态授权复用 `retryResearchIngestJob` 的精确对账与原子恢复：可选 grant ID 只进入 child params，run/delivery/job 继续同进同退；Health 接收授权响应中的最新 run 后恢复既有 importing 轮询 |
 | 2026-07-20 | Research discovery 接入 job 级取消：同一 AbortSignal 覆盖 query LLM、并行 Tavily 搜索与 triage LLM，`allSettled` 后和 provenance 写入前重验取消，统一抛 `AgentCancelled` 且不落候选 run；供 Health 三类处置 Stop 闭环使用 |
 | 2026-07-20 | Ingest worker 接入 URL 登录态 grant：401/403 发结构化恢复事件；重排后按 job/source 解密 exact-origin Cookie/Authorization；下游失败保留、完整提交成功清理，Research child 不绕过 provenance 状态机 |
