@@ -33,6 +33,7 @@ function verdict(over: Partial<MasteryVerdict> = {}): MasteryVerdict {
     confidence: 'high',
     evidenceCount: 1,
     lastEvidenceAt: '2026-07-26T00:00:00.000Z',
+    dueAt: null,
     expiresAt: null,
     recent: [],
     ...over,

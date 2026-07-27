@@ -13,6 +13,7 @@ const verdict = (state: MasteryState) => ({
   confidence: state === 'unknown' ? ('none' as const) : ('high' as const),
   evidenceCount: 1,
   lastEvidenceAt: '2026-07-26T00:00:00.000Z',
+  dueAt: null,
   expiresAt: null,
 });
 
