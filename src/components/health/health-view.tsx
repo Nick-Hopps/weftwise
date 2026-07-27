@@ -39,6 +39,7 @@ import {
   RESEARCH_RUN_UPDATED_EVENT,
   type ResearchRunUpdatedEventDetail,
 } from '@/lib/research-run-updated-event';
+import { MAX_RESEARCH_BATCH_JOBS } from '@/lib/research-plan';
 import type {
   Job,
   LintFinding,
@@ -65,11 +66,13 @@ import {
   readResearchRun,
   readResearchRunId,
   recentOutcomeCounts,
+  remediationButtonDisabled,
   researchApprovalBody,
   requestHealthJobCancel,
   selectRecoverableHealthJobs,
   summarizeFixOutcomes,
   type ExecutableRemediationAction,
+  type RecoverableHealthJob,
   type HealthOrigin,
 } from './remediation-ui';
 
@@ -148,6 +151,14 @@ export function HealthView() {
   const actionJobMetaRef = useRef<Partial<Record<ExecutableRemediationAction, ActionJobMeta>>>({});
   const researchJobMetaRef = useRef<ResearchJobMeta | null>(null);
   const researchFetchJobIdRef = useRef<string | null>(null);
+  /**
+   * 批量 Research 拆出的其余 job（当前正在观察的那个不在其中）。
+   *
+   * worker 对非 ingest job 串行独占执行，所以逐个用 SSE 观察即可覆盖整批，
+   * 既不必为 N 个 job 建 N 条连接，也避开「POST 后 active 列表尚未刷新就误判整批完成」。
+   * 队列排空前不释放 research 锁。
+   */
+  const researchQueueRef = useRef<string[]>([]);
   const lintJobMetaRef = useRef<ActionJobMeta | null>(null);
   const lintRerunQueueRef = useRef(createLintRerunQueue());
   const researchActionOriginRef = useRef<HealthOrigin | null>(null);
@@ -171,6 +182,7 @@ export function HealthView() {
     actionJobMetaRef.current = {};
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
+    researchQueueRef.current = [];
     lintJobMetaRef.current = null;
     lintRerunQueueRef.current.reset();
     researchActionOriginRef.current = null;
@@ -287,6 +299,7 @@ export function HealthView() {
     actionJobMetaRef.current = {};
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
+    researchQueueRef.current = [];
     lintJobMetaRef.current = null;
     lintRerunQueueRef.current.reset();
     researchActionOriginRef.current = null;
@@ -490,7 +503,11 @@ export function HealthView() {
   const [researchActing, setResearchActing] = useState(false);
   const [handledSourceIds, setHandledSourceIds] = useState<Set<string>>(new Set());
   const [deletingSourceIds, setDeletingSourceIds] = useState<Set<string>>(new Set());
-  const { status: researchStatus, events: researchEvents } = useJobStream(researchJobId);
+  const {
+    status: researchStatus,
+    events: researchEvents,
+    reset: resetResearchStream,
+  } = useJobStream(researchJobId);
   const researching = workflowBusyActions.has('research');
 
   useEffect(() => {
@@ -518,16 +535,21 @@ export function HealthView() {
     if (allSubjects || !originSubjectId) return;
     const origin = captureOrigin();
     const recoverableIds = new Set(
-      Object.values(recoverableJobs).map((candidate) => candidate?.jobId).filter(Boolean),
+      Object.values(recoverableJobs).flatMap(
+        (candidates) => (candidates ?? []).map((candidate) => candidate.jobId),
+      ),
     );
     for (const settledId of settledJobIdsRef.current) {
       if (!recoverableIds.has(settledId)) settledJobIdsRef.current.delete(settledId);
     }
 
-    for (const [workflow, candidate] of Object.entries(recoverableJobs) as Array<
-      [ExecutableRemediationAction, NonNullable<(typeof recoverableJobs)[ExecutableRemediationAction]>]
+    for (const [workflow, candidates] of Object.entries(recoverableJobs) as Array<
+      [ExecutableRemediationAction, RecoverableHealthJob[] | undefined]
     >) {
-      if (!candidate || settledJobIdsRef.current.has(candidate.jobId)) continue;
+      const pending = (candidates ?? [])
+        .filter((candidate) => !settledJobIdsRef.current.has(candidate.jobId));
+      const candidate = pending[0];
+      if (!candidate) continue;
       const existing = actionJobMetaRef.current[workflow];
       if (existing?.jobId === candidate.jobId) continue;
 
@@ -546,7 +568,9 @@ export function HealthView() {
           setCurateJobId(candidate.jobId);
           break;
         case 'research':
+          // 批量拆出的其余主题进入队列，Stop 与结算都以整批为单位。
           researchFetchJobIdRef.current = null;
+          researchQueueRef.current = pending.slice(1).map((item) => item.jobId);
           researchJobMetaRef.current = { ...meta, source: candidate.source };
           setResearchJobId(candidate.jobId);
           break;
@@ -559,10 +583,45 @@ export function HealthView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recoverableJobs, allSubjects, originSubjectId, scope]);
 
+  /**
+   * 结算当前观察的 research job：队列还有主题就接着观察下一个，排空才释放 action 锁。
+   * 一个主题失败不影响后续主题继续执行。
+   */
+  function settleResearchJob(meta: ResearchJobMeta): void {
+    settledJobIdsRef.current.add(meta.jobId);
+    invalidateWorkflowLifecycle(meta.origin);
+    researchFetchJobIdRef.current = null;
+
+    const next = researchQueueRef.current.shift();
+    if (next) {
+      const nextMeta = { jobId: next, origin: meta.origin, source: meta.source };
+      researchJobMetaRef.current = nextMeta;
+      actionJobMetaRef.current.research = nextMeta;
+      // 必须先清流：`useJobStream` 在 jobId 变化时不会重置 status，残留的上一个主题终态
+      // 会让下一个主题被立刻误判为已完成（整批瞬间「跑完」）；reset 同时清掉
+      // lastEventId，避免新 job 带着上一个 job 的游标续播。
+      resetResearchStream();
+      setResearchJobId(next);
+      return;
+    }
+
+    researchJobMetaRef.current = null;
+    delete actionJobMetaRef.current.research;
+    setResearchJobId(null);
+    setActionCancelling('research', false);
+    releaseAction('research', meta.origin);
+  }
+
   useEffect(() => {
     const meta = researchJobMetaRef.current;
     if (!researchJobId || !meta || meta.jobId !== researchJobId || !isCurrentOrigin(meta.origin)) return;
     if (researchStatus === 'completed') {
+      // remediation 来源的候选由 finding 行内入口按需打开，不自动弹窗劫持焦点；
+      // 手动 / backlog 主题没有对应的 finding 行，仍必须自动弹出，否则候选无处审批。
+      if (meta.source === 'remediation') {
+        settleResearchJob(meta);
+        return;
+      }
       if (researchFetchJobIdRef.current === researchJobId) return;
       researchFetchJobIdRef.current = researchJobId;
       void (async () => {
@@ -583,15 +642,8 @@ export function HealthView() {
           }
         } finally {
           if (researchJobMetaRef.current?.jobId === researchJobId) {
-            settledJobIdsRef.current.add(meta.jobId);
-            invalidateWorkflowLifecycle(meta.origin);
-            researchJobMetaRef.current = null;
-            delete actionJobMetaRef.current.research;
-            setResearchJobId(null);
-            setActionCancelling('research', false);
-            releaseAction('research', meta.origin);
-          }
-          if (researchFetchJobIdRef.current === researchJobId) {
+            settleResearchJob(meta);
+          } else if (researchFetchJobIdRef.current === researchJobId) {
             researchFetchJobIdRef.current = null;
           }
         }
@@ -601,13 +653,7 @@ export function HealthView() {
       if (!wasCancelled) {
         showResearchError(meta.source, 'Research failed — see job details for the underlying error.');
       }
-      settledJobIdsRef.current.add(meta.jobId);
-      invalidateWorkflowLifecycle(meta.origin);
-      researchJobMetaRef.current = null;
-      delete actionJobMetaRef.current.research;
-      setResearchJobId(null);
-      setActionCancelling('research', false);
-      releaseAction('research', meta.origin);
+      settleResearchJob(meta);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [researchStatus, researchEvents]);
@@ -656,6 +702,27 @@ export function HealthView() {
     // 只在 run 身份或阶段改变时重建轮询；内容刷新不重置计时器。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateResult?.run.id, candidateResult?.run.status]);
+
+  /**
+   * 行内审批入口：plan 已带 runId，直接读 run，不必再经 `GET /api/jobs/:id`。
+   * 只打开弹窗，不动 action gate——研究是否仍在跑由 job/快照决定，与「看候选」无关。
+   */
+  function openResearchRun(runId: string): void {
+    const origin = captureOrigin();
+    if (!isCurrentOrigin(origin) || origin.scope !== 'subject') return;
+    void (async () => {
+      try {
+        const run = await loadResearchRun(runId, origin);
+        if (!isCurrentOrigin(origin)) return;
+        setCandidateResult({ run, origin });
+      } catch (error) {
+        if (!isCurrentOrigin(origin)) return;
+        setRemediationError(
+          error instanceof Error ? error.message : t('health.error.resultLoad'),
+        );
+      }
+    })();
+  }
 
   async function loadResearchRun(runId: string, origin: HealthOrigin): Promise<ResearchRunView> {
     const response = await apiFetch(
@@ -746,10 +813,15 @@ export function HealthView() {
         return;
       }
 
-      const { jobId: remediationJobId } = await response.json() as {
-        jobId: string;
+      const { jobIds } = await response.json() as {
+        jobIds?: unknown;
         deduplicated?: boolean;
       };
+      // Research 按主题拆分后返回多个 job；其余动作恒为一个。
+      const remediationJobIds = Array.isArray(jobIds)
+        ? jobIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [];
+      const remediationJobId = remediationJobIds[0];
       if (!isCurrentOrigin(origin) || !remediationJobId) return;
       accepted = true;
       const meta = { jobId: remediationJobId, origin };
@@ -762,6 +834,8 @@ export function HealthView() {
           setCurateJobId(remediationJobId);
           break;
         case 'research':
+          researchFetchJobIdRef.current = null;
+          researchQueueRef.current = remediationJobIds.slice(1);
           researchJobMetaRef.current = { ...meta, source: 'remediation' };
           setResearchJobId(remediationJobId);
           break;
@@ -787,9 +861,16 @@ export function HealthView() {
 
     setRemediationError(null);
     setActionCancelling(action, true);
+    // Research 是整批：先清队列再取消，避免 head 终态时又接着观察已取消的主题。
+    const queued = action === 'research' ? researchQueueRef.current : [];
+    if (action === 'research') researchQueueRef.current = [];
     let accepted = false;
     try {
-      await requestHealthJobCancel(jobIdToCancel, apiFetch, t);
+      const results = await Promise.allSettled(
+        [jobIdToCancel, ...queued].map((id) => requestHealthJobCancel(id, apiFetch, t)),
+      );
+      const failure = results.find((result) => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
       accepted = true;
       if (isCurrentOrigin(origin)) invalidateWorkflowLifecycle(origin);
     } catch (error) {
@@ -1093,6 +1174,9 @@ export function HealthView() {
   const fixFindingIds = data ? actionFindingIds(data, 'fix') : [];
   const curateFindingIds = data ? actionFindingIds(data, 'curate') : [];
   const researchFindingIds = data ? actionFindingIds(data, 'research') : [];
+  // 一个主题一个 job 且 worker 串行执行，一次只提交前 N 条（快照已按严重度排序）。
+  const researchBatchIds = researchFindingIds.slice(0, MAX_RESEARCH_BATCH_JOBS);
+  const researchDeferredCount = researchFindingIds.length - researchBatchIds.length;
   const curateButtonState = healthActionButtonState(
     curating,
     curateJobId,
@@ -1269,13 +1353,13 @@ export function HealthView() {
                   ? void cancelHealthAction('curate', curateJobId)
                   : void runRemediation('curate', curateFindingIds)}
                 loading={curateButtonState === 'starting' || curateButtonState === 'cancelling'}
-                disabled={curateButtonState === 'idle' && (
-                  neverRun
-                  || curateFindingIds.length === 0
-                  || running
-                  || fixing
-                  || effectiveBusyActions.has('curate')
-                )}
+                disabled={curateButtonState === 'idle' && remediationButtonDisabled({
+                  neverRun,
+                  targetCount: curateFindingIds.length,
+                  action: 'curate',
+                  busyActions: effectiveBusyActions,
+                  lintRunning: running,
+                })}
                 title={curateButtonState === 'idle' ? t('health.curate') : t('jobs.stop')}
               >
                 {curateButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
@@ -1290,13 +1374,13 @@ export function HealthView() {
                   ? void cancelHealthAction('fix', fixJobId)
                   : void runRemediation('fix', fixFindingIds)}
                 loading={fixButtonState === 'starting' || fixButtonState === 'cancelling'}
-                disabled={fixButtonState === 'idle' && (
-                  neverRun
-                  || fixFindingIds.length === 0
-                  || running
-                  || curating
-                  || effectiveBusyActions.has('fix')
-                )}
+                disabled={fixButtonState === 'idle' && remediationButtonDisabled({
+                  neverRun,
+                  targetCount: fixFindingIds.length,
+                  action: 'fix',
+                  busyActions: effectiveBusyActions,
+                  lintRunning: running,
+                })}
                 title={fixButtonState === 'idle' ? t('health.fix') : t('jobs.stop')}
               >
                 {fixButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
@@ -1309,19 +1393,35 @@ export function HealthView() {
                 intent={researchButtonState === 'running' || researchButtonState === 'cancelling' ? 'danger' : 'outline'}
                 onClick={() => researchJobId && researchButtonState !== 'idle'
                   ? void cancelHealthAction('research', researchJobId)
-                  : void runRemediation('research', researchFindingIds)}
+                  : void runRemediation('research', researchBatchIds)}
                 loading={researchButtonState === 'starting' || researchButtonState === 'cancelling'}
-                disabled={researchButtonState === 'idle' && (
-                  neverRun
-                  || researchFindingIds.length === 0
-                  || effectiveBusyActions.has('research')
-                )}
-                title={researchButtonState === 'idle' ? t('health.research') : t('jobs.stop')}
+                disabled={researchButtonState === 'idle' && remediationButtonDisabled({
+                  neverRun,
+                  targetCount: researchBatchIds.length,
+                  action: 'research',
+                  busyActions: effectiveBusyActions,
+                  lintRunning: running,
+                })}
+                title={researchButtonState !== 'idle'
+                  ? t('jobs.stop')
+                  : researchDeferredCount > 0
+                    ? t('health.research.batchLimit', {
+                        batch: researchBatchIds.length,
+                        remaining: researchDeferredCount,
+                      })
+                    : t('health.research')}
               >
                 {researchButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
                 {researchButtonState === 'idle' && <Search className="h-3.5 w-3.5" />}
                 {researchButtonState === 'idle'
-                  ? <>{t('health.action.research')} {researchFindingIds.length > 0 && `(${researchFindingIds.length})`}</>
+                  ? <>
+                      {t('health.action.research')}
+                      {researchBatchIds.length > 0 && (
+                        researchDeferredCount > 0
+                          ? ` (${researchBatchIds.length} / ${researchFindingIds.length})`
+                          : ` (${researchBatchIds.length})`
+                      )}
+                    </>
                   : t('jobs.stop')}
               </Button>
             </div>
@@ -1516,6 +1616,7 @@ export function HealthView() {
                                 void runRemediation(action.type, [finding.id], finding.id);
                               }
                             } : undefined}
+                            onReviewRun={!allSubjects ? openResearchRun : undefined}
                             onDeleteSource={
                               finding.type === 'orphan-source' && finding.sourceId && !allSubjects
                                 ? () => deleteSource(finding.sourceId!)

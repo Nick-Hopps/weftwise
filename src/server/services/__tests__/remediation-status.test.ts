@@ -340,6 +340,54 @@ describe('buildHealthSnapshot', () => {
     }
   });
 
+  it('awaiting-approval 的 research plan 直接携带 runId，供行内审批入口取数', () => {
+    const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: JSON.stringify({ runId: 'run-1' }),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related], {
+      researchRuns: [researchRun('awaiting-approval')],
+    });
+
+    expect(snapshot.remediations['finding-1']).toMatchObject({
+      status: 'awaiting-approval',
+      jobId: 'job-1',
+      runId: 'run-1',
+    });
+  });
+
+  it('没有持久化 run 时不猜测 runId', () => {
+    const current = lint([finding('finding-1', { type: 'coverage-gap' })]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: JSON.stringify({ candidates: [RESEARCH_CANDIDATE] }),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related], { researchRuns: [] });
+
+    expect(snapshot.remediations['finding-1'].status).toBe('awaiting-approval');
+    expect(snapshot.remediations['finding-1']).not.toHaveProperty('runId');
+  });
+
+  it('Fix plan 不携带 runId', () => {
+    const current = lint([finding('finding-1', { type: 'broken-link' })]);
+    const related = remediationJob('job-1', ['finding-1'], {
+      action: 'fix',
+      status: 'running',
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related]);
+
+    expect(snapshot.remediations['finding-1'].status).toBe('queued');
+    expect(snapshot.remediations['finding-1']).not.toHaveProperty('runId');
+  });
+
   it.each([
     ['completed', 'fixed', 'fixed'],
     ['partial', 'fixed', 'fixed'],

@@ -41,7 +41,7 @@
 | `/api/tag-actions` | GET / POST | Tags 工作台审批恢复 / 创建批量治理预览；POST 接受 `{ action:'rename'|'merge'|'delete', sourceTag, targetTag?, subjectId }`，只持久化无 conversation 的 `tag-batch` PendingAction，不直接写 Vault |
 | `/api/lint` | POST | 入队 `lint` 任务；默认 subject-scoped discovery，`{ allSubjects: true }` 显式全量发现；显式 verification body 暂留旧客户端兼容，Health 处置终态不再调用；返回 `jobId + mode` |
 | `/api/lint/latest` | GET | 返回当前 subject（或 `?allSubjects=1` 全量）最近一次 completed lint 的完整 `HealthSnapshot`；有界读取近期 jobs 与关联 Research run 后，直接投影掉 baseline 之后已完成处置验证的 finding，并按当前 `sources/page_sources` 过滤已删除或已重新关联的 `orphan-source`；真实 fixed/failed/skipped 结果进入近期摘要，并重算 severity；从未跑过返回完整空快照，All Subjects plans 只读 |
-| `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobId, deduplicated }` |
+| `/api/health/remediations` | POST | Phase 2A 统一处置入口：`{ subjectId, lintJobId, findingIds, action:'fix'\|'curate'\|'research'\|'re-ingest' }`；服务端重新校验当前 subject 最新 lint、稳定 ID 与 router action，原子去重后委托既有 workflow；202 返回 `{ jobIds, deduplicated }`（research 按主题拆分可返回多个 job，其余动作长度恒为 1；`deduplicated` 仅在整批复用时为 true） |
 | `/api/curate` | POST | 校验 `{ subjectId }` 后入队 `curate` 任务（对当前 subject 全量页面做 agent 策展：tool-loop 自驱 `wiki.merge/split/delete/create`，`createCurateGuard` 硬护栏 caps 各≤5）；返回 202 + `{ jobId }` |
 | `/api/fix` | POST | 入队 `fix` 任务修复当前 subject lint findings（确定性+LLM 两阶段）；返回 202 + `{ jobId }` |
 | `/api/research` | POST | 入队 `research` 任务（缺口/薄页/主题→联网研究候选快照，只发现不写入）；body 二选一 `{ findingIds, lintJobId, subjectId }` 或 `{ topic, subjectId }`；完成后持久化 run/candidate/finding evidence，job result 只用 `runId` 定位；旧 `gapIds` 400，web search 未配置 422 |
@@ -84,7 +84,8 @@
 - `401/403`：沿用 Auth / CSRF 拒绝；subject 解析错误直接透传。
 - `409 stale-snapshot`：`lintJobId` 已不是当前快照，或任一 ID 已消失/属于其他 subject；批量请求整体拒绝，不部分入队。
 - `409 source-not-found | already-referenced | in-flight | requeue-conflict`：Re-ingest 来源前提或原子 requeue 冲突；同 remediation context 的在途任务则成功返回原 `jobId` 与 `deduplicated:true`。
-- `422 web-search-not-configured`：Research 所需 Web Search 未配置。
+- `400 invalid-research-batch`：Research 一次最多 `MAX_RESEARCH_BATCH_JOBS`(10) 个 finding——拆分后一个主题一个 job，而非 ingest job 由 worker 串行独占执行。
+- `422 web-search-not-configured`：Research 所需 Web Search 未配置；检查在 per-job `beforeCreate`，首个创建尝试即抛，零 job 落库。
 - `500 internal-error`：未知服务编排异常，响应不泄漏内部错误细节。
 
 请求中的 `lintJobId` 是 compare-and-set token；`findingIds` 在服务端去重排序后写入 `job.paramsJson.remediationContext`。`review-source` 是只读导航，不允许提交到此端点；orphan-source 删除也不属于通用 remediation action。
@@ -172,6 +173,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | `POST /api/health/remediations` 响应从 `{ jobId, deduplicated }` 改为 `{ jobIds, deduplicated }`，并新增 400 `invalid-research-batch`（research 单次最多 10 个 finding）；`GET /api/lint/latest` 的 research plan 在有持久化 run 时附带 `runId`。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-27 | `POST /api/evidence` 身份字段加上限（`slug` ≤512 / `anchor` ≤256，超限 400 不落行——App Router 无默认 body 上限而 `page_evidence` 永不删除）；`GET /api/mastery` 新增 `?due=1` 复习清单分支（`mastered` 且已过 `dueAt`，按 `dueAt` 升序，上限 20 带 `total`），与全量分支共用同一次 `listForSubject`、同一份 meta 页口径与同一个 `deriveMastery`；Dashboard 挂载「该复习了」区块。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | Lens 接入已知概念地图：`POST /api/lens/[...slug]` 算邻域地图注入重塑 prompt（抛错按无地图继续，**不阻断重塑**）并把快照写进 `page_renditions.known_concepts_json`；`GET` 的 `assumedKnown` **从存储列派生而非重算**（必须是当初真正告诉模型的那一份），并补算当前地图与之比对纳入 `stale`——掌握度变化不改 `profileVersion`，没有这一项纠错闭环在 UI 上无从触发。`known_concepts_json` 为 null 的旧行不参与比对，存量重塑版不会一上线全变 stale。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 证据流与逐页掌握度：新增 `POST /api/evidence`（写前 slug 存在性校验 + style-bearing 证据顺带跑风格 reducer）与 `GET /api/mastery`（全量 lite / 单页含 `recent`，排除 meta 页）；`/api/query` 在既有落库点追加 `selection-ask` / `citation-hit`（跨 subject 引用不记），`POST /api/lens/[...slug]` 成功后追加 `reshape-request`，三处均 best-effort；`/api/profile/signals` **已删除**（`profile_signals` 退役，反馈改走 `/api/evidence`）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
