@@ -108,7 +108,7 @@
 - `research-backlog-section.tsx` / `research-candidates-dialog.tsx` —— 通用 Research backlog 与候选批准；候选以稳定 ID 选择、score=3 默认勾选，只有 awaiting-approval 可勾选；持久展示 importing/verifying/terminal 与 child delivery，导入失败时同时提供重试原选择与重新选择原候选
 - `postcondition-summary.ts` —— SSE 嵌套 report 运行时守卫与有界提示纯函数（最多三条、每条 180 字符）
 
-**Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API；404 按已删除幂等收敛，409/500 在工作区显示可操作错误。
+**Plan-driven 与只读边界**：Health UI 只渲染 `HealthSnapshot.remediations[finding.id].actions`，批量 Fix/Tidy/Research 也从这些 actions 收集稳定 ID，并提交当前 `data.jobId` 作为 `lintJobId`；批量范围＝**当前可见列表**（`actionFindingIds` 的 findings 参数必传，类型筛选生效时不提交筛掉的条目，计数随之变化）；客户端不维护 finding-type 白名单或备用动作。All Subjects 请求服务端 read-only plans，前端不挂执行/删除回调，保持纯查看。orphan 不提供删除；orphan-source 的 Delete Source 独立于通用 action，保留 armed → 确认的二次点击、来源 in-flight 守卫及专用 DELETE API；404 按已删除幂等收敛，409/500 在工作区显示可操作错误。
 
 **刷新恢复与 subject 隔离**：当前 subject 以 React Query 严格按 `pending → running` 顺序读取 active jobs，避免 claim 窗口遗漏；首次成功 hydrate 前四类 action 安全禁用。合法 Fix/Curate/Research 按 job type 恢复，Re-ingest 还要求严格 context。每个 workflow 按 `createdAt + id` 选最新 job；queued plan 是 active 列表短暂缺失时的兜底，awaiting-approval Research plan 也可恢复已完成 discovery job，再由其 `runId` 读取持久化审批事实。
 
@@ -200,6 +200,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | Health 批量动作范围跟随类型筛选：`actionFindingIds` 增加**必传**的 findings 范围参数（刻意无默认值——「忘记传＝悄悄退回全量」正是这次要修的漂移），`health-view` 传 `visibleFindings`，筛成某类型后另两个按钮归零禁用而非仍显示各类之和；同时不再把本地已删除来源的 orphan-source 计入批量 |
 | 2026-07-27 | 批量研究拆分为单主题 job：`health-view.tsx` 的 research 状态机从「一次一个 job」改为整批——`researchQueueRef` 逐个 SSE 观察（**advance 前调 `reset()`**，否则残留终态让整批瞬间误判完成）、Stop 并发取消 head + 队列、刷新恢复全部在途 job；remediation 来源不再自动弹候选窗（改由 `finding-row` 的 `Review candidates` 行内入口按 `plan.runId` 取数），手动/backlog 主题无对应行故保留自动弹窗；`remediation-ui.ts` 的 `selectRecoverableHealthJobs` 返回值改为**每 workflow 一个数组**（research 可多个，其余长度 1）并对 active/plan 双来源去重，新增纯函数 `remediationButtonDisabled` 让整理/修复/研究互不阻塞。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-27 | 新增 `dashboard/due-for-review.tsx`（`dueAt` 的第一个消费者：React Query `['mastery-due', subjectId]` 拉 `?due=1`，**空/失败整体不渲染**保住零证据零回归）——放 Dashboard 是因为它是唯一能让提醒**被动**进入视野的位置，Graph 图层是主动审计动作（用完即走）、阅读页状态行只有打开那页才看得到；`wiki/use-page-read-beacon.ts` 的 `reachedBottom` 拆为粘性 `scrolledToBottom` + 非粘性 `fitsInViewport`，且**每个 tick 重新观测**（不可滚动容器的 progress 恒为 100，图片/mermaid 布局完成前的首帧会被永久判为读完）。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | Graph 掌握度图层：`use-wiki-graph` 新增 `mode` 状态与 `setMode`（切到 mastery 时额外 fetch `/api/mastery`，`cy.batch` 写 data + `cy.style` 换样式，取数失败回落结构模式），tap handler 读 `modeRef.current`（注册在 `[]` effect 里，读 state 会把挂载时的 mode 永久钉死——该文件已因同类闭包问题留过注释）；退出全屏重置回 `structure`（切换入口只在全屏顶栏，跨全屏持久化会让 mini-graph 困在无法切回的配色里）；`fullscreen-graph` 加模式切换、四态分布 stats、四行图例与证据面板。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
