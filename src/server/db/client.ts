@@ -870,6 +870,11 @@ function ensureIndexes(): void {
       ON page_aliases(subject_id, old_slug);
     CREATE INDEX IF NOT EXISTS wiki_links_target_idx
       ON wiki_links(target_subject_id, target_slug);
+    -- 风格 reducer 的输入（evidence-repo::listStyleEvidence）：它**跨 subject**取
+    -- style-bearing 证据，而 page_evidence 另两个索引都以 subject_id 作第二列，
+    -- 只能吃到 user_id 前缀。该查询挂在 POST /api/evidence 的同步路径上。
+    CREATE INDEX IF NOT EXISTS page_evidence_style_idx
+      ON page_evidence(user_id, kind, created_at);
     CREATE INDEX IF NOT EXISTS wiki_links_source_idx
       ON wiki_links(subject_id, source_slug);
     CREATE INDEX IF NOT EXISTS job_events_job_idx

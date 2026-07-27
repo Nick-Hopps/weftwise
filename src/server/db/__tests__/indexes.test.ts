@@ -213,4 +213,48 @@ describe('热路径查询走索引（非全表扫描）', () => {
     );
     expect(expiry).toMatch(/USING (COVERING )?INDEX/);
   });
+
+  it('page_evidence 的风格证据查询（跨 subject）走索引', async () => {
+    // `listStyleEvidence` 挂在 POST /api/evidence 的同步路径上（写 style-bearing
+    // 证据后当场跑 reducer）。它**跨 subject**，而另两个索引都以 subject_id 作第二列，
+    // 只能吃到 user_id 前缀——单用户下等于全表扫。
+    const db = await bootstrap();
+    const detail = planDetail(
+      db,
+      `SELECT kind FROM page_evidence
+       WHERE user_id = ? AND kind IN (?, ?) AND created_at > ?
+       ORDER BY created_at ASC, id ASC`,
+      'local',
+      'self-report-hard',
+      'self-report-easy',
+      '2026-07-01T00:00:00.000Z',
+    );
+    expect(detail).toMatch(/page_evidence_style_idx/);
+    expect(detail).not.toMatch(/SCAN page_evidence\b/);
+  });
+
+  it('page_evidence 的逐页与全 subject 取数走既有索引', async () => {
+    const db = await bootstrap();
+    const page = planDetail(
+      db,
+      `SELECT kind FROM page_evidence
+       WHERE user_id = ? AND subject_id = ? AND slug = ?
+       ORDER BY created_at ASC, id ASC`,
+      'local',
+      's1',
+      'backprop',
+    );
+    expect(page).toMatch(/USING (COVERING )?INDEX/);
+    expect(page).not.toMatch(/SCAN page_evidence\b/);
+
+    const scope = planDetail(
+      db,
+      `SELECT slug, kind FROM page_evidence
+       WHERE user_id = ? AND subject_id = ? ORDER BY created_at ASC, id ASC`,
+      'local',
+      's1',
+    );
+    expect(scope).toMatch(/USING (COVERING )?INDEX/);
+    expect(scope).not.toMatch(/SCAN page_evidence\b/);
+  });
 });
