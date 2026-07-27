@@ -24,6 +24,15 @@ export interface RecoverableHealthJob {
   blocksAction: boolean;
 }
 
+/**
+ * 每个 workflow 可恢复的 job 列表。
+ *
+ * 批量 Research 按主题拆成多个 job，恢复时必须拿到**全部**（Stop 要整批取消），
+ * 所以这里是数组；fix/curate/re-ingest 一次只有一个，长度恒为 1。
+ */
+export type RecoverableHealthJobs =
+  Partial<Record<ExecutableRemediationAction, RecoverableHealthJob[]>>;
+
 export interface QueuedLintRun {
   origin: HealthOrigin;
 }
@@ -56,13 +65,13 @@ export function healthActionButtonState(
 }
 
 export function blockingRecoverableActions(
-  jobs: Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>>,
+  jobs: RecoverableHealthJobs,
 ): Set<ExecutableRemediationAction> {
   const actions = new Set<ExecutableRemediationAction>();
-  for (const [action, candidate] of Object.entries(jobs) as Array<
-    [ExecutableRemediationAction, RecoverableHealthJob | undefined]
+  for (const [action, candidates] of Object.entries(jobs) as Array<
+    [ExecutableRemediationAction, RecoverableHealthJob[] | undefined]
   >) {
-    if (candidate?.blocksAction) actions.add(action);
+    if (candidates?.some((candidate) => candidate.blocksAction)) actions.add(action);
   }
   return actions;
 }
@@ -165,25 +174,39 @@ export async function fetchActiveHealthJobs(
   ];
 }
 
+/**
+ * 恢复 in-flight 的处置 job。
+ *
+ * Research 保留全部 active job（批量拆分后一个主题一个 job，Stop 要整批取消）；
+ * 其余 workflow 一次只有一个，沿用「createdAt 最新、同时间 id 最大」的确定性选择。
+ * 快照 plan 是 active 列表短暂缺失时的兜底，已在 active 列表出现的 jobId 不重复计入。
+ */
 export function selectRecoverableHealthJobs(
   snapshot: Pick<HealthSnapshot, 'jobId' | 'findings' | 'remediations' | 'ranAt'>,
   activeJobs: Job[],
-): Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>> {
-  const selected: Partial<Record<ExecutableRemediationAction, RecoverableHealthJob>> = {};
+): RecoverableHealthJobs {
+  const selected: RecoverableHealthJobs = {};
   const activeWorkflows = new Set<ExecutableRemediationAction>();
+  const seenJobIds = new Set<string>();
 
   for (const job of activeJobs) {
     if (job.status !== 'running' && job.status !== 'pending') continue;
     const candidate = recoverableFromActiveJob(job);
     if (!candidate) continue;
     activeWorkflows.add(candidate.workflow);
-    const current = selected[candidate.workflow];
+    seenJobIds.add(candidate.jobId);
+
+    if (candidate.workflow === 'research') {
+      selected.research = [...(selected.research ?? []), candidate];
+      continue;
+    }
+    const current = selected[candidate.workflow]?.[0];
     if (
       !current
       || candidate.createdAt > current.createdAt
       || (candidate.createdAt === current.createdAt && candidate.jobId > current.jobId)
     ) {
-      selected[candidate.workflow] = candidate;
+      selected[candidate.workflow] = [candidate];
     }
   }
 
@@ -191,12 +214,12 @@ export function selectRecoverableHealthJobs(
     const plan = snapshot.remediations[finding.id];
     if (
       !plan?.jobId
+      || seenJobIds.has(plan.jobId)
       || (plan.status !== 'queued'
         && !(plan.workflow === 'research' && plan.status === 'awaiting-approval'))
     ) continue;
     const workflow = executableWorkflow(plan.workflow);
-    if (!workflow || activeWorkflows.has(workflow)) continue;
-    const current = selected[workflow];
+    if (!workflow) continue;
     const candidate: RecoverableHealthJob = {
       jobId: plan.jobId,
       workflow,
@@ -204,7 +227,16 @@ export function selectRecoverableHealthJobs(
       createdAt: snapshot.ranAt ?? '',
       blocksAction: plan.status === 'queued',
     };
-    if (!current || candidate.jobId > current.jobId) selected[workflow] = candidate;
+
+    if (workflow === 'research') {
+      // 每个 finding 有自己的 run，多条 awaiting-approval plan 要各自恢复。
+      seenJobIds.add(candidate.jobId);
+      selected.research = [...(selected.research ?? []), candidate];
+      continue;
+    }
+    if (activeWorkflows.has(workflow)) continue;
+    const current = selected[workflow]?.[0];
+    if (!current || candidate.jobId > current.jobId) selected[workflow] = [candidate];
   }
   return selected;
 }

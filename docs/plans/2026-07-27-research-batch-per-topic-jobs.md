@@ -136,6 +136,7 @@ npm run lint
 ## 风险与回滚
 
 - **T1 的部分创建**：逐个创建 job 无补偿事务；若中途基础设施异常，已创建 job 保留并正常执行，用户重试由 `findDuplicateRemediationJob` 复用——不会重复排队。
-- **T2 去掉 research SSE 依赖**：完成判定改为 5s 轮询，最坏情况锁释放延迟 5 秒；换来的是不必为 N 个 job 建 N 条 SSE。
+- **T3 改为「按批排队、逐个 SSE 观察」而非轮询**：worker 串行执行整批，逐个观察天然契合，且避开「POST 后 active 列表尚未刷新就误判整批完成」的竞态。
+- **T3 切换 job 必须先 `reset()` 流**：`useJobStream` 在 `jobId` 变化时**不重置 status**（只在 jobId 变 null 时 reset），残留的上一个主题终态会让下一个主题被立刻误判完成、整批瞬间「跑完」并提前释放锁；`reset()` 同时清掉 `lastEventId`，避免新 job 带着上一个 job 的游标续播。本仓库无 React 测试库（现有组件测试只用 `renderToStaticMarkup`，测不到 effect），这条只能靠真实环境走批量验证。
 - **T4 陈旧 baseline**：lint 运行中入队的处置动作用的是旧 `lintJobId`。请求期由 `remediate` 的 409 `stale-snapshot` 守住；执行期 finding ID 是内容哈希，仍存在的 finding 照旧匹配，已消失的进入「近期结果」。
 - 每个任务独立提交，回滚粒度为单 commit。

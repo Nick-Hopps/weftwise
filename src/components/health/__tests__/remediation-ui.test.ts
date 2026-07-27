@@ -104,6 +104,7 @@ function job(
 
 const broken = finding('broken', 'broken-link');
 const gap = finding('gap', 'coverage-gap');
+const thinPage = finding('thin', 'thin-page');
 const readonly = finding('readonly', 'orphan');
 
 const snapshot: HealthSnapshot = {
@@ -514,11 +515,12 @@ describe('Health remediation UI helper', () => {
       }, '2026-07-13T01:00:00Z'),
     ]);
 
-    expect(selected.fix).toMatchObject({
+    expect(selected.fix).toHaveLength(1);
+    expect(selected.fix?.[0]).toMatchObject({
       jobId: 'fix-1',
       source: 'remediation',
     });
-    expect(selected.fix).not.toHaveProperty('baselineLintJobId');
+    expect(selected.fix?.[0]).not.toHaveProperty('baselineLintJobId');
   });
 
   it('active manual Research 恢复 research workflow busy', () => {
@@ -526,10 +528,79 @@ describe('Health remediation UI helper', () => {
       job('research-manual', 'research', { topic: 'Graph RAG' }, '2026-07-13T01:00:00Z'),
     ]);
 
-    expect(selected.research).toMatchObject({
+    expect(selected.research?.[0]).toMatchObject({
       jobId: 'research-manual',
       source: 'manual',
     });
+  });
+
+  it('批量拆出的多个 active research job 全部恢复，而不是只留最新一个', () => {
+    const selected = selectRecoverableHealthJobs(snapshot, [
+      job('research-1', 'research', {
+        remediationContext: { lintJobId: 'lint-origin', findingIds: ['f1'], action: 'research' },
+      }, '2026-07-13T01:00:00Z'),
+      job('research-2', 'research', {
+        remediationContext: { lintJobId: 'lint-origin', findingIds: ['f2'], action: 'research' },
+      }, '2026-07-13T01:00:01Z'),
+      job('research-3', 'research', {
+        remediationContext: { lintJobId: 'lint-origin', findingIds: ['f3'], action: 'research' },
+      }, '2026-07-13T01:00:02Z'),
+    ]);
+
+    expect(selected.research?.map((item) => item.jobId).sort())
+      .toEqual(['research-1', 'research-2', 'research-3']);
+    expect(selected.research?.every((item) => item.blocksAction)).toBe(true);
+  });
+
+  it('同一 research job 同时出现在 active 列表与快照 plan 时不重复计入', () => {
+    const queuedResearch: HealthSnapshot = {
+      ...snapshot,
+      remediations: {
+        ...snapshot.remediations,
+        [gap.id]: {
+          ...snapshot.remediations[gap.id],
+          status: 'queued',
+          jobId: 'research-1',
+        },
+      },
+    };
+
+    const selected = selectRecoverableHealthJobs(queuedResearch, [
+      job('research-1', 'research', {
+        remediationContext: { lintJobId: 'lint-origin', findingIds: ['f1'], action: 'research' },
+      }, '2026-07-13T01:00:00Z'),
+    ]);
+
+    expect(selected.research?.map((item) => item.jobId)).toEqual(['research-1']);
+  });
+
+  it('多个 awaiting-approval Research plan 各自恢复出可读 run 的 job', () => {
+    const awaitingSnapshot: HealthSnapshot = {
+      ...snapshot,
+      findings: [...snapshot.findings, thinPage],
+      remediations: {
+        ...snapshot.remediations,
+        [gap.id]: {
+          ...snapshot.remediations[gap.id],
+          status: 'awaiting-approval',
+          jobId: 'research-a',
+        },
+        [thinPage.id]: {
+          findingId: thinPage.id,
+          workflow: 'research',
+          status: 'awaiting-approval',
+          actions: [{ type: 'research', label: 'Research', destructive: false }],
+          reason: '候选仍需确认',
+          jobId: 'research-b',
+        },
+      },
+    };
+
+    const selected = selectRecoverableHealthJobs(awaitingSnapshot, []);
+
+    expect(selected.research?.map((item) => item.jobId).sort())
+      .toEqual(['research-a', 'research-b']);
+    expect(selected.research?.every((item) => item.blocksAction)).toBe(false);
   });
 
   it('active 查询缺失时从 queued plan jobId 恢复 workflow', () => {
@@ -545,7 +616,7 @@ describe('Health remediation UI helper', () => {
       },
     };
 
-    expect(selectRecoverableHealthJobs(queuedSnapshot, []).fix).toMatchObject({
+    expect(selectRecoverableHealthJobs(queuedSnapshot, []).fix?.[0]).toMatchObject({
       jobId: 'fix-from-plan',
       source: 'remediation',
       blocksAction: true,
@@ -565,7 +636,7 @@ describe('Health remediation UI helper', () => {
       },
     };
 
-    expect(selectRecoverableHealthJobs(awaitingSnapshot, []).research).toMatchObject({
+    expect(selectRecoverableHealthJobs(awaitingSnapshot, []).research?.[0]).toMatchObject({
       jobId: 'research-completed',
       source: 'remediation',
       blocksAction: false,
@@ -574,20 +645,20 @@ describe('Health remediation UI helper', () => {
 
   it('候选弹窗关闭后，已完成 Research 恢复项不再占用动作按钮', () => {
     expect([...blockingRecoverableActions({
-      fix: {
+      fix: [{
         jobId: 'fix-running',
         workflow: 'fix',
         source: 'remediation',
         createdAt: '2026-07-21T00:00:00.000Z',
         blocksAction: true,
-      },
-      research: {
+      }],
+      research: [{
         jobId: 'research-completed',
         workflow: 'research',
         source: 'remediation',
         createdAt: '2026-07-21T00:00:00.000Z',
         blocksAction: false,
-      },
+      }],
     })]).toEqual(['fix']);
   });
 
@@ -609,7 +680,7 @@ describe('Health remediation UI helper', () => {
       job('fix-c', 'fix', {}, '2026-07-13T02:00:00Z'),
     ]);
 
-    expect(selected.fix?.jobId).toBe('fix-c');
+    expect(selected.fix?.map((item) => item.jobId)).toEqual(['fix-c']);
   });
 
   it('workflow 终态同时失效 lint snapshot 与 active jobs', () => {
