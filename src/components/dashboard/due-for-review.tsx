@@ -74,7 +74,9 @@ export function DueForReview() {
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground transition-colors group-hover:text-accent-strong">
                   {entry.title}
                 </span>
-                <span className="shrink-0 font-mono text-xs tabular-nums text-foreground-tertiary">
+                {/* 不用 font-mono：这是中英混排的标签，等宽会把 CJK 拉散；
+                    只要 tabular-nums 保证数字列稳定即可。 */}
+                <span className="shrink-0 text-xs tabular-nums text-foreground-tertiary">
                   {days === 0
                     ? t('dashboard.review.dueToday')
                     : t('dashboard.review.overdueDays', { count: days })}
