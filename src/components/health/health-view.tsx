@@ -1171,9 +1171,10 @@ export function HealthView() {
 
   const total = allFindings.length;
   const neverRun = data?.jobId == null;
-  const fixFindingIds = data ? actionFindingIds(data, 'fix') : [];
-  const curateFindingIds = data ? actionFindingIds(data, 'curate') : [];
-  const researchFindingIds = data ? actionFindingIds(data, 'research') : [];
+  // 批量范围＝当前可见列表：类型筛选生效时不把筛掉的条目一起提交，计数也随之变化。
+  const fixFindingIds = data ? actionFindingIds(data, 'fix', visibleFindings) : [];
+  const curateFindingIds = data ? actionFindingIds(data, 'curate', visibleFindings) : [];
+  const researchFindingIds = data ? actionFindingIds(data, 'research', visibleFindings) : [];
   // 一个主题一个 job 且 worker 串行执行，一次只提交前 N 条（快照已按严重度排序）。
   const researchBatchIds = researchFindingIds.slice(0, MAX_RESEARCH_BATCH_JOBS);
   const researchDeferredCount = researchFindingIds.length - researchBatchIds.length;

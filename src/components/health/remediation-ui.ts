@@ -1,4 +1,5 @@
 import type {
+  EnrichedLintFinding,
   HealthSnapshot,
   Job,
   RemediationAction,
@@ -376,12 +377,19 @@ export function actionForFinding(
   return snapshot.remediations[findingId]?.actions.find((item) => item.type === action) ?? null;
 }
 
-/** 按快照 finding 顺序收集服务端明确允许执行该动作的稳定 ID。 */
+/**
+ * 按传入顺序收集服务端明确允许执行该动作的稳定 ID。
+ *
+ * `findings` 是**必传的批量范围**，调用方传当前可见列表——工具栏批量动作必须与用户看到的
+ * 一致：类型筛选生效时不能把筛掉的条目（或本地已删除来源的 orphan-source）一起提交。
+ * 刻意不给默认值，否则「忘记传 = 悄悄退回全量」这类漂移会再次发生。
+ */
 export function actionFindingIds(
   snapshot: HealthSnapshot,
   action: RemediationActionType,
+  findings: readonly Pick<EnrichedLintFinding, 'id'>[],
 ): string[] {
-  return snapshot.findings
+  return findings
     .filter((finding) => actionForFinding(snapshot, finding.id, action) !== null)
     .map((finding) => finding.id);
 }

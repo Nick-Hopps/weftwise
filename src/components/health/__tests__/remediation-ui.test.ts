@@ -159,9 +159,31 @@ describe('Health remediation UI helper', () => {
     }), t)).rejects.toThrow('Stop request failed (503).');
   });
 
-  it('批量 ID 只来自服务端允许的 action，并保持 findings 顺序', () => {
-    expect(actionFindingIds(snapshot, 'research')).toEqual([gap.id]);
-    expect(actionFindingIds(snapshot, 'fix')).toEqual([broken.id]);
+  it('批量 ID 只来自服务端允许的 action，并保持传入 findings 的顺序', () => {
+    expect(actionFindingIds(snapshot, 'research', snapshot.findings)).toEqual([gap.id]);
+    expect(actionFindingIds(snapshot, 'fix', snapshot.findings)).toEqual([broken.id]);
+  });
+
+  it('批量范围严格跟随传入的可见 findings：被筛掉的条目不参与，即使 plan 允许该 action', () => {
+    const visible = [thinPage, gap];
+    const filtered: HealthSnapshot = {
+      ...snapshot,
+      findings: [...snapshot.findings, thinPage],
+      remediations: {
+        ...snapshot.remediations,
+        [thinPage.id]: plan(thinPage.id, [
+          { type: 'research', label: 'Research', destructive: false },
+        ]),
+      },
+    };
+
+    // 只传 thin-page 一条 → coverage-gap 不进批量，尽管它的 plan 同样允许 research
+    expect(actionFindingIds(filtered, 'research', [thinPage])).toEqual([thinPage.id]);
+    // 顺序服从传入列表，而非快照 findings 顺序
+    expect(actionFindingIds(filtered, 'research', visible))
+      .toEqual([thinPage.id, gap.id]);
+    // 传入列表里没有可执行 fix 的条目 → 空批量（按钮随之禁用）
+    expect(actionFindingIds(filtered, 'fix', visible)).toEqual([]);
   });
 
   it('找不到 plan 或 action 时不返回客户端猜测', () => {
@@ -172,7 +194,7 @@ describe('Health remediation UI helper', () => {
   it('运行时未知 action 不匹配任何计划动作', () => {
     const unknownAction = 'rebuild' as RemediationActionType;
     expect(actionForFinding(snapshot, broken.id, unknownAction)).toBeNull();
-    expect(actionFindingIds(snapshot, unknownAction)).toEqual([]);
+    expect(actionFindingIds(snapshot, unknownAction, snapshot.findings)).toEqual([]);
   });
 
   it('只读 plan 不产生任何可执行 finding ID', () => {
