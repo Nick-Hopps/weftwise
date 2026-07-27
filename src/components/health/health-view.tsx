@@ -658,6 +658,27 @@ export function HealthView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [candidateResult?.run.id, candidateResult?.run.status]);
 
+  /**
+   * 行内审批入口：plan 已带 runId，直接读 run，不必再经 `GET /api/jobs/:id`。
+   * 只打开弹窗，不动 action gate——研究是否仍在跑由 job/快照决定，与「看候选」无关。
+   */
+  function openResearchRun(runId: string): void {
+    const origin = captureOrigin();
+    if (!isCurrentOrigin(origin) || origin.scope !== 'subject') return;
+    void (async () => {
+      try {
+        const run = await loadResearchRun(runId, origin);
+        if (!isCurrentOrigin(origin)) return;
+        setCandidateResult({ run, origin });
+      } catch (error) {
+        if (!isCurrentOrigin(origin)) return;
+        setRemediationError(
+          error instanceof Error ? error.message : t('health.error.resultLoad'),
+        );
+      }
+    })();
+  }
+
   async function loadResearchRun(runId: string, origin: HealthOrigin): Promise<ResearchRunView> {
     const response = await apiFetch(
       `/api/research-runs/${encodeURIComponent(runId)}?subjectId=${encodeURIComponent(origin.subjectId)}`,
@@ -1539,6 +1560,7 @@ export function HealthView() {
                                 void runRemediation(action.type, [finding.id], finding.id);
                               }
                             } : undefined}
+                            onReviewRun={!allSubjects ? openResearchRun : undefined}
                             onDeleteSource={
                               finding.type === 'orphan-source' && finding.sourceId && !allSubjects
                                 ? () => deleteSource(finding.sourceId!)

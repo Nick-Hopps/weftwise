@@ -33,7 +33,38 @@ npx vitest run src/server/services/__tests__/remediation-service.test.ts src/app
 
 ---
 
-## T2 前端多 job 跟踪：busy 派生、Stop 整批、刷新恢复
+## T2 审批入口移进 finding 行（与自动弹窗并存）
+
+**目标**：`awaiting-approval` 的 finding 行出现 `Review candidates`，点击才加载 run。
+
+> **顺序说明**：本任务与 T3 相对最初计划做了对调。若先切多 job 再加行内入口，中间那次提交里
+> remediation 来源的候选将**无处审批**。按「并存加新 → 原子切换 → 删旧」，这一步只**新增**行内
+> 入口并与既有自动弹窗并存，T3 再原子切到多 job 并删掉 remediation 的自动弹窗分支。
+
+**涉及文件**
+- `src/lib/contracts.ts`：`RemediationPlan` 新增 `runId?: string`
+- `src/server/services/remediation-status.ts`：`applyCurrentJob` 把命中的 `run.id` 写入 plan
+- `src/components/health/finding-row.tsx`：plan 有 `runId` 且 `status === 'awaiting-approval'` 时渲染 `Review candidates` 按钮，回调上抛 `runId`
+- `src/components/health/health-view.tsx`：新增 `openResearchRun(runId)`（直接 `GET /api/research-runs/:id`，不再经 `GET /api/jobs/:id` 取 `result.runId`）。删除 remediation 自动弹窗分支留给 T3
+- `src/server/services/__tests__/remediation-status.test.ts`、`src/components/health/__tests__/remediation-ui.test.ts`
+- i18n：`zh-CN.ts` / `en.ts` 新增 `health.reviewCandidates`
+
+**失败测试先写**
+1. 快照构建：research job 有对应 run 时，`remediations[findingId].runId === run.id`；无 run 时字段缺失
+2. `runId` 只在 research workflow 上出现，fix/curate plan 不带
+3. finding-row：`awaiting-approval` + 有 `runId` → 渲染入口；缺 `runId` → 不渲染（不猜测）
+
+**验证**
+```
+npx vitest run src/server/services/__tests__/remediation-status.test.ts src/components/health/__tests__
+```
+手工：批量跑完 → 无弹窗自动出现 → 三行各自 `Needs action` → 点开任一行审批 → 其余两行不受影响。
+
+**提交**：`feat: 研究候选审批入口下沉到 finding 行`
+
+---
+
+## T3 前端多 job 跟踪：busy 派生、Stop 整批、刷新恢复
 
 **目标**：research 从「一次一个 job」变成「一批 N 个 job」，锁的获取/释放与取消都以整批为单位。
 
@@ -41,7 +72,7 @@ npx vitest run src/server/services/__tests__/remediation-service.test.ts src/app
 - `src/components/health/remediation-ui.ts`：`selectRecoverableHealthJobs` 返回值改 `Partial<Record<Action, RecoverableHealthJob[]>>`；`blockingRecoverableActions` 适配数组
 - `src/components/health/health-view.tsx`：
   - `researchJobId: string | null` → `researchBatchRef = { jobIds: Set<string>, origin }` + `researchJobIds` state
-  - remediation 来源的 research **不再用 `useJobStream` 判完成**：改由 `health-active-jobs` 轮询 + `persistedBusyActions` 推导；批内 jobId 全部离开 active 列表即释放锁并失效 `lint-latest`
+  - remediation 来源的 research **不再用 `useJobStream` 判完成、也不再自动弹窗**（入口已由 T2 落到行内）：改由 `health-active-jobs` 轮询 + `persistedBusyActions` 推导；批内 jobId 全部离开 active 列表即释放锁并失效 `lint-latest`
   - `cancelHealthAction('research')` 对批内每个 jobId 并发 cancel（`Promise.allSettled`，409 幂等）
   - 手动 / backlog 来源保留原单 job SSE 链（`ResearchJobMeta.source !== 'remediation'`）
 - `src/components/health/__tests__/remediation-ui.test.ts`
@@ -59,33 +90,6 @@ npx vitest run src/components/health/__tests__/remediation-ui.test.ts
 手工：造 3 条 coverage-gap → 点批量 → JobsPanel 三行排队 → 刷新页面按钮仍为 Stop → Stop 后三行全部 cancelled。
 
 **提交**：`feat: Health 研究动作按批跟踪与整批取消`
-
----
-
-## T3 审批入口移进 finding 行，remediation 来源不再自动弹窗
-
-**目标**：`awaiting-approval` 的 finding 行出现 `Review candidates`，点击才加载 run；批量完成不再劫持焦点。
-
-**涉及文件**
-- `src/lib/contracts.ts`：`RemediationPlan` 新增 `runId?: string`
-- `src/server/services/remediation-status.ts`：`applyCurrentJob` 把命中的 `run.id` 写入 plan
-- `src/components/health/finding-row.tsx`：plan 有 `runId` 且 `status === 'awaiting-approval'` 时渲染 `Review candidates` 按钮，回调上抛 `runId`
-- `src/components/health/health-view.tsx`：新增 `openResearchRun(runId)`（直接 `GET /api/research-runs/:id`，不再经 `GET /api/jobs/:id` 取 `result.runId`）；删除 remediation 来源的「完成→自动 setCandidateResult」分支
-- `src/server/services/__tests__/remediation-status.test.ts`、`src/components/health/__tests__/remediation-ui.test.ts`
-- i18n：`zh-CN.ts` / `en.ts` 新增 `health.reviewCandidates`
-
-**失败测试先写**
-1. 快照构建：research job 有对应 run 时，`remediations[findingId].runId === run.id`；无 run 时字段缺失
-2. `runId` 只在 research workflow 上出现，fix/curate plan 不带
-3. finding-row：`awaiting-approval` + 有 `runId` → 渲染入口；缺 `runId` → 不渲染（不猜测）
-
-**验证**
-```
-npx vitest run src/server/services/__tests__/remediation-status.test.ts src/components/health/__tests__
-```
-手工：批量跑完 → 无弹窗自动出现 → 三行各自 `Needs action` → 点开任一行审批 → 其余两行不受影响。
-
-**提交**：`feat: 研究候选审批入口下沉到 finding 行`
 
 ---
 

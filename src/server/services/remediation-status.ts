@@ -148,6 +148,8 @@ function applyCurrentJob(
   researchRunsByJob: Map<string, ResearchRunView>,
 ): RemediationPlan {
   let status: RemediationStatus;
+  // 只在确实读到持久化 run 时透出，供行内审批入口直接取数；缺失时不猜测。
+  let runId: string | undefined;
 
   if (job.status === 'pending' || job.status === 'running') {
     status = 'queued';
@@ -155,6 +157,7 @@ function applyCurrentJob(
     status = 'failed';
   } else if (context.action === 'research') {
     const run = researchRunsByJob.get(researchJobKey(job.subjectId!, job.id));
+    runId = run?.id;
     status = run
       ? researchRunOutcome(run, findingId)
       : researchOutcome(job.resultJson);
@@ -179,7 +182,12 @@ function applyCurrentJob(
     status = 'failed';
   }
 
-  return { ...plan, status, jobId: job.id };
+  return {
+    ...plan,
+    status,
+    jobId: job.id,
+    ...(runId === undefined ? {} : { runId }),
+  };
 }
 
 function readRecentOutcome(

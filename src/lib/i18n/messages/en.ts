@@ -736,6 +736,7 @@ export const en = {
   'health.skipped': 'skipped',
   'health.curate': 'Curate orphaned pages',
   'health.fix': 'Fix deterministic findings',
+  'health.reviewCandidates': 'Review candidates',
   'health.research': 'Research coverage gaps',
   'health.research.batchLimit': 'Researches the first {batch} topics — one job each, run in order. {remaining} more need another click.',
   'health.topicPlaceholder': 'Topic or question',

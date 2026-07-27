@@ -669,6 +669,11 @@ export interface RemediationPlan {
   actions: RemediationAction[];
   reason: string;
   jobId?: string;
+  /**
+   * 关联 Research provenance run。只在服务端确实读到持久化 run 时出现，
+   * 供 finding 行内审批入口直接取数，不必再经 `GET /api/jobs/:id` 拿 `result.runId`。
+   */
+  runId?: string;
 }
 
 export interface RemediationContext {

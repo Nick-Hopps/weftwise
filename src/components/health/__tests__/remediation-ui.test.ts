@@ -425,6 +425,62 @@ describe('Health remediation UI helper', () => {
     expect(html).toContain('<button disabled="">Retry ingest</button>');
   });
 
+  it('awaiting-approval 且带 runId 时行内渲染 Review candidates，并取代重复的 Research 按钮', () => {
+    const html = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: gap,
+      plan: {
+        findingId: gap.id,
+        workflow: 'research',
+        status: 'awaiting-approval',
+        actions: [{ type: 'research', label: 'Research topic', destructive: false }],
+        reason: '候选仍需确认',
+        jobId: 'research-1',
+        runId: 'run-1',
+      },
+      onAction: () => undefined,
+      onReviewRun: () => undefined,
+    }));
+
+    expect(html).toContain('Review candidates');
+    expect(html).not.toContain('Research topic');
+  });
+
+  it('缺 runId 的 awaiting-approval 不渲染审批入口，也不猜测 run 身份', () => {
+    const html = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: gap,
+      plan: {
+        findingId: gap.id,
+        workflow: 'research',
+        status: 'awaiting-approval',
+        actions: [{ type: 'research', label: 'Research topic', destructive: false }],
+        reason: '候选仍需确认',
+        jobId: 'research-1',
+      },
+      onAction: () => undefined,
+      onReviewRun: () => undefined,
+    }));
+
+    expect(html).not.toContain('Review candidates');
+    expect(html).toContain('Research topic');
+  });
+
+  it('未挂 onReviewRun 的只读视图不渲染审批入口', () => {
+    const html = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: gap,
+      plan: {
+        findingId: gap.id,
+        workflow: 'research',
+        status: 'awaiting-approval',
+        actions: [],
+        reason: '候选仍需确认',
+        jobId: 'research-1',
+        runId: 'run-1',
+      },
+    }));
+
+    expect(html).not.toContain('Review candidates');
+  });
+
   it('lint busy 时同 origin 只排队一次，并在终态 drain', () => {
     const queue = createLintRerunQueue();
     const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };

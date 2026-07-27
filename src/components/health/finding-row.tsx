@@ -111,6 +111,7 @@ export function FindingRow({
   deleting = false,
   busyActions,
   onAction,
+  onReviewRun,
   onDeleteSource,
 }: {
   finding: EnrichedLintFinding;
@@ -120,6 +121,8 @@ export function FindingRow({
   deleting?: boolean;
   busyActions?: ReadonlySet<ExecutableRemediationAction>;
   onAction?: (action: RemediationAction) => void;
+  /** 只有可执行视图会挂：打开该 finding 自己的 Research 候选审批。 */
+  onReviewRun?: (runId: string) => void;
   onDeleteSource?: () => void;
 }) {
   const { t } = useI18n();
@@ -131,6 +134,11 @@ export function FindingRow({
     (action) => action.type !== 'review-source' && busyActions?.has(action.type),
   ) ?? false;
   const hasDetails = Boolean(finding.suggestedFix || plan?.reason);
+  // 待审批的 Research 有自己的 run 时，行内入口取代重复的「再研究一次」按钮。
+  const reviewRunId = plan?.status === 'awaiting-approval' && plan.workflow === 'research'
+    ? plan.runId
+    : undefined;
+  const reviewable = Boolean(reviewRunId && onReviewRun);
 
   useEffect(() => {
     if (deleting || acting.size > 0 || planActionBusy) {
@@ -208,7 +216,17 @@ export function FindingRow({
           </div>
 
           <div className="flex shrink-0 items-center justify-end gap-1.5">
-            {plan?.actions.map((item) =>
+            {reviewable && reviewRunId && (
+              <Button
+                intent="outline"
+                size="sm"
+                disabled={deleting}
+                onClick={() => onReviewRun?.(reviewRunId)}
+              >
+                {t('health.reviewCandidates')}
+              </Button>
+            )}
+            {plan?.actions.filter((item) => !(reviewable && item.type === 'research')).map((item) =>
               item.type === 'review-source' && item.href ? (
                 <Link
                   key={item.type}
