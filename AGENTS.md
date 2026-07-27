@@ -170,7 +170,7 @@ LLM 配置存放于 `llm-config.json`（参考 `llm-config.example.json`），�
 
 ## 六、测试策略
 
-> vitest 已配置（`vitest.config.ts`），测试文件分布在各模块 `__tests__/` 目录（292 文件 / 2418 用例，2026-07-20）。
+> vitest 已配置（`vitest.config.ts`），测试文件分布在各模块 `__tests__/` 目录（331 文件 / 2844 用例，2026-07-27）。
 > 已覆盖：既有 Wiki/Saga/agents/ingest/DB/search/lint/Health 全链路，以及 30 个 builtin 的 registry/Profile/compile policy、跨 Subject 只读/复合引用、History list/diff/revert 审批、workflow status/start/cancel 审批、Ask AI canonical 完整块选区配图审批/原子 job/页面+资产 Saga、`wiki.move` 页面身份迁移（alias/旧 URL/跨 Subject 链接/source sidecar/派生缓存/回滚）、frontmatter emoji/fenced code/CRLF 往返与跨 Subject 同名 title resolver、metadata/link 窄写纯函数与 plan/apply、Fix/Curate 串行 Guard、Query PendingAction preview/approve/stale、Research run 原子批准/候选租约/Ingest lineage/验证对账/Health 恢复、URL Source 引用持久化/worker 临时抓取/网页标题描述/远程沙箱预览、逐跳 SSRF 防护、旧 CHECK 原子迁移和 job/embedding + applied 原子最终化；worker 心跳生命周期、双进程 job claim、到期租约、Saga 失败终态/事件顺序、job_events 同毫秒续播、pages 复合 PK/path unique 与手动 FTS update/delete 一致性也已由真实 SQLite/WAL 测试锁定。
 
 ---

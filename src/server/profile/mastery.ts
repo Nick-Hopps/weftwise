@@ -92,6 +92,14 @@ interface Streak {
  *    折叠单位是 `STREAK_MIN_GAP_HOURS` 而非日历日，理由见该常量的注释（时区）。
  * 3. **只有 strong 负证据清零**——`citation-hit`（问了个问题、回答引用了这一页，完全
  *    正常的事）不得把攒了几周的连击打回零。
+ *
+ * > **「过期」不等于「降档」，这是刻意的。** 连击只从最后一条 strong 负证据起算，
+ * > 不因 `expiresAt` 过期而重置。所以一页过期回落 `exposed` 之后再答对一次，
+ * > 连击不从 1 重来，会直接按历史档位给出较长的有效期。
+ * >
+ * > 从间隔重复的角度这是对的——间隔越长仍然答对，说明记忆越牢，值得更长的下一档。
+ * > 会让人误以为是 bug 的是「过期了却没降档」，但降档的触发条件是**答错**
+ * > （strong 负证据），不是**没来**。别把它「修」掉。
  */
 function computeStreak(sorted: EvidenceRow[]): Streak {
   let resetAt: string | null = null;

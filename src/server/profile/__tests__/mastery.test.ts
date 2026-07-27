@@ -289,6 +289,20 @@ describe('deriveMastery：连击按滚动间隔折叠（决策 1）', () => {
     expect(deriveMastery([...rows].reverse(), NOW)).toEqual(deriveMastery(rows, NOW));
   });
 
+  it('过期回落 exposed 后再答对，连击不从 1 重来（「过期」≠「降档」）', () => {
+    // 降档的触发条件是**答错**（strong 负证据），不是**没来**。
+    // 从间隔重复的角度这是对的：间隔越长仍然答对，说明记忆越牢，值得更长的下一档。
+    // 这条锁死该语义，防将来被当 bug「修」掉。
+    const rows = [gradedCorrect(60, 'a'), gradedCorrect(40, 'b'), gradedCorrect(1, 'c')];
+    // 中途必然经历过期（连击 2 时失效期只有 +10 天，而下一次答对在 39 天后）
+    expect(deriveMastery([rows[0], rows[1]], new Date(NOW.getTime() - 20 * DAY_MS)).state)
+      .toBe('exposed');
+    // 再答对一次 → 连击 3（不是 1），有效期按第三档给
+    const v = deriveMastery(rows, NOW);
+    expect(v.state).toBe('mastered');
+    expect(streakFromExpiry(v, daysAgo(1))).toBe(3);
+  });
+
   it('lastPositiveAt 仍取最后一条正证据，不取最后一条被计数的', () => {
     // 否则同一坐的第二次答对反而会缩短有效期——反直觉。
     const first = new Date(NOW.getTime() - 3 * 3_600_000).toISOString();
