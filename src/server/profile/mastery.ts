@@ -15,9 +15,10 @@ import type {
   MasteryConfidence,
   MasteryState,
   MasteryVerdict,
+  MasteryVerdictLite,
 } from '@/lib/contracts';
 
-export type { EvidenceRow, MasteryConfidence, MasteryState, MasteryVerdict };
+export type { EvidenceRow, MasteryConfidence, MasteryState, MasteryVerdict, MasteryVerdictLite };
 
 const DAY_MS = 86_400_000;
 
@@ -124,20 +125,45 @@ function computeStreak(sorted: EvidenceRow[]): Streak {
   };
 }
 
+/** 决策 3 的优先级表序号。报告按它归因，不必二次猜测判定是怎么来的。 */
+export type MasteryRule = 1 | 2 | 3 | 4 | 5;
+
+export interface MasteryExplanation {
+  verdict: MasteryVerdict;
+  /** 命中的优先级规则序号（决策 3 的表）。 */
+  rule: MasteryRule;
+  /** 折叠后的连击次数（见 `computeStreak`）。 */
+  consecutivePositives: number;
+  strongPositives: number;
+  weakPositives: number;
+  /** 衰减窗口内的强负证据条数（规则 2 的置信度依据）。 */
+  recentStrongNegatives: number;
+  /** 有正证据、却被规则 3 的 strength 门槛挡下而落 `exposed`。 */
+  blockedByStrengthGate: boolean;
+  /** 有足量正证据、但已过 `expiresAt` 而落 `exposed`。 */
+  expiredPositives: boolean;
+}
+
 function verdict(
   state: MasteryState,
   confidence: MasteryConfidence,
   base: Pick<MasteryVerdict, 'evidenceCount' | 'lastEvidenceAt' | 'recent'>,
-  expiresAt: string | null = null,
+  windows: { dueAt: string | null; expiresAt: string | null } = { dueAt: null, expiresAt: null },
 ): MasteryVerdict {
-  return { state, confidence, expiresAt, ...base };
+  return { state, confidence, ...windows, ...base };
 }
 
 /**
- * 按决策 3 的优先级表自上而下先命中先返回。任何结论都可以回溯到 `recent` 里的
- * 具体证据条目与时间——这是「掌握度必须可解释」那条约束的落点。
+ * 按决策 3 的优先级表自上而下先命中先返回，并**一并给出判定归因**。
+ *
+ * 任何结论都可以回溯到 `recent` 里的具体证据条目与时间——这是「掌握度必须可解释」
+ * 那条约束的落点；`rule` 与几个计数字段则让离线报告能回答「为什么是这个状态」，
+ * 而不必自己再判一遍。
+ *
+ * `deriveMastery` 是本函数丢掉解释字段的薄封装，**方向不能反**：
+ * 两份判定分头演化必然漂移，报告就会开始撒谎。
  */
-export function deriveMastery(evidence: EvidenceRow[], now: Date): MasteryVerdict {
+export function explainMastery(evidence: EvidenceRow[], now: Date): MasteryExplanation {
   const sorted = [...evidence].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
   const recent = [...evidence]
     .sort((a, b) => (a.createdAt > b.createdAt ? -1 : a.createdAt < b.createdAt ? 1 : 0))
@@ -148,43 +174,99 @@ export function deriveMastery(evidence: EvidenceRow[], now: Date): MasteryVerdic
     lastEvidenceAt: sorted.length ? sorted[sorted.length - 1].createdAt : null,
     recent,
   };
+  const explain = (
+    rule: MasteryRule,
+    v: MasteryVerdict,
+    counts: Partial<Omit<MasteryExplanation, 'verdict' | 'rule'>> = {},
+  ): MasteryExplanation => ({
+    verdict: v,
+    rule,
+    consecutivePositives: 0,
+    strongPositives: 0,
+    weakPositives: 0,
+    recentStrongNegatives: 0,
+    blockedByStrengthGate: false,
+    expiredPositives: false,
+    ...counts,
+  });
 
   // 规则 1：无任何证据。长期看这会是绝大多数页面的状态。
-  if (sorted.length === 0) return verdict('unknown', 'none', base);
+  if (sorted.length === 0) return explain(1, verdict('unknown', 'none', base));
 
   // 规则 2：衰减窗口内存在强负证据 → struggling。
   // 「负证据压过正证据」——哪怕 quiz 答对过；保守方向永远是「多讲一点」。
   const negativeCutoff = new Date(now.getTime() - NEGATIVE_WINDOW_DAYS * DAY_MS).toISOString();
   const recentStrongNegatives = sorted.filter(
     (r) => isStrongNegative(r) && r.createdAt >= negativeCutoff,
-  );
-  if (recentStrongNegatives.length > 0) {
-    return verdict('struggling', recentStrongNegatives.length >= 2 ? 'high' : 'low', base);
+  ).length;
+  if (recentStrongNegatives > 0) {
+    return explain(
+      2,
+      verdict('struggling', recentStrongNegatives >= 2 ? 'high' : 'low', base),
+      { recentStrongNegatives },
+    );
   }
 
   // 规则 3：存在未过期的正证据，且（含 ≥1 条 strong 或 ≥2 条 weak）。
   const streak = computeStreak(sorted);
-  if (streak.lastPositiveAt) {
-    // 判定只看 expiresAt；`dueDays`（该复习了）留给未来的复习提醒，不参与四态。
-    const { expiryDays } = masteryWindowDays(streak.count);
-    const expiresAt = new Date(
-      new Date(streak.lastPositiveAt).getTime() + expiryDays * DAY_MS,
-    ).toISOString();
+  const strongPositives = streak.positives.filter((r) => r.strength === 'strong').length;
+  const weakPositives = streak.positives.length - strongPositives;
+  const counts = { consecutivePositives: streak.count, strongPositives, weakPositives };
 
-    const strongCount = streak.positives.filter((r) => r.strength === 'strong').length;
-    const weakCount = streak.positives.length - strongCount;
+  if (streak.lastPositiveAt) {
+    const { dueDays, expiryDays } = masteryWindowDays(streak.count);
+    const lastMs = new Date(streak.lastPositiveAt).getTime();
+    const dueAt = new Date(lastMs + dueDays * DAY_MS).toISOString();
+    const expiresAt = new Date(lastMs + expiryDays * DAY_MS).toISOString();
+
     // strength 门槛是必须的：否则一条 `self-report-easy`（读者点一下「太浅」）就能把
     // 整页判成 mastered，重塑从此跳过解释它。自评答对同理——自我拔高偏差下的单条自陈
     // 不足以支撑「不必再讲」。
-    const sufficient = strongCount >= 1 || weakCount >= 2;
+    const sufficient = strongPositives >= 1 || weakPositives >= 2;
+    const live = now.toISOString() < expiresAt;
 
-    if (sufficient && now.toISOString() < expiresAt) {
-      return verdict('mastered', strongCount >= 1 ? 'high' : 'low', base, expiresAt);
+    if (sufficient && live) {
+      // 四态判定只看 `expiresAt`；`dueAt`（该复习了）不参与判定，只供复习面消费。
+      return explain(
+        3,
+        verdict('mastered', strongPositives >= 1 ? 'high' : 'low', base, { dueAt, expiresAt }),
+        counts,
+      );
     }
+    // 落 exposed 的两种不同原因要分开报告：门槛太严与自然过期，
+    // 对应的调整动作完全不同（改门槛 vs 加复习提醒）。
+    return explain(4, verdict('exposed', 'low', base), {
+      ...counts,
+      blockedByStrengthGate: !sufficient,
+      expiredPositives: sufficient && !live,
+    });
   }
 
-  // 规则 4/5：exposure 证据、已过期的正证据、不足以支撑规则 3 的孤立 weak 正证据，
-  // 或只有弱负证据。都落 exposed——弱负证据信噪比不足以判 struggling，
-  // 但足以证明「他接触过这一页」。
-  return verdict('exposed', 'low', base);
+  // 规则 4/5：只有 exposure 证据，或只有弱负证据。都落 exposed——弱负证据信噪比不足以
+  // 判 struggling，但足以证明「他接触过这一页」。
+  const hasExposure = sorted.some((r) => r.polarity === 'exposure');
+  return explain(hasExposure ? 4 : 5, verdict('exposed', 'low', base), counts);
+}
+
+/**
+ * 四态派生的对外契约。spec ② 的 prompt 注入与 Graph 图层都只消费它。
+ *
+ * 它是 `explainMastery` 丢掉解释字段的薄封装——两者共用同一段判定逻辑。
+ */
+export function deriveMastery(evidence: EvidenceRow[], now: Date): MasteryVerdict {
+  return explainMastery(evidence, now).verdict;
+}
+
+/**
+ * 复习清单的判据（决策 4）。
+ *
+ * `mastered` 本身已排除过期项（过期即回落 `exposed`），所以这等价于
+ * `dueAt <= now < expiresAt`——语义正是「该复习、但还没失效」。
+ *
+ * **刻意不含已过期回落 `exposed` 的页**：清单的语义是「维持你已有的掌握」。
+ * 把失效的混进来会让它随时间单调膨胀成一个永远清不完的待办，那会让人直接忽略它，
+ * 连带毁掉这个面的可信度。想找回失效的概念，走 Graph 审计面。
+ */
+export function isDueForReview(v: MasteryVerdictLite, now: Date): boolean {
+  return v.state === 'mastered' && v.dueAt !== null && v.dueAt <= now.toISOString();
 }

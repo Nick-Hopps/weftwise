@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveMastery,
+  explainMastery,
+  isDueForReview,
   masteryWindowDays,
   MAX_RECENT_EVIDENCE,
   NEGATIVE_WINDOW_DAYS,
@@ -94,6 +96,7 @@ describe('deriveMastery：优先级 1 —— 无证据', () => {
       confidence: 'none',
       evidenceCount: 0,
       lastEvidenceAt: null,
+      dueAt: null,
       expiresAt: null,
       recent: [],
     });
@@ -331,5 +334,139 @@ describe('deriveMastery：汇总字段', () => {
   it('时钟回拨：未来时间戳的证据按已发生处理，不特殊化', () => {
     const v = deriveMastery([gradedCorrect(-1)], NOW);
     expect(v.state).toBe('mastered');
+  });
+});
+
+describe('deriveMastery：dueAt（决策 4 两级语义的另一半）', () => {
+  it('仅 mastered 时非空', () => {
+    expect(deriveMastery([], NOW).dueAt).toBeNull();
+    expect(deriveMastery([ev('page-read', 1)], NOW).dueAt).toBeNull();
+    expect(deriveMastery([ev('quiz-wrong', 1)], NOW).dueAt).toBeNull();
+    // 过期回落 exposed 的也没有 dueAt——它已经不算掌握了
+    expect(deriveMastery([gradedCorrect(5)], NOW).dueAt).toBeNull();
+    expect(deriveMastery([gradedCorrect(1)], NOW).dueAt).not.toBeNull();
+  });
+
+  it('dueAt 恒早于 expiresAt（复习到期 ≠ 知识失效）', () => {
+    const v = deriveMastery([gradedCorrect(1)], NOW);
+    expect(new Date(v.dueAt!).getTime()).toBeLessThan(new Date(v.expiresAt!).getTime());
+  });
+
+  it('dueAt = 最后一条正证据 + 该档 dueDays', () => {
+    const lastAt = daysAgo(1);
+    const v = deriveMastery([gradedCorrect(1)], NOW);
+    const { dueDays } = masteryWindowDays(1);
+    expect(v.dueAt).toBe(new Date(new Date(lastAt).getTime() + dueDays * DAY_MS).toISOString());
+  });
+
+  it('连击越长 dueAt 越远（逐档对应 masteryWindowDays）', () => {
+    // 连击 3：40 / 20 / 1 天前各一条 strong 正证据（间隔远超最小间隔）
+    const v = deriveMastery(
+      [gradedCorrect(40, 'a'), gradedCorrect(20, 'b'), gradedCorrect(1, 'c')],
+      NOW,
+    );
+    const { dueDays } = masteryWindowDays(3);
+    expect(v.dueAt).toBe(new Date(new Date(daysAgo(1)).getTime() + dueDays * DAY_MS).toISOString());
+  });
+});
+
+describe('isDueForReview（决策 4 的清单判据）', () => {
+  it('mastered 且已过 dueAt → true', () => {
+    // 连击 1：dueDays=1 / expiryDays=4。3 天前答对 → 已该复习、尚未失效。
+    const v = deriveMastery([gradedCorrect(3)], NOW);
+    expect(v.state).toBe('mastered');
+    expect(isDueForReview(v, NOW)).toBe(true);
+  });
+
+  it('mastered 但未到 dueAt → false', () => {
+    const v = deriveMastery([gradedCorrect(0.5)], NOW);
+    expect(v.state).toBe('mastered');
+    expect(isDueForReview(v, NOW)).toBe(false);
+  });
+
+  it('恰好到 dueAt 即算到期', () => {
+    const v = deriveMastery([gradedCorrect(1)], NOW);
+    expect(isDueForReview(v, new Date(v.dueAt!))).toBe(true);
+  });
+
+  it('已失效回落 exposed 的不进清单（清单语义是「维持已有掌握」）', () => {
+    // 含失效项会让清单单调膨胀成清不完的待办，连带毁掉这个面的可信度。
+    // 想找回失效的概念走 Graph 审计面。
+    const v = deriveMastery([gradedCorrect(5)], NOW);
+    expect(v.state).toBe('exposed');
+    expect(isDueForReview(v, NOW)).toBe(false);
+  });
+
+  it('struggling / unknown 一律 false', () => {
+    expect(isDueForReview(deriveMastery([ev('quiz-wrong', 1)], NOW), NOW)).toBe(false);
+    expect(isDueForReview(deriveMastery([], NOW), NOW)).toBe(false);
+  });
+});
+
+describe('explainMastery：与 deriveMastery 同一段逻辑（决策 7）', () => {
+  const CASES: Array<[string, EvidenceRow[]]> = [
+    ['无证据', []],
+    ['强负证据', [ev('quiz-wrong', 1)]],
+    ['两条强负证据', [ev('quiz-wrong', 2), ev('selection-ask', 1)]],
+    ['strong 正证据', [gradedCorrect(1)]],
+    ['两条 weak 正证据', [ev('quiz-correct', 3, { anchor: 'a' }), ev('quiz-correct', 1, { anchor: 'b' })]],
+    ['孤立 weak 正证据', [ev('self-report-easy', 1)]],
+    ['仅 exposure', [ev('page-read', 1)]],
+    ['仅弱负证据', [ev('citation-hit', 1)]],
+    ['过期正证据', [gradedCorrect(5)]],
+  ];
+
+  it.each(CASES)('%s：verdict 与 deriveMastery 深相等', (_name, rows) => {
+    // 报告与线上判定共用同一段逻辑才不会漂移；两份判定必然分头演化，报告就会开始撒谎。
+    expect(explainMastery(rows, NOW).verdict).toEqual(deriveMastery(rows, NOW));
+  });
+
+  it('五条优先级规则各自的序号', () => {
+    expect(explainMastery([], NOW).rule).toBe(1);
+    expect(explainMastery([ev('quiz-wrong', 1)], NOW).rule).toBe(2);
+    expect(explainMastery([gradedCorrect(1)], NOW).rule).toBe(3);
+    expect(explainMastery([ev('page-read', 1)], NOW).rule).toBe(4);
+    expect(explainMastery([ev('citation-hit', 1)], NOW).rule).toBe(5);
+  });
+
+  it('blockedByStrengthGate 只在有正证据却被门槛挡下时为 true', () => {
+    // 这是「mastered 恒空」的第一嫌疑：规则 3 的 strength 门槛太严。
+    expect(explainMastery([ev('self-report-easy', 1)], NOW).blockedByStrengthGate).toBe(true);
+    expect(explainMastery([ev('quiz-correct', 1)], NOW).blockedByStrengthGate).toBe(true);
+    expect(explainMastery([gradedCorrect(1)], NOW).blockedByStrengthGate).toBe(false);
+    expect(explainMastery([ev('page-read', 1)], NOW).blockedByStrengthGate).toBe(false);
+  });
+
+  it('expiredPositives 区分「门槛挡下」与「过期」两种落 exposed 的原因', () => {
+    const expired = explainMastery([gradedCorrect(5)], NOW);
+    expect(expired).toMatchObject({ expiredPositives: true, blockedByStrengthGate: false });
+
+    const gated = explainMastery([ev('self-report-easy', 1)], NOW);
+    expect(gated).toMatchObject({ expiredPositives: false, blockedByStrengthGate: true });
+  });
+
+  it('计数字段反映判定依据', () => {
+    const e = explainMastery(
+      [gradedCorrect(40, 'a'), gradedCorrect(20, 'b'), ev('self-report-easy', 1)],
+      NOW,
+    );
+    expect(e).toMatchObject({
+      consecutivePositives: 3,
+      strongPositives: 2,
+      weakPositives: 1,
+      recentStrongNegatives: 0,
+    });
+  });
+
+  it('strong 负证据清零后，计数只覆盖其后的正证据', () => {
+    const e = explainMastery(
+      [gradedCorrect(40, 'a'), ev('quiz-wrong', 35), gradedCorrect(30, 'b'), gradedCorrect(1, 'c')],
+      NOW,
+    );
+    expect(e.consecutivePositives).toBe(2);
+    expect(e.strongPositives).toBe(2);
+    // 该强负证据已超出 NEGATIVE_WINDOW_DAYS，不再判 struggling
+    expect(e.recentStrongNegatives).toBe(0);
+    expect(e.rule).toBe(3);
   });
 });

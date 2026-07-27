@@ -1221,6 +1221,13 @@ export interface MasteryVerdictLite {
   confidence: MasteryConfidence;
   evidenceCount: number;
   lastEvidenceAt: string | null;
+  /**
+   * 「该复习了」的时刻；仅 state==='mastered' 时非空。
+   *
+   * 与 `expiresAt` 是两个不同的量（决策 4 的两级语义）：到期该复习 ≠ 到期就当作不会了。
+   * 它不参与四态判定，只供复习面消费。
+   */
+  dueAt: string | null;
   /** 仅 state==='mastered' 时非空；供审计面解释「何时会降级」。 */
   expiresAt: string | null;
 }
@@ -1228,6 +1235,22 @@ export interface MasteryVerdictLite {
 export interface MasteryVerdict extends MasteryVerdictLite {
   /** 供审计面展示，按时间倒序有界截断。 */
   recent: EvidenceRow[];
+}
+
+/** 复习清单的一条：`GET /api/mastery?due=1`。 */
+export interface MasteryDueEntry {
+  slug: string;
+  title: string;
+  dueAt: string;
+  expiresAt: string;
+  confidence: MasteryConfidence;
+}
+
+export interface MasteryDueResult {
+  entries: MasteryDueEntry[];
+  /** 到期总数；`entries` 有上限截断，两者可能不等。 */
+  total: number;
+  limit: number;
 }
 
 // ---------------------------------------------------------------------------
