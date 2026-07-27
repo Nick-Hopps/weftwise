@@ -147,3 +147,78 @@ describe('evidence-repo', () => {
     expect(rows.map((r) => r.kind)).toEqual(['quiz-wrong', 'page-read']);
   });
 });
+
+describe('evidence-repo：detail 大小闸门', () => {
+  /** `detail_json` 不进 `EvidenceRow`（它只用于事后审计），只能回读原始列。 */
+  async function readDetail(slug: string): Promise<string | null> {
+    const { getRawDb } = await import('../../client');
+    const row = getRawDb()
+      .prepare('SELECT detail_json FROM page_evidence WHERE slug = ?')
+      .get(slug) as { detail_json: string | null } | undefined;
+    return row?.detail_json ?? null;
+  }
+
+  it('正常 detail 原样落库', async () => {
+    const { evidenceRepo, subjectId } = await setup();
+    evidenceRepo.appendEvidence({
+      userId: USER, subjectId, slug: 'ok', kind: 'page-read',
+      detail: { viewedSource: 'reshape', profileVersion: 3 },
+    });
+    expect(JSON.parse((await readDetail('ok'))!)).toEqual({
+      viewedSource: 'reshape', profileVersion: 3,
+    });
+  });
+
+  it('缺省 detail 仍为 null', async () => {
+    const { evidenceRepo, subjectId } = await setup();
+    evidenceRepo.appendEvidence({ userId: USER, subjectId, slug: 'none', kind: 'page-read' });
+    expect(await readDetail('none')).toBeNull();
+  });
+
+  it('超大 detail 被截断，但证据本身照常落库', async () => {
+    // `page_evidence` 是 append-only 永不删除的表，一次失控写入是永久的。
+    // 但为一条只用于事后审计的字段丢掉整条证据，与 best-effort 语义矛盾。
+    const { evidenceRepo, subjectId } = await setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const huge = 'x'.repeat(evidenceRepo.MAX_DETAIL_BYTES + 1);
+    evidenceRepo.appendEvidence({
+      userId: USER, subjectId, slug: 'big', kind: 'selection-ask', detail: { excerpt: huge },
+    });
+
+    expect(evidenceRepo.listForPage(USER, subjectId, 'big')).toHaveLength(1);
+    const stored = JSON.parse((await readDetail('big'))!);
+    // 落的是「这里原本有多大」，不是被砍半的 JSON——半截 JSON 既不可解析也不可解释。
+    expect(stored.truncated).toBe(true);
+    expect(stored.bytes).toBeGreaterThan(evidenceRepo.MAX_DETAIL_BYTES);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('恰好等于上限不截断', async () => {
+    const { evidenceRepo, subjectId } = await setup();
+    // `{"v":"…"}` 外壳占 8 字符
+    const pad = 'y'.repeat(evidenceRepo.MAX_DETAIL_BYTES - 8);
+    evidenceRepo.appendEvidence({
+      userId: USER, subjectId, slug: 'edge', kind: 'page-read', detail: { v: pad },
+    });
+    expect(JSON.parse((await readDetail('edge'))!).v).toBe(pad);
+  });
+
+  it('闸门在 repo 层，服务端生产方经 recordEvidence 同样受保护', async () => {
+    // `/api/query` 的 selection-ask / citation-hit 与 `/api/lens` 的 reshape-request
+    // 都直接调 repo、绕过路由。闸门装在唯一写入口才有意义。
+    const { evidenceRepo, subjectId } = await setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { recordEvidence } = await import('@/server/services/record-evidence');
+
+    recordEvidence({
+      userId: USER, subjectId, slug: 'via-service', kind: 'selection-ask',
+      detail: { excerpt: 'z'.repeat(evidenceRepo.MAX_DETAIL_BYTES + 1) },
+    });
+
+    expect(evidenceRepo.listForPage(USER, subjectId, 'via-service')).toHaveLength(1);
+    expect(JSON.parse((await readDetail('via-service'))!).truncated).toBe(true);
+    warn.mockRestore();
+  });
+});

@@ -88,6 +88,10 @@
 - `mastery-layer.ts` —— 图层纯逻辑：`summarizeMastery`（`unknown` 由节点总数减有证据数推出）/ `applyMasteryData`（**只写 node data，绝不重建元素集**——数据 effect 是 `[]` 一次性，改元素会摧毁 cose 布局与力导向模拟）/ `clearMasteryData`
 - `mastery-inspector.tsx` —— 掌握度模式 tap 节点后的证据面板：state / confidence / 原始证据条目（kind 经 i18n 映射成人话，不上屏原始枚举值）+ 「打开页面」；取数失败只在面板内显示错误行，图本身不受影响
 
+### `dashboard/`
+
+- `due-for-review.tsx` 🆕 —— Dashboard「该复习了」清单：`dueAt` 的第一个消费者，React Query `['mastery-due', subjectId]` 拉 `GET /api/mastery?due=1`，列出已到复习期且尚未失效的页。**空 / 失败整体不渲染**（锦上添花的提醒不该给首页添噪，也不该在零证据时占位）。放 Dashboard 而非 Graph 图层：图层是**主动**审计动作（用完即走），承载不了**被动**送达的提醒。导出纯函数 `overdueDays` 便于单测
+
 ### `tags/`
 
 - `tags-index-view.tsx` —— 标签目录工作台：复用 `workspace-page` 的页头/指标带/sticky 工具栏/状态区；聚合当前 Subject 页面元数据，All 支持标签/页面搜索与三种排序；Review 显示待处理数量并切换到解释型清理队列；URL 保存 scope/search/sort，治理意图继续交给既有 PendingAction 审批
@@ -187,6 +191,7 @@ src/components/
 ├── tags/         {tags-index-view, tag-review-queue, tag-pages-view, tag-governance-dialog, tag-governance-state}
 ├── health/       {health-view, finding-row, remediation-ui, research-backlog-section, research-candidates-dialog, postcondition-summary}
 ├── history/      {operation-list, operation-diff, revert-button}
+├── dashboard/    {due-for-review}
 ├── graph/        {mini-graph-view}
 └── shared/       {global-job-tracker, jobs-panel, progress-toast}
 ```
@@ -195,6 +200,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | 新增 `dashboard/due-for-review.tsx`（`dueAt` 的第一个消费者：React Query `['mastery-due', subjectId]` 拉 `?due=1`，**空/失败整体不渲染**保住零证据零回归）——放 Dashboard 是因为它是唯一能让提醒**被动**进入视野的位置，Graph 图层是主动审计动作（用完即走）、阅读页状态行只有打开那页才看得到；`wiki/use-page-read-beacon.ts` 的 `reachedBottom` 拆为粘性 `scrolledToBottom` + 非粘性 `fitsInViewport`，且**每个 tick 重新观测**（不可滚动容器的 progress 恒为 100，图片/mermaid 布局完成前的首帧会被永久判为读完）。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | Graph 掌握度图层：`use-wiki-graph` 新增 `mode` 状态与 `setMode`（切到 mastery 时额外 fetch `/api/mastery`，`cy.batch` 写 data + `cy.style` 换样式，取数失败回落结构模式），tap handler 读 `modeRef.current`（注册在 `[]` effect 里，读 state 会把挂载时的 mode 永久钉死——该文件已因同类闭包问题留过注释）；退出全屏重置回 `structure`（切换入口只在全屏顶栏，跨全屏持久化会让 mini-graph 困在无法切回的配色里）；`fullscreen-graph` 加模式切换、四态分布 stats、四行图例与证据面板。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 正文首个交互块：新增 `quiz-block.tsx` 与 `use-page-read-beacon.ts`；`page-renderer.tsx` 新增 `interactive?` **透传** prop（**自身不构造**——否则 `editor-preview` 立刻长出判分按钮），`wiki-reading-view.tsx` 是全应用唯一构造方；`lens-feedback.tsx` 改为仅在展示重塑版时渲染并带 `viewedSource` 归因，反馈改走 `/api/evidence`；`hooks/use-profile.ts::useSendSignal` 退役，新增 `hooks/use-evidence.ts::useAppendEvidence`（**刻意不碰 react-query**——QuizBlock 出现在全部六个渲染路径里，在 hook 里 `useQueryClient()` 会让正文渲染硬依赖 Provider）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-21 | failed URL 授权任务改为显式决策：全局任务追踪器仍恢复未取消的结构化 auth-required Ingest，但不再自动弹出授权框；任务行提供 KeyRound“授权后重试”和 CircleX“取消任务”，取消复用通用 cancel API 持久化 `cancelled=true`、清检查点并触发 Research provenance 对账，刷新后不再恢复。spec/plan 见 `docs/{specs,plans}/2026-07-21-failed-url-auth-explicit-choice.md` |

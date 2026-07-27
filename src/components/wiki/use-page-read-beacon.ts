@@ -22,28 +22,56 @@ export const READ_DWELL_MS = 30_000;
 export interface ReadBeaconState {
   /** 仅统计**页面可见**时的停留：后台标签页挂一小时不算读过。 */
   visibleMs: number;
-  reachedBottom: boolean;
+  /**
+   * **粘性**：在可滚动的容器里滚到过底部。这是一个**已发生的事实**，
+   * 读完往回翻不该把它撤销。
+   */
+  scrolledToBottom: boolean;
+  /**
+   * **非粘性**：当前内容不足一屏（一眼看完）。这是一个**当下的属性**——
+   * 图片 / mermaid / KaTeX 布局完成后页面变长，它就不再成立，必须每次重算。
+   *
+   * 与 `scrolledToBottom` 分开是本 hook 的关键：`calculateReadingProgress` 对不可滚动
+   * 的容器返回 100，若把它也并进粘性变量，首帧尚未布局完的长页会被永久标记「读完」，
+   * 用户只看了开头也照发 `page-read`。
+   */
+  fitsInViewport: boolean;
+}
+
+/** 一次观测：容器当前是否可滚动，以及滚动进度。由调用方从 DOM 读，纯函数不碰 DOM。 */
+export interface ReadBeaconTick {
+  visibleMsDelta?: number;
+  scrollable?: boolean;
+  progress?: number;
 }
 
 export function initialReadBeaconState(): ReadBeaconState {
-  return { visibleMs: 0, reachedBottom: false };
+  return { visibleMs: 0, scrolledToBottom: false, fitsInViewport: false };
 }
 
 export function advanceReadBeacon(
   state: ReadBeaconState,
-  tick: { visibleMsDelta?: number; progress?: number },
+  tick: ReadBeaconTick,
 ): ReadBeaconState {
-  return {
+  const next: ReadBeaconState = {
+    ...state,
     visibleMs: state.visibleMs + (tick.visibleMsDelta ?? 0),
-    // 到过底就算数：读完后往回翻不该把它撤销。
-    reachedBottom:
-      state.reachedBottom ||
-      (tick.progress !== undefined && tick.progress >= READ_PROGRESS_THRESHOLD),
   };
+  if (tick.scrollable === undefined) return next;
+
+  if (tick.scrollable) {
+    next.fitsInViewport = false;
+    if ((tick.progress ?? 0) >= READ_PROGRESS_THRESHOLD) next.scrolledToBottom = true;
+  } else {
+    next.fitsInViewport = true;
+  }
+  return next;
 }
 
 export function shouldFireReadBeacon(state: ReadBeaconState): boolean {
-  return state.reachedBottom && state.visibleMs >= READ_DWELL_MS;
+  return (
+    (state.scrolledToBottom || state.fitsInViewport) && state.visibleMs >= READ_DWELL_MS
+  );
 }
 
 export function readBeaconKey(subjectSlug: string, slug: string): string {
@@ -65,6 +93,14 @@ export function markPageReadOnce(key: string): boolean {
 }
 
 const TICK_MS = 1_000;
+
+/** 从滚动容器读一次观测。`scrollable:false` 表示内容不足一屏、根本无从滚动。 */
+function observeScroller(el: HTMLElement): { scrollable: boolean; progress: number } {
+  return {
+    scrollable: el.scrollHeight > el.clientHeight,
+    progress: calculateReadingProgress(el.scrollTop, el.scrollHeight, el.clientHeight),
+  };
+}
 
 export interface PageReadBeaconOptions {
   containerRef: RefObject<HTMLDivElement | null>;
@@ -109,13 +145,7 @@ export function usePageReadBeacon({
     };
 
     const onScroll = () => {
-      state = advanceReadBeacon(state, {
-        progress: calculateReadingProgress(
-          scroller.scrollTop,
-          scroller.scrollHeight,
-          scroller.clientHeight,
-        ),
-      });
+      state = advanceReadBeacon(state, observeScroller(scroller));
       fireIfReady();
     };
 
@@ -124,7 +154,12 @@ export function usePageReadBeacon({
 
     timer = setInterval(() => {
       if (document.visibilityState !== 'visible') return;
-      state = advanceReadBeacon(state, { visibleMsDelta: TICK_MS });
+      // **每 tick 重新观测**，不只累加停留：图片 / mermaid / KaTeX 布局完成会让页面变长，
+      // 而这件事可能在用户完全没滚动的情况下发生——只监听 scroll 事件感知不到。
+      state = advanceReadBeacon(state, {
+        ...observeScroller(scroller),
+        visibleMsDelta: TICK_MS,
+      });
       fireIfReady();
     }, TICK_MS);
 

@@ -168,6 +168,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | `contracts.ts`：`MasteryVerdictLite` 新增 `dueAt`（与 `expiresAt` 同规格、同只在 `mastered` 时非空，决策 4 两级语义的另一半）；新增 `MasteryDueEntry` / `MasteryDueResult` 供 `GET /api/mastery?due=1` 与 Dashboard 复习区块共用。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | `markdown-client.ts` 的 `interactive` 加 `assumedKnown?`，`a` 覆盖据此挂 E3 纠错入口（比对 subject）；`theme/read-theme-vars.ts` 的 `ThemeSnapshot` 补 3 个 `mastery*` 字段。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 新增 `stable-hash.ts::fnv1a`；`markdown-client.ts` 新增 `createRemarkQuiz()`（排在 `selectionBlocks` **之后**——它会插入没有 `position` 的包装节点）与 `RenderOptions.interactive` 能力接缝；`contracts.ts` 新增 `EvidenceKind` / `EVIDENCE_KIND_META` / `STYLE_BEARING_EVIDENCE_KINDS` / `MasteryState` / `MasteryVerdict(Lite)`——**证据类型枚举是两份 spec 共用的单一真实源，不得各自扩充**。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-18 | `tool-activity.ts` 将 emoji 映射改为稳定语义图标键，worker 事件只写可复制纯文本；`markdown-client.ts` 为 callout 注入 Lucide 图标并在渲染期兼容剥离历史标题 emoji，不改写 vault |

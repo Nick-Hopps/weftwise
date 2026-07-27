@@ -12,10 +12,18 @@ export const runtime = 'nodejs';
 
 const EVIDENCE_KINDS = Object.keys(EVIDENCE_KIND_META) as [EvidenceKind, ...EvidenceKind[]];
 
+/**
+ * 身份字段的大小上限。超限直接 400 而不是截断——它们参与页面/题目身份，
+ * 截断出来的是一个**别的** slug，会静默把证据归到错的地方。
+ * （审计字段 `detail` 走另一套：在 repo 层截断但不丢证据，见 `MAX_DETAIL_BYTES`。）
+ */
+const MAX_SLUG_CHARS = 512;
+const MAX_ANCHOR_CHARS = 256;
+
 const Body = z.object({
-  slug: z.string().min(1),
+  slug: z.string().min(1).max(MAX_SLUG_CHARS),
   kind: z.enum(EVIDENCE_KINDS),
-  anchor: z.string().optional(),
+  anchor: z.string().max(MAX_ANCHOR_CHARS).optional(),
   /** 仅 `quiz-correct` 会被采纳；其余 kind 的权重由 kind 决定（见 evidence-repo）。 */
   strength: z.enum(['strong', 'weak']).optional(),
   /** 归因载荷：viewedSource / profileVersion 等，只用于事后审计。 */

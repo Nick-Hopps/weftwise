@@ -129,6 +129,7 @@ src/server/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | 掌握度模型调优：`profile/mastery.ts` 连击折叠由 UTC 日改为**滚动 `STREAK_MIN_GAP_HOURS`(16h) 间隔**（日历日需要时区，而服务端不知道读者在哪个时区，UTC+8 的早 7:30/8:30 同一坐被算成两次复习）；判定主体改名 `explainMastery` 并返回归因（`rule`/连击/strength 计数/`blockedByStrengthGate`/`expiredPositives`），`deriveMastery` 降为其薄封装；verdict 新增 `dueAt`（此前算了即丢，无消费者）与 `isDueForReview`；新增 `profile/mastery-report.ts` 聚合纯函数供 `npm run mastery:report`。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | 已知概念地图的两个消费面：新增 `profile/concept-map.ts`（`selectNeighborhood` / `groupByMastery` / `renderKnownConcepts` 三个纯函数，邻域取自**正文 wikilink** 而非图查询，硬上界 `MAX_NEIGHBORHOOD=40` 且截断时明说不静默）与 `profile/concept-map-io.ts`（`buildKnownConceptsForPage`，接受预取证据 map 让 GET/POST 只查一次）；`llm/prompts/reshape-prompt.ts` 与 `services/reshape-service.ts` 接受可选 `knownConcepts`（三段全空则整段不注入，零证据时 prompt 逐字节不变）。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 证据流与逐页掌握度模型：新增 `page_evidence` 表 + `db/repos/evidence-repo.ts` + `profile/mastery.ts::deriveMastery`（四态 `unknown/exposed/mastered/struggling` × 三档置信度，显式优先级判定，`mastered` 两级有效期 = 复习到期再逾期一档）；`profile/signal-reducer.ts` 输入换 `EvidenceRow[]` 并加时间窗/衰减/消费边界/三维独立阈值；新增 `services/{record-evidence,style-learning}.ts`；**`profile_signals` 表与 `signals-repo` 已退役**。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-20 | `generateStructuredOutput` 与 `webSearch` 新增可选外部 AbortSignal，并分别与任务 route timeout、Tavily 8 秒 timeout 合并；所有退出路径清理 listener，供 Research 手动中断复用 |

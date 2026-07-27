@@ -103,11 +103,27 @@
 唯一例外是 `quiz-correct` 的 strength 可被调用方上调（揭晓答案后判分 = strong，
 无答案自评 = weak，见 `EVIDENCE_KIND_META.strengthOverridable`）。
 
-- `appendEvidence(input): void` —— 未知 kind 抛错；`detail` 序列化进 `detail_json`
+- `appendEvidence(input): void` —— 未知 kind 抛错；`detail` 序列化进 `detail_json`，
+  **超过 `MAX_DETAIL_BYTES`（4096）时替换为 `{truncated,bytes}` 但证据照常落库**
+  （闸门必须在 repo 层：`/api/query` 与 `/api/lens` 的三个生产方经 `recordEvidence`
+  直接调这里、绕过路由；而为一条只用于事后审计的字段丢掉整条证据与 best-effort 语义矛盾）
 - `listForPage(userId, subjectId, slug): EvidenceRow[]` —— 按时间正序
 - `listForSubject(userId, subjectId): Map<slug, EvidenceRow[]>` —— 图层全量，一次索引扫描 + 内存分组
 - `listStyleEvidence(userId, since): EvidenceRow[]` —— 跨 subject 取 style-bearing 证据，供风格 reducer
 - `deleteByPage(subjectId, slug)` / `movePage(subjectId, from, to)` —— **跨全部用户**，因为它们是页面身份操作
+
+> **索引**：除 `page_evidence_page_idx` / `page_evidence_scope_idx` 外，
+> `ensureIndexes` 还建 `page_evidence_style_idx (user_id, kind, created_at)` 供
+> `listStyleEvidence`——它**跨 subject**，而前两个索引都以 `subject_id` 作第二列，
+> 只能吃到 `user_id` 前缀（单用户下等于全表扫），且该查询挂在
+> `POST /api/evidence` 的同步路径上。EQP 断言见 `__tests__/indexes.test.ts`。
+
+> **保留策略（已决策，暂不实现）**：`page_evidence` append-only 无 GC。当前单用户一年的
+> 量级远小于 `job_events`，按 YAGNI 不做。**将来真要做时的正确形状**：只折叠 12 个月以上的
+> **exposure 与 weak negative** 行（`page-read` / `citation-hit` / `reshape-request`），
+> **正证据与 strong negative 永久保留**——连击派生要扫完整的正证据历史，删正证据会让老页面的
+> `consecutivePositives` 凭空缩水、有效期集体跳水；exposure 行只影响规则 4/5 的落点，
+> 折叠成一条计数即可。（对比先例：`llm_usage` 90 天、`operations` 每 subject 500 条。）
 
 > **生命周期闭合**：删页挂在 `wiki/indexer.ts::indexTouchedPages` 的删除分支（与
 > `renditionsRepo.deleteByPage` 同处，覆盖 Saga 删除 / merge / split / rebuild 全部路径）；
@@ -241,6 +257,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-27 | `page_evidence` 调优：`ensureIndexes` 补 `page_evidence_style_idx (user_id, kind, created_at)`（`listStyleEvidence` 跨 subject，原本只吃到 `user_id` 前缀且挂在 `POST /api/evidence` 同步路径上）；`appendEvidence` 对超 `MAX_DETAIL_BYTES`(4096) 的 `detail` 截断为 `{truncated,bytes}` 但**证据照常落库**（闸门在 repo 层，三个服务端生产方经 `recordEvidence` 绕过路由）；沉淀证据表保留策略决策（只折叠 12 个月以上 exposure/weak negative，正证据永久保留）。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | 新增 `page_evidence` 表 + `evidence-repo`（逐页掌握度证据流，append-only，FK CASCADE，两个热路径索引）；`user_profiles` 新增 `style_prefs_updated_at`（reducer 消费边界，**走守卫式 ALTER 补列**，不能只靠 `CREATE TABLE IF NOT EXISTS`）；**`profile_signals` 表退役**（`DROP TABLE`，`signals-repo` 删除）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-21 | checkpoint 写入边界按 `jobs.cancel_requested` 原子拒绝已取消任务的迟到 upsert；`getProgress` 同步屏蔽历史 cancelled checkpoint，避免结束后的 Ingest 刷新复活 |
 | 2026-07-20 | `retryResearchIngestJobAtomic` 可在既有 lineage 校验内合并 `sourceAuthGrantId`：grant params、failed job→pending、delivery→queued、run→importing 同属一个 IMMEDIATE transaction，任一 CAS 失败整体回滚 |

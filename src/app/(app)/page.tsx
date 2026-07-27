@@ -8,6 +8,7 @@ import { getDb } from '@/server/db/client';
 import { sources } from '@/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { DashboardHero } from './_components/dashboard-hero';
+import { DueForReview } from '@/components/dashboard/due-for-review';
 import { DashboardIngestHero } from './_components/dashboard-ingest-hero';
 import { SectionLabel } from '@/components/ui/panel';
 import { Tag } from '@/components/ui/tag';
@@ -100,6 +101,13 @@ export default async function DashboardPage() {
 
       {/* ingest hero — the dashboard's primary feature */}
       <DashboardIngestHero />
+
+      {/*
+        该复习了 —— `dueAt` 的第一个消费者。放 Dashboard 是因为它是唯一能让提醒
+        **被动**进入视野的位置：Graph 掌握度图层是主动审计动作（用完即走），
+        阅读页状态行则只有打开那一页才看得到。零证据时组件整体不渲染。
+      */}
+      <DueForReview />
 
       {/* recent pages */}
       <section aria-labelledby="recent-pages-heading">

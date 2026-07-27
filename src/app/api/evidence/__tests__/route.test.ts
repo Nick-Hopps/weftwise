@@ -101,6 +101,23 @@ describe('POST /api/evidence', () => {
     expect(mockAppend).toHaveBeenCalledWith(expect.objectContaining({ strength: 'strong' }));
   });
 
+  it('超长 slug → 400，不落行', async () => {
+    // `page_evidence` 是 append-only 永不删除的表，且 App Router 没有默认 body 上限。
+    // slug 参与页面身份，超长值本来也过不了 getPageBySlug——早拒早明确。
+    expect((await call({ ...VALID, slug: 'a'.repeat(513) })).status).toBe(400);
+    expect(mockAppend).not.toHaveBeenCalled();
+  });
+
+  it('超长 anchor → 400，不落行', async () => {
+    expect((await call({ ...VALID, anchor: 'a'.repeat(257) })).status).toBe(400);
+    expect(mockAppend).not.toHaveBeenCalled();
+  });
+
+  it('恰好达到上限的 slug / anchor 正常通过', async () => {
+    expect((await call({ ...VALID, slug: 'a'.repeat(512), anchor: 'b'.repeat(256) })).status).toBe(201);
+    expect(mockAppend).toHaveBeenCalled();
+  });
+
   it('非法 strength → 400', async () => {
     expect((await call({ ...VALID, kind: 'quiz-correct', strength: 'nuclear' })).status).toBe(400);
     expect(mockAppend).not.toHaveBeenCalled();

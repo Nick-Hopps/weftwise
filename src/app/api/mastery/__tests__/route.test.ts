@@ -119,3 +119,112 @@ describe('GET /api/mastery?slug= —— 单页', () => {
     expect((await call('http://localhost/api/mastery?slug=index')).status).toBe(404);
   });
 });
+
+describe('GET /api/mastery?due=1 —— 复习清单', () => {
+  const DAY_MS = 86_400_000;
+  const daysAgo = (n: number) => new Date(Date.now() - n * DAY_MS).toISOString();
+
+  /** 连击 1 → 该复习 +1 天 / 失效 +4 天。2 天前答对 = 已到期未失效。 */
+  const dueRows = () => [gradedCorrect(daysAgo(2))];
+  /** 刚答对：还没到该复习的时候。 */
+  const freshRows = () => [gradedCorrect(daysAgo(0.1))];
+  /** 5 天前答对：已过 +4 天失效，回落 exposed。 */
+  const expiredRows = () => [gradedCorrect(daysAgo(5))];
+
+  function dueCall() {
+    return call('http://localhost/api/mastery?due=1');
+  }
+
+  beforeEach(() => {
+    mockGetAllPages.mockReturnValue([
+      { slug: 'backprop', title: 'Backpropagation', tags: [] },
+      { slug: 'chain-rule', title: 'The Chain Rule', tags: [] },
+      { slug: 'gradient', title: 'Gradient Descent', tags: [] },
+      { slug: 'index', title: 'Index', tags: ['meta'] },
+    ]);
+  });
+
+  it('空库返回空清单（区块整体不渲染，冷启动零回归）', async () => {
+    const body = await (await dueCall()).json();
+    expect(body).toMatchObject({ entries: [], total: 0 });
+  });
+
+  it('只列出 mastered 且已过 dueAt 的页', async () => {
+    mockListForSubject.mockReturnValue(
+      new Map([
+        ['backprop', dueRows()],
+        ['chain-rule', freshRows()],
+        ['gradient', expiredRows()],
+      ]),
+    );
+    const body = await (await dueCall()).json();
+    expect(body.entries.map((e: { slug: string }) => e.slug)).toEqual(['backprop']);
+  });
+
+  it('条目带标题与两个时刻，供 UI 直接渲染', async () => {
+    mockListForSubject.mockReturnValue(new Map([['backprop', dueRows()]]));
+    const [entry] = (await (await dueCall()).json()).entries;
+    expect(entry).toEqual({
+      slug: 'backprop',
+      title: 'Backpropagation',
+      dueAt: expect.any(String),
+      expiresAt: expect.any(String),
+      confidence: 'high',
+    });
+    expect(entry.dueAt < entry.expiresAt).toBe(true);
+  });
+
+  it('按 dueAt 升序（最该复习的在前）', async () => {
+    mockListForSubject.mockReturnValue(
+      new Map([
+        ['backprop', [gradedCorrect(daysAgo(2))]],
+        ['chain-rule', [gradedCorrect(daysAgo(3.5))]],
+      ]),
+    );
+    const body = await (await dueCall()).json();
+    expect(body.entries.map((e: { slug: string }) => e.slug)).toEqual(['chain-rule', 'backprop']);
+  });
+
+  it('排除 meta 页，与另两条分支同口径', async () => {
+    mockListForSubject.mockReturnValue(
+      new Map([
+        ['index', dueRows()],
+        ['backprop', dueRows()],
+      ]),
+    );
+    const body = await (await dueCall()).json();
+    expect(body.entries.map((e: { slug: string }) => e.slug)).toEqual(['backprop']);
+  });
+
+  it('证据指向已删页时跳过，不 500', async () => {
+    mockListForSubject.mockReturnValue(new Map([['ghost', dueRows()]]));
+    const res = await dueCall();
+    expect(res.status).toBe(200);
+    expect((await res.json()).entries).toEqual([]);
+  });
+
+  it('超上限截断，但 total 反映真实到期总数', async () => {
+    const many = new Map<string, unknown>();
+    const pages: Array<{ slug: string; title: string; tags: string[] }> = [];
+    for (let i = 0; i < 25; i++) {
+      many.set(`p${i}`, [gradedCorrect(daysAgo(2 + i * 0.01))]);
+      pages.push({ slug: `p${i}`, title: `Page ${i}`, tags: [] });
+    }
+    mockGetAllPages.mockReturnValue(pages);
+    mockListForSubject.mockReturnValue(many);
+
+    const body = await (await dueCall()).json();
+    expect(body.total).toBe(25);
+    expect(body.entries).toHaveLength(body.limit);
+    expect(body.entries.length).toBeLessThan(25);
+  });
+
+  it('subject 缺失 → 透传 error，不查证据', async () => {
+    mockResolve.mockReturnValue({
+      subject: null,
+      error: NextResponse.json({ error: 'subject required' }, { status: 400 }),
+    });
+    expect((await dueCall()).status).toBe(400);
+    expect(mockListForSubject).not.toHaveBeenCalled();
+  });
+});
