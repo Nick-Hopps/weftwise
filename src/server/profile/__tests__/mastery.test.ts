@@ -5,6 +5,7 @@ import {
   MAX_RECENT_EVIDENCE,
   NEGATIVE_WINDOW_DAYS,
   SPACING_LADDER,
+  STREAK_MIN_GAP_HOURS,
 } from '../mastery';
 import { EVIDENCE_KIND_META, type EvidenceKind, type EvidenceRow } from '@/lib/contracts';
 
@@ -36,6 +37,29 @@ function ev(
 /** 揭晓答案后判对：strong positive。 */
 function gradedCorrect(daysBefore: number, anchor = 'q1'): EvidenceRow {
   return ev('quiz-correct', daysBefore, { strength: 'strong', anchor });
+}
+
+/** 揭晓答案后判对，按绝对时刻给定——连击的间隔语义要精确到小时，天为单位不够用。 */
+function gradedCorrectAt(iso: string, anchor = 'q1'): EvidenceRow {
+  return {
+    kind: 'quiz-correct',
+    polarity: 'positive',
+    strength: 'strong',
+    anchor,
+    createdAt: new Date(iso).toISOString(),
+  };
+}
+
+/** 由 `expiresAt` 反推派生出的连击档位，避免测试到处手算日期。 */
+function streakFromExpiry(v: { expiresAt: string | null }, lastPositiveIso: string): number {
+  if (v.expiresAt === null) return 0;
+  const expiryDays = Math.round(
+    (new Date(v.expiresAt).getTime() - new Date(lastPositiveIso).getTime()) / DAY_MS,
+  );
+  for (let n = 1; n <= SPACING_LADDER.length; n++) {
+    if (masteryWindowDays(n).expiryDays === expiryDays) return n;
+  }
+  throw new Error(`expiryDays ${expiryDays} 不对应任何连击档位`);
 }
 
 describe('masteryWindowDays（决策 4 的两级语义）', () => {
@@ -203,6 +227,72 @@ describe('deriveMastery：连击的三条定义（决策 4）', () => {
     expect(withStrongNegative.expiresAt).toBe(
       new Date(NOW.getTime() + (10 - 1) * DAY_MS).toISOString(),
     );
+  });
+});
+
+describe('deriveMastery：连击按滚动间隔折叠（决策 1）', () => {
+  /** 造两条相隔 `gapHours` 的 strong 正证据，返回派生出的连击档位。 */
+  function streakForGap(gapHours: number): number {
+    const second = new Date(NOW.getTime() - 2 * 3_600_000);
+    const first = new Date(second.getTime() - gapHours * 3_600_000);
+    const v = deriveMastery(
+      [gradedCorrectAt(first.toISOString(), 'q1'), gradedCorrectAt(second.toISOString(), 'q2')],
+      NOW,
+    );
+    return streakFromExpiry(v, second.toISOString());
+  }
+
+  it('UTC 跨日但只隔 1 小时 → 连击 1（本项目在 UTC+8，早 7:30 与 8:30 是同一坐）', () => {
+    // 这条锁死的是按 UTC 日折叠的缺陷：日历日需要时区，而服务端不知道读者在哪个时区，
+    // 证据行里也没存。同一次学习会话被算成两次复习，有效期从 +4 天虚涨到 +10 天。
+    const v = deriveMastery(
+      [
+        gradedCorrectAt('2026-07-25T23:30:00Z', 'q1'), // 北京时间 07-26 07:30
+        gradedCorrectAt('2026-07-26T00:30:00Z', 'q2'), // 北京时间 07-26 08:30
+      ],
+      NOW,
+    );
+    expect(v.state).toBe('mastered');
+    expect(streakFromExpiry(v, '2026-07-26T00:30:00.000Z')).toBe(1);
+  });
+
+  it('同一自然日的晚上与次日早上（隔 12 小时）也算同一次', () => {
+    expect(streakForGap(12)).toBe(1);
+  });
+
+  it('间隔恰好达到阈值即计为两次', () => {
+    expect(streakForGap(STREAK_MIN_GAP_HOURS)).toBe(2);
+  });
+
+  it('差一分钟不到阈值仍算一次', () => {
+    expect(streakForGap(STREAK_MIN_GAP_HOURS - 1 / 60)).toBe(1);
+  });
+
+  it('每日节律（隔 24 小时）正常累计', () => {
+    expect(streakForGap(24)).toBe(2);
+  });
+
+  it('同一坐连点五下仍只算 1（原语义不回归）', () => {
+    const base = NOW.getTime() - 3_600_000;
+    const rows = Array.from({ length: 5 }, (_, i) =>
+      gradedCorrectAt(new Date(base + i * 60_000).toISOString(), `q${i}`),
+    );
+    const v = deriveMastery(rows, NOW);
+    expect(streakFromExpiry(v, new Date(base + 4 * 60_000).toISOString())).toBe(1);
+  });
+
+  it('输入乱序不影响连击（内部按时间排序后再扫描）', () => {
+    const rows = [gradedCorrect(1, 'c'), gradedCorrect(20, 'a'), gradedCorrect(10, 'b')];
+    expect(deriveMastery([...rows].reverse(), NOW)).toEqual(deriveMastery(rows, NOW));
+  });
+
+  it('lastPositiveAt 仍取最后一条正证据，不取最后一条被计数的', () => {
+    // 否则同一坐的第二次答对反而会缩短有效期——反直觉。
+    const first = new Date(NOW.getTime() - 3 * 3_600_000).toISOString();
+    const second = new Date(NOW.getTime() - 1 * 3_600_000).toISOString();
+    const v = deriveMastery([gradedCorrectAt(first, 'q1'), gradedCorrectAt(second, 'q2')], NOW);
+    // 连击 1 → 失效 = 最后一条正证据 + 4 天
+    expect(v.expiresAt).toBe(new Date(new Date(second).getTime() + 4 * DAY_MS).toISOString());
   });
 });
 

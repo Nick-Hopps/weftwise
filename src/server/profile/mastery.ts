@@ -41,6 +41,18 @@ export const NEGATIVE_WINDOW_DAYS = 14;
 export const MAX_RECENT_EVIDENCE = 20;
 
 /**
+ * 连击的最小间隔（小时）。两条正证据相隔不足这个数就只算一次复习。
+ *
+ * **刻意不用「日历日」**：日历日需要一个时区，而服务端不知道读者在哪个时区、证据行里
+ * 也没存。按 UTC 日折叠时，UTC+8 的早 7:30 与 8:30 分属两个 UTC 日——同一坐被算成
+ * 两次复习，有效期从 +4 天虚涨到 +10 天。任何选定的时区都会在某种作息下出错。
+ *
+ * 取 16 小时：落在「同一天内的两次」（≤12h）与「每日节律」（≥24h）之间，
+ * 并给每日复习留 8 小时的作息浮动余量。接入真实数据后按连击分布再调。
+ */
+export const STREAK_MIN_GAP_HOURS = 16;
+
+/**
  * 决策 4 的两级语义。
  *
  * 阶梯本身**不是**有效期——它说的是「什么时候该复习」，不是「知识什么时候失效」。
@@ -61,13 +73,8 @@ function isStrongNegative(row: EvidenceRow): boolean {
   return row.polarity === 'negative' && row.strength === 'strong';
 }
 
-/** UTC 日期键，用于连击的按天折叠。 */
-function dayKey(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
-}
-
 interface Streak {
-  /** 按天折叠后的连续正证据次数。 */
+  /** 按 `STREAK_MIN_GAP_HOURS` 折叠后的连续正证据次数。 */
   count: number;
   /** 参与本轮连击的正证据（未折叠，供 strength 门槛计数）。 */
   positives: EvidenceRow[];
@@ -79,8 +86,9 @@ interface Streak {
  *
  * 1. **页级，不是题级**——同一页上任意正证据都累加。题级连击要求用户回去重答同一道题，
  *    没有任何机制促成，实际不可达。
- * 2. **按「天」去重，不按行计数**——否则反复点判分按钮就能把连击刷到 5，换来 120 天。
+ * 2. **按最小间隔去重，不按行计数**——否则反复点判分按钮就能把连击刷到 5，换来 120 天。
  *    证据表仍 append-only 全量保留（审计需要），只是派生时折叠。
+ *    折叠单位是 `STREAK_MIN_GAP_HOURS` 而非日历日，理由见该常量的注释（时区）。
  * 3. **只有 strong 负证据清零**——`citation-hit`（问了个问题、回答引用了这一页，完全
  *    正常的事）不得把攒了几周的连击打回零。
  */
@@ -93,11 +101,25 @@ function computeStreak(sorted: EvidenceRow[]): Streak {
   const positives = sorted.filter(
     (r) => r.polarity === 'positive' && (resetAt === null || r.createdAt > resetAt),
   );
-  const days = new Set(positives.map((r) => dayKey(r.createdAt)));
+
+  // 线性扫描（`sorted` 已按时间正序）：第一条计数，其后只有距上一条**被计数**的
+  // 正证据满一个最小间隔才计数。用「距上一条被计数的」而非「距上一条正证据」，
+  // 否则每隔 15 小时点一下就能一路推进游标，把连击刷满。
+  const gapMs = STREAK_MIN_GAP_HOURS * 3_600_000;
+  let count = 0;
+  let lastCountedMs = -Infinity;
+  for (const row of positives) {
+    const at = new Date(row.createdAt).getTime();
+    if (at - lastCountedMs < gapMs) continue;
+    count += 1;
+    lastCountedMs = at;
+  }
 
   return {
-    count: days.size,
+    count,
     positives,
+    // 取最后一条正证据、**不是**最后一条被计数的：它的语义是「最近一次表现出掌握」，
+    // 用于起算有效期。挪到被计数那条上，同一坐的第二次答对反而会缩短有效期。
     lastPositiveAt: positives.length ? positives[positives.length - 1].createdAt : null,
   };
 }
