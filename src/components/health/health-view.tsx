@@ -66,6 +66,7 @@ import {
   readResearchRun,
   readResearchRunId,
   recentOutcomeCounts,
+  remediationButtonDisabled,
   researchApprovalBody,
   requestHealthJobCancel,
   selectRecoverableHealthJobs,
@@ -1352,13 +1353,13 @@ export function HealthView() {
                   ? void cancelHealthAction('curate', curateJobId)
                   : void runRemediation('curate', curateFindingIds)}
                 loading={curateButtonState === 'starting' || curateButtonState === 'cancelling'}
-                disabled={curateButtonState === 'idle' && (
-                  neverRun
-                  || curateFindingIds.length === 0
-                  || running
-                  || fixing
-                  || effectiveBusyActions.has('curate')
-                )}
+                disabled={curateButtonState === 'idle' && remediationButtonDisabled({
+                  neverRun,
+                  targetCount: curateFindingIds.length,
+                  action: 'curate',
+                  busyActions: effectiveBusyActions,
+                  lintRunning: running,
+                })}
                 title={curateButtonState === 'idle' ? t('health.curate') : t('jobs.stop')}
               >
                 {curateButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
@@ -1373,13 +1374,13 @@ export function HealthView() {
                   ? void cancelHealthAction('fix', fixJobId)
                   : void runRemediation('fix', fixFindingIds)}
                 loading={fixButtonState === 'starting' || fixButtonState === 'cancelling'}
-                disabled={fixButtonState === 'idle' && (
-                  neverRun
-                  || fixFindingIds.length === 0
-                  || running
-                  || curating
-                  || effectiveBusyActions.has('fix')
-                )}
+                disabled={fixButtonState === 'idle' && remediationButtonDisabled({
+                  neverRun,
+                  targetCount: fixFindingIds.length,
+                  action: 'fix',
+                  busyActions: effectiveBusyActions,
+                  lintRunning: running,
+                })}
                 title={fixButtonState === 'idle' ? t('health.fix') : t('jobs.stop')}
               >
                 {fixButtonState === 'running' && <Square className="h-3.5 w-3.5" />}
@@ -1394,11 +1395,13 @@ export function HealthView() {
                   ? void cancelHealthAction('research', researchJobId)
                   : void runRemediation('research', researchBatchIds)}
                 loading={researchButtonState === 'starting' || researchButtonState === 'cancelling'}
-                disabled={researchButtonState === 'idle' && (
-                  neverRun
-                  || researchBatchIds.length === 0
-                  || effectiveBusyActions.has('research')
-                )}
+                disabled={researchButtonState === 'idle' && remediationButtonDisabled({
+                  neverRun,
+                  targetCount: researchBatchIds.length,
+                  action: 'research',
+                  busyActions: effectiveBusyActions,
+                  lintRunning: running,
+                })}
                 title={researchButtonState !== 'idle'
                   ? t('jobs.stop')
                   : researchDeferredCount > 0

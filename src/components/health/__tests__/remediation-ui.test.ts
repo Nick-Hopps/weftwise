@@ -25,6 +25,7 @@ import {
   readResearchRunId,
   recentOutcomeBannerTone,
   recentOutcomeCounts,
+  remediationButtonDisabled,
   persistedBusyActions,
   healthTerminalInvalidationKeys,
   selectRecoverableHealthJobs,
@@ -32,6 +33,7 @@ import {
   researchApprovalBody,
   requestHealthJobCancel,
   summarizeFixOutcomes,
+  type ExecutableRemediationAction,
 } from '../remediation-ui';
 import { FindingRow, remediationStatusLabel } from '../finding-row';
 import { createI18n } from '@/lib/i18n/translator';
@@ -480,6 +482,59 @@ describe('Health remediation UI helper', () => {
     }));
 
     expect(html).not.toContain('Review candidates');
+  });
+
+  it('三个处置动作互不阻塞：只有自身 in-flight 才禁用', () => {
+    const busy = (...actions: ExecutableRemediationAction[]) =>
+      new Set<ExecutableRemediationAction>(actions);
+
+    // curate 在跑，fix / research 仍可点（worker 会串行排队执行）
+    expect(remediationButtonDisabled({
+      neverRun: false,
+      targetCount: 3,
+      action: 'fix',
+      busyActions: busy('curate'),
+    })).toBe(false);
+    expect(remediationButtonDisabled({
+      neverRun: false,
+      targetCount: 3,
+      action: 'research',
+      busyActions: busy('curate', 'fix'),
+    })).toBe(false);
+    // 自身 in-flight 仍禁用，防重复提交
+    expect(remediationButtonDisabled({
+      neverRun: false,
+      targetCount: 3,
+      action: 'fix',
+      busyActions: busy('fix'),
+    })).toBe(true);
+  });
+
+  it('lint 运行中不再阻塞三个处置动作', () => {
+    for (const action of ['fix', 'curate', 'research'] as const) {
+      expect(remediationButtonDisabled({
+        neverRun: false,
+        targetCount: 1,
+        action,
+        busyActions: new Set(),
+        lintRunning: true,
+      })).toBe(false);
+    }
+  });
+
+  it('从未体检或没有目标 finding 时仍禁用', () => {
+    expect(remediationButtonDisabled({
+      neverRun: true,
+      targetCount: 3,
+      action: 'fix',
+      busyActions: new Set(),
+    })).toBe(true);
+    expect(remediationButtonDisabled({
+      neverRun: false,
+      targetCount: 0,
+      action: 'fix',
+      busyActions: new Set(),
+    })).toBe(true);
   });
 
   it('lint busy 时同 origin 只排队一次，并在终态 drain', () => {

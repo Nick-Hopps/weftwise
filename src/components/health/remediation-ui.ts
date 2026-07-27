@@ -64,6 +64,27 @@ export function healthActionButtonState(
   return cancelling ? 'cancelling' : 'running';
 }
 
+/**
+ * 处置按钮 idle 态是否禁用。
+ *
+ * 三个动作**互不阻塞**：worker 对非 ingest job 串行独占执行（`decideClaim`），vault 写入另有
+ * vault-mutex 保护，所以点了就入队是安全的，禁用只会让用户白等。lint 运行中同样不阻塞——
+ * 请求期由 `remediate` 的 409 `stale-snapshot` 守住陈旧 baseline。只有自身 in-flight
+ * 才禁用，防重复提交。
+ */
+export function remediationButtonDisabled(input: {
+  neverRun: boolean;
+  targetCount: number;
+  action: ExecutableRemediationAction;
+  busyActions: ReadonlySet<ExecutableRemediationAction>;
+  /** 刻意「接收但不使用」：调用方仍会传，单测据此守住「lint 不阻塞处置」不被改回去。 */
+  lintRunning?: boolean;
+}): boolean {
+  return input.neverRun
+    || input.targetCount === 0
+    || input.busyActions.has(input.action);
+}
+
 export function blockingRecoverableActions(
   jobs: RecoverableHealthJobs,
 ): Set<ExecutableRemediationAction> {
