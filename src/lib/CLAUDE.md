@@ -168,6 +168,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-28 | `tool-activity.ts` 新增 `jobStageIcon(eventType)`：按事件类型前缀派生阶段图标（ingest→import / lint→scan-search / curate→folder-tree / fix→wrench / reenrich→sparkles / save→file-plus / research(-import)→globe / `job:cancelled`→stop / 其余 circle-dot），并把 `ToolActivityIconName` 扩到 28 个键。**刻意复用工具图标的同一套键**而非另起一套——日志时间线里工具行与阶段行混排，两套图标体系必然又长回「视觉割裂」；`job-log.ts` 的 `JobLogLine` 随之增加 `icon`（有 tool 取工具图标，否则取阶段图标），把图标决策留在可单测的纯函数层。**`agent:*` 不按前缀走而是拆三态**（`run-started`→circle-play / `step`→bot / `run-completed`→circle-check，其余 agent 子事件回退 bot）：实测一个 Ingest job 里 agent 事件占 1150/1154，只给一枚图标的话整列日志退化成同一个符号，读不出节奏；拆开后实测分布 400/379/379。run-completed 用中性灰 CircleCheck，与 job 级成功态的绿色裸 Check 分属两个层级 |
 | 2026-07-27 | `contracts.ts`：`RemediationPlan` 新增可选 `runId`（只在服务端确实读到持久化 Research run 时出现，供 finding 行内审批入口免去一次 `GET /api/jobs/:id`）；`research-plan.ts` 新增 `MAX_RESEARCH_BATCH_JOBS=10`——放在 lib 是因为服务端校验与工具栏计数必须共用同一个上限，两端漂移会让「研究 (10 / 23)」和 400 拒绝对不上。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-27 | `contracts.ts`：`MasteryVerdictLite` 新增 `dueAt`（与 `expiresAt` 同规格、同只在 `mastered` 时非空，决策 4 两级语义的另一半）；新增 `MasteryDueEntry` / `MasteryDueResult` 供 `GET /api/mastery?due=1` 与 Dashboard 复习区块共用。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | `markdown-client.ts` 的 `interactive` 加 `assumedKnown?`，`a` 覆盖据此挂 E3 纠错入口（比对 subject）；`theme/read-theme-vars.ts` 的 `ThemeSnapshot` 补 3 个 `mastery*` 字段。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
