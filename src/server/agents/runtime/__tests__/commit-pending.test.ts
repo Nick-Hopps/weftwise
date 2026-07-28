@@ -123,3 +123,62 @@ describe('commitPending', () => {
     expect(txMocks.applyChangeset.mock.calls[0][1]).toBeUndefined();
   });
 });
+
+describe('commitPending — quiz 分隔符终审（零成本、只观测）', () => {
+  const SPOILED = '---\ntitle: A\n---\n\n> [!quiz] 检验理解\n> 问：为什么？\n> 答：因为忽里勒台。\n';
+  const OK = '---\ntitle: A\n---\n\n> [!quiz] ❓ 自测\n> 问：为什么？\n>\n> ---\n>\n> 答：因为忽里勒台。\n';
+
+  beforeEach(() => {
+    txMocks.createChangeset.mockClear();
+    txMocks.applyChangeset.mockClear();
+  });
+
+  function quizWarns(ctx: AgentContext): unknown[][] {
+    return (ctx.emit as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === 'ingest:warn' && String(c[1]).includes('Quiz answer separator'),
+    );
+  }
+
+  it('最终内容仍有受损 quiz → emit warn 带 path 与违规明细', async () => {
+    const ctx = makeCtx({
+      pending: { entries: [{ action: 'create', path: 'wiki/general/page-a.md', content: SPOILED }] },
+    });
+    await commitPending(ctx, []);
+
+    const warns = quizWarns(ctx);
+    expect(warns).toHaveLength(1);
+    expect(String(warns[0][1])).toContain('wiki/general/page-a.md');
+    const data = warns[0][2] as { path: string; violations: Array<{ reason: string }> };
+    expect(data.path).toBe('wiki/general/page-a.md');
+    expect(data.violations.map((v) => v.reason)).toEqual(['missing-separator']);
+  });
+
+  it('终审只观测：不改动提交内容，也不阻断提交', async () => {
+    const ctx = makeCtx({
+      pending: { entries: [{ action: 'create', path: 'wiki/general/page-a.md', content: SPOILED }] },
+    });
+    const result = await commitPending(ctx, []);
+
+    expect(result.commitSha).toBe('sha-1');
+    const entries = txMocks.createChangeset.mock.calls[0][2] as Array<{ content: string }>;
+    // 只有系统 frontmatter 戳记，正文部分逐字保留（分隔符没有被偷偷补上）
+    expect(entries[0].content).toContain('> 答：因为忽里勒台。');
+    expect(entries[0].content).not.toContain('> ---');
+  });
+
+  it('内容守约时不产生 warn 噪音', async () => {
+    const ctx = makeCtx({
+      pending: { entries: [{ action: 'create', path: 'wiki/general/page-a.md', content: OK }] },
+    });
+    await commitPending(ctx, []);
+    expect(quizWarns(ctx)).toHaveLength(0);
+  });
+
+  it('delete 条目没有 content，不参与终审', async () => {
+    const ctx = makeCtx({
+      pending: { entries: [{ action: 'delete', path: 'wiki/general/page-a.md', content: null }] },
+    });
+    await commitPending(ctx, []);
+    expect(quizWarns(ctx)).toHaveLength(0);
+  });
+});

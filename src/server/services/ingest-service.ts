@@ -81,7 +81,7 @@ export function buildIngestSteps(opts: {
     level === 'off'
       ? []
       : [
-          { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
+          { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page', quizSeparatorGuard: true },
           { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
         ];
   return [
@@ -198,7 +198,7 @@ registerHandler('ingest', async (job: Job, emit): Promise<Record<string, unknown
   // 播种不覆盖已存在文件，存量 vault 的旧 skill 会静默产零素材/丢页，必须拦截。
   const MIN_SKILL_VERSIONS: Record<string, number> = {
     'ingest-planner': 2, 'ingest-writer': 6,
-    'ingest-enricher': 7, 'ingest-verifier': 2,
+    'ingest-enricher': 8, 'ingest-verifier': 2,
     'ingest-verifier-triage': 2, 'ingest-verifier-apply': 3,
   };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {

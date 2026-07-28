@@ -46,7 +46,7 @@ interface ReenrichParams {
 export function reenrichSteps(): PipelineStep[] {
   return [
     { kind: 'supplement', skillId: 'reenrich-supplement', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'supplement-page' },
-    { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page' },
+    { kind: 'fanout', skillId: 'ingest-enricher', fromOutput: 'plan.pages', injectPriorPageAs: 'draftContent', checkpointAs: 'enricher-page', quizSeparatorGuard: true },
     { kind: 'verify', fromOutput: 'plan.pages', injectPriorPageAs: 'content', checkpointAs: 'verifier-page' },
   ];
 }
@@ -144,7 +144,7 @@ registerHandler('re-enrich', async (job: Job, emit): Promise<Record<string, unkn
   const { skillRegistry, toolRegistry } = getRuntimeRegistries();
   const MIN_SKILL_VERSIONS: Record<string, number> = {
     'reenrich-supplement': 1,
-    'ingest-enricher': 7, 'ingest-verifier': 2,
+    'ingest-enricher': 8, 'ingest-verifier': 2,
     'ingest-verifier-triage': 2, 'ingest-verifier-apply': 3,
   };
   for (const [skillId, minVersion] of Object.entries(MIN_SKILL_VERSIONS)) {

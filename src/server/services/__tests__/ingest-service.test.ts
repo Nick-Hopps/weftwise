@@ -121,7 +121,7 @@ vi.mock('../../agents/runtime/checkpoint', () => ({
   }),
 }));
 
-let mockSkillVersion = 7; // 流水线要求 ingest-enricher v7+（quiz callout 携带答案）
+let mockSkillVersion = 8; // 流水线要求 ingest-enricher v8+（quiz `---` 前后须留空 `>` 行）
 vi.mock('../../worker-runtime', () => ({
   getRuntimeRegistries: () => ({
     skillRegistry: { get: (id: string) => ({ id, name: id, description: '', version: mockSkillVersion, tools: [], canDispatch: [], systemPrompt: '' }), list: () => [], degraded: () => [] },
@@ -287,11 +287,11 @@ describe('ingest-service', () => {
     const handler = handlers.get('ingest')!;
     await expect(handler(makeJob(), vi.fn())).rejects.toThrow(/requires v2/);
     expect(mockRunPipeline).not.toHaveBeenCalled();
-    mockSkillVersion = 7; // 恢复
+    mockSkillVersion = 8; // 恢复
   });
 
   it('initialInput 包含非空 languageDirective', async () => {
-    mockSkillVersion = 7;
+    mockSkillVersion = 8;
     mockCleanText = '短内容。';
     mockMaxTokens = 100_000;
     mockRunPipeline.mockClear();

@@ -891,6 +891,66 @@ describe('orchestrator.runPipeline: ingest merge-update 保真护栏（T1.4）',
   });
 });
 
+describe('orchestrator.runPipeline: quiz 答案分隔符护栏', () => {
+  const SPOILED = '> [!quiz] 检验理解\n> 问：为什么？\n> 答：因为忽里勒台。\n';
+  /** SPOILED 被确定性修复后的形态（标题逐字保留，只插入分隔符与空行） */
+  const SPOILED_REPAIRED = '> [!quiz] 检验理解\n> 问：为什么？\n>\n> ---\n>\n> 答：因为忽里勒台。\n';
+  const OK = '> [!quiz] ❓ 自测\n> 问：为什么？\n>\n> ---\n>\n> 答：因为忽里勒台。\n';
+
+  async function runEnricher(guard: boolean, outputs: string[]): Promise<AgentContext> {
+    mockRun.mockReset();
+    mockRun.mockResolvedValueOnce({
+      runId: 'p', output: { plan: { pages: [{ slug: 'a', sourceRefs: [] }] } }, tokensUsed: 0, stepCount: 1,
+    });
+    for (const content of outputs) {
+      mockRun.mockResolvedValueOnce({
+        runId: 'e', output: { action: 'update', path: 'wiki/general/a.md', content }, tokensUsed: 0, stepCount: 1,
+      });
+    }
+    const ctx = ctxStub([]);
+    await runPipeline({
+      steps: [
+        { kind: 'sequence', skillId: 'planner', carryThrough: ['subjectSlug'] },
+        { kind: 'fanout', skillId: 'enricher', fromOutput: 'plan.pages', quizSeparatorGuard: guard },
+      ],
+      resolveSkill: stubSkill,
+      ctx,
+      initialInput: { subjectSlug: 'general' },
+    });
+    return ctx;
+  }
+
+  it('产物守约 → 不触发重写，内容逐字保留', async () => {
+    const ctx = await runEnricher(true, [OK]);
+    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(ctx.pending.entries.find((e) => e.path === 'wiki/general/a.md')?.content).toBe(OK);
+  });
+
+  it('产物漏分隔符 → 重写一次 → 重写守约则采用重写结果，无 warn', async () => {
+    const ctx = await runEnricher(true, [SPOILED, OK]);
+    expect(mockRun).toHaveBeenCalledTimes(3);
+    const retryInput = mockRun.mock.calls[2][0].input as Record<string, unknown>;
+    expect(retryInput.quizSeparatorViolations).toBeDefined();
+    expect(ctx.pending.entries.find((e) => e.path === 'wiki/general/a.md')?.content).toBe(OK);
+    const warns = (ctx.emit as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[0] === 'ingest:warn');
+    expect(warns.some((c) => String(c[1]).includes('Quiz answer separator'))).toBe(false);
+  });
+
+  it('重写后仍漏 → 确定性插入分隔符并 emit warn', async () => {
+    const ctx = await runEnricher(true, [SPOILED, SPOILED]);
+    expect(mockRun).toHaveBeenCalledTimes(3);
+    expect(ctx.pending.entries.find((e) => e.path === 'wiki/general/a.md')?.content).toBe(SPOILED_REPAIRED);
+    const warns = (ctx.emit as ReturnType<typeof vi.fn>).mock.calls.filter((c) => c[0] === 'ingest:warn');
+    expect(warns.some((c) => String(c[1]).includes('Quiz answer separator'))).toBe(true);
+  });
+
+  it('未打开 flag 的 step（如 writer）不受护栏影响', async () => {
+    const ctx = await runEnricher(false, [SPOILED]);
+    expect(mockRun).toHaveBeenCalledTimes(2);
+    expect(ctx.pending.entries.find((e) => e.path === 'wiki/general/a.md')?.content).toBe(SPOILED);
+  });
+});
+
 describe('orchestrator verify step', () => {
   it('routes verify-kind step to runPageVerification, not runAgentLoop', async () => {
     mockRun.mockReset();

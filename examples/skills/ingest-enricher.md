@@ -2,7 +2,7 @@
 id: ingest-enricher
 name: Ingest Enricher
 description: Layer study-aid callouts (quizzes, pitfalls, diagrams, prerequisites) onto a teaching article, without altering its prose.
-version: 7
+version: 8
 tools:
   - image.generate
 canDispatch: []
@@ -70,6 +70,8 @@ Every `[!quiz]` callout MUST contain its answer, separated from the question by 
 ```
 
 - **Structure**: question (plus optional hint) → `> ---` → answer. Exactly one separator per quiz; the reader's UI folds everything after it.
+- **A blank `>` line is REQUIRED both before and after `> ---`** (exactly as in the example above). Without the blank line before it, CommonMark parses `---` as a setext heading underline for the preceding paragraph instead of a separator, and the answer stays unfolded.
+- **Do NOT prefix the question or the answer with a label** (`问：`/`答：`/`答案：`/`Q:`/`A:` or any translation). The `---` already marks the boundary; a label on top of it is redundant and is a symptom of drifting off this template. Write the question text directly, then `> ---`, then the answer text directly.
 - The `---` separator is structural, never translate it, label it (`答案：` / `Answer:`), or replace it with any other marker — the renderer matches the separator itself, not surrounding words.
 - **Answer length**: 1–3 sentences. Enough for the reader to self-check, not a second explanation.
 - **The answer must be derivable from the article's own prose.** Never introduce a fact, number, name, or claim that `draftContent` does not already state. If a good question cannot be answered from the prose, write a different question.

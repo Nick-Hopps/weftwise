@@ -7,6 +7,7 @@ import {
   type SourceLinkOps,
 } from '../../wiki/wiki-transaction';
 import { stampSystemFrontmatter } from '../../wiki/frontmatter';
+import { findQuizSeparatorViolations } from '../../wiki/quiz-separator';
 import * as pagesRepo from '../../db/repos/pages-repo';
 import * as sourcesRepo from '../../db/repos/sources-repo';
 import { updateSourcePageLinks } from '../../sources/source-store';
@@ -16,6 +17,26 @@ const PATH_RE = /^wiki\/[^/]+\/(.+?)\.md$/;
 function slugFromPath(path: string): string | null {
   const match = path.match(PATH_RE);
   return match ? match[1] : null;
+}
+
+/**
+ * quiz 答案分隔符的**终审**：只观测、不改内容、不阻断，零 LLM 调用。
+ *
+ * enricher 那道护栏（`quiz-separator-guard.ts`）之后还有 verify 阶段会整页重写。verifier
+ * skill 要求 verbatim 复现，实测 30/30 分隔符都活着穿过了它，所以没给它加重写面；但这条
+ * 日志是「万一它真吃掉了」时唯一的凭据——护栏之后仍在终审报警，就说明责任在 verify。
+ */
+function auditQuizSeparators(ctx: AgentContext, entries: ChangesetEntry[]): void {
+  for (const entry of entries) {
+    if (entry.auxiliary || entry.action === 'delete' || typeof entry.content !== 'string') continue;
+    const violations = findQuizSeparatorViolations(entry.content);
+    if (violations.length === 0) continue;
+    ctx.emit(
+      'ingest:warn',
+      `Quiz answer separator missing at commit time in ${entry.path} — answers will not fold`,
+      { path: entry.path, violations },
+    );
+  }
 }
 
 /** 合并暂存条目与调用方补充条目；同 path 由调用方补充版本覆盖。 */
@@ -50,6 +71,8 @@ export async function commitPending(
   if (mergedEntries.length === 0) {
     throw new Error('commitPending: nothing to commit (no staged or supplied entries)');
   }
+
+  auditQuizSeparators(ctx, mergedEntries);
 
   const now = new Date().toISOString();
   const entries = mergedEntries.map((entry) => {
