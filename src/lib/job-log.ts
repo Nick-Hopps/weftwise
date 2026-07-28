@@ -1,6 +1,12 @@
 import type { JobStreamEvent } from '@/hooks/use-job-stream';
 import { SYNTHETIC_FINAL_ID } from '@/hooks/job-stream-logic';
-import { stripLegacyToolActivityIcon, toolNameFromEvent } from '@/lib/tool-activity';
+import {
+  jobStageIcon,
+  stripLegacyToolActivityIcon,
+  toolActivityIcon,
+  toolNameFromEvent,
+  type ToolActivityIconName,
+} from '@/lib/tool-activity';
 
 export type JobLogTone = 'default' | 'success' | 'warning' | 'error';
 
@@ -10,6 +16,8 @@ export interface JobLogLine {
   isError: boolean;
   tool: string | null;
   tone: JobLogTone;
+  /** 与语气无关的行图标：有 tool 用工具图标，否则按事件类型前缀取阶段图标。 */
+  icon: ToolActivityIconName;
 }
 
 export interface JobError {
@@ -58,6 +66,7 @@ export function eventLogLine(event: JobStreamEvent): JobLogLine {
     isError: tone === 'error',
     tool,
     tone,
+    icon: tool ? toolActivityIcon(tool) : jobStageIcon(event.type),
   };
 }
 

@@ -5,25 +5,33 @@
  */
 export type ToolActivityIconName =
   | 'activity'
+  | 'bot'
+  | 'circle-check'
+  | 'circle-dot'
+  | 'circle-play'
   | 'compass'
   | 'file-diff'
   | 'file-pen'
   | 'file-plus'
   | 'file-text'
   | 'files'
+  | 'folder-tree'
   | 'globe'
   | 'image'
+  | 'import'
   | 'library'
   | 'link'
   | 'merge'
   | 'move-right'
+  | 'scan-search'
   | 'search'
   | 'sparkles'
   | 'split'
   | 'stop'
   | 'tags'
   | 'telescope'
-  | 'trash';
+  | 'trash'
+  | 'wrench';
 
 export function toolActivityIcon(tool: string): ToolActivityIconName {
   switch (tool) {
@@ -194,5 +202,34 @@ export function jobActivityTitle(events: readonly { type: string }[]): MessageKe
     if (event.type.startsWith('lint')) return 'jobs.activity.lint';
   }
   return 'jobs.activity.processing';
+}
+
+/**
+ * 按 job 事件类型前缀派生阶段图标，供日志时间线里**没有 tool 的普通进度行**使用。
+ * 与 `toolActivityIcon` 共用同一套图标键，日志每一行才会是同一套图标语言——
+ * 曾经这里退化成一个小圆点，和工具/语气图标混排显得割裂。
+ */
+export function jobStageIcon(eventType: string): ToolActivityIconName {
+  if (eventType === 'job:cancelled') return 'stop';
+
+  // agent 生命周期单独拆三态：这类事件在一个 Ingest job 里能占到九成以上，
+  // 只按 `agent` 前缀给一枚图标的话整列日志会退化成同一个符号，读不出节奏。
+  // run-completed 用中性灰 CircleCheck，与 job 级成功态的绿色裸 Check 不同层级。
+  if (eventType === 'agent:run-started') return 'circle-play';
+  if (eventType === 'agent:run-completed') return 'circle-check';
+
+  const stage = eventType.split(':')[0];
+  switch (stage) {
+    case 'ingest': return 'import';
+    case 'lint': return 'scan-search';
+    case 'curate': return 'folder-tree';
+    case 'fix': return 'wrench';
+    case 'reenrich': return 'sparkles';
+    case 'save': return 'file-plus';
+    case 'agent': return 'bot';
+    case 'research':
+    case 'research-import': return 'globe';
+    default: return 'circle-dot';
+  }
 }
 import type { MessageKey } from '@/lib/i18n/messages';

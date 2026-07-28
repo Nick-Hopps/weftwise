@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   jobActivityTitle,
+  jobStageIcon,
   latestToolName,
   summarizeToolArgs,
   toolActivityIcon,
@@ -205,5 +206,35 @@ describe('jobActivityTitle', () => {
     expect(jobActivityTitle([{ type: 'ingest:start' }])).toBe('jobs.activity.ingest');
     expect(jobActivityTitle([{ type: 'lint:scope' }])).toBe('jobs.activity.lint');
     expect(jobActivityTitle([{ type: 'job:completed' }])).toBe('jobs.activity.processing');
+  });
+});
+
+describe('jobStageIcon', () => {
+  it('按事件类型前缀派生阶段图标', () => {
+    expect(jobStageIcon('ingest:parsing')).toBe('import');
+    expect(jobStageIcon('lint:semantic:start')).toBe('scan-search');
+    expect(jobStageIcon('curate:merge')).toBe('folder-tree');
+    expect(jobStageIcon('fix:page')).toBe('wrench');
+    expect(jobStageIcon('reenrich:start')).toBe('sparkles');
+    expect(jobStageIcon('save:complete')).toBe('file-plus');
+  });
+
+  it('agent 生命周期三态各自成图标，未知 agent 子事件回退 bot', () => {
+    expect(jobStageIcon('agent:run-started')).toBe('circle-play');
+    expect(jobStageIcon('agent:step')).toBe('bot');
+    expect(jobStageIcon('agent:run-completed')).toBe('circle-check');
+    expect(jobStageIcon('agent:error')).toBe('bot');
+  });
+
+  it('research 与 research-import 共用发现语义图标', () => {
+    expect(jobStageIcon('research:search')).toBe('globe');
+    expect(jobStageIcon('research-import:start')).toBe('globe');
+  });
+
+  it('job:cancelled 用停止语义，其余 job 级与未知前缀回退中性图标', () => {
+    expect(jobStageIcon('job:cancelled')).toBe('stop');
+    expect(jobStageIcon('job:retrying')).toBe('circle-dot');
+    expect(jobStageIcon('embed-index:whatever')).toBe('circle-dot');
+    expect(jobStageIcon('')).toBe('circle-dot');
   });
 });
