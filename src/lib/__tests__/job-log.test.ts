@@ -41,6 +41,16 @@ describe('eventLogLine', () => {
     expect(eventLogLine({ type: 'fix:tool', data: {} }).tone).toBe('default');
   });
 
+  it('每一行都带图标：tool 行用工具图标，其余行用阶段图标', () => {
+    expect(eventLogLine({
+      type: 'fix:tool',
+      data: { message: 'Editing', data: { tool: 'wiki_update' } },
+    }).icon).toBe('file-pen');
+    expect(eventLogLine({ type: 'ingest:parsing', data: {} }).icon).toBe('import');
+    expect(eventLogLine({ type: 'lint:scope', data: {} }).icon).toBe('scan-search');
+    expect(eventLogLine({ type: 'job:completed', data: {} }).icon).toBe('circle-dot');
+  });
+
   it('formats createdAt as HH:mm:ss and tolerates missing/invalid', () => {
     const iso = '2026-06-28T12:03:45.000Z';
     const d = new Date(iso);

@@ -15,7 +15,6 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  Circle,
   CircleAlert,
   Copy,
   TriangleAlert,
@@ -29,7 +28,7 @@ import type { Job } from '@/lib/contracts';
 import type { JobStreamEvent, JobStreamStatus } from '@/hooks/use-job-stream';
 import { eventLogLines, parseJobError, type JobLogLine } from '@/lib/job-log';
 import { jobActivityTitle } from '@/lib/tool-activity';
-import { ToolActivityIcon } from './tool-activity-icon';
+import { SemanticIcon } from './tool-activity-icon';
 import { useI18n } from '@/components/i18n-provider';
 
 interface JobDetailDialogProps {
@@ -40,14 +39,16 @@ interface JobDetailDialogProps {
   onClose: () => void;
 }
 
+// 每一行都是同尺寸同笔画的语义图标：工具行取工具图标，语气行取语气图标，
+// 其余普通进度行按事件类型前缀取阶段图标——不再退化成一个视觉上割裂的小圆点。
 function LogEventIcon({ line }: { line: JobLogLine }) {
   if (line.tool) {
-    return <ToolActivityIcon tool={line.tool} className="h-3.5 w-3.5 text-accent" />;
+    return <SemanticIcon name={line.icon} className="h-3.5 w-3.5 text-accent" />;
   }
   if (line.tone === 'success') return <Check className="h-3.5 w-3.5 text-success" />;
   if (line.tone === 'warning') return <TriangleAlert className="h-3.5 w-3.5 text-warning" />;
   if (line.tone === 'error') return <CircleAlert className="h-3.5 w-3.5 text-danger" />;
-  return <Circle className="h-1.5 w-1.5 fill-current text-foreground-tertiary" />;
+  return <SemanticIcon name={line.icon} className="h-3.5 w-3.5 text-foreground-tertiary" />;
 }
 
 export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDetailDialogProps) {
@@ -109,7 +110,8 @@ export function JobDetailDialog({ jobId, events, status, open, onClose }: JobDet
     }
   };
 
-  const title = jobActivityTitle(events);
+  // jobActivityTitle 返回的是 message key，必须过 t()——直接渲染会把 `jobs.activity.ingest` 上屏。
+  const title = t(jobActivityTitle(events));
 
   // 经 portal 渲染到 body：挂载点（JobsPanel/ProgressToast）祖先带 transform 类，
   // 会劫持 position:fixed 的包含块，导致全屏遮罩被钉在右下角小面板内。
