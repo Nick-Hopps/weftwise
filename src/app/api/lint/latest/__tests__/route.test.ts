@@ -184,7 +184,7 @@ describe('GET /api/lint/latest', () => {
   });
 
   it.each(['fix', 'curate'] as const)(
-    'completed %s 的 skipped finding 不再出现在真实 API 快照中',
+    'completed %s 的 skipped finding 在真实 API 快照中保持可见并标注 skipped',
     async (action) => {
       const currentFinding = finding({ type: action === 'curate' ? 'orphan' : 'broken-link' });
       const currentFindingId = computeFindingId(currentFinding);
@@ -216,10 +216,16 @@ describe('GET /api/lint/latest', () => {
       const body = await response.json();
 
       expect(response.status).toBe(200);
-      expect(body.findings).toEqual([]);
-      expect(body.remediations).toEqual({});
-      expect(body.bySeverity).toEqual({ critical: 0, warning: 0, info: 0 });
-      expect(body.recentOutcomes).toEqual({ [currentFindingId]: 'skipped' });
+      // skipped = 未触达，问题仍在原地；隐藏它会让用户以为修好了，下次 discovery 又原样出现
+      expect(body.findings).toEqual([
+        expect.objectContaining({ id: currentFindingId }),
+      ]);
+      expect(body.remediations[currentFindingId]).toMatchObject({
+        status: 'skipped',
+        jobId: `${action}-completed`,
+      });
+      expect(body.bySeverity).toEqual({ critical: 0, warning: 1, info: 0 });
+      expect(body.recentOutcomes).toEqual({});
     },
   );
 

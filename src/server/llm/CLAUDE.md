@@ -125,7 +125,7 @@ getEmbeddingModel(route: ResolvedTaskRoute) → LanguageModel  // ⑧ 向量模�
 | `lint-prompt.ts` | 扫描整库/单页的 lint finding；语义结果必须返回 targetSlug 与可逐页核验的原文 evidence。 |
 | `merge-prompt.ts` | 融合两页正文与摘要（由 `page-ops.ts` 内部调用，不再是独立 job）。`MergeResultSchema` |
 | `split-prompt.ts` | 拆一页成多页（由 `page-ops.ts` 内部调用，不再是独立 job）。`SplitResultSchema` (pages.min(2)，恰一 isPrimary) |
-| `curate-prompt.ts` | 🆕 agentic tool-loop 策展 prompt：`CURATE_AGENTIC_SYSTEM_PROMPT`（保守策展系统提示，工具使用规范）+ `buildCurateAgenticUserPrompt(pages, ctx, opts)` builder；退休旧 triage/confirm 三套 schema（`CurateTriageSchema`/`CurateMergeConfirmSchema`/`CurateSplitConfirmSchema`）|
+| `curate-prompt.ts` | 🆕 agentic tool-loop 策展 prompt：`CURATE_AGENTIC_SYSTEM_PROMPT`（保守策展系统提示，工具使用规范）+ `buildCurateAgenticUserPrompt(pages, ctx, opts)` builder（`opts.orphans` 可注入 Health 派来的孤页工单）；退休旧 triage/confirm 三套 schema（`CurateTriageSchema`/`CurateMergeConfirmSchema`/`CurateSplitConfirmSchema`）|
 | `fix-prompt.ts` | 🆕 agentic tool-loop 修复 prompt：`FIX_AGENTIC_SYSTEM_PROMPT` + `buildFixAgenticUserPrompt(reportLines, roster, ctx)`（逐页 `FixPageSchema` 三件套已退休） |
 
 ### `client.ts` / `errors.ts`
@@ -230,6 +230,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-28 | `buildCurateAgenticUserPrompt` 第三参新增可选 `orphans: CurateOrphanAssignment[]`：非空时在 `## Pages` 之前插入 assignment 段（逐条列出孤页 + description + suggestedFix，**不注入 finding ID**）并给出「无自然锚点则不写、只报告原因」的出路；空/缺省时输出逐字节不变。`CURATE_AGENTIC_SYSTEM_PROMPT` 一字未改 —— 保守纪律是宪法，任务语境走 user prompt |
 | 2026-07-17 | Query Agentic prompt 改由单一 `read/propose/image-insert` mode 构造；配图 prompt 只描述 `wiki_image_insert`，不再伴随通用 `wiki_preview_change` 工具 schema |
 | 2026-07-17 | Query 意图 schema 从选区二分类扩展为统一结构化契约，覆盖 read/propose、直接 Re-enrich、选区配图、重置请求/确认/取消/不明确；输入显式携带 selection/current-page/reset phase 可信上下文 |
 | 2026-07-17 | Ask AI canonical 选区可提议一张解释配图；批准后的 `image-insert` worker 继续复用 `ingest:image`，不新增 task schema/示例配置，Query 模型本身无真实生图权限 |
