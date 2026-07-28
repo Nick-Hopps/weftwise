@@ -52,7 +52,7 @@
 - `html-source-frame.tsx` —— HTML/网页 Source 的 sandbox iframe：上传 HTML 仍加载同源 raw 路由；链接型 URL Source 直接加载远程地址并设置 `referrerPolicy=no-referrer`，始终不开放 `allow-same-origin`，默认禁用脚本，用户显式点击后只增加 `allow-scripts`
 - `url-source-preview.tsx` —— URL Source 共用双视图：默认实时 sandbox iframe，可显式切到摄入时保存的本地 Markdown 阅读正文；独立 Source 页和 Wiki Sources 分栏复用，正文缺失/截断都有明确状态
 - `mermaid-diagram.tsx` / `mermaid-svg.tsx` / `mermaid-preview.tsx` / `mermaid-theme.ts` —— Mermaid 客户端渲染与主题配置；内联图与全屏预览复用同一 SVG 渲染器，预览支持 50%–200% 缩放、滚动、重置及 Escape/遮罩关闭；使用紧凑 flowchart 参数、浅/深色 palette，并监听根节点主题变化重绘 SVG；Diagram callout 的无卡片图解样式位于 `globals.css`
-- `wiki-link.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件，支持 hover peek；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显
+- `wiki-link.tsx` / `wiki-link-peek.tsx` —— `[[target]]` / `[[subject:target]]` 的 client 组件 + 抽出的 hover peek 卡片；preview 缓存 key `${effectiveSubjectSlug}:${slug}` 防同名跨主题串显。peek **只能用 `<span>`**（靠 `block` / `line-clamp` 拿回块级排版）——正文 wikilink 永远在 `<p>` 里，`<div>`/`<p>` 会被浏览器截断段落并报 hydration 错
 - `wiki-page-elsewhere.tsx` —— 🆕 当目标 subject 没该 slug 但其他 subject 有时给出"也许在 X 中"提示，链接附 `?s=`
 - `tag-link.tsx` —— 🆕 可点 tag chip（Link 包 Tag，prop 驱动 subjectSlug，链到 /tags/<tag>?s=）
 - `frontmatter-display.tsx` —— 页头 meta 信息展示；标题行右侧 `actions` 插槽渲染统一动作条（Edit 已移入 `PageActions`，不再有内置 `editHref`/Edit 按钮）
@@ -200,6 +200,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-28 | 阅读页控制台三条报错清零：① hover peek 抽成 `wiki-link-peek.tsx` 并改为**纯行内元素**——正文 wikilink 一定处在 `<p>`（callout 内同理）里，原来的 `<div>`/`<p>` 卡片让浏览器就地截断段落，React 连报 `<p> cannot contain a nested <p>/<div>` + hydration 失败；② `graph-stylesheet.ts` 删掉 `node:hover`——cytoscape 无此伪类，整条规则被判非法**整体丢弃**，连同一行的 `.labelled` 一起失效，`use-wiki-graph` 的 mouseover 加了 class 也点不亮标签（hover 本就由 class 承载）；③ 根 `layout.tsx` 补 `data-scroll-behavior="smooth"` 消掉 Next 15 平滑滚动警告 |
 | 2026-07-28 | Job 详情弹窗日志行图标统一 + 标题补 i18n：`tool-activity-icon.tsx` 抽出按图标键渲染的 `SemanticIcon`（`ToolActivityIcon` 降为薄封装），`job-detail-dialog.tsx` 的 default 行不再退化成 `h-1.5` 实心小圆点而是渲染 `line.icon` 的阶段图标——「一半圆点一半图标」的割裂感来自这一个分支，其余三个语气分支一直是图标；同一文件的 `jobActivityTitle(events)` 返回的是 message key，**必须过 `t()`**（`progress-toast` 一直是对的，只有弹窗漏了，实测上屏的就是 `jobs.activity.ingest` 原文）。已全量核对所有返回 `MessageKey` 的函数，无其他漏 `t()` 的渲染点 |
 | 2026-07-27 | Health 批量动作范围跟随类型筛选：`actionFindingIds` 增加**必传**的 findings 范围参数（刻意无默认值——「忘记传＝悄悄退回全量」正是这次要修的漂移），`health-view` 传 `visibleFindings`，筛成某类型后另两个按钮归零禁用而非仍显示各类之和；同时不再把本地已删除来源的 orphan-source 计入批量 |
 | 2026-07-27 | 批量研究拆分为单主题 job：`health-view.tsx` 的 research 状态机从「一次一个 job」改为整批——`researchQueueRef` 逐个 SSE 观察（**advance 前调 `reset()`**，否则残留终态让整批瞬间误判完成）、Stop 并发取消 head + 队列、刷新恢复全部在途 job；remediation 来源不再自动弹候选窗（改由 `finding-row` 的 `Review candidates` 行内入口按 `plan.runId` 取数），手动/backlog 主题无对应行故保留自动弹窗；`remediation-ui.ts` 的 `selectRecoverableHealthJobs` 返回值改为**每 workflow 一个数组**（research 可多个，其余长度 1）并对 active/plan 双来源去重，新增纯函数 `remediationButtonDisabled` 让整理/修复/研究互不阻塞。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |

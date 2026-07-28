@@ -56,6 +56,9 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={`${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}
       data-color-mode="light"
+      // globals.css 的 `html { scroll-behavior: smooth }` 需要显式声明，
+      // 否则 Next 15 会警告将来不再自动在路由切换时临时关闭平滑滚动。
+      data-scroll-behavior="smooth"
       style={{
         [BODY_FONT_SIZE_CSS_VARIABLE]: bodyFontSizeCssValue(bodyFontSize),
       } as React.CSSProperties}

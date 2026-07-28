@@ -78,7 +78,10 @@ export function buildStylesheet(
       },
     },
     {
-      selector: 'node:hover, node.labelled, node.neighbor, node.focused',
+      // cytoscape 不支持 `:hover` 伪类，混进来整条规则会被判非法并**整体丢弃**，
+      // 连 `.labelled` 一起失效。hover 由 `use-wiki-graph` 的 mouseover/mouseout
+      // 加减 `labelled` class 承载，这里只认 class。
+      selector: 'node.labelled, node.neighbor, node.focused',
       style: { 'text-opacity': 1 },
     },
     {

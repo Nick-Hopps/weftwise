@@ -86,3 +86,20 @@ describe('buildStylesheet —— 掌握度模式', () => {
     expect(selectors('mastery')).toContain('edge');
   });
 });
+
+describe('buildStylesheet —— 选择器合法性', () => {
+  // cytoscape 没有 `:hover` 伪类，整条规则会被判非法**整体丢弃**（控制台
+  // "The selector ... is invalid"），连同一条里的 `.labelled` 一起失效——
+  // 于是 `use-wiki-graph` 的 mouseover 加了 class 也点不亮标签。
+  // hover 本来就由 `labelled` class 承载，这里锁死不许再出现 CSS 伪类。
+  for (const mode of ['structure', 'mastery'] as const) {
+    it(`${mode} 模式不含 cytoscape 不支持的 :hover 伪类`, () => {
+      expect(selectors(mode).filter((s) => String(s).includes(':hover'))).toEqual([]);
+    });
+
+    it(`${mode} 模式下 labelled / neighbor / focused 都点亮标签`, () => {
+      const style = styleFor('node.labelled, node.neighbor, node.focused', mode);
+      expect(style).toMatchObject({ 'text-opacity': 1 });
+    });
+  }
+});
