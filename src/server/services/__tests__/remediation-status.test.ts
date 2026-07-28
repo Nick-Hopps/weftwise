@@ -322,6 +322,67 @@ describe('buildHealthSnapshot', () => {
     expect(snapshot.recentOutcomes).toEqual({ gap: 'skipped' });
   });
 
+  /**
+   * 载荷取自 2026-07-28 真实 `data/wiki.db`：world-history 的 `mongol-empire` orphan 被
+   * Tidy 处置三次，每次都是 `writes:0` / `touchedSlugs:[]` / `skipped`。此处不连真实 DB
+   * （那会随后续操作漂移），只固化当时记录的字段。
+   */
+  it('回归：mongol-empire orphan 在 Tidy 刚完成的时序下依然可见且为 skipped', () => {
+    const ORPHAN_ID = '6f79135a21596a7bf98256ee1bd9972dc46349cf61b026e6abde00495e358ded';
+    const SUBJECT_ID = '5691a847-7774-471b-bc3d-6c221c4882c1';
+    const BASELINE_LINT_JOB = 'b1cf6556-938b-4965-bd42-58143a991c63';
+    const CURATE_JOB = 'e97dbcfd-6b74-45d1-939e-d13556b4ddb3';
+    const LINT_RAN = '2026-07-28T11:51:24.000Z';
+    const CURATE_COMPLETED = '2026-07-28T11:59:28.145Z';
+
+    const orphan: EnrichedLintFinding = {
+      id: ORPHAN_ID,
+      subjectId: SUBJECT_ID,
+      subjectSlug: 'world-history',
+      type: 'orphan',
+      severity: 'info',
+      pageSlug: 'mongol-empire',
+      description: 'Orphan page: "mongol-empire" in subject "world-history" has no inbound links.',
+      suggestedFix: "Link to this page from at least one related page, or from the subject's index page.",
+    };
+    const current = lint([orphan], { jobId: BASELINE_LINT_JOB, ranAt: LINT_RAN });
+    const tidy = job({
+      id: CURATE_JOB,
+      type: 'curate',
+      subjectId: SUBJECT_ID,
+      status: 'completed',
+      completedAt: CURATE_COMPLETED,
+      paramsJson: JSON.stringify({
+        scope: 'pages',
+        slugs: ['mongol-empire'],
+        subjectId: SUBJECT_ID,
+        remediationContext: {
+          lintJobId: BASELINE_LINT_JOB,
+          findingIds: [ORPHAN_ID],
+          action: 'curate',
+        } satisfies RemediationContext,
+      }),
+      resultJson: JSON.stringify({
+        merge: 0, split: 0, delete: 0, create: 0, update: 0, writes: 0,
+        postconditionStatus: 'clean',
+        residualCount: 0,
+        semanticStatus: 'not-needed',
+        perFindingOutcomes: { [ORPHAN_ID]: 'skipped' },
+      }),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [tidy]);
+
+    // Tidy 完成时间晚于 baseline lint —— 改动前这正是「被隐藏、看起来修好了」的时序
+    expect(snapshot.findings.map((item) => item.id)).toEqual([ORPHAN_ID]);
+    expect(snapshot.remediations[ORPHAN_ID]).toMatchObject({
+      workflow: 'curate',
+      status: 'skipped',
+      jobId: CURATE_JOB,
+    });
+    expect(snapshot.bySeverity).toEqual({ critical: 0, warning: 0, info: 1 });
+  });
+
   it('completed 结果损坏时不把 finding 误判为已完成验证', () => {
     const current = lint([finding('finding-1')]);
     const related = remediationJob('fix-1', ['finding-1'], {
