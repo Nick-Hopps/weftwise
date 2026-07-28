@@ -1,6 +1,6 @@
 {
   "name": "weftwise",
-  "version": "0.45.6",
+  "version": "0.45.7",
   "private": true,
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
@@ -15,6 +15,7 @@
     "db:migrate-subjects": "tsx scripts/migrate-introduce-subject.ts",
     "db:rebuild": "tsx scripts/rebuild-cache.ts",
     "db:backfill-source-presentation": "tsx scripts/backfill-source-presentation.ts",
+    "vault:repair-quiz-separator": "node --env-file-if-exists=.env --env-file-if-exists=.env.local --import tsx scripts/repair-quiz-separator.ts",
     "db:seed-mastery-evidence": "tsx scripts/seed-mastery-evidence.ts",
     "mastery:report": "tsx scripts/mastery-report.ts",
     "eval:retrieval": "tsx scripts/eval-retrieval.ts",
