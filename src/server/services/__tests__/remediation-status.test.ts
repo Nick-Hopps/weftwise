@@ -217,10 +217,8 @@ describe('buildHealthSnapshot', () => {
 
   it.each([
     ['fix', 'fixed'],
-    ['fix', 'skipped'],
     ['fix', 'failed'],
     ['curate', 'fixed'],
-    ['curate', 'skipped'],
     ['curate', 'failed'],
   ] as const)(
     '%s 在 baseline 之后完成验证为 %s 时从 Health 快照移除并保留真实结果',
@@ -249,6 +247,80 @@ describe('buildHealthSnapshot', () => {
       expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 0 });
     },
   );
+
+  it.each(['fix', 'curate'] as const)(
+    '%s 在 baseline 之后验证为 skipped 时 finding 留在列表并标注 skipped（未触达 ≠ 已处理）',
+    (action) => {
+      const current = lint([
+        finding('untouched', { type: action === 'curate' ? 'orphan' : 'broken-link', severity: 'info' }),
+        finding('open', { severity: 'critical' }),
+      ]);
+      const related = remediationJob(`${action}-1`, ['untouched'], {
+        action,
+        status: 'completed',
+        completedAt: AFTER_LINT,
+        resultJson: JSON.stringify({
+          writes: 0,
+          postconditionStatus: 'clean',
+          semanticStatus: 'not-needed',
+          perFindingOutcomes: { untouched: 'skipped' },
+        }),
+      });
+
+      const snapshot = buildHealthSnapshot(current, [related]);
+
+      expect(snapshot.findings.map((item) => item.id)).toEqual(['untouched', 'open']);
+      expect(snapshot.remediations.untouched).toMatchObject({
+        status: 'skipped',
+        jobId: `${action}-1`,
+      });
+      // 已可见的 finding 不该在近期摘要里重复出现
+      expect(snapshot.recentOutcomes).toEqual({});
+      expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 1 });
+    },
+  );
+
+  it('job-level 兼容路径（无 perFindingOutcomes、零写入）的 skipped 同样保持可见', () => {
+    const current = lint([finding('legacy-skip', { type: 'orphan', severity: 'info' })]);
+    const related = remediationJob('curate-legacy', ['legacy-skip'], {
+      action: 'curate',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: cleanResult(0),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related]);
+
+    expect(snapshot.findings.map((item) => item.id)).toEqual(['legacy-skip']);
+    expect(snapshot.remediations['legacy-skip']).toMatchObject({ status: 'skipped' });
+    expect(snapshot.recentOutcomes).toEqual({});
+  });
+
+  it('Research 的 skipped 仍隐藏——dismissed run 是用户显式忽略，不是未触达', () => {
+    const gap = finding('gap', { type: 'coverage-gap' });
+    const current = lint([gap]);
+    const related = remediationJob('research-1', ['gap'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: JSON.stringify({ candidates: [] }),
+    });
+    const run = researchRun('dismissed', {
+      researchJobId: 'research-1',
+      findings: [{
+        findingId: 'gap',
+        finding: gap,
+        verificationStatus: 'pending',
+        verifiedAt: null,
+        verificationFinding: null,
+      }],
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related], { researchRuns: [run] });
+
+    expect(snapshot.findings).toEqual([]);
+    expect(snapshot.recentOutcomes).toEqual({ gap: 'skipped' });
+  });
 
   it('completed 结果损坏时不把 finding 误判为已完成验证', () => {
     const current = lint([finding('finding-1')]);
