@@ -3,6 +3,7 @@ import { runAgentLoop, AgentCancelled, type AgentRunResult } from './agent-loop'
 import { runPageVerification } from './verify-page';
 import { runPageSupplement } from './supplement-page';
 import { reconcileMergeUpdateFidelity } from './merge-update-fidelity';
+import { reconcileQuizSeparator } from './quiz-separator-guard';
 import { BudgetExceededError } from './budget';
 import { extractWikiLinks } from '@/server/wiki/wikilinks';
 import type { ChangesetAssetEntry, ChangesetEntry } from '@/lib/contracts';
@@ -12,7 +13,7 @@ export const EXISTING_PAGES_FANOUT_TOP_K = 20;
 
 export type PipelineStep =
   | { kind: 'sequence'; skillId: string; carryThrough?: string[]; omitFromInput?: string[]; checkpointAs?: 'plan' }
-  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string; injectExistingPageForUpdate?: boolean }
+  | { kind: 'fanout'; skillId: string; fromOutput: string; checkpointAs?: 'writer-page' | 'enricher-page' | 'verifier-page'; injectPriorPageAs?: string; injectExistingPageForUpdate?: boolean; quizSeparatorGuard?: boolean }
   | { kind: 'supplement'; skillId: string; fromOutput: string; checkpointAs?: 'supplement-page'; injectPriorPageAs?: string }
   | { kind: 'verify'; fromOutput: string; checkpointAs?: 'verifier-page'; injectPriorPageAs?: string }
   | { kind: 'map'; skillId: string; fromOutput: string; intoOutput: string; checkpointAs?: 'chunk-summary' };
@@ -186,6 +187,17 @@ export async function runPipeline(opts: {
                 existingContent: input.existingPageContent,
                 first: r,
                 rerun: (extra) => runAgentLoop({ skill: skill!, ctx: childCtx, input: { ...input, ...extra } }),
+                emit: opts.ctx.emit,
+                slug,
+              });
+            }
+            // quiz 答案分隔符护栏：只有产出 callout 的 enricher step 打开这个 flag。
+            // 用 step flag 而不是按 skillId 硬编码——「哪个阶段需要哪道护栏」属于 service
+            // 的流水线声明（与 injectExistingPageForUpdate 同一范式）。
+            if (step.quizSeparatorGuard) {
+              r = await reconcileQuizSeparator({
+                first: r,
+                rerun: (extra) => runAgentLoop({ skill: skill!, ctx: childCtx, input: { ...(isPlainObject(input) ? input : {}), ...extra } }),
                 emit: opts.ctx.emit,
                 slug,
               });
