@@ -247,6 +247,7 @@ src/components/
 | 2026-07-16 | Chat 显示 `/api/query` 的 SSE error 终态，模型超时、工具失败或 workflow 预览失败不再留下空白 assistant/loading 假象 |
 | 2026-07-16 | Maintenance 新增项目范围多选：支持 `All projects` 或若干 Subject，复用 `['subjects']` 缓存并即时保存；范围变化后刷新到期页统计；`settings-rows` 新增带 All 语义的 `MultiSelectRow` |
 | 2026-07-15 | 聚合任务面板新增一键清理 completed/failed 任务；父面板汇总行级 SSE 终态，折叠后按处理中、全部成功或包含失败显示对应图标 |
+| 2026-07-28 | Health 列表现在会显示 Fix/Tidy 判为 `skipped`（未触达）的 finding —— 前端零改动，`finding-row` 既有 skipped 徽章与 `remediation-ui` 统计直接生效；变更全在服务端 `remediation-status` 投影 |
 | 2026-07-15 | Health Fix/Tidy/Research 终态改为直接刷新服务端快照投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要；手动 Run check 才触发 discovery |
 | 2026-07-15 | Health 自动复检改为 verification：Fix/Curate 终态携带 baseline/remediation ID，刷新恢复与 lint rerun queue 均保留该上下文；手动 Run check 仍为 discovery，避免零写 Curate 后同一 vault 的 findings 随模型漂移增长 |
 | 2026-07-15 | Health 修复结果纠偏：完成提示改按 `perFindingOutcomes` 统计 fixed/failed/skipped，不再展示或解释 `writes`；明确后续全库检查可能发现新问题，不再把写入次数误报为修复数量 |

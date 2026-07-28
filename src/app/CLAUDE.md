@@ -195,6 +195,7 @@ src/app/
 | 2026-07-16 | Tags Review 增加 Rename/Merge/Delete 治理入口；`/api/tag-actions` 只创建/恢复服务端 PendingAction，批准继续复用通用 approve/reject API，批量写入由单 changeset Saga 原子执行 |
 | 2026-07-16 | Tags 两路由升级为目录/组合浏览工作台，筛选状态 URL 化并增加 Suspense 加载边界；仍复用 subject-aware `/api/pages`，不新增写接口 |
 | 2026-07-16 | 明确的“重新丰富当前页面 / 重新丰富页面 `<slug>`”由 `/api/query` 确定性创建 workflow PendingAction，不再等待 Query LLM 首次 tool-call；仍须独立批准才入队 |
+| 2026-07-28 | `GET /api/lint/latest` 的处置投影收紧：Fix/Curate 逐 finding 结果为 `skipped`（未触达）时 finding 保持可见并带 `status:'skipped'`，不再进 `recentOutcomes`；fixed/failed 仍移除 |
 | 2026-07-15 | 修正 `GET /api/lint/latest` 处置投影：Tidy/Fix 完成任务内验证、Research provenance 到达验证终态后均直接移除关联 finding，真实 fixed/failed/skipped 结果保留在近期摘要 |
 | 2026-07-15 | `GET /api/lint/latest` 改为基于处置 postcondition 投影当前快照，fixed finding 直接移除；Health Fix/Tidy/Research 终态不再自动请求 `/api/lint`，显式 verification API 仅保留兼容 |
 | 2026-07-15 | Ingest 工作台支持并行任务切换：批量文件/URL 提交后展示全部成功入队任务，刷新时恢复当前 Subject 的 running + pending + 可续传 failed；仅选中任务建立 SSE，任务条显示 queued/running/completed/failed，排队详情不再误报为正在解析 |

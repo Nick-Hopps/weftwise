@@ -217,10 +217,8 @@ describe('buildHealthSnapshot', () => {
 
   it.each([
     ['fix', 'fixed'],
-    ['fix', 'skipped'],
     ['fix', 'failed'],
     ['curate', 'fixed'],
-    ['curate', 'skipped'],
     ['curate', 'failed'],
   ] as const)(
     '%s 在 baseline 之后完成验证为 %s 时从 Health 快照移除并保留真实结果',
@@ -249,6 +247,141 @@ describe('buildHealthSnapshot', () => {
       expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 0 });
     },
   );
+
+  it.each(['fix', 'curate'] as const)(
+    '%s 在 baseline 之后验证为 skipped 时 finding 留在列表并标注 skipped（未触达 ≠ 已处理）',
+    (action) => {
+      const current = lint([
+        finding('untouched', { type: action === 'curate' ? 'orphan' : 'broken-link', severity: 'info' }),
+        finding('open', { severity: 'critical' }),
+      ]);
+      const related = remediationJob(`${action}-1`, ['untouched'], {
+        action,
+        status: 'completed',
+        completedAt: AFTER_LINT,
+        resultJson: JSON.stringify({
+          writes: 0,
+          postconditionStatus: 'clean',
+          semanticStatus: 'not-needed',
+          perFindingOutcomes: { untouched: 'skipped' },
+        }),
+      });
+
+      const snapshot = buildHealthSnapshot(current, [related]);
+
+      expect(snapshot.findings.map((item) => item.id)).toEqual(['untouched', 'open']);
+      expect(snapshot.remediations.untouched).toMatchObject({
+        status: 'skipped',
+        jobId: `${action}-1`,
+      });
+      // 已可见的 finding 不该在近期摘要里重复出现
+      expect(snapshot.recentOutcomes).toEqual({});
+      expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 1 });
+    },
+  );
+
+  it('job-level 兼容路径（无 perFindingOutcomes、零写入）的 skipped 同样保持可见', () => {
+    const current = lint([finding('legacy-skip', { type: 'orphan', severity: 'info' })]);
+    const related = remediationJob('curate-legacy', ['legacy-skip'], {
+      action: 'curate',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: cleanResult(0),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related]);
+
+    expect(snapshot.findings.map((item) => item.id)).toEqual(['legacy-skip']);
+    expect(snapshot.remediations['legacy-skip']).toMatchObject({ status: 'skipped' });
+    expect(snapshot.recentOutcomes).toEqual({});
+  });
+
+  it('Research 的 skipped 仍隐藏——dismissed run 是用户显式忽略，不是未触达', () => {
+    const gap = finding('gap', { type: 'coverage-gap' });
+    const current = lint([gap]);
+    const related = remediationJob('research-1', ['gap'], {
+      action: 'research',
+      status: 'completed',
+      completedAt: AFTER_LINT,
+      resultJson: JSON.stringify({ candidates: [] }),
+    });
+    const run = researchRun('dismissed', {
+      researchJobId: 'research-1',
+      findings: [{
+        findingId: 'gap',
+        finding: gap,
+        verificationStatus: 'pending',
+        verifiedAt: null,
+        verificationFinding: null,
+      }],
+    });
+
+    const snapshot = buildHealthSnapshot(current, [related], { researchRuns: [run] });
+
+    expect(snapshot.findings).toEqual([]);
+    expect(snapshot.recentOutcomes).toEqual({ gap: 'skipped' });
+  });
+
+  /**
+   * 载荷取自 2026-07-28 真实 `data/wiki.db`：world-history 的 `mongol-empire` orphan 被
+   * Tidy 处置三次，每次都是 `writes:0` / `touchedSlugs:[]` / `skipped`。此处不连真实 DB
+   * （那会随后续操作漂移），只固化当时记录的字段。
+   */
+  it('回归：mongol-empire orphan 在 Tidy 刚完成的时序下依然可见且为 skipped', () => {
+    const ORPHAN_ID = '6f79135a21596a7bf98256ee1bd9972dc46349cf61b026e6abde00495e358ded';
+    const SUBJECT_ID = '5691a847-7774-471b-bc3d-6c221c4882c1';
+    const BASELINE_LINT_JOB = 'b1cf6556-938b-4965-bd42-58143a991c63';
+    const CURATE_JOB = 'e97dbcfd-6b74-45d1-939e-d13556b4ddb3';
+    const LINT_RAN = '2026-07-28T11:51:24.000Z';
+    const CURATE_COMPLETED = '2026-07-28T11:59:28.145Z';
+
+    const orphan: EnrichedLintFinding = {
+      id: ORPHAN_ID,
+      subjectId: SUBJECT_ID,
+      subjectSlug: 'world-history',
+      type: 'orphan',
+      severity: 'info',
+      pageSlug: 'mongol-empire',
+      description: 'Orphan page: "mongol-empire" in subject "world-history" has no inbound links.',
+      suggestedFix: "Link to this page from at least one related page, or from the subject's index page.",
+    };
+    const current = lint([orphan], { jobId: BASELINE_LINT_JOB, ranAt: LINT_RAN });
+    const tidy = job({
+      id: CURATE_JOB,
+      type: 'curate',
+      subjectId: SUBJECT_ID,
+      status: 'completed',
+      completedAt: CURATE_COMPLETED,
+      paramsJson: JSON.stringify({
+        scope: 'pages',
+        slugs: ['mongol-empire'],
+        subjectId: SUBJECT_ID,
+        remediationContext: {
+          lintJobId: BASELINE_LINT_JOB,
+          findingIds: [ORPHAN_ID],
+          action: 'curate',
+        } satisfies RemediationContext,
+      }),
+      resultJson: JSON.stringify({
+        merge: 0, split: 0, delete: 0, create: 0, update: 0, writes: 0,
+        postconditionStatus: 'clean',
+        residualCount: 0,
+        semanticStatus: 'not-needed',
+        perFindingOutcomes: { [ORPHAN_ID]: 'skipped' },
+      }),
+    });
+
+    const snapshot = buildHealthSnapshot(current, [tidy]);
+
+    // Tidy 完成时间晚于 baseline lint —— 改动前这正是「被隐藏、看起来修好了」的时序
+    expect(snapshot.findings.map((item) => item.id)).toEqual([ORPHAN_ID]);
+    expect(snapshot.remediations[ORPHAN_ID]).toMatchObject({
+      workflow: 'curate',
+      status: 'skipped',
+      jobId: CURATE_JOB,
+    });
+    expect(snapshot.bySeverity).toEqual({ critical: 0, warning: 0, info: 1 });
+  });
 
   it('completed 结果损坏时不把 finding 误判为已完成验证', () => {
     const current = lint([finding('finding-1')]);

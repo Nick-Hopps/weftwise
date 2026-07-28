@@ -46,4 +46,73 @@ describe('buildCurateAgenticUserPrompt', () => {
     expect(manual).not.toMatch(/do NOT create/i);
     expect(manual).toMatch(/delete redundant pages/i);
   });
+
+  describe('orphan worklist 注入', () => {
+    const orphans = [{
+      pageSlug: 'mongol-empire',
+      description: 'Orphan page: "mongol-empire" in subject "world-history" has no inbound links.',
+      suggestedFix: 'Link to this page from at least one related page.',
+    }];
+
+    it('注入 assignment 段，含孤页 slug 与 description', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
+      expect(out).toMatch(/assignment/i);
+      expect(out).toContain('`mongol-empire`');
+      expect(out).toContain('has no inbound links');
+      expect(out).toContain('Link to this page from at least one related page.');
+    });
+
+    it('assignment 段出现在 Pages 清单之前', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
+      expect(out.search(/assignment/i)).toBeLessThan(out.indexOf('## Pages'));
+    });
+
+    it('给出「找不到自然锚点就不要写」的明确出路', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
+      expect(out).toContain('wiki_link_ensure');
+      expect(out).toMatch(/no[\s\S]{0,40}anchor[\s\S]{0,80}(do NOT write|not write)/i);
+      expect(out).toMatch(/(inventing|invent)[\s\S]{0,60}anchor/i);
+      expect(out).toMatch(/Related/);
+    });
+
+    it('不注入 finding ID', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, {
+        auto: true,
+        orphans,
+      });
+      expect(out).not.toMatch(/[0-9a-f]{64}/);
+    });
+
+    it('缺省 / 空数组时输出与不带 orphans 逐字节相同', () => {
+      const baseline = buildCurateAgenticUserPrompt(pages, ctx, { auto: true });
+      expect(buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans: [] }))
+        .toBe(baseline);
+      expect(buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans: undefined }))
+        .toBe(baseline);
+
+      const manualBaseline = buildCurateAgenticUserPrompt(pages, ctx, { auto: false });
+      expect(buildCurateAgenticUserPrompt(pages, ctx, { auto: false, orphans: [] }))
+        .toBe(manualBaseline);
+    });
+
+    it('注入后仍保留 auto 模式的禁建/禁删提示', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
+      expect(out).toMatch(/AUTOMATIC/);
+      expect(out).toMatch(/do NOT create or delete/i);
+      expect(out).toContain('`a`');
+    });
+
+    it('多条孤页逐条列出并报数', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, {
+        auto: true,
+        orphans: [
+          orphans[0],
+          { pageSlug: 'black-death', description: 'Orphan page: "black-death" …', suggestedFix: null },
+        ],
+      });
+      expect(out).toContain('`mongol-empire`');
+      expect(out).toContain('`black-death`');
+      expect(out).toMatch(/2 orphan/i);
+    });
+  });
 });
