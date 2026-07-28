@@ -1,6 +1,6 @@
 {
   "name": "weftwise",
-  "version": "0.45.9",
+  "version": "0.46.0",
   "private": true,
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
