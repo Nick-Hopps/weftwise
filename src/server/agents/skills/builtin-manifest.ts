@@ -17,6 +17,8 @@ export const BUILTIN_UPGRADE_HASHES: Partial<Record<BuiltinSkillId, readonly str
     'f44633a47747a8628768182ea951d064906477f54445ace2dfb5488cf903f396',
     // v6 原版（v7 起 quiz callout 用 `---` 携带答案）
     '80b59ca6cac1379537030d577a4802f25cbed8b050ff48bb6e1f3e60550c9a2d',
+    // v7 原版（v8 起明确要求 `---` 前后留空 `>` 行、禁止自造 问：/答： 标签）
+    '43c234261331d6d64b267e54cc19522e392f0723a599daa6d775a9f4e5fae7e7',
   ],
 };
 

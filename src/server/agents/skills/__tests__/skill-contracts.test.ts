@@ -33,10 +33,17 @@ describe('ingest-writer skill 契约（v6 讲解者）', () => {
   });
 });
 
-describe('ingest-enricher skill 契约（v7 quiz 携带答案 + 可信图片工具）', () => {
+describe('ingest-enricher skill 契约（v8 quiz 分隔符写法收紧 + 可信图片工具）', () => {
   const src = readSkill('ingest-enricher');
-  it('版本抬到 7', () => {
-    expect(versionOf(src)).toBe(7);
+  it('版本抬到 8', () => {
+    expect(versionOf(src)).toBe(8);
+  });
+  it('明确要求 `---` 前后各留一个空 `>` 行（缺空行会被解析成 setext 标题）', () => {
+    expect(src).toMatch(/blank `>` line is REQUIRED both before and after/i);
+    expect(src).toMatch(/setext/i);
+  });
+  it('禁止自造 问：/答： 标签前缀（存量受损块全部带这类标签）', () => {
+    expect(src).toMatch(/Do NOT prefix the question or the answer with a label/i);
   });
   it('移除 intuition / example 两类（已属 writer 正文）', () => {
     expect(src).not.toContain('[!intuition]');
