@@ -260,7 +260,19 @@ export async function runCurateJob(
   // 4. 驱动工具循环
   await generateTextWithTools('curate', {
     system: CURATE_AGENTIC_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: buildCurateAgenticUserPrompt(metas, promptCtx, { auto: seedSet !== null }) }],
+    messages: [{
+      role: 'user',
+      content: buildCurateAgenticUserPrompt(metas, promptCtx, {
+        auto: seedSet !== null,
+        // worklist 已由 resolveCurateWorklist 保证是同 subject、同快照的 orphan；
+        // 空数组（manual / ingest 后自动 Curate）时 prompt 逐字节退回原样。
+        orphans: worklist.map((finding) => ({
+          pageSlug: finding.pageSlug,
+          description: finding.description,
+          suggestedFix: finding.suggestedFix,
+        })),
+      }),
+    }],
     tools,
     maxSteps: CURATE_MAX_STEPS,
     usageSubjectId: subject.id,

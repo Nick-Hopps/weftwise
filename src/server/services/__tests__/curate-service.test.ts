@@ -562,4 +562,62 @@ describe('runCurateJob (tool-loop)', () => {
       [second.id]: 'failed',
     });
   });
+
+  describe('orphan 工单注入 user prompt', () => {
+    function userContent(): string {
+      const [, rawOpts] = genMock.generateTextWithTools.mock.calls[0];
+      const opts = rawOpts as { messages: { role: string; content: string }[] };
+      return opts.messages[0]!.content;
+    }
+
+    it('带 remediationContext 时把 orphan 事实注入 user prompt', async () => {
+      const first = orphan('a', 'Orphan page: "a" 没有任何入链');
+      const context = remediationContext([first]);
+      queueMock.get.mockReturnValueOnce(lintJob([first]));
+
+      await runCurateJob(job({
+        scope: 'pages',
+        slugs: ['a'],
+        subjectId: 's1',
+        remediationContext: context,
+      }), vi.fn());
+
+      const content = userContent();
+      expect(content).toMatch(/assignment/i);
+      expect(content).toContain('`a`');
+      expect(content).toContain('Orphan page: "a" 没有任何入链');
+      expect(content).toContain('wiki_link_ensure');
+      // 归因靠服务端 touchedSlugs，模型不该看到 finding ID
+      expect(content).not.toContain(first.id);
+    });
+
+    it('多条 orphan 全部注入并报数', async () => {
+      const first = orphan('a');
+      const second = orphan('b');
+      const context = remediationContext([first, second]);
+      queueMock.get.mockReturnValueOnce(lintJob([first, second]));
+
+      await runCurateJob(job({
+        scope: 'pages',
+        slugs: ['a', 'b'],
+        subjectId: 's1',
+        remediationContext: context,
+      }), vi.fn());
+
+      const content = userContent();
+      expect(content).toMatch(/2 orphan/i);
+      expect(content).toContain('`a`');
+      expect(content).toContain('`b`');
+    });
+
+    it('manual（无 remediationContext）时不注入 assignment 段', async () => {
+      await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), vi.fn());
+      expect(userContent()).not.toMatch(/assignment/i);
+    });
+
+    it('auto 但无 remediationContext 时也不注入', async () => {
+      await runCurateJob(job({ scope: 'pages', slugs: ['a'], subjectId: 's1' }), vi.fn());
+      expect(userContent()).not.toMatch(/assignment/i);
+    });
+  });
 });
