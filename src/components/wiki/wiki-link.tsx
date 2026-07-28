@@ -7,6 +7,7 @@ import { useCurrentSubject } from '@/hooks/use-current-subject';
 import { cn } from '@/lib/cn';
 import { useI18n } from '@/components/i18n-provider';
 import { useAppendEvidence } from '@/hooks/use-evidence';
+import WikiLinkPeek, { type WikiLinkPeekPreview } from './wiki-link-peek';
 
 interface WikiLinkProps {
   href: string;
@@ -22,10 +23,7 @@ interface WikiLinkProps {
   assumedKnown?: boolean;
 }
 
-interface PagePreview {
-  title: string;
-  summary: string;
-}
+type PagePreview = WikiLinkPeekPreview;
 
 // Simple in-memory cache to avoid redundant fetches.
 // Keyed by `<subjectSlug>:<slug>` so same-slug pages from different subjects
@@ -152,33 +150,13 @@ export default function WikiLink({
       )}
 
       {showPeek && (
-        <div
-          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 z-tooltip pointer-events-none"
+        <WikiLinkPeek
+          loading={loading}
+          preview={preview}
+          noPreviewLabel={t('wiki.link.noPreview')}
           onMouseEnter={() => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current); }}
           onMouseLeave={handleMouseLeave}
-        >
-          <div className={cn(
-            'pointer-events-auto rounded-lg border border-border',
-            'bg-surface shadow-md p-3 animate-slide-down',
-          )}>
-            {loading ? (
-              <div className="h-4 w-3/4 rounded bg-subtle animate-pulse" />
-            ) : preview ? (
-              <>
-                <p className="text-sm font-semibold text-foreground truncate">
-                  {preview.title}
-                </p>
-                {preview.summary && (
-                  <p className="text-xs text-foreground-secondary mt-1 line-clamp-3">
-                    {preview.summary}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-xs text-foreground-tertiary italic">{t('wiki.link.noPreview')}</p>
-            )}
-          </div>
-        </div>
+        />
       )}
     </span>
   );
