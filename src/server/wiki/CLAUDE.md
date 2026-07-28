@@ -50,6 +50,7 @@ operations.status = 'applied'                   ← 释放 lock
 | `wikilinks.ts` | `extractWikiLinks(md, { currentSubjectSlug, titleResolver }) / resolveWikiLinkTarget / normalizeWikiLink`、类型 `ExtractedLink`（含 `targetSubjectSlug` / `rawTitle`） / `TitleResolver` | **全应用 wikilink 单一真实源** + `[[subject:page]]` 跨主题语法 |
 | `page-identity.ts` | `parseWikiPath(path) → { subjectSlug, slug } / wikiPathFor(subjectSlug, slug) / normalizeSlug / assertCanonicalPageSlug / deriveUniqueSlug(title, existingSlugs) / GENERAL_SUBJECT_SLUG / META_PAGE_SLUGS` | path ↔ (subject, slug) 互转；任何路径拼接/读取前用 `assertCanonicalPageSlug` 拒绝 `..`、绝对路径与未规范化 slug；`deriveUniqueSlug` 为 create/split 共用的唯一 slug 派生（冲突自动加后缀）；`META_PAGE_SLUGS`=内置系统页（index/log）单一源 |
 | `rewrite-fidelity.ts` 🆕 | `checkRewriteFidelity(original, revised, profile) / FIDELITY_PROFILES`（四档：`supplement`/`merge-update`/`fix`/`reshape`） | **统一保真护栏单一真实源**（T1.4）：长度/wikilink（复用 `wikilinks.ts::extractWikiLinks`，preserve/subset/none）/heading/frontmatter 四项检查，阈值集中在 `FIDELITY_PROFILES`；fix/reshape/supplement 三条既有护栏 + ingest merge-update（新增）共用同一实现，不再各写一份 |
+| `quiz-separator.ts` 🆕 | `findQuizSeparatorViolations(markdown) / repairQuizSeparator(markdown)` | `[!quiz]` 答案分隔符的确定性判定与修复（**摄入侧**兜底，渲染侧刻意保持纯结构判定）。判定镜像 `markdown-client.ts` 的 remark 插件集，只在 mdast 缺 `thematicBreak` **且**块内有 `---` 字面量（被吃成 setext 标题）或答案标签行时才判违规——**只有问题、没有答案的形态不算违规**（存量 204 处是既有兼容设计）。修复在原始文本行上插入 `>` / `> ---`，正文其余部分逐字节保留、幂等；无歧义标签（`答案`/`参考答案`/`Answer`）优先于歧义标签（`答`/`A`，可能只是选择题选项 A）。由 `agents/runtime/quiz-separator-guard.ts`、`agents/runtime/commit-pending.ts` 与 `scripts/repair-quiz-separator.ts` 三处共用 |
 | `indexer.ts` | `indexTouchedPages(subjectId, slugs) / rebuildSearchIndex` | 把解析结果写入 pages + wiki_links + FTS |
 | `meta-pages.ts` 🆕 | `renderIndexPage(pages, opts) / renderLogPage(entries, opts) / parseLogEntries(existingLogMd) / buildIngestLogEntry(sources, pageCount) / resolveTemplateLang(wikiLanguage)` | **T2.1**：subject 系统元页（`index.md`/`log.md`）确定性渲染，取代原 `ingest-indexer` LLM 结构化输出——纯函数，零 LLM 调用。index 按每页第一个 tag 分组（无 tag 归 Uncategorized/未分类，永远排最后）、组内按标题排序，条目 `[[slug\|Title]] — summary`；log 保留最近 `MAX_LOG_ENTRIES=50` 条（新条目在前），既有条目由 `parseLogEntries` 解析既有正文 bullet 行还原。`resolveTemplateLang` 把自由文本 `wikiLanguage` 粗略二值化为 zh/en 模板（只影响分组标题/表头等固定文案，不影响页面 title/summary 本身的语言）。调用方 `ingest-service.ts::finalizeIngest` |
 | `relink.ts` | `rewriteBacklinkText / repointLinksToPage / rewriteLinksForPageMove` | 纯函数：标题变更、合并/拆分与页面 move 共用 token 级重写，保留 subject 前缀、锚点和显示别名；move 只改当前 Subject 源文件 |
@@ -124,6 +125,7 @@ src/server/wiki/
 ├── wikilinks.ts          # ★ 单一真实源
 ├── page-identity.ts      # slug ↔ path
 ├── rewrite-fidelity.ts   # 🆕 统一保真护栏（四档 profile，T1.4）
+├── quiz-separator.ts     # 🆕 quiz 答案分隔符判定 + 确定性修复（纯函数）
 ├── indexer.ts            # 写入 pages + FTS
 ├── relink.ts             # 改标题/重指引用 重写（纯函数）
 ├── split-plan.ts         # 拆分页 slug 派生 + 恰一主页（纯函数）
@@ -142,6 +144,7 @@ src/server/wiki/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-28 | 新增 `quiz-separator.ts`（`findQuizSeparatorViolations` / `repairQuizSeparator`）。动机：阅读页 quiz 折叠只认 `thematicBreak`，enricher 漏写 `---` 时答案直接剧透——实测全库 308 个 quiz 里 74 个如此。**判定必须与渲染同一套解析**，故镜像 `markdown-client.ts` 的插件集（parse+frontmatter+gfm+math）；口径刻意保守，不把「子节点数 > 2」当信号（问题+提示是合法形态）。第二种失效同样被覆盖：`> ---` 前若无空 `>` 行，CommonMark 把它解析成 **setext H2** 而非分隔符（实测 mdast 为 `[heading, paragraph]`），修复走「补空行」这条零猜测路径。修复只在原始文本行上插入，故正文逐字节保留且幂等。spec/plan 见 `docs/{specs,plans}/2026-07-28-quiz-answer-separator-guard.md` |
 | 2026-07-17 | 新增顶层 Markdown 块持久化锚点；`applyChangeset` 支持持锁后的 `assertCanApply` 多点复核，选区配图取消可在写入/commit 前触发 Saga rollback；页面与图片 asset 同一 changeset |
 | 2026-07-16 | 新增 `planTagBatch`：Rename 要求新标签未使用、Merge 要求目标已存在、Delete 只移除标签；精确匹配原始大小写、跳过 meta 页、正文保持不变，全部受影响页在单 changeset 中预览/批准/apply |
 | 2026-07-14 | Wiki 解析边界：frontmatter 补齐 emoji/fenced code/CRLF 语义往返测试；`TitleResolver` 接收目标 Subject，indexer 与页面操作按 Subject 隔离同名 title，跨 Subject 标题正确解析到 canonical slug |

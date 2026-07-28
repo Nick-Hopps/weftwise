@@ -117,6 +117,7 @@ Worker 启动时（`worker-entry.ts`）由 `buildSkillRegistry()` 将 `examples/
 | `overlay-vault.ts` | 读写隔离层：agent 读操作走 vault 快照，写操作累积为内存 diff，commit 时才一次性落地 |
 | `checkpoint.ts` | `loadCheckpoint(jobId)` → `IngestCheckpoint`；内存索引 + 落盘双写（checkpoints-repo）；挂于 `AgentContext.checkpoint?`，缺省时 orchestrator 行为不变。kinds：chunk-summary/plan/writer-page/enricher-page/verifier-page/`supplement-page`（re-enrich 专用，`getSupplementPage/putSupplementPage`）+ `cited-sources`（⑨ 续传补源：整张 `CitedSource[]` 单 blob，`getCitedSources/putCitedSources`，`verify-page` record 后 persist、`ingest-service` pipeline 前 rehydrate） |
 | `verify-page.ts` | `runPageVerification({ resolveSkill, ctx, input }): Promise<AgentRunResult>`（⑨）——逐页两段式联网核查：triage→编排层 `webSearch`→apply / 降级到 `ingest-verifier`(v2) 自检 / triage 空时 passthrough；apply 的 citedSources URL 经 `parseFrontmatter/serializeFrontmatter` 确定性追加进页 frontmatter `sources`，并累积进 `ctx.citedSources`（按 url 去重、合并 citedBy、fallbackContent 取匹配 snippet）。全程无 tools |
+| `quiz-separator-guard.ts` 🆕 | `reconcileQuizSeparator({ first, rerun, emit, slug })`——enricher 产物的 quiz 答案分隔符护栏，与 `merge-update-fidelity.ts` 同构的「重写一次 → 回落」：违规（判定见 `wiki/quiz-separator.ts`）→ 把 `quizSeparatorViolations` 拼回输入重写一次 → 仍违规 → **确定性修复**（`repairQuizSeparator`，零 token）+ emit `ingest:warn`。**合规产物原样返回**（连 `AgentRunResult` 对象本体都不换），护栏不得改动守约产物的任何字节。回落选确定性修复而非保留原样：修复固化进 vault 后可 git diff 审阅、可回滚，比让答案继续剧透强 |
 | `supplement-page.ts` | `runPageSupplement({ skill, ctx, input }): Promise<AgentRunResult>`——re-enrich 专用，画像探针驱动正文缺口补全：调 skill（`reenrich-supplement`）产候选 → `supplement-guard.ts::checkSupplementFidelity` 4 项确定性护栏校验 → 不过则把 `violations[]` 拼回输入重写一次 → 仍不过则回落原文 passthrough（emit `reenrich:supplement-fallback`，不阻断后续阶段）。共用 fanout 骨架（`orchestrator.ts` 的 `kind:'supplement'` 分支），仅「每项计算」不同 |
 
 ### `skills/`
@@ -278,6 +279,7 @@ src/server/agents/
 │   ├── verify-page.ts              # runPageVerification（⑨ 联网核查）
 │   ├── supplement-page.ts          # 🆕 runPageSupplement（re-enrich 专用，画像探针驱动正文补全 + 护栏 + 重写一次 + 回落原文）
 │   ├── supplement-guard.ts         # 🆕 checkSupplementFidelity 纯函数（4 项确定性护栏：不缩水/不臆造wikilink/标题不减/frontmatter不变）
+│   ├── quiz-separator-guard.ts     # 🆕 reconcileQuizSeparator（enricher quiz 分隔符：重写一次 + 确定性修复）
 │   ├── commit-pending.ts           # service-level 暂存提交入口（非模型工具）
 │   └── __tests__/
 ├── skills/
@@ -330,6 +332,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-28 | quiz 答案分隔符护栏：新增 `runtime/quiz-separator-guard.ts::reconcileQuizSeparator`，`orchestrator.ts` 的 fanout 分支新增 **step flag** `quizSeparatorGuard`（ingest 与 re-enrich 的 enricher step 各自打开——两条流水线共用同一个 `skillId:'ingest-enricher'` step，用 flag 而非按 skillId 硬编码，与 `injectExistingPageForUpdate` 同一范式）。`commit-pending.ts` 增加 commit 前**零成本终审**：对最终内容跑同一判定，仍违规则 emit `ingest:warn`，不改内容、不阻断、不调 LLM——**这条日志是将来判断「是哪一阶段吃掉分隔符」的唯一凭据**（enricher 护栏之后仍报警就说明责任在 verify；verifier skill 要求 verbatim 复现，实测 30/30 分隔符都活着穿过了它，故没给它加重写面）。`ingest-enricher` 升 **v8**：明确 `---` 前后必须各留一个空 `>` 行（缺空行会被解析成 setext 标题，条文此前一个字都没提）+ 禁止自造 `问：/答：/Q:/A:` 标签前缀（实测受损块**全部**带这类自造标签，是脱离模板的病征）。三处版本门照旧同步：两个 service 的 `MIN_SKILL_VERSIONS` 7→8、`BUILTIN_UPGRADE_HASHES` 追加 v7 原版 SHA-256，并实跑 `upgradeBuiltinSkillFiles` 验证 v7 副本确实被替换成 v8。spec/plan 见 `docs/{specs,plans}/2026-07-28-quiz-answer-separator-guard.md` |
 | 2026-07-26 | `ingest-enricher` 升 **v7**：`[!quiz]` callout 必须用一行 `---` 分隔问题与答案（结构化分隔符，语言无关，不得翻译或替换成「答案：」这类标记；答案 1–3 句且**不得引入正文没有的事实**）。三处同步：`ingest-service` / `reenrich-service` 版本门 6→7，`BUILTIN_UPGRADE_HASHES` 追加 v6 原版 SHA-256（**漏这一条，所有未改过 skill 的既有 vault 都会卡在 v6 撞版本门**）。新增 `builtin-manifest.test.ts` 断言 v6 hash 在白名单内、且当前模板 hash 不在（防自我替换循环） |
 | 2026-07-17 | Query 选区配图采用独立 `image-insert` mode：复用 propose policy，但只编译只读工具与 `wiki.image.insert`；新增 ToolSet JSON Schema 根节点回归，避免无关 union schema 阻断 provider 工具注册 |
 | 2026-07-17 | 新增 `wiki.image.insert` propose builtin 与 Query profile 授权；canonical page/selection 由 ToolContext 绑定，模型不能控制 slug/offset，且 Query 仍不可调用真实 `image.generate` |
