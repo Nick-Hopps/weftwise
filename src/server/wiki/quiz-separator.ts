@@ -34,10 +34,19 @@ export interface QuizSeparatorViolation {
 }
 
 /**
- * 答案标签行。允许 `**`/`*`/`_` 强调包裹（实测 enricher 会写 `**答：**`）。
- * 只匹配行首——正文中间出现「答：」不算。
+ * 答案标签行。只匹配行首——正文中间出现「答：」不算。容错两种实测写法：
+ * `**` / `*` / `_` 强调包裹（`> **答：**`）与列表项前缀（`> - 答案：`）。
  */
-const ANSWER_LABEL_RE = /^\s*(?:[*_]{1,2})?\s*(?:参考答案|答案|答|Answer|A)\s*(?:[*_]{1,2})?\s*[:：]/i;
+const ANSWER_LABEL_RE = /^\s*(?:[-*+]|\d+[.)])?\s*(?:[*_]{1,2})?\s*(参考答案|答案|答|Answer|A)\s*(?:[*_]{1,2})?\s*[:：]/i;
+
+/**
+ * 只可能是答案、不可能是选项的标签。
+ *
+ * `答` / `A` 有歧义——选择题的选项就长成 `- A: …`。若一个块里同时存在歧义标签和
+ * 无歧义标签，分隔符必须插在无歧义的那行前面，否则会切在选项 A 上、把问题劈成两半。
+ * 实测当前 vault 里 307 个 quiz 块的问题段都只有一个标签行，这条只是防未来出现选择题。
+ */
+const UNAMBIGUOUS_LABELS = new Set(['参考答案', '答案', 'answer']);
 
 /** 独占一行的 thematicBreak 写法（CommonMark 允许 `-`/`*`/`_` 三种，可含空格）。 */
 const BREAK_LINE_RE = /^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/;
@@ -135,10 +144,18 @@ function locate(block: QuizBlock, lines: string[]): LocatedViolation | null {
       return { ...base, reason: 'setext-separator', anchorLine: i + 1 };
     }
   }
+  let firstAmbiguous: number | null = null;
   for (let i = block.startLine; i < block.endLine; i += 1) {
-    if (ANSWER_LABEL_RE.test(stripMarker(lines[i]))) {
+    const label = ANSWER_LABEL_RE.exec(stripMarker(lines[i]))?.[1];
+    if (label === undefined) continue;
+    // 无歧义标签优先——它一定是答案的开头，歧义标签可能只是选项 A
+    if (UNAMBIGUOUS_LABELS.has(label.toLowerCase())) {
       return { ...base, reason: 'missing-separator', anchorLine: i + 1 };
     }
+    firstAmbiguous ??= i + 1;
+  }
+  if (firstAmbiguous !== null) {
+    return { ...base, reason: 'missing-separator', anchorLine: firstAmbiguous };
   }
   return null;
 }

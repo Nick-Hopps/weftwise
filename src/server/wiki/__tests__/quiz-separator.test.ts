@@ -66,6 +66,39 @@ describe('findQuizSeparatorViolations — missing-separator（有答案标签、
     });
   }
 
+  it('答案写成列表项（`> - 答案：`）同样识别', () => {
+    const md = [
+      '> [!quiz] ❓ 自测',
+      '> 如果预计工时 3 天但实际平均 5 天，管理者该做什么？',
+      '> - 答案：把偏差反馈到排期估算环节，用真实数据校准未来同类任务。',
+    ].join('\n');
+    const found = findQuizSeparatorViolations(md);
+    expect(found.map((v) => v.reason)).toEqual(['missing-separator']);
+  });
+
+  it('选择题：分隔符锚定到无歧义的「答案：」，不切在选项 `- A:` 上', () => {
+    const md = [
+      '> [!quiz] ❓ 自测',
+      '> 下面哪个是子空间？',
+      '> - A: $\\{(x,y) : x + y = 1\\}$',
+      '> - B: $\\{(x,y) : x + y = 0\\}$',
+      '>',
+      '> 答案：B —— A 不含零元。',
+    ].join('\n');
+    const out = repairQuizSeparator(md);
+    expect(out.content).toBe([
+      '> [!quiz] ❓ 自测',
+      '> 下面哪个是子空间？',
+      '> - A: $\\{(x,y) : x + y = 1\\}$',
+      '> - B: $\\{(x,y) : x + y = 0\\}$',
+      '>',
+      '> ---',
+      '>',
+      '> 答案：B —— A 不含零元。',
+    ].join('\n'));
+    expect(findQuizSeparatorViolations(out.content)).toEqual([]);
+  });
+
   it('答案是独立段落（分段形态）同样识别', () => {
     const md = ['> [!quiz] ❓ 自测', '> 问：为什么？', '>', '> 答：因为忽里勒台。'].join('\n');
     expect(findQuizSeparatorViolations(md).map((v) => v.reason)).toEqual(['missing-separator']);
