@@ -812,6 +812,34 @@ describe('runFixJob (tool-loop)', () => {
     expect(emit).not.toHaveBeenCalledWith('fix:scope-blocked', expect.anything(), expect.anything());
   });
 
+  it('scoped 模式把可写页清单（含对侧 evidence 页）写进 prompt，legacy 模式不写', async () => {
+    const contradiction = identified({
+      ...finding('contradiction', 'a', 'A 与 B 对同一事实的表述相反'),
+      evidence: [
+        { pageSlug: 'a', quote: 'qa' },
+        { pageSlug: 'b', quote: 'qb' },
+      ],
+    });
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([contradiction.id]),
+    }), vi.fn());
+
+    const scopedPrompt = getFixPrompt();
+    expect(scopedPrompt).toContain('## Writable pages');
+    expect(scopedPrompt.slice(scopedPrompt.indexOf('## Writable pages'))).toContain('`b`');
+
+    genMock.generateTextWithTools.mockClear();
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([
+      finding('broken-link', 'a', 'A 中的坏链'),
+    ]);
+    await runFixJob(job({ subjectId: 's1' }), vi.fn());
+    expect(getFixPrompt()).not.toContain('Writable pages');
+  });
+
   it('写入被门控拒绝时 emit fix:scope-blocked，并把允许清单带进错误消息', async () => {
     const contradiction = identified({
       ...finding('contradiction', 'a', 'A 与 B 对同一事实的表述相反'),

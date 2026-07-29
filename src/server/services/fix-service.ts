@@ -363,10 +363,13 @@ export async function runFixJob(
     const guard = createFixGuard({ caps: { writes: writeCap } });
     const baseContext = buildFixToolContext(subject, { guard, jobId: job.id, emit });
     let toolContext = baseContext;
+    let writableSlugs: string[] = [];
     if (remediationContext) {
-      const scoped = scopeFixWrites(baseContext, fixWritableSlugs(worklist), emit);
+      const allowed = fixWritableSlugs(worklist);
+      const scoped = scopeFixWrites(baseContext, allowed, emit);
       toolContext = scoped.context;
       blockedWriteSlugs = scoped.blockedSlugs;
+      writableSlugs = [...allowed];
     }
     const profile = resolveToolProfile(
       loop.some((finding) => finding.type === 'contradiction') ? 'fix:contradiction' : 'fix:links',
@@ -393,7 +396,10 @@ export async function runFixJob(
 
     await generateTextWithTools('fix', {
       system: buildFixAgenticSystemPrompt(profile.id === 'fix:contradiction'),
-      messages: [{ role: 'user', content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx) }],
+      messages: [{
+        role: 'user',
+        content: buildFixAgenticUserPrompt(reportLines, roster, promptCtx, writableSlugs),
+      }],
       tools,
       maxSteps: FIX_MAX_STEPS,
       usageSubjectId: subject.id,
