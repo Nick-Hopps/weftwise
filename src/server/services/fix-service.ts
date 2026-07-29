@@ -228,32 +228,52 @@ function selectedFixScope(
   };
 }
 
-/** scoped Fix 只收窄写侧；read/search/inspect/source evidence 仍保持 subject-wide。 */
+/**
+ * scoped Fix 只收窄写侧；read/search/inspect/source evidence 仍保持 subject-wide。
+ *
+ * 被拒的 slug 记进闭包 `blockedSlugs` 并 emit 事件：`fix:tool` 走的是 AI SDK
+ * `onStepFinish`，只报「发起了哪些 tool call」、拿不到执行结果，被拒的写入在日志里
+ * 与成功写入长得一模一样。归因判据（`buildPerFindingOutcomes`）也需要这个信号来区分
+ * 「被门控挡住」与「模型主动留着」，两者都表现为零写入。
+ */
 function scopeFixWrites(
   context: ToolContext,
   allowedPageSlugs: ReadonlySet<string>,
-): ToolContext {
+  emit: (type: string, message: string, data?: Record<string, unknown>) => void,
+): { context: ToolContext; blockedSlugs: Set<string> } {
+  const blockedSlugs = new Set<string>();
+  const allowed = [...allowedPageSlugs];
   const assertAllowed = (slug: string): void => {
-    if (!allowedPageSlugs.has(slug)) {
-      throw new Error(`[PAGE_OUT_OF_SCOPE] ${slug} is outside selected Fix findings`);
-    }
+    if (allowedPageSlugs.has(slug)) return;
+    blockedSlugs.add(slug);
+    emit(
+      'fix:scope-blocked',
+      `Refused to write "${slug}": outside the pages selected for this Fix (${allowed.join(', ')}).`,
+      { slug, allowed },
+    );
+    throw new Error(
+      `[PAGE_OUT_OF_SCOPE] ${slug} is outside selected Fix findings; writable pages: ${allowed.join(', ')}`,
+    );
   };
 
   return {
-    ...context,
-    updatePage: context.updatePage && (async (input) => {
-      assertAllowed(input.slug);
-      return context.updatePage!(input);
-    }),
-    patchPage: context.patchPage && (async (input) => {
-      assertAllowed(input.slug);
-      return context.patchPage!(input);
-    }),
-    linkEnsure: context.linkEnsure && (async (input) => {
-      // target 只用于存在性验证；唯一写对象是 source page。
-      assertAllowed(input.sourceSlug);
-      return context.linkEnsure!(input);
-    }),
+    blockedSlugs,
+    context: {
+      ...context,
+      updatePage: context.updatePage && (async (input) => {
+        assertAllowed(input.slug);
+        return context.updatePage!(input);
+      }),
+      patchPage: context.patchPage && (async (input) => {
+        assertAllowed(input.slug);
+        return context.patchPage!(input);
+      }),
+      linkEnsure: context.linkEnsure && (async (input) => {
+        // target 只用于存在性验证；唯一写对象是 source page。
+        assertAllowed(input.sourceSlug);
+        return context.linkEnsure!(input);
+      }),
+    },
   };
 }
 
@@ -324,7 +344,7 @@ export async function runFixJob(
     const guard = createFixGuard({ caps: { writes: writeCap } });
     const baseContext = buildFixToolContext(subject, { guard, jobId: job.id, emit });
     const toolContext = remediationContext
-      ? scopeFixWrites(baseContext, fixWritableSlugs(worklist))
+      ? scopeFixWrites(baseContext, fixWritableSlugs(worklist), emit).context
       : baseContext;
     const profile = resolveToolProfile(
       loop.some((finding) => finding.type === 'contradiction') ? 'fix:contradiction' : 'fix:links',
