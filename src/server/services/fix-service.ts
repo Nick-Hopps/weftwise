@@ -69,14 +69,28 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const EMPTY_SLUGS: ReadonlySet<string> = new Set<string>();
+
 function hasOwn(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-/** 依据实际工作清单与后置校验，为批量 Fix 中每个稳定 finding ID 单独归因。 */
+/**
+ * 依据实际工作清单与后置校验，为批量 Fix 中每个稳定 finding ID 单独归因。
+ *
+ * 两处判据都按「该 finding 的处置落点」而不是 `finding.pageSlug`（`fixWritableSlugs`
+ * 单一口径，与写白名单同源）：contradiction 的修复常常只写对侧页，按 pageSlug 判会让
+ * 修好了也记成 skipped —— 与 2026-07-29 orphan 的 `touchedSlugs` 误判同族。
+ *
+ * `blockedWrite` 表示本次 job 有写入被写白名单挡下。归因精度：被拒的 slug 按定义不在任何
+ * finding 的可写集里，无法反查「为哪条 finding 而拒」，因此**逐条处置时精确，批量处置时偏
+ * 保守**（同批里模型主动留着的 LLM 类 finding 也会被记为 failed）。宁可多报一次失败让用户
+ * 能重试，也不再把「改不了」静默成「无需更改」。
+ */
 function buildPerFindingOutcomes(
   worklist: EnrichedLintFinding[],
   postcondition: PostconditionReport,
+  blockedWrite: boolean,
 ): Record<string, FixFindingOutcome> {
   const residualKeys = new Set(
     postcondition.residualFindings.map(
@@ -96,13 +110,17 @@ function buildPerFindingOutcomes(
     const hasMatchingResidual = residualKeys.has(
       JSON.stringify([finding.type, finding.pageSlug]),
     );
+    const touchedAnyWritablePage = [...fixWritableSlugs([finding])]
+      .some((slug) => touchedSlugs.has(slug));
     if (
       postcondition.verificationError !== null
       || hasMatchingResidual
     ) {
       outcomes[finding.id] = 'failed';
-    } else if (!touchedSlugs.has(finding.pageSlug)) {
-      outcomes[finding.id] = 'skipped';
+    } else if (!touchedAnyWritablePage) {
+      outcomes[finding.id] = blockedWrite && LLM_FIX_TYPES.has(finding.type)
+        ? 'failed'
+        : 'skipped';
     } else if (
       postcondition.semanticStatus === 'failed'
       && SEMANTIC_FIX_TYPES.has(finding.type)
@@ -339,13 +357,17 @@ export async function runFixJob(
   // 3. tool-loop：修 broken-link / missing-crossref / contradiction
   let update = 0;
   let create = 0;
+  let blockedWriteSlugs: ReadonlySet<string> = EMPTY_SLUGS;
   if (loop.length > 0) {
     const writeCap = Math.max(20, new Set(loop.map((f) => f.pageSlug)).size * 2);
     const guard = createFixGuard({ caps: { writes: writeCap } });
     const baseContext = buildFixToolContext(subject, { guard, jobId: job.id, emit });
-    const toolContext = remediationContext
-      ? scopeFixWrites(baseContext, fixWritableSlugs(worklist), emit).context
-      : baseContext;
+    let toolContext = baseContext;
+    if (remediationContext) {
+      const scoped = scopeFixWrites(baseContext, fixWritableSlugs(worklist), emit);
+      toolContext = scoped.context;
+      blockedWriteSlugs = scoped.blockedSlugs;
+    }
     const profile = resolveToolProfile(
       loop.some((finding) => finding.type === 'contradiction') ? 'fix:contradiction' : 'fix:links',
     );
@@ -394,7 +416,11 @@ export async function runFixJob(
     semanticFindings: selectedScope.semantic,
     emit,
   });
-  const perFindingOutcomes = buildPerFindingOutcomes(worklist, postcondition);
+  const perFindingOutcomes = buildPerFindingOutcomes(
+    worklist,
+    postcondition,
+    blockedWriteSlugs.size > 0,
+  );
   if (remediationContext) {
     for (const findingId of remediationContext.findingIds) {
       if (!hasOwn(perFindingOutcomes, findingId)) {
