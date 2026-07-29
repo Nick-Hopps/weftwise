@@ -86,6 +86,63 @@ export function remediationButtonDisabled(input: {
     || input.busyActions.has(input.action);
 }
 
+/**
+ * 每个可执行动作对应的 job type。
+ *
+ * `re-ingest` 复用 `ingest` job（靠 remediation context 区分），其余同名。
+ */
+const JOB_TYPE_BY_ACTION: Record<ExecutableRemediationAction, string> = {
+  fix: 'fix',
+  curate: 'curate',
+  research: 'research',
+  're-ingest': 'ingest',
+};
+
+/**
+ * 某个动作当前已被在途 job 覆盖的 finding 集合。
+ *
+ * 这是逐条门控的唯一依据：**只有落在这个集合里的 finding 才禁用自己的按钮**，
+ * 不再因为「这个 action 类型有人在用」就整类禁用。服务端按 `remediationContext`
+ * （sorted findingIds）算幂等键，不同 finding 建独立 job，worker 对非 ingest job
+ * 串行独占执行，所以并发点击本就安全——过去的整类禁用只是让用户白等。
+ *
+ * 不产生覆盖的三种 job：终态（已经结束）、无 remediation context 的 manual
+ * Tidy/Fix（没有 finding 范围）、以及其他动作的 job。
+ */
+export function coveredFindingIds(
+  activeJobs: Job[],
+  action: ExecutableRemediationAction,
+): Set<string> {
+  const covered = new Set<string>();
+  const expectedType = JOB_TYPE_BY_ACTION[action];
+
+  for (const job of activeJobs) {
+    if (job.status !== 'running' && job.status !== 'pending') continue;
+    if (job.type !== expectedType) continue;
+    const context = readStrictRemediationContext(job.paramsJson);
+    if (!context || context.action !== action) continue;
+    for (const findingId of context.findingIds) covered.add(findingId);
+  }
+
+  return covered;
+}
+
+/**
+ * 单条 finding 的某个动作是否禁用。
+ *
+ * `hydrationBusy` 保持整类禁用：首次读到 active jobs 前我们不知道有什么在途，
+ * 此时的禁用防的是「刷新后重复提交」，与本次要解除的同类阻塞无关（spec C4）。
+ */
+export function rowActionDisabled(input: {
+  findingId: string;
+  action: ExecutableRemediationAction;
+  coveredIds: ReadonlySet<string>;
+  hydrationBusy: ReadonlySet<ExecutableRemediationAction>;
+}): boolean {
+  return input.hydrationBusy.has(input.action)
+    || input.coveredIds.has(input.findingId);
+}
+
 export function blockingRecoverableActions(
   jobs: RecoverableHealthJobs,
 ): Set<ExecutableRemediationAction> {

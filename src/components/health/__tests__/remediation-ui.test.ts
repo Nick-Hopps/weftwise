@@ -14,6 +14,7 @@ import {
   actionFindingIds,
   actionForFinding,
   blockingRecoverableActions,
+  coveredFindingIds,
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
@@ -28,6 +29,7 @@ import {
   remediationButtonDisabled,
   persistedBusyActions,
   readStrictRemediationContext,
+  rowActionDisabled,
   healthTerminalInvalidationKeys,
   selectRecoverableHealthJobs,
   researchBacklogPatchBody,
@@ -458,6 +460,90 @@ describe('Health remediation UI helper', () => {
       expect(readStrictRemediationContext(JSON.stringify(params))).toBeNull();
     }
     expect(readStrictRemediationContext('not json')).toBeNull();
+  });
+
+  it('coveredFindingIds 只覆盖各 job 自己 context 里的 finding，同类不同目标互不牵连', () => {
+    const jobs = [
+      job('curate-a', 'curate', {
+        remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-a'], action: 'curate' },
+      }, '2026-07-30T00:00:00.000Z'),
+      job('curate-b', 'curate', {
+        remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-b'], action: 'curate' },
+      }, '2026-07-30T00:01:00.000Z'),
+    ];
+
+    const covered = coveredFindingIds(jobs, 'curate');
+    expect(covered.has('finding-a')).toBe(true);
+    expect(covered.has('finding-b')).toBe(true);
+    // 本次修复的核心断言：第三条 finding 不因为别人在跑而被覆盖。
+    expect(covered.has('finding-c')).toBe(false);
+  });
+
+  it('coveredFindingIds 覆盖批量 job 的全部 finding，批外条目不受影响', () => {
+    const jobs = [
+      job('curate-batch', 'curate', {
+        remediationContext: {
+          lintJobId: 'lint-1',
+          findingIds: ['finding-a', 'finding-b', 'finding-c'],
+          action: 'curate',
+        },
+      }, '2026-07-30T00:00:00.000Z'),
+    ];
+
+    const covered = coveredFindingIds(jobs, 'curate');
+    expect([...covered].sort()).toEqual(['finding-a', 'finding-b', 'finding-c']);
+    expect(covered.has('finding-d')).toBe(false);
+  });
+
+  it('coveredFindingIds 忽略终态 job、无 context 的 manual job 与其他 action', () => {
+    const context = (action: string) => ({
+      remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-a'], action },
+    });
+    const terminal = {
+      ...job('done', 'curate', context('curate'), '2026-07-30T00:00:00.000Z'),
+      status: 'completed' as const,
+    };
+    const manual = job('manual', 'curate', { subjectId: 'subject-1' }, '2026-07-30T00:00:00.000Z');
+    const otherAction = job('fix-job', 'fix', context('fix'), '2026-07-30T00:00:00.000Z');
+
+    expect(coveredFindingIds([terminal], 'curate').size).toBe(0);
+    expect(coveredFindingIds([manual], 'curate').size).toBe(0);
+    expect(coveredFindingIds([otherAction], 'curate').size).toBe(0);
+    expect(coveredFindingIds([otherAction], 'fix').has('finding-a')).toBe(true);
+  });
+
+  it('coveredFindingIds 把带 re-ingest context 的 ingest job 归到 re-ingest', () => {
+    const reingest = job('ingest-job', 'ingest', {
+      remediationContext: {
+        lintJobId: 'lint-1',
+        findingIds: ['finding-source'],
+        action: 're-ingest',
+      },
+    }, '2026-07-30T00:00:00.000Z');
+
+    expect(coveredFindingIds([reingest], 're-ingest').has('finding-source')).toBe(true);
+    // 普通 Ingest（无 context）不该让任何行禁用。
+    const plainIngest = job('plain', 'ingest', { sourceId: 's1' }, '2026-07-30T00:00:00.000Z');
+    expect(coveredFindingIds([plainIngest], 're-ingest').size).toBe(0);
+  });
+
+  it('rowActionDisabled 只看本行是否被覆盖，hydration 门仍整类禁用', () => {
+    const covered = new Set(['finding-a']);
+    const idle = new Set<ExecutableRemediationAction>();
+
+    expect(rowActionDisabled({
+      findingId: 'finding-a', action: 'curate', coveredIds: covered, hydrationBusy: idle,
+    })).toBe(true);
+    expect(rowActionDisabled({
+      findingId: 'finding-b', action: 'curate', coveredIds: covered, hydrationBusy: idle,
+    })).toBe(false);
+    // hydration 未就绪时防重复提交优先，与 covered 无关（spec C4 零回归）。
+    expect(rowActionDisabled({
+      findingId: 'finding-b',
+      action: 'curate',
+      coveredIds: covered,
+      hydrationBusy: new Set<ExecutableRemediationAction>(['curate']),
+    })).toBe(true);
   });
 
   it('Delete 在途时禁用同一行的 Re-ingest action', () => {
