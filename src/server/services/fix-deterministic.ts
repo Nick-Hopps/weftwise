@@ -71,6 +71,33 @@ export function buildFixWorklist<T extends LintFinding>(deterministic: T[], sema
   return out;
 }
 
+/**
+ * 工作清单对应的**可写页白名单**（scoped Fix 的写侧收窄依据）。
+ *
+ * `contradiction` 额外并入 `evidence[].pageSlug`：矛盾天生跨两页，而错的那一页往往
+ * 是**对侧页**（`finding.pageSlug` 只是 lint 挂载点）。只按 pageSlug 开白名单会让模型
+ * 判对了也写不进去，最终静默记成 skipped —— 与 2026-07-29 的 orphan 缺陷同族
+ * （处置的写入落点 ≠ finding.pageSlug）。
+ *
+ * 其余类型不扩：`missing-crossref` 虽也带 evidence，但它的写入落点就是源页
+ * （`linkEnsure` 只写 source），扩白名单是无谓放权。
+ */
+export function fixWritableSlugs(worklist: LintFinding[]): Set<string> {
+  const slugs = new Set<string>();
+  const add = (slug: unknown): void => {
+    if (typeof slug !== 'string') return;
+    const trimmed = slug.trim();
+    if (trimmed) slugs.add(trimmed);
+  };
+
+  for (const finding of worklist) {
+    add(finding.pageSlug);
+    if (finding.type !== 'contradiction') continue;
+    for (const item of finding.evidence ?? []) add(item?.pageSlug);
+  }
+  return slugs;
+}
+
 // ── 诊断报告分组（纯函数）────────────────────────────────────────────────────
 
 export const REPORT_DESC_MAX = 200;

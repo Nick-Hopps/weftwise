@@ -24,6 +24,7 @@ import {
   buildFixWorklist,
   buildSubjectReportLines,
   createFixGuard,
+  fixWritableSlugs,
 } from './fix-deterministic';
 import { normalizeRemediationContext } from './remediation-context';
 import { buildFixToolContext } from './fix-tools';
@@ -323,7 +324,7 @@ export async function runFixJob(
     const guard = createFixGuard({ caps: { writes: writeCap } });
     const baseContext = buildFixToolContext(subject, { guard, jobId: job.id, emit });
     const toolContext = remediationContext
-      ? scopeFixWrites(baseContext, new Set(worklist.map((finding) => finding.pageSlug)))
+      ? scopeFixWrites(baseContext, fixWritableSlugs(worklist))
       : baseContext;
     const profile = resolveToolProfile(
       loop.some((finding) => finding.type === 'contradiction') ? 'fix:contradiction' : 'fix:links',
