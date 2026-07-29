@@ -32,6 +32,7 @@ import { verifyJobPostconditions } from './postcondition-service';
 import { readRemediationContext } from './remediation-context';
 import { selectLatestFindings } from './lint-latest';
 import { pageHasInboundLinks } from './lint-deterministic';
+import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
 export const CURATE_MAX_STEPS = 40;
@@ -176,6 +177,53 @@ function buildCuratePerFindingOutcomes(
   return outcomes;
 }
 
+/** 每个孤页最多引入几个语义候选源页。每多一页就多一份写 scope 护栏面，故设上界。 */
+const ORPHAN_SOURCE_CANDIDATES = 5;
+
+/**
+ * 给 orphan worklist 补上「谁最该链到它」的候选源页。
+ *
+ * 孤页的定义就是**没有入链**，所以 `expandScopeWithNeighbors` 的一跳图邻居只剩它自己链出去
+ * 的那几页——一个与「谁该链到它」几乎无关的集合。「哪一页最该提到这个概念」本质是语义相似度
+ * 问题，因此这里改用既有混合检索（FTS + 向量 RRF）取候选，让写 scope 落在真正相关的页上。
+ *
+ * 只在带 orphan worklist 时执行：manual Tidy 与 ingest 后的自动 Curate 一次检索都不发，
+ * allowedSet 逐元素不变。
+ */
+async function expandScopeWithOrphanSourceCandidates(
+  scopeSlugs: string[],
+  worklist: EnrichedLintFinding[],
+  subject: Subject,
+  emit: CurateEmit,
+): Promise<string[]> {
+  const out = new Set(scopeSlugs);
+  const orphanSlugs = new Set(worklist.map((finding) => finding.pageSlug));
+
+  for (const finding of worklist) {
+    const page = readPageInSubject(subject.slug, finding.pageSlug);
+    const query = [page?.frontmatter.title, page?.frontmatter.summary]
+      .filter((part): part is string => Boolean(part))
+      .join(' ')
+      || finding.pageSlug;
+
+    const ranked = await hybridRankSlugs(subject.id, query, ORPHAN_SOURCE_CANDIDATES);
+    const candidates = ranked.filter(
+      (slug) => !META_PAGE_SLUGS.has(slug) && !orphanSlugs.has(slug),
+    );
+    for (const slug of candidates) out.add(slug);
+
+    emit(
+      'curate:orphan-candidates',
+      candidates.length > 0
+        ? `Candidate source pages for "${finding.pageSlug}": ${candidates.join(', ')}`
+        : `No candidate source page found for "${finding.pageSlug}".`,
+      { orphanSlug: finding.pageSlug, candidates },
+    );
+  }
+
+  return [...out];
+}
+
 export async function runCurateJob(
   job: Job,
   emit: (type: string, message: string, data?: Record<string, unknown>) => void,
@@ -203,6 +251,14 @@ export async function runCurateJob(
     seedSet = new Set(seed);
     const links = pagesRepo.getAllLinks(subject.id);
     scopeSlugs = expandScopeWithNeighbors(seed, links, subject.id, META_PAGE_SLUGS);
+    if (worklist.length > 0) {
+      scopeSlugs = await expandScopeWithOrphanSourceCandidates(
+        scopeSlugs,
+        worklist,
+        subject,
+        emit,
+      );
+    }
   } else {
     seedSet = null;
     scopeSlugs = pagesRepo.getAllPages(subject.id).map((p) => p.slug).filter((s) => !META_PAGE_SLUGS.has(s));

@@ -58,8 +58,8 @@ const pageOpsMock = vi.hoisted(() => ({
   })),
 }));
 vi.mock('@/server/wiki/page-ops', () => pageOpsMock);
-// curate-tools 透传引入；本测试不触发搜索，mock 防 import-time 副作用
-vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
+const retrievalMock = vi.hoisted(() => ({ hybridRankSlugs: vi.fn(async () => [] as string[]) }));
+vi.mock('@/server/search/hybrid-retrieval', () => retrievalMock);
 const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
 vi.mock('@/server/services/postcondition-service', () => postconditionMock);
 // orphan 归因改按「当前是否有非 meta 入链」判定，不再按 touchedSlugs
@@ -157,6 +157,8 @@ describe('runCurateJob (tool-loop)', () => {
     postconditionMock.verifyJobPostconditions.mockResolvedValue(cleanReport);
     lintDetMock.pageHasInboundLinks.mockReset();
     lintDetMock.pageHasInboundLinks.mockReturnValue(false);
+    retrievalMock.hybridRankSlugs.mockReset();
+    retrievalMock.hybridRankSlugs.mockResolvedValue([]);
   });
   it('manual：驱动 generateTextWithTools(curate) + emit start/complete', async () => {
     const emit = vi.fn();
@@ -620,6 +622,81 @@ describe('runCurateJob (tool-loop)', () => {
     expect(result.perFindingOutcomes).toEqual({
       [first.id]: 'failed',
       [second.id]: 'failed',
+    });
+  });
+
+  describe('孤页候选源页按语义检索扩 scope', () => {
+    function userContent(): string {
+      const [, rawOpts] = genMock.generateTextWithTools.mock.calls[0];
+      const opts = rawOpts as { messages: { role: string; content: string }[] };
+      return opts.messages[0]!.content;
+    }
+
+    it('带 orphan worklist 时用混合检索取候选源页并并入 scope', async () => {
+      const target = orphan('a');
+      const context = remediationContext([target]);
+      queueMock.get.mockReturnValueOnce(lintJob([target]));
+      // 图邻接给不出候选（孤页定义上无入链），检索给出一个语义相关页
+      pagesMock.getAllLinks.mockReturnValueOnce([]);
+      retrievalMock.hybridRankSlugs.mockResolvedValue(['semantically-related']);
+
+      await runCurateJob(job({
+        scope: 'pages',
+        slugs: ['a'],
+        subjectId: 's1',
+        remediationContext: context,
+      }), vi.fn());
+
+      expect(retrievalMock.hybridRankSlugs).toHaveBeenCalled();
+      expect(userContent()).toContain('`semantically-related`');
+    });
+
+    it('不带 orphan worklist 时一次检索都不发', async () => {
+      await runCurateJob(job({ scope: 'pages', slugs: ['a'], subjectId: 's1' }), vi.fn());
+      expect(retrievalMock.hybridRankSlugs).not.toHaveBeenCalled();
+    });
+
+    it('manual（scope:subject）同样不发检索', async () => {
+      await runCurateJob(job({ scope: 'subject', subjectId: 's1' }), vi.fn());
+      expect(retrievalMock.hybridRankSlugs).not.toHaveBeenCalled();
+    });
+
+    it('检索结果里的孤页自身与 meta 页被过滤', async () => {
+      const target = orphan('a');
+      const context = remediationContext([target]);
+      queueMock.get.mockReturnValueOnce(lintJob([target]));
+      pagesMock.getAllLinks.mockReturnValueOnce([]);
+      retrievalMock.hybridRankSlugs.mockResolvedValue(['a', 'index', 'log', 'real-candidate']);
+
+      await runCurateJob(job({
+        scope: 'pages',
+        slugs: ['a'],
+        subjectId: 's1',
+        remediationContext: context,
+      }), vi.fn());
+
+      const content = userContent();
+      expect(content).toContain('`real-candidate`');
+      expect(content).not.toContain('`index`');
+      expect(content).not.toContain('`log`');
+      // 孤页自身只出现一次（作为 seed），不因检索重复出现
+      expect(content.match(/slug: `a`/g) ?? []).toHaveLength(1);
+    });
+
+    it('检索返回空时不扩张也不抛错', async () => {
+      const target = orphan('a');
+      const context = remediationContext([target]);
+      queueMock.get.mockReturnValueOnce(lintJob([target]));
+      retrievalMock.hybridRankSlugs.mockResolvedValue([]);
+
+      const result = await runCurateJob(job({
+        scope: 'pages',
+        slugs: ['a'],
+        subjectId: 's1',
+        remediationContext: context,
+      }), vi.fn());
+
+      expect(result.perFindingOutcomes).toEqual({ [target.id]: 'skipped' });
     });
   });
 
