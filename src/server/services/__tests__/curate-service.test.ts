@@ -63,7 +63,9 @@ vi.mock('@/server/search/hybrid-retrieval', () => retrievalMock);
 const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
 vi.mock('@/server/services/postcondition-service', () => postconditionMock);
 // orphan 归因改按「当前是否有非 meta 入链」判定，不再按 touchedSlugs
-const lintDetMock = vi.hoisted(() => ({ pageHasInboundLinks: vi.fn(() => false) }));
+const lintDetMock = vi.hoisted(() => ({
+  pageHasInboundLinks: vi.fn((_subject: unknown, _slug: string): boolean => false),
+}));
 vi.mock('@/server/services/lint-deterministic', () => lintDetMock);
 
 import { runCurateJob } from '../curate-service';
@@ -386,7 +388,7 @@ describe('runCurateJob (tool-loop)', () => {
         description: 'B 仍没有入链',
       }],
     });
-    lintDetMock.pageHasInboundLinks.mockImplementation((_s: unknown, slug: string) => slug === 'a');
+    lintDetMock.pageHasInboundLinks.mockImplementation((_s, slug) => slug === 'a');
 
     const result = await runCurateJob(job({
       scope: 'pages',
@@ -423,7 +425,7 @@ describe('runCurateJob (tool-loop)', () => {
         description: '关联页仍异常',
       }],
     });
-    lintDetMock.pageHasInboundLinks.mockImplementation((_s: unknown, slug: string) => slug === 'a');
+    lintDetMock.pageHasInboundLinks.mockImplementation((_s, slug) => slug === 'a');
 
     const result = await runCurateJob(job({
       scope: 'pages',
@@ -528,7 +530,7 @@ describe('runCurateJob (tool-loop)', () => {
         touchedSlugs: ['a'],
       },
     });
-    lintDetMock.pageHasInboundLinks.mockImplementation((_s: unknown, slug: string) => slug === 'a');
+    lintDetMock.pageHasInboundLinks.mockImplementation((_s, slug) => slug === 'a');
 
     const result = await runCurateJob(job({
       scope: 'pages',
