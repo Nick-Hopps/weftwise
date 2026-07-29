@@ -217,9 +217,7 @@ describe('buildHealthSnapshot', () => {
 
   it.each([
     ['fix', 'fixed'],
-    ['fix', 'failed'],
     ['curate', 'fixed'],
-    ['curate', 'failed'],
   ] as const)(
     '%s 在 baseline 之后完成验证为 %s 时从 Health 快照移除并保留真实结果',
     (action, outcome) => {
@@ -245,6 +243,38 @@ describe('buildHealthSnapshot', () => {
       expect(snapshot.remediations.handled).toBeUndefined();
       expect(snapshot.recentOutcomes).toEqual({ handled: outcome });
       expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 0 });
+    },
+  );
+
+  it.each(['fix', 'curate'] as const)(
+    '%s 验证为 failed 时 finding 留在列表并标注 failed（未解决 ≠ 已处理）',
+    (action) => {
+      const current = lint([
+        finding('unresolved', { type: action === 'curate' ? 'orphan' : 'broken-link', severity: 'critical' }),
+        finding('open', { severity: 'info' }),
+      ]);
+      const related = remediationJob(`${action}-1`, ['unresolved'], {
+        action,
+        status: 'completed',
+        completedAt: AFTER_LINT,
+        resultJson: JSON.stringify({
+          writes: 0,
+          postconditionStatus: 'clean',
+          semanticStatus: 'not-needed',
+          perFindingOutcomes: { unresolved: 'failed' },
+        }),
+      });
+
+      const snapshot = buildHealthSnapshot(current, [related]);
+
+      expect(snapshot.findings.map((item) => item.id)).toEqual(['unresolved', 'open']);
+      expect(snapshot.remediations.unresolved).toMatchObject({
+        status: 'failed',
+        jobId: `${action}-1`,
+      });
+      // 留在列表的 finding 不该在近期摘要里重复出现
+      expect(snapshot.recentOutcomes).toEqual({});
+      expect(snapshot.bySeverity).toEqual({ critical: 1, warning: 0, info: 1 });
     },
   );
 

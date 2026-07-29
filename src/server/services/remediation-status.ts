@@ -79,7 +79,7 @@ export function buildHealthSnapshot(
     const handledOutcome = related
       ? readHandledOutcome(related, lint, researchRunsByJob)
       : null;
-    if (related && handledOutcome && !isUntouchedSkip(related.context.action, handledOutcome)) {
+    if (related && handledOutcome && !isUnresolvedOutcome(related.context.action, handledOutcome)) {
       projectedOutcomes.push({
         subjectId: finding.subjectId,
         findingId: finding.id,
@@ -224,26 +224,27 @@ function readRecentOutcome(
 }
 
 /**
- * Fix / Curate 的 `skipped` 语义是**未触达** —— 该 finding 的页面不在 postcondition 的
- * `touchedSlugs` 里，问题必然还在原地。隐藏它就是谎报已处理：用户点完 Tidy 看到问题消失，
- * 下次手动 discovery 又原样发现同一个稳定 ID（2026-07-28 `mongol-empire` 的 orphan 复发
- * 闭环）。所以 2026-07-15「完成验证即隐藏」的投影只保留给确实触达过页面的 fixed / failed，
- * 它们的真实结果继续进 `recentOutcomes`。
+ * Fix / Curate 的 `skipped`（未触达）与 `failed`（处置没成功）语义都是**问题还在原地**。
+ * 隐藏它们就是谎报已处理：用户点完 Tidy 看到问题消失，下次手动 discovery 又原样发现同一个
+ * 稳定 ID（2026-07-28 `mongol-empire` 的 orphan 复发闭环）。所以 2026-07-15「完成验证即
+ * 隐藏」的投影只保留给 `fixed`，其余留在列表并由 `applyCurrentJob` 标注真实状态，用户可以
+ * 直接重试。
  *
  * Research 的 `skipped` 不在此列 —— 它来自 dismissed / empty run，是用户显式忽略或检索
- * 确实没有候选，属于「已处理」而非「未触达」。
+ * 确实没有候选，属于「已处理」而非「未解决」。
  */
-function isUntouchedSkip(
+function isUnresolvedOutcome(
   action: RemediationContext['action'],
   outcome: RemediationStatus,
 ): boolean {
-  return outcome === 'skipped' && (action === 'fix' || action === 'curate');
+  return (outcome === 'skipped' || outcome === 'failed')
+    && (action === 'fix' || action === 'curate');
 }
 
 /**
  * Health 中的 finding 是一次 discovery 快照，不是实时问题表。关联处置在该快照之后
  * 完成自身验证后即视为已处理；真实 fixed/failed/skipped 结果仍进入近期摘要。
- * 是否真的隐藏由调用方结合 `isUntouchedSkip` 决定。
+ * 是否真的隐藏由调用方结合 `isUnresolvedOutcome` 决定。
  */
 function readHandledOutcome(
   { job, context, findingId }: FindingContextJob,
