@@ -54,6 +54,7 @@ import {
 import {
   activeJobsHydrationBusyActions,
   actionFindingIds,
+  BATCH_TARGET,
   blockingRecoverableActions,
   createActionGate,
   createLintRerunQueue,
@@ -259,7 +260,7 @@ export function HealthView() {
     findingId?: string,
   ): boolean {
     if (effectiveBusyActions.has(action)) return false;
-    if (!actionGateRef.current.tryAcquire(action, origin)) return false;
+    if (!actionGateRef.current.tryAcquire(action, BATCH_TARGET, origin)) return false;
     setBusyActions((current) => new Set(current).add(action));
     if (findingId) {
       setActingFindingByAction((current) => ({ ...current, [action]: findingId }));
@@ -268,7 +269,7 @@ export function HealthView() {
   }
 
   function releaseAction(action: ExecutableRemediationAction, origin: HealthOrigin): void {
-    if (!actionGateRef.current.release(action, origin)) return;
+    if (!actionGateRef.current.release(action, BATCH_TARGET, origin)) return;
     setBusyActions((current) => {
       const next = new Set(current);
       next.delete(action);
@@ -553,8 +554,8 @@ export function HealthView() {
       const existing = actionJobMetaRef.current[workflow];
       if (existing?.jobId === candidate.jobId) continue;
 
-      if (!actionGateRef.current.isBusy(workflow)) {
-        actionGateRef.current.tryAcquire(workflow, origin);
+      if (!actionGateRef.current.isBusy(workflow, BATCH_TARGET)) {
+        actionGateRef.current.tryAcquire(workflow, BATCH_TARGET, origin);
       }
       setBusyActions((current) => new Set(current).add(workflow));
       const meta = { jobId: candidate.jobId, origin };

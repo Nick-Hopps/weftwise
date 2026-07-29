@@ -13,6 +13,7 @@ import {
   activeJobsHydrationBusyActions,
   actionFindingIds,
   actionForFinding,
+  BATCH_TARGET,
   blockingRecoverableActions,
   coveredFindingIds,
   createActionGate,
@@ -249,17 +250,41 @@ describe('Health remediation UI helper', () => {
     });
   });
 
-  it('动作门同步阻止同 action 重入，同时允许不同 action 并发', () => {
+  it('动作门同步阻止同 action 同 target 重入，同时允许不同 action 并发', () => {
     const gate = createActionGate();
     const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
 
-    expect(gate.tryAcquire('research', origin)).toBe(true);
-    expect(gate.tryAcquire('research', origin)).toBe(false);
-    expect(gate.tryAcquire('fix', origin)).toBe(true);
-    expect(gate.isBusy('research')).toBe(true);
-    expect(gate.release('research', { ...origin, generation: 0 })).toBe(false);
-    expect(gate.release('research', origin)).toBe(true);
-    expect(gate.isBusy('research')).toBe(false);
+    expect(gate.tryAcquire('research', BATCH_TARGET, origin)).toBe(true);
+    expect(gate.tryAcquire('research', BATCH_TARGET, origin)).toBe(false);
+    expect(gate.tryAcquire('fix', BATCH_TARGET, origin)).toBe(true);
+    expect(gate.isBusy('research', BATCH_TARGET)).toBe(true);
+    expect(gate.release('research', BATCH_TARGET, { ...origin, generation: 0 })).toBe(false);
+    expect(gate.release('research', BATCH_TARGET, origin)).toBe(true);
+    expect(gate.isBusy('research', BATCH_TARGET)).toBe(false);
+  });
+
+  it('动作门允许同 action 不同 target 并发，批量哨兵与逐条目标互不占用', () => {
+    const gate = createActionGate();
+    const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
+
+    // 本次修复的核心断言：同一个 action 上，不同 finding 各自持锁。
+    expect(gate.tryAcquire('curate', 'finding-a', origin)).toBe(true);
+    expect(gate.tryAcquire('curate', 'finding-b', origin)).toBe(true);
+    expect(gate.tryAcquire('curate', 'finding-a', origin)).toBe(false);
+    expect(gate.isBusy('curate', 'finding-b')).toBe(true);
+    expect(gate.isBusy('curate', 'finding-c')).toBe(false);
+
+    // 工具栏批量与逐条是不同 target，不该互相占用。
+    expect(gate.tryAcquire('curate', BATCH_TARGET, origin)).toBe(true);
+
+    gate.release('curate', 'finding-a', origin);
+    expect(gate.isBusy('curate', 'finding-a')).toBe(false);
+    expect(gate.isBusy('curate', 'finding-b')).toBe(true);
+    expect(gate.isBusy('curate', BATCH_TARGET)).toBe(true);
+
+    gate.reset();
+    expect(gate.isBusy('curate', 'finding-b')).toBe(false);
+    expect(gate.isBusy('curate', BATCH_TARGET)).toBe(false);
   });
 
   it('origin 必须同时匹配 generation、subject 与 scope', () => {
