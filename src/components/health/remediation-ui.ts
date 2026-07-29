@@ -303,9 +303,23 @@ function recoverableFromActiveJob(job: Job): RecoverableHealthJob | null {
   return null;
 }
 
-function readStrictRemediationContext(
+export interface StrictRemediationContext {
+  action: ExecutableRemediationAction;
+  lintJobId: string;
+  /**
+   * 该 job 覆盖的稳定 finding ID。
+   *
+   * 校验规则一直都在，但返回值原本只有 `action` + `lintJobId`——**校验完就丢**，
+   * 于是客户端无法知道某个在途 job 覆盖了哪些 finding，逐条门控只能退化为按 action
+   * 类型整类禁用。`coveredFindingIds` 消费的就是这里。
+   */
+  findingIds: string[];
+}
+
+/** 严格解析 job params 里的 remediation context；任一字段不合规一律 fail closed 返回 null。 */
+export function readStrictRemediationContext(
   paramsJson: string,
-): { action: ExecutableRemediationAction; lintJobId: string } | null {
+): StrictRemediationContext | null {
   try {
     const params: unknown = JSON.parse(paramsJson);
     if (!isRecord(params) || !isRecord(params.remediationContext)) return null;
@@ -322,7 +336,9 @@ function readStrictRemediationContext(
       || context.action === 're-ingest'
       ? context.action
       : null;
-    return action ? { action, lintJobId: context.lintJobId } : null;
+    return action
+      ? { action, lintJobId: context.lintJobId, findingIds: [...context.findingIds] }
+      : null;
   } catch {
     return null;
   }

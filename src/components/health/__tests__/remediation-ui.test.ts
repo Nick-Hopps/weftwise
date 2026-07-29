@@ -27,6 +27,7 @@ import {
   recentOutcomeCounts,
   remediationButtonDisabled,
   persistedBusyActions,
+  readStrictRemediationContext,
   healthTerminalInvalidationKeys,
   selectRecoverableHealthJobs,
   researchBacklogPatchBody,
@@ -425,6 +426,38 @@ describe('Health remediation UI helper', () => {
       'json:running',
     ]);
     expect(jobs.map((item) => item.id)).toEqual(['pending-job', 'running-job']);
+  });
+
+  it('readStrictRemediationContext 返回已校验的 findingIds，不再校验完就丢', () => {
+    expect(readStrictRemediationContext(JSON.stringify({
+      subjectId: 'subject-1',
+      remediationContext: {
+        lintJobId: 'lint-1',
+        findingIds: ['a'.repeat(64), 'b'.repeat(64)],
+        action: 'curate',
+      },
+    }))).toEqual({
+      action: 'curate',
+      lintJobId: 'lint-1',
+      findingIds: ['a'.repeat(64), 'b'.repeat(64)],
+    });
+  });
+
+  it('readStrictRemediationContext 对残缺 context 继续 fail closed', () => {
+    const cases: unknown[] = [
+      { remediationContext: { lintJobId: 'lint-1', findingIds: [], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', findingIds: ['ok', 7], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', findingIds: ['ok', ''], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', action: 'fix' } },
+      { remediationContext: { lintJobId: '', findingIds: ['ok'], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', findingIds: ['ok'], action: 'reshape' } },
+      { subjectId: 'subject-1' },
+    ];
+
+    for (const params of cases) {
+      expect(readStrictRemediationContext(JSON.stringify(params))).toBeNull();
+    }
+    expect(readStrictRemediationContext('not json')).toBeNull();
   });
 
   it('Delete 在途时禁用同一行的 Re-ingest action', () => {
