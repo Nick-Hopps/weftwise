@@ -82,6 +82,76 @@ describe('runDeterministicChecksForSubject', () => {
   });
 });
 
+describe('pageHasInboundLinks', () => {
+  async function setupInbound() {
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const pagesRepo = await import('@/server/db/repos/pages-repo');
+    const s = subjectsRepo.create({ slug: 's-inb', name: 'S' });
+    const s2 = subjectsRepo.create({ slug: 's2-inb', name: 'S2' });
+
+    // 真实 vault 的 index/log 带 `meta` tag —— `isMetaPage` 按 tag 判定而非 slug
+    pagesRepo.upsertPage({ ...page(s.id, 'index'), tags: ['meta'] });
+    pagesRepo.upsertPage(page(s.id, 'only-index-links-me'));
+    pagesRepo.upsertPage(page(s.id, 'content-links-me'));
+    pagesRepo.upsertPage(page(s.id, 'cross-links-me'));
+    pagesRepo.upsertPage(page(s.id, 'nobody-links-me'));
+    pagesRepo.upsertPage(page(s.id, 'linker'));
+    pagesRepo.upsertPage({ ...page(s.id, 'meta-tagged'), tags: ['meta'] });
+    pagesRepo.upsertPage(page(s.id, 'meta-tagged-links-me'));
+    pagesRepo.upsertPage(page(s2.id, 'x'));
+
+    // index 是 meta 页：它的出链不该算入链
+    pagesRepo.setLinksForPage(s.id, 'index', [
+      { targetSubjectId: s.id, targetSlug: 'only-index-links-me', context: '[[a]]' },
+    ]);
+    pagesRepo.setLinksForPage(s.id, 'linker', [
+      { targetSubjectId: s.id, targetSlug: 'content-links-me', context: '[[b]]' },
+    ]);
+    pagesRepo.setLinksForPage(s2.id, 'x', [
+      { targetSubjectId: s.id, targetSlug: 'cross-links-me', context: '[[s-inb:c]]' },
+    ]);
+    pagesRepo.setLinksForPage(s.id, 'meta-tagged', [
+      { targetSubjectId: s.id, targetSlug: 'meta-tagged-links-me', context: '[[d]]' },
+    ]);
+
+    const mod = await import('../lint-deterministic');
+    return { subject: s, ...mod };
+  }
+
+  it('内容页入链算，meta 页（index）出链不算', async () => {
+    const { subject, pageHasInboundLinks } = await setupInbound();
+    expect(pageHasInboundLinks(subject, 'content-links-me')).toBe(true);
+    expect(pageHasInboundLinks(subject, 'only-index-links-me')).toBe(false);
+  });
+
+  it('跨主题入链算', async () => {
+    const { subject, pageHasInboundLinks } = await setupInbound();
+    expect(pageHasInboundLinks(subject, 'cross-links-me')).toBe(true);
+  });
+
+  it('完全无入链为 false', async () => {
+    const { subject, pageHasInboundLinks } = await setupInbound();
+    expect(pageHasInboundLinks(subject, 'nobody-links-me')).toBe(false);
+  });
+
+  it('与 checkOrphanPages 口径一致：报为 orphan ⟺ 无入链', async () => {
+    const { subject, pageHasInboundLinks, runDeterministicChecksForSubject } =
+      await setupInbound();
+    const orphanSlugs = new Set(
+      runDeterministicChecksForSubject(subject)
+        .filter((f) => f.type === 'orphan')
+        .map((f) => f.pageSlug),
+    );
+    const pagesRepo = await import('@/server/db/repos/pages-repo');
+
+    for (const p of pagesRepo.getAllPages(subject.id)) {
+      // orphan 检查本身会跳过 meta slug 与 meta tag 页，这些页不参与一致性断言
+      if (p.slug === 'index' || (p.tags ?? []).includes('meta')) continue;
+      expect(orphanSlugs.has(p.slug)).toBe(!pageHasInboundLinks(subject, p.slug));
+    }
+  });
+});
+
 describe('checkStaleSourcesForPage', () => {
   it('stale-source finding 带精确的 sourceId 和 sourceFilename', async () => {
     const subjectsRepo = await import('@/server/db/repos/subjects-repo');

@@ -75,6 +75,31 @@ function checkBrokenLinks(
   return findings;
 }
 
+/**
+ * 从跨主题全量 link 里收敛出「本 subject 内有入链的 slug」。
+ * 调用方须传入已排除 meta 页出链的 links（`getAllLinks(undefined, getMetaPageKeys())`）——
+ * index 链接全库每一页，算进来会让 orphan 规则直接失效。
+ */
+function collectInboundSlugs(subject: Subject, allLinks: WikiLink[]): Set<string> {
+  const inboundSlugs = new Set<string>();
+  for (const link of allLinks) {
+    if (link.targetSubjectId === subject.id) {
+      inboundSlugs.add(link.targetSlug);
+    }
+  }
+  return inboundSlugs;
+}
+
+/**
+ * 单页版入链判定，与 `checkOrphanPages` 共用 `collectInboundSlugs` 口径，避免两份判定漂移
+ * （范式同 `checkStaleSourcesForPage`）。供 Curate 判断某个 orphan finding 是否真的修好了——
+ * 孤页的修复写的是**源页**，按 `touchedSlugs` 判会永远判成未触达。
+ */
+export function pageHasInboundLinks(subject: Subject, slug: string): boolean {
+  const allLinks = pagesRepo.getAllLinks(undefined, pagesRepo.getMetaPageKeys());
+  return collectInboundSlugs(subject, allLinks).has(slug);
+}
+
 function checkOrphanPages(
   subject: Subject,
   allPages: WikiPage[],
@@ -82,12 +107,7 @@ function checkOrphanPages(
 ): LintFinding[] {
   const findings: LintFinding[] = [];
   // allLinks 为跨主题全量：跨主题入链也算 inbound
-  const inboundSlugs = new Set<string>();
-  for (const link of allLinks) {
-    if (link.targetSubjectId === subject.id) {
-      inboundSlugs.add(link.targetSlug);
-    }
-  }
+  const inboundSlugs = collectInboundSlugs(subject, allLinks);
 
   for (const page of allPages) {
     if (META_PAGE_SLUGS.has(page.slug)) continue;
