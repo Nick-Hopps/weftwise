@@ -171,7 +171,7 @@ describe('runCurateJob (tool-loop)', () => {
     expect(task).toBe('curate');
     expect(Object.keys(opts.tools)).toEqual(expect.arrayContaining([
       'wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read', 'wiki_inspect',
-      'wiki_metadata_patch', 'wiki_link_ensure',
+      'wiki_metadata_patch', 'wiki_link_ensure', 'wiki_patch',
     ]));
     expect(emit).toHaveBeenCalledWith('curate:start', expect.any(String), expect.any(Object));
     expect(emit).toHaveBeenCalledWith('curate:complete', expect.any(String), expect.any(Object));
@@ -266,7 +266,7 @@ describe('runCurateJob (tool-loop)', () => {
     const toolKeys = Object.keys(opts.tools);
     expect(toolKeys).toEqual(expect.arrayContaining([
       'wiki_merge', 'wiki_split', 'wiki_read', 'wiki_inspect',
-      'wiki_metadata_patch', 'wiki_link_ensure',
+      'wiki_metadata_patch', 'wiki_link_ensure', 'wiki_patch',
     ]));
     expect(toolKeys).not.toContain('wiki_create');
     expect(toolKeys).not.toContain('wiki_delete');
