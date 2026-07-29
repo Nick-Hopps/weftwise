@@ -19,6 +19,7 @@ import {
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
+  findFindingJob,
   healthActionButtonState,
   isHealthOriginCurrent,
   nextDeleteArmed,
@@ -950,14 +951,49 @@ describe('Health remediation UI helper', () => {
     expect(selectRecoverableHealthJobs(snapshot, [invalid])['re-ingest']).toBeUndefined();
   });
 
-  it('同 workflow 确定性选择 createdAt 最新、同时间 id 最大的 job', () => {
+  it('同 workflow 保留全部在途 job，按 createdAt 升序、同时间按 id 升序', () => {
+    // 逐条处置后同一 action 可以有多个在途 job（一次点击一个），只留最新一个会让其余
+    // 永远观察不到。顺序取最早优先，与 worker 的 FIFO 执行顺序一致。
     const selected = selectRecoverableHealthJobs(snapshot, [
+      job('fix-c', 'fix', {}, '2026-07-13T02:00:00Z'),
       job('fix-a', 'fix', {}, '2026-07-13T01:00:00Z'),
       job('fix-b', 'fix', {}, '2026-07-13T02:00:00Z'),
-      job('fix-c', 'fix', {}, '2026-07-13T02:00:00Z'),
     ]);
 
-    expect(selected.fix?.map((item) => item.jobId)).toEqual(['fix-c']);
+    expect(selected.fix?.map((item) => item.jobId)).toEqual(['fix-a', 'fix-b', 'fix-c']);
+  });
+
+  it('findFindingJob 定位覆盖某条 finding 的在途 job，终态与其他 action 不命中', () => {
+    const jobs = [
+      job('curate-a', 'curate', {
+        remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-a'], action: 'curate' },
+      }, '2026-07-30T00:00:00.000Z'),
+      {
+        ...job('curate-b', 'curate', {
+          remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-b'], action: 'curate' },
+        }, '2026-07-30T00:01:00.000Z'),
+        status: 'pending' as const,
+      },
+      {
+        ...job('curate-done', 'curate', {
+          remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-c'], action: 'curate' },
+        }, '2026-07-30T00:02:00.000Z'),
+        status: 'completed' as const,
+      },
+    ];
+
+    expect(findFindingJob(jobs, 'curate', 'finding-a')).toEqual({
+      jobId: 'curate-a',
+      status: 'running',
+    });
+    // 排队中的也要能取到 jobId——否则行内 Stop 无法取消尚未开跑的任务。
+    expect(findFindingJob(jobs, 'curate', 'finding-b')).toEqual({
+      jobId: 'curate-b',
+      status: 'pending',
+    });
+    expect(findFindingJob(jobs, 'curate', 'finding-c')).toBeNull();
+    expect(findFindingJob(jobs, 'fix', 'finding-a')).toBeNull();
+    expect(findFindingJob(jobs, 'curate', 'finding-z')).toBeNull();
   });
 
   it('workflow 终态同时失效 lint snapshot 与 active jobs', () => {
