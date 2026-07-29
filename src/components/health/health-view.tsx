@@ -54,7 +54,11 @@ import {
 import {
   activeJobsHydrationBusyActions,
   actionFindingIds,
+  BATCH_TARGET,
   blockingRecoverableActions,
+  coveredFindingIds,
+  EXECUTABLE_REMEDIATION_ACTIONS as EXECUTABLE_ACTIONS,
+  findFindingJob,
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
@@ -71,16 +75,23 @@ import {
   requestHealthJobCancel,
   selectRecoverableHealthJobs,
   summarizeFixOutcomes,
+  rowActionDisabled,
   type ExecutableRemediationAction,
+  type HealthActionButtonState,
   type RecoverableHealthJob,
   type HealthOrigin,
 } from './remediation-ui';
 
 type Scope = 'subject' | 'all';
+
+/** 稳定空集：避免逐行渲染时新建对象。 */
+const EMPTY_COVERED: ReadonlySet<string> = new Set();
 type ResearchOrigin = 'manual' | 'backlog' | 'remediation';
 type ActionJobMeta = {
   jobId: string;
   origin: HealthOrigin;
+  /** 该 job 归属的处置目标（finding ID 或 `BATCH_TARGET`）。 */
+  target: string;
 };
 type ResearchJobMeta = ActionJobMeta & { source: ResearchOrigin };
 type CandidateResult = {
@@ -140,14 +151,22 @@ export function HealthView() {
   const allSubjects = scope === 'all';
   const originSubjectId = subjectId ?? '';
   const [remediationError, setRemediationError] = useState<string | null>(null);
-  const [busyActions, setBusyActions] = useState<Set<ExecutableRemediationAction>>(new Set());
-  const [cancellingActions, setCancellingActions] = useState<Set<ExecutableRemediationAction>>(new Set());
-  const [actingFindingByAction, setActingFindingByAction] = useState<
+  /**
+   * 正在提交中的处置目标，键为 `action\0target`（target = findingId 或 `BATCH_TARGET`）。
+   *
+   * 只覆盖「POST 已发出、active-jobs 还没回来」这个窗口——之后行的禁用与 Stop 一律由
+   * 服务端 active jobs 派生（`coveredFindingIds` / `findFindingJob`），客户端不再自己记账
+   * 谁在跑。这样刷新也不会丢，并且天然按 finding 而非按 action 类型隔离。
+   */
+  const [submittingTargets, setSubmittingTargets] = useState<Set<string>>(new Set());
+  const [cancellingTargets, setCancellingTargets] = useState<Set<string>>(new Set());
+  /** 每个 action 当前被 SSE 观察的那个 job 归属哪个 target（render 需要，故用 state）。 */
+  const [observedTargets, setObservedTargets] = useState<
     Partial<Record<ExecutableRemediationAction, string>>
   >({});
 
   const actionGateRef = useRef(createActionGate());
-  const cancellingActionsRef = useRef<Set<ExecutableRemediationAction>>(new Set());
+  const cancellingTargetsRef = useRef<Set<string>>(new Set());
   const actionJobMetaRef = useRef<Partial<Record<ExecutableRemediationAction, ActionJobMeta>>>({});
   const researchJobMetaRef = useRef<ResearchJobMeta | null>(null);
   const researchFetchJobIdRef = useRef<string | null>(null);
@@ -159,7 +178,7 @@ export function HealthView() {
    * 队列排空前不释放 research 锁。
    */
   const researchQueueRef = useRef<string[]>([]);
-  const lintJobMetaRef = useRef<ActionJobMeta | null>(null);
+  const lintJobMetaRef = useRef<{ jobId: string; origin: HealthOrigin } | null>(null);
   const lintRerunQueueRef = useRef(createLintRerunQueue());
   const researchActionOriginRef = useRef<HealthOrigin | null>(null);
   const researchApprovalAttemptRef = useRef<ResearchApprovalAttempt | null>(null);
@@ -178,7 +197,7 @@ export function HealthView() {
       scope,
     };
     actionGateRef.current.reset();
-    cancellingActionsRef.current.clear();
+    cancellingTargetsRef.current.clear();
     actionJobMetaRef.current = {};
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
@@ -222,21 +241,30 @@ export function HealthView() {
     () => activeJobsHydrationBusyActions(scope, originSubjectId, activeJobsReady),
     [scope, originSubjectId, activeJobsReady],
   );
+  /**
+   * 「这个 action 有东西在跑」——**只用于状态文案与运行态呈现，不用于禁用判定**。
+   *
+   * 禁用一律走目标粒度：行内看 `coveredFindingIds`（服务端事实），工具栏看自己那一批
+   * 的 `submittingTargets` / 观察中的 job。整类禁用是这次要修掉的东西。
+   */
   const workflowBusyActions = useMemo(
-    () => new Set([
+    () => new Set<ExecutableRemediationAction>([
       ...snapshotBusyActions,
       ...blockingRecoverableActions(recoverableJobs),
-      ...busyActions,
+      ...[...submittingTargets].map(
+        (key) => key.split(' ')[0] as ExecutableRemediationAction,
+      ),
     ]),
-    [snapshotBusyActions, recoverableJobs, busyActions],
+    [snapshotBusyActions, recoverableJobs, submittingTargets],
   );
-  const effectiveBusyActions = useMemo(
-    () => new Set([
-      ...hydrationBusyActions,
-      ...workflowBusyActions,
-    ]),
-    [hydrationBusyActions, workflowBusyActions],
-  );
+  /** 每个 action 当前被在途 job 覆盖的 finding（服务端 active jobs 派生）。 */
+  const coveredByAction = useMemo(() => {
+    const map = new Map<ExecutableRemediationAction, Set<string>>();
+    for (const action of EXECUTABLE_ACTIONS) {
+      map.set(action, coveredFindingIds(activeJobs, action));
+    }
+    return map;
+  }, [activeJobs]);
 
   function captureOrigin(): HealthOrigin {
     return { ...originRef.current };
@@ -253,38 +281,69 @@ export function HealthView() {
     }
   }
 
+  function targetKey(action: ExecutableRemediationAction, target: string): string {
+    return `${action} ${target}`;
+  }
+
+  /**
+   * 抢占某个**处置目标**的提交权（防同一目标重复提交），而非整个 action 类型。
+   *
+   * hydration 未就绪时仍整类拒绝：那时还不知道有什么在途，防的是刷新后重复提交。
+   */
   function acquireAction(
     action: ExecutableRemediationAction,
     origin: HealthOrigin,
-    findingId?: string,
+    target: string,
   ): boolean {
-    if (effectiveBusyActions.has(action)) return false;
-    if (!actionGateRef.current.tryAcquire(action, origin)) return false;
-    setBusyActions((current) => new Set(current).add(action));
-    if (findingId) {
-      setActingFindingByAction((current) => ({ ...current, [action]: findingId }));
-    }
+    if (hydrationBusyActions.has(action)) return false;
+    if (!actionGateRef.current.tryAcquire(action, target, origin)) return false;
+    setSubmittingTargets((current) => new Set(current).add(targetKey(action, target)));
     return true;
   }
 
-  function releaseAction(action: ExecutableRemediationAction, origin: HealthOrigin): void {
-    if (!actionGateRef.current.release(action, origin)) return;
-    setBusyActions((current) => {
+  function releaseAction(
+    action: ExecutableRemediationAction,
+    origin: HealthOrigin,
+    target: string,
+  ): void {
+    if (!actionGateRef.current.release(action, target, origin)) return;
+    setSubmittingTargets((current) => {
       const next = new Set(current);
-      next.delete(action);
+      next.delete(targetKey(action, target));
       return next;
     });
-    setActingFindingByAction((current) => {
+  }
+
+  /**
+   * 结算一个观察完的处置 job：清掉观察头与该 target 的取消标记。
+   *
+   * 不释放提交窗口锁——它在 POST 成功、active jobs 刷新后就已经释放，之后的禁用一律
+   * 由服务端在途 job 派生。清空观察头后，恢复 effect 会从新的 active jobs 里挑下一个。
+   */
+  function settleActionJob(
+    action: ExecutableRemediationAction,
+    meta: ActionJobMeta,
+    setJobIdState: (jobId: string | null) => void,
+  ): void {
+    delete actionJobMetaRef.current[action];
+    setObservedTargets((current) => {
       const next = { ...current };
       delete next[action];
       return next;
     });
+    setJobIdState(null);
+    setActionCancelling(action, meta.target, false);
   }
 
-  function setActionCancelling(action: ExecutableRemediationAction, cancelling: boolean): void {
-    if (cancelling) cancellingActionsRef.current.add(action);
-    else cancellingActionsRef.current.delete(action);
-    setCancellingActions(new Set(cancellingActionsRef.current));
+  function setActionCancelling(
+    action: ExecutableRemediationAction,
+    target: string,
+    cancelling: boolean,
+  ): void {
+    const key = targetKey(action, target);
+    if (cancelling) cancellingTargetsRef.current.add(key);
+    else cancellingTargetsRef.current.delete(key);
+    setCancellingTargets(new Set(cancellingTargetsRef.current));
   }
 
   function invalidateOrigin(nextScope: Scope): void {
@@ -295,7 +354,7 @@ export function HealthView() {
     };
     originKeyRef.current = `${originSubjectId}\u0000${nextScope}`;
     actionGateRef.current.reset();
-    cancellingActionsRef.current.clear();
+    cancellingTargetsRef.current.clear();
     actionJobMetaRef.current = {};
     researchJobMetaRef.current = null;
     researchFetchJobIdRef.current = null;
@@ -402,7 +461,12 @@ export function HealthView() {
 
   const [curateJobId, setCurateJobId] = useState<string | null>(null);
   const [curatePostcondition, setCuratePostcondition] = useState<PostconditionReport | null>(null);
-  const { status: curateStatus, events: curateEvents, latestMessage: curateMessage } = useJobStream(curateJobId);
+  const {
+    status: curateStatus,
+    events: curateEvents,
+    latestMessage: curateMessage,
+    reset: resetCurateStream,
+  } = useJobStream(curateJobId);
   const curating = workflowBusyActions.has('curate');
 
   const [fixJobId, setFixJobId] = useState<string | null>(null);
@@ -412,7 +476,12 @@ export function HealthView() {
     failed: number;
   } | null>(null);
   const [fixPostcondition, setFixPostcondition] = useState<PostconditionReport | null>(null);
-  const { status: fixStatus, events: fixEvents, latestMessage: fixMessage } = useJobStream(fixJobId);
+  const {
+    status: fixStatus,
+    events: fixEvents,
+    latestMessage: fixMessage,
+    reset: resetFixStream,
+  } = useJobStream(fixJobId);
   const fixing = workflowBusyActions.has('fix');
 
   useEffect(() => {
@@ -426,17 +495,11 @@ export function HealthView() {
       queryClient.invalidateQueries({ queryKey: ['pages'] });
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
-      delete actionJobMetaRef.current.curate;
-      setCurateJobId(null);
-      setActionCancelling('curate', false);
-      releaseAction('curate', meta.origin);
+      settleActionJob('curate', meta, setCurateJobId);
     } else if (curateStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
-      delete actionJobMetaRef.current.curate;
-      setCurateJobId(null);
-      setActionCancelling('curate', false);
-      releaseAction('curate', meta.origin);
+      settleActionJob('curate', meta, setCurateJobId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [curateStatus, curateEvents, queryClient, allSubjects, subjectId]);
@@ -454,23 +517,17 @@ export function HealthView() {
       queryClient.invalidateQueries({ queryKey: ['pages'] });
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
-      delete actionJobMetaRef.current.fix;
-      setFixJobId(null);
-      setActionCancelling('fix', false);
-      releaseAction('fix', meta.origin);
+      settleActionJob('fix', meta, setFixJobId);
     } else if (fixStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
-      delete actionJobMetaRef.current.fix;
-      setFixJobId(null);
-      setActionCancelling('fix', false);
-      releaseAction('fix', meta.origin);
+      settleActionJob('fix', meta, setFixJobId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fixStatus, fixEvents, queryClient, allSubjects, subjectId]);
 
   const [reingestJobId, setReingestJobId] = useState<string | null>(null);
-  const { status: reingestStatus } = useJobStream(reingestJobId);
+  const { status: reingestStatus, reset: resetReingestStream } = useJobStream(reingestJobId);
 
   // Retry ingest 完成 → 自动重跑体检刷新 findings（与 Fix 闭环一致）；失败则仅停止追踪
   useEffect(() => {
@@ -480,16 +537,12 @@ export function HealthView() {
       queryClient.invalidateQueries({ queryKey: ['pages'] });
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
-      delete actionJobMetaRef.current['re-ingest'];
-      setReingestJobId(null);
-      releaseAction('re-ingest', meta.origin);
+      settleActionJob('re-ingest', meta, setReingestJobId);
       void runLint(meta.origin);
     } else if (reingestStatus === 'failed') {
       settledJobIdsRef.current.add(meta.jobId);
       invalidateWorkflowLifecycle(meta.origin);
-      delete actionJobMetaRef.current['re-ingest'];
-      setReingestJobId(null);
-      releaseAction('re-ingest', meta.origin);
+      settleActionJob('re-ingest', meta, setReingestJobId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reingestStatus, queryClient]);
@@ -553,18 +606,21 @@ export function HealthView() {
       const existing = actionJobMetaRef.current[workflow];
       if (existing?.jobId === candidate.jobId) continue;
 
-      if (!actionGateRef.current.isBusy(workflow)) {
-        actionGateRef.current.tryAcquire(workflow, origin);
-      }
-      setBusyActions((current) => new Set(current).add(workflow));
-      const meta = { jobId: candidate.jobId, origin };
+      // 不再抢锁、不再整类置 busy：提交窗口锁只管 POST 那一瞬间，之后的禁用由
+      // `coveredFindingIds` 按 finding 派生。这里只负责把 SSE 观察头指到队首。
+      const meta = { jobId: candidate.jobId, origin, target: candidate.target };
       actionJobMetaRef.current[workflow] = meta;
+      setObservedTargets((current) => ({ ...current, [workflow]: candidate.target }));
 
       switch (workflow) {
         case 'fix':
+          // 切换观察目标前必须清流：`useJobStream` 在 jobId 变化时不重置 status，
+          // 残留终态会让下一个 job 被立刻误判为已完成（7-27 在 research 上踩过）。
+          resetFixStream();
           setFixJobId(candidate.jobId);
           break;
         case 'curate':
+          resetCurateStream();
           setCurateJobId(candidate.jobId);
           break;
         case 'research':
@@ -572,9 +628,11 @@ export function HealthView() {
           researchFetchJobIdRef.current = null;
           researchQueueRef.current = pending.slice(1).map((item) => item.jobId);
           researchJobMetaRef.current = { ...meta, source: candidate.source };
+          resetResearchStream();
           setResearchJobId(candidate.jobId);
           break;
         case 're-ingest':
+          resetReingestStream();
           setReingestJobId(candidate.jobId);
           break;
       }
@@ -594,7 +652,12 @@ export function HealthView() {
 
     const next = researchQueueRef.current.shift();
     if (next) {
-      const nextMeta = { jobId: next, origin: meta.origin, source: meta.source };
+      const nextMeta = {
+        jobId: next,
+        origin: meta.origin,
+        source: meta.source,
+        target: meta.target,
+      };
       researchJobMetaRef.current = nextMeta;
       actionJobMetaRef.current.research = nextMeta;
       // 必须先清流：`useJobStream` 在 jobId 变化时不会重置 status，残留的上一个主题终态
@@ -606,10 +669,7 @@ export function HealthView() {
     }
 
     researchJobMetaRef.current = null;
-    delete actionJobMetaRef.current.research;
-    setResearchJobId(null);
-    setActionCancelling('research', false);
-    releaseAction('research', meta.origin);
+    settleActionJob('research', meta, setResearchJobId);
   }
 
   useEffect(() => {
@@ -733,11 +793,14 @@ export function HealthView() {
 
   async function startResearch(topic: string, source: Exclude<ResearchOrigin, 'remediation'>): Promise<string | null> {
     const origin = captureOrigin();
-    if (!isCurrentOrigin(origin) || origin.scope !== 'subject' || !acquireAction('research', origin)) {
+    if (
+      !isCurrentOrigin(origin)
+      || origin.scope !== 'subject'
+      || !acquireAction('research', origin, BATCH_TARGET)
+    ) {
       return null;
     }
     setResearchError(null);
-    let accepted = false;
     try {
       const res = await apiFetch('/api/research', {
         method: 'POST',
@@ -748,11 +811,15 @@ export function HealthView() {
       if (res.ok) {
         const json = (await res.json()) as { jobId: string };
         if (!isCurrentOrigin(origin) || !json.jobId) return null;
-        accepted = true;
-        const meta = { jobId: json.jobId, origin, source };
+        const meta = { jobId: json.jobId, origin, source, target: BATCH_TARGET };
         researchJobMetaRef.current = meta;
         actionJobMetaRef.current.research = meta;
+        setObservedTargets((current) => ({ ...current, research: BATCH_TARGET }));
+        resetResearchStream();
         setResearchJobId(json.jobId);
+        await queryClient.invalidateQueries({
+          queryKey: ['health-active-jobs', origin.subjectId],
+        });
         return json.jobId;
       } else {
         const json = (await res.json().catch(() => ({}))) as { error?: string };
@@ -762,7 +829,8 @@ export function HealthView() {
     } catch {
       if (isCurrentOrigin(origin)) setResearchError(t('health.error.researchRetry'));
     } finally {
-      if (!accepted) releaseAction('research', origin);
+      // 提交窗口结束即释放：之后的禁用/Stop 全由服务端在途 job 派生。
+      releaseAction('research', origin, BATCH_TARGET);
     }
     return null;
   }
@@ -775,7 +843,9 @@ export function HealthView() {
     if (!data?.jobId || findingIds.length === 0 || allSubjects) return;
     const origin = captureOrigin();
     const lintJobId = data.jobId;
-    if (!isCurrentOrigin(origin) || !acquireAction(action, origin, actingFindingId)) return;
+    // 逐条点击以 finding 为 target，工具栏批量用哨兵——两者互不占用。
+    const target = actingFindingId ?? BATCH_TARGET;
+    if (!isCurrentOrigin(origin) || !acquireAction(action, origin, target)) return;
 
     setRemediationError(null);
     if (action === 'fix') {
@@ -785,7 +855,6 @@ export function HealthView() {
       setCuratePostcondition(null);
     }
 
-    let accepted = false;
     try {
       const response = await apiFetch('/api/health/remediations', {
         method: 'POST',
@@ -823,47 +892,67 @@ export function HealthView() {
         : [];
       const remediationJobId = remediationJobIds[0];
       if (!isCurrentOrigin(origin) || !remediationJobId) return;
-      accepted = true;
-      const meta = { jobId: remediationJobId, origin };
-      actionJobMetaRef.current[action] = meta;
-      switch (action) {
-        case 'fix':
-          setFixJobId(remediationJobId);
-          break;
-        case 'curate':
-          setCurateJobId(remediationJobId);
-          break;
-        case 'research':
-          researchFetchJobIdRef.current = null;
-          researchQueueRef.current = remediationJobIds.slice(1);
-          researchJobMetaRef.current = { ...meta, source: 'remediation' };
-          setResearchJobId(remediationJobId);
-          break;
-        case 're-ingest':
-          setReingestJobId(remediationJobId);
-          break;
+
+      // 该 action 已有观察头时不抢流：新 job 会由恢复 effect 在队首轮到它时接管，
+      // 否则先点的那个任务会失去进度事件。
+      if (!actionJobMetaRef.current[action]) {
+        const meta = { jobId: remediationJobId, origin, target };
+        actionJobMetaRef.current[action] = meta;
+        setObservedTargets((current) => ({ ...current, [action]: target }));
+        switch (action) {
+          case 'fix':
+            resetFixStream();
+            setFixJobId(remediationJobId);
+            break;
+          case 'curate':
+            resetCurateStream();
+            setCurateJobId(remediationJobId);
+            break;
+          case 'research':
+            researchFetchJobIdRef.current = null;
+            researchQueueRef.current = remediationJobIds.slice(1);
+            researchJobMetaRef.current = { ...meta, source: 'remediation' };
+            resetResearchStream();
+            setResearchJobId(remediationJobId);
+            break;
+          case 're-ingest':
+            resetReingestStream();
+            setReingestJobId(remediationJobId);
+            break;
+        }
       }
       await queryClient.invalidateQueries({ queryKey: ['lint-latest', origin.subjectId] });
+      // 等 active jobs 落地后才松开提交窗口锁：此后该行的禁用由服务端在途 job 派生，
+      // 中间没有「锁已放、事实还没到」的空窗。
+      await queryClient.invalidateQueries({
+        queryKey: ['health-active-jobs', origin.subjectId],
+      });
     } catch {
       if (isCurrentOrigin(origin)) setRemediationError(t('health.error.remediationRetry'));
     } finally {
-      if (!accepted) releaseAction(action, origin);
+      releaseAction(action, origin, target);
     }
   }
 
   async function cancelHealthAction(
-    action: Extract<ExecutableRemediationAction, 'fix' | 'curate' | 'research'>,
+    action: Extract<ExecutableRemediationAction, 'fix' | 'curate' | 'research' | 're-ingest'>,
     jobIdToCancel: string,
+    target: string,
   ) {
     const meta = actionJobMetaRef.current[action];
     const origin = meta?.jobId === jobIdToCancel ? meta.origin : captureOrigin();
-    if (!isCurrentOrigin(origin) || cancellingActionsRef.current.has(action)) return;
+    if (
+      !isCurrentOrigin(origin)
+      || cancellingTargetsRef.current.has(targetKey(action, target))
+    ) return;
 
     setRemediationError(null);
-    setActionCancelling(action, true);
-    // Research 是整批：先清队列再取消，避免 head 终态时又接着观察已取消的主题。
-    const queued = action === 'research' ? researchQueueRef.current : [];
-    if (action === 'research') researchQueueRef.current = [];
+    setActionCancelling(action, target, true);
+    // Research 批量是整批：先清队列再取消，避免 head 终态时又接着观察已取消的主题。
+    // 逐条 Research（target 是 finding）只取消它自己那一个。
+    const wholeBatch = action === 'research' && target === BATCH_TARGET;
+    const queued = wholeBatch ? researchQueueRef.current : [];
+    if (wholeBatch) researchQueueRef.current = [];
     let accepted = false;
     try {
       const results = await Promise.allSettled(
@@ -880,7 +969,7 @@ export function HealthView() {
         );
       }
     } finally {
-      if (!accepted && isCurrentOrigin(origin)) setActionCancelling(action, false);
+      if (!accepted && isCurrentOrigin(origin)) setActionCancelling(action, target, false);
     }
   }
 
@@ -1144,10 +1233,10 @@ export function HealthView() {
     setResearchComposerOpen(false);
     setTopicInput('');
     setRemediationError(null);
-    setBusyActions(new Set());
-    cancellingActionsRef.current.clear();
-    setCancellingActions(new Set());
-    setActingFindingByAction({});
+    setSubmittingTargets(new Set());
+    cancellingTargetsRef.current.clear();
+    setCancellingTargets(new Set());
+    setObservedTargets({});
     setHandledSourceIds(new Set());
     setDeletingSourceIds(new Set());
     setReingestJobId(null);
@@ -1178,21 +1267,39 @@ export function HealthView() {
   // 一个主题一个 job 且 worker 串行执行，一次只提交前 N 条（快照已按严重度排序）。
   const researchBatchIds = researchFindingIds.slice(0, MAX_RESEARCH_BATCH_JOBS);
   const researchDeferredCount = researchFindingIds.length - researchBatchIds.length;
-  const curateButtonState = healthActionButtonState(
-    curating,
-    curateJobId,
-    cancellingActions.has('curate'),
-  );
-  const fixButtonState = healthActionButtonState(
-    fixing,
-    fixJobId,
-    cancellingActions.has('fix'),
-  );
-  const researchButtonState = healthActionButtonState(
-    researching,
-    researchJobId,
-    cancellingActions.has('research'),
-  );
+  /**
+   * 工具栏批量按钮的状态**只看自己那一批**（`BATCH_TARGET`）。
+   *
+   * 逐条行点出来的 job 不会让它变 starting/running，也不会禁用它——那正是这次修掉的
+   * 整类阻塞。行内 job 的进度仍在下方活动文案里体现（`curating`/`fixing`/`researching`）。
+   */
+  function batchState(
+    action: ExecutableRemediationAction,
+    observedJobId: string | null,
+  ): HealthActionButtonState {
+    const mine = observedTargets[action] === BATCH_TARGET;
+    const busy = submittingTargets.has(targetKey(action, BATCH_TARGET)) || mine;
+    return healthActionButtonState(
+      busy,
+      mine ? observedJobId : null,
+      cancellingTargets.has(targetKey(action, BATCH_TARGET)),
+    );
+  }
+  /** 批量按钮 idle 态的禁用集：hydration 未就绪，或自己那一批已在途。 */
+  const batchBusyActions = useMemo(() => {
+    const set = new Set<ExecutableRemediationAction>(hydrationBusyActions);
+    for (const action of EXECUTABLE_ACTIONS) {
+      if (
+        submittingTargets.has(targetKey(action, BATCH_TARGET))
+        || observedTargets[action] === BATCH_TARGET
+      ) set.add(action);
+    }
+    return set;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrationBusyActions, submittingTargets, observedTargets]);
+  const curateButtonState = batchState('curate', curateJobId);
+  const fixButtonState = batchState('fix', fixJobId);
+  const researchButtonState = batchState('research', researchJobId);
   const recentOutcomeSummary = useMemo(
     () => data
       ? recentOutcomeCounts(data)
@@ -1351,14 +1458,14 @@ export function HealthView() {
               <Button
                 intent={curateButtonState === 'running' || curateButtonState === 'cancelling' ? 'danger' : 'outline'}
                 onClick={() => curateJobId && curateButtonState !== 'idle'
-                  ? void cancelHealthAction('curate', curateJobId)
+                  ? void cancelHealthAction('curate', curateJobId, BATCH_TARGET)
                   : void runRemediation('curate', curateFindingIds)}
                 loading={curateButtonState === 'starting' || curateButtonState === 'cancelling'}
                 disabled={curateButtonState === 'idle' && remediationButtonDisabled({
                   neverRun,
                   targetCount: curateFindingIds.length,
                   action: 'curate',
-                  busyActions: effectiveBusyActions,
+                  busyActions: batchBusyActions,
                   lintRunning: running,
                 })}
                 title={curateButtonState === 'idle' ? t('health.curate') : t('jobs.stop')}
@@ -1372,14 +1479,14 @@ export function HealthView() {
               <Button
                 intent={fixButtonState === 'running' || fixButtonState === 'cancelling' ? 'danger' : 'outline'}
                 onClick={() => fixJobId && fixButtonState !== 'idle'
-                  ? void cancelHealthAction('fix', fixJobId)
+                  ? void cancelHealthAction('fix', fixJobId, BATCH_TARGET)
                   : void runRemediation('fix', fixFindingIds)}
                 loading={fixButtonState === 'starting' || fixButtonState === 'cancelling'}
                 disabled={fixButtonState === 'idle' && remediationButtonDisabled({
                   neverRun,
                   targetCount: fixFindingIds.length,
                   action: 'fix',
-                  busyActions: effectiveBusyActions,
+                  busyActions: batchBusyActions,
                   lintRunning: running,
                 })}
                 title={fixButtonState === 'idle' ? t('health.fix') : t('jobs.stop')}
@@ -1393,14 +1500,14 @@ export function HealthView() {
               <Button
                 intent={researchButtonState === 'running' || researchButtonState === 'cancelling' ? 'danger' : 'outline'}
                 onClick={() => researchJobId && researchButtonState !== 'idle'
-                  ? void cancelHealthAction('research', researchJobId)
+                  ? void cancelHealthAction('research', researchJobId, BATCH_TARGET)
                   : void runRemediation('research', researchBatchIds)}
                 loading={researchButtonState === 'starting' || researchButtonState === 'cancelling'}
                 disabled={researchButtonState === 'idle' && remediationButtonDisabled({
                   neverRun,
                   targetCount: researchBatchIds.length,
                   action: 'research',
-                  busyActions: effectiveBusyActions,
+                  busyActions: batchBusyActions,
                   lintRunning: running,
                 })}
                 title={researchButtonState !== 'idle'
@@ -1435,7 +1542,7 @@ export function HealthView() {
             onKeyDown={blockImeEnterSubmit}
             onSubmit={(event) => {
               event.preventDefault();
-              if (effectiveBusyActions.has('research')) return;
+              if (batchBusyActions.has('research')) return;
               const topic = topicInput.trim();
               if (!topic) return;
               void startResearch(topic, 'manual');
@@ -1453,7 +1560,7 @@ export function HealthView() {
               intent="secondary"
               type="submit"
               loading={researching}
-              disabled={effectiveBusyActions.has('research') || !topicInput.trim()}
+              disabled={batchBusyActions.has('research') || !topicInput.trim()}
             >
               {!researching && <Search className="h-3.5 w-3.5" />}
               {t('health.action.startResearch')}
@@ -1593,13 +1700,37 @@ export function HealthView() {
                     <div className="divide-y divide-border-subtle border-y border-border-subtle bg-surface">
                       {group.findings.map((finding) => {
                         const plan = data?.remediations[finding.id];
+                        // 提交中（POST 未回）→ 本行该动作转 loading。
                         const actingActions = new Set(
-                          (Object.entries(actingFindingByAction) as Array<
-                            [ExecutableRemediationAction, string]
-                          >)
-                            .filter(([, findingId]) => findingId === finding.id)
-                            .map(([action]) => action),
+                          EXECUTABLE_ACTIONS.filter(
+                            (action) => submittingTargets.has(targetKey(action, finding.id)),
+                          ),
                         );
+                        // 禁用只看本行：被在途 job 覆盖，或 hydration 未就绪，或正在提交。
+                        const rowDisabled = new Set(
+                          EXECUTABLE_ACTIONS.filter((action) => rowActionDisabled({
+                            findingId: finding.id,
+                            action,
+                            coveredIds: coveredByAction.get(action) ?? EMPTY_COVERED,
+                            hydrationBusy: hydrationBusyActions,
+                          }) || submittingTargets.has(targetKey(action, finding.id))),
+                        );
+                        // 本行是否有在途 job（含 pending，排队中也要能 Stop）。
+                        const rowRunning = allSubjects ? undefined : (() => {
+                          for (const item of plan?.actions ?? []) {
+                            if (item.type === 'review-source') continue;
+                            const found = findFindingJob(activeJobs, item.type, finding.id);
+                            if (!found) continue;
+                            return {
+                              type: item.type,
+                              jobId: found.jobId,
+                              cancelling: cancellingTargets.has(
+                                targetKey(item.type, finding.id),
+                              ),
+                            };
+                          }
+                          return undefined;
+                        })();
                         const deleting = finding.sourceId
                           ? deletingSourceIds.has(finding.sourceId)
                           : false;
@@ -1611,7 +1742,15 @@ export function HealthView() {
                             showSubject={allSubjects}
                             acting={actingActions}
                             deleting={deleting}
-                            busyActions={effectiveBusyActions}
+                            disabledActions={rowDisabled}
+                            runningAction={rowRunning}
+                            onStop={!allSubjects && rowRunning ? (jobIdToCancel) => {
+                              void cancelHealthAction(
+                                rowRunning.type,
+                                jobIdToCancel,
+                                finding.id,
+                              );
+                            } : undefined}
                             onAction={!allSubjects ? (action) => {
                               if (action.type !== 'review-source') {
                                 void runRemediation(action.type, [finding.id], finding.id);
@@ -1638,7 +1777,7 @@ export function HealthView() {
       {!allSubjects && (
         <div className="mt-10 border-t border-border pt-7">
           <ResearchBacklogSection
-            researchBusy={effectiveBusyActions.has('research')}
+            researchBusy={batchBusyActions.has('research')}
             onResearch={(topic) => startResearch(topic, 'backlog')}
           />
         </div>

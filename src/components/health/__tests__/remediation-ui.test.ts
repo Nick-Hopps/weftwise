@@ -13,10 +13,13 @@ import {
   activeJobsHydrationBusyActions,
   actionFindingIds,
   actionForFinding,
+  BATCH_TARGET,
   blockingRecoverableActions,
+  coveredFindingIds,
   createActionGate,
   createLintRerunQueue,
   fetchActiveHealthJobs,
+  findFindingJob,
   healthActionButtonState,
   isHealthOriginCurrent,
   nextDeleteArmed,
@@ -27,6 +30,8 @@ import {
   recentOutcomeCounts,
   remediationButtonDisabled,
   persistedBusyActions,
+  readStrictRemediationContext,
+  rowActionDisabled,
   healthTerminalInvalidationKeys,
   selectRecoverableHealthJobs,
   researchBacklogPatchBody,
@@ -246,17 +251,41 @@ describe('Health remediation UI helper', () => {
     });
   });
 
-  it('动作门同步阻止同 action 重入，同时允许不同 action 并发', () => {
+  it('动作门同步阻止同 action 同 target 重入，同时允许不同 action 并发', () => {
     const gate = createActionGate();
     const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
 
-    expect(gate.tryAcquire('research', origin)).toBe(true);
-    expect(gate.tryAcquire('research', origin)).toBe(false);
-    expect(gate.tryAcquire('fix', origin)).toBe(true);
-    expect(gate.isBusy('research')).toBe(true);
-    expect(gate.release('research', { ...origin, generation: 0 })).toBe(false);
-    expect(gate.release('research', origin)).toBe(true);
-    expect(gate.isBusy('research')).toBe(false);
+    expect(gate.tryAcquire('research', BATCH_TARGET, origin)).toBe(true);
+    expect(gate.tryAcquire('research', BATCH_TARGET, origin)).toBe(false);
+    expect(gate.tryAcquire('fix', BATCH_TARGET, origin)).toBe(true);
+    expect(gate.isBusy('research', BATCH_TARGET)).toBe(true);
+    expect(gate.release('research', BATCH_TARGET, { ...origin, generation: 0 })).toBe(false);
+    expect(gate.release('research', BATCH_TARGET, origin)).toBe(true);
+    expect(gate.isBusy('research', BATCH_TARGET)).toBe(false);
+  });
+
+  it('动作门允许同 action 不同 target 并发，批量哨兵与逐条目标互不占用', () => {
+    const gate = createActionGate();
+    const origin = { generation: 1, subjectId: 'subject-1', scope: 'subject' as const };
+
+    // 本次修复的核心断言：同一个 action 上，不同 finding 各自持锁。
+    expect(gate.tryAcquire('curate', 'finding-a', origin)).toBe(true);
+    expect(gate.tryAcquire('curate', 'finding-b', origin)).toBe(true);
+    expect(gate.tryAcquire('curate', 'finding-a', origin)).toBe(false);
+    expect(gate.isBusy('curate', 'finding-b')).toBe(true);
+    expect(gate.isBusy('curate', 'finding-c')).toBe(false);
+
+    // 工具栏批量与逐条是不同 target，不该互相占用。
+    expect(gate.tryAcquire('curate', BATCH_TARGET, origin)).toBe(true);
+
+    gate.release('curate', 'finding-a', origin);
+    expect(gate.isBusy('curate', 'finding-a')).toBe(false);
+    expect(gate.isBusy('curate', 'finding-b')).toBe(true);
+    expect(gate.isBusy('curate', BATCH_TARGET)).toBe(true);
+
+    gate.reset();
+    expect(gate.isBusy('curate', 'finding-b')).toBe(false);
+    expect(gate.isBusy('curate', BATCH_TARGET)).toBe(false);
   });
 
   it('origin 必须同时匹配 generation、subject 与 scope', () => {
@@ -427,6 +456,122 @@ describe('Health remediation UI helper', () => {
     expect(jobs.map((item) => item.id)).toEqual(['pending-job', 'running-job']);
   });
 
+  it('readStrictRemediationContext 返回已校验的 findingIds，不再校验完就丢', () => {
+    expect(readStrictRemediationContext(JSON.stringify({
+      subjectId: 'subject-1',
+      remediationContext: {
+        lintJobId: 'lint-1',
+        findingIds: ['a'.repeat(64), 'b'.repeat(64)],
+        action: 'curate',
+      },
+    }))).toEqual({
+      action: 'curate',
+      lintJobId: 'lint-1',
+      findingIds: ['a'.repeat(64), 'b'.repeat(64)],
+    });
+  });
+
+  it('readStrictRemediationContext 对残缺 context 继续 fail closed', () => {
+    const cases: unknown[] = [
+      { remediationContext: { lintJobId: 'lint-1', findingIds: [], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', findingIds: ['ok', 7], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', findingIds: ['ok', ''], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', action: 'fix' } },
+      { remediationContext: { lintJobId: '', findingIds: ['ok'], action: 'fix' } },
+      { remediationContext: { lintJobId: 'lint-1', findingIds: ['ok'], action: 'reshape' } },
+      { subjectId: 'subject-1' },
+    ];
+
+    for (const params of cases) {
+      expect(readStrictRemediationContext(JSON.stringify(params))).toBeNull();
+    }
+    expect(readStrictRemediationContext('not json')).toBeNull();
+  });
+
+  it('coveredFindingIds 只覆盖各 job 自己 context 里的 finding，同类不同目标互不牵连', () => {
+    const jobs = [
+      job('curate-a', 'curate', {
+        remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-a'], action: 'curate' },
+      }, '2026-07-30T00:00:00.000Z'),
+      job('curate-b', 'curate', {
+        remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-b'], action: 'curate' },
+      }, '2026-07-30T00:01:00.000Z'),
+    ];
+
+    const covered = coveredFindingIds(jobs, 'curate');
+    expect(covered.has('finding-a')).toBe(true);
+    expect(covered.has('finding-b')).toBe(true);
+    // 本次修复的核心断言：第三条 finding 不因为别人在跑而被覆盖。
+    expect(covered.has('finding-c')).toBe(false);
+  });
+
+  it('coveredFindingIds 覆盖批量 job 的全部 finding，批外条目不受影响', () => {
+    const jobs = [
+      job('curate-batch', 'curate', {
+        remediationContext: {
+          lintJobId: 'lint-1',
+          findingIds: ['finding-a', 'finding-b', 'finding-c'],
+          action: 'curate',
+        },
+      }, '2026-07-30T00:00:00.000Z'),
+    ];
+
+    const covered = coveredFindingIds(jobs, 'curate');
+    expect([...covered].sort()).toEqual(['finding-a', 'finding-b', 'finding-c']);
+    expect(covered.has('finding-d')).toBe(false);
+  });
+
+  it('coveredFindingIds 忽略终态 job、无 context 的 manual job 与其他 action', () => {
+    const context = (action: string) => ({
+      remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-a'], action },
+    });
+    const terminal = {
+      ...job('done', 'curate', context('curate'), '2026-07-30T00:00:00.000Z'),
+      status: 'completed' as const,
+    };
+    const manual = job('manual', 'curate', { subjectId: 'subject-1' }, '2026-07-30T00:00:00.000Z');
+    const otherAction = job('fix-job', 'fix', context('fix'), '2026-07-30T00:00:00.000Z');
+
+    expect(coveredFindingIds([terminal], 'curate').size).toBe(0);
+    expect(coveredFindingIds([manual], 'curate').size).toBe(0);
+    expect(coveredFindingIds([otherAction], 'curate').size).toBe(0);
+    expect(coveredFindingIds([otherAction], 'fix').has('finding-a')).toBe(true);
+  });
+
+  it('coveredFindingIds 把带 re-ingest context 的 ingest job 归到 re-ingest', () => {
+    const reingest = job('ingest-job', 'ingest', {
+      remediationContext: {
+        lintJobId: 'lint-1',
+        findingIds: ['finding-source'],
+        action: 're-ingest',
+      },
+    }, '2026-07-30T00:00:00.000Z');
+
+    expect(coveredFindingIds([reingest], 're-ingest').has('finding-source')).toBe(true);
+    // 普通 Ingest（无 context）不该让任何行禁用。
+    const plainIngest = job('plain', 'ingest', { sourceId: 's1' }, '2026-07-30T00:00:00.000Z');
+    expect(coveredFindingIds([plainIngest], 're-ingest').size).toBe(0);
+  });
+
+  it('rowActionDisabled 只看本行是否被覆盖，hydration 门仍整类禁用', () => {
+    const covered = new Set(['finding-a']);
+    const idle = new Set<ExecutableRemediationAction>();
+
+    expect(rowActionDisabled({
+      findingId: 'finding-a', action: 'curate', coveredIds: covered, hydrationBusy: idle,
+    })).toBe(true);
+    expect(rowActionDisabled({
+      findingId: 'finding-b', action: 'curate', coveredIds: covered, hydrationBusy: idle,
+    })).toBe(false);
+    // hydration 未就绪时防重复提交优先，与 covered 无关（spec C4 零回归）。
+    expect(rowActionDisabled({
+      findingId: 'finding-b',
+      action: 'curate',
+      coveredIds: covered,
+      hydrationBusy: new Set<ExecutableRemediationAction>(['curate']),
+    })).toBe(true);
+  });
+
   it('Delete 在途时禁用同一行的 Re-ingest action', () => {
     const orphanSource = {
       ...finding('source', 'orphan-source'),
@@ -448,6 +593,62 @@ describe('Health remediation UI helper', () => {
     }));
 
     expect(html).toContain('<button disabled="">Retry ingest</button>');
+  });
+
+  it('FindingRow 只看本行的 disabledActions，别的 finding 在跑不再牵连本行', () => {
+    const tidyPlan: RemediationPlan = {
+      findingId: readonly.id,
+      workflow: 'curate',
+      status: 'queued',
+      actions: [{ type: 'curate', label: 'Tidy', destructive: false }],
+      reason: '整理结构',
+    };
+
+    // 父级已按 finding 算过：本行没被任何在途 job 覆盖 → 可点。
+    expect(renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      disabledActions: new Set<ExecutableRemediationAction>(),
+      onAction: () => undefined,
+    }))).toContain('<button>Curate page</button>');
+
+    // 本行确实被覆盖时才禁用。
+    expect(renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      disabledActions: new Set<ExecutableRemediationAction>(['curate']),
+      onAction: () => undefined,
+    }))).toContain('<button disabled="">Curate page</button>');
+  });
+
+  it('FindingRow 在本行动作运行中时原位切为 Stop，其他动作运行中不影响本行标签', () => {
+    const tidyPlan: RemediationPlan = {
+      findingId: readonly.id,
+      workflow: 'curate',
+      status: 'queued',
+      actions: [{ type: 'curate', label: 'Tidy', destructive: false }],
+      reason: '整理结构',
+    };
+
+    const running = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      runningAction: { type: 'curate', jobId: 'curate-job-1' },
+      onAction: () => undefined,
+      onStop: () => undefined,
+    }));
+    expect(running).toContain('Stop job');
+    expect(running).not.toContain('Curate page');
+
+    const otherRunning = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      runningAction: { type: 'fix', jobId: 'fix-job-1' },
+      onAction: () => undefined,
+      onStop: () => undefined,
+    }));
+    expect(otherRunning).toContain('Curate page');
+    expect(otherRunning).not.toContain('Stop job');
   });
 
   it('awaiting-approval 且带 runId 时行内渲染 Review candidates，并取代重复的 Research 按钮', () => {
@@ -728,6 +929,7 @@ describe('Health remediation UI helper', () => {
         source: 'remediation',
         createdAt: '2026-07-21T00:00:00.000Z',
         blocksAction: true,
+        target: 'finding-1',
       }],
       research: [{
         jobId: 'research-completed',
@@ -735,6 +937,7 @@ describe('Health remediation UI helper', () => {
         source: 'remediation',
         createdAt: '2026-07-21T00:00:00.000Z',
         blocksAction: false,
+        target: BATCH_TARGET,
       }],
     })]).toEqual(['fix']);
   });
@@ -750,14 +953,49 @@ describe('Health remediation UI helper', () => {
     expect(selectRecoverableHealthJobs(snapshot, [invalid])['re-ingest']).toBeUndefined();
   });
 
-  it('同 workflow 确定性选择 createdAt 最新、同时间 id 最大的 job', () => {
+  it('同 workflow 保留全部在途 job，按 createdAt 升序、同时间按 id 升序', () => {
+    // 逐条处置后同一 action 可以有多个在途 job（一次点击一个），只留最新一个会让其余
+    // 永远观察不到。顺序取最早优先，与 worker 的 FIFO 执行顺序一致。
     const selected = selectRecoverableHealthJobs(snapshot, [
+      job('fix-c', 'fix', {}, '2026-07-13T02:00:00Z'),
       job('fix-a', 'fix', {}, '2026-07-13T01:00:00Z'),
       job('fix-b', 'fix', {}, '2026-07-13T02:00:00Z'),
-      job('fix-c', 'fix', {}, '2026-07-13T02:00:00Z'),
     ]);
 
-    expect(selected.fix?.map((item) => item.jobId)).toEqual(['fix-c']);
+    expect(selected.fix?.map((item) => item.jobId)).toEqual(['fix-a', 'fix-b', 'fix-c']);
+  });
+
+  it('findFindingJob 定位覆盖某条 finding 的在途 job，终态与其他 action 不命中', () => {
+    const jobs = [
+      job('curate-a', 'curate', {
+        remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-a'], action: 'curate' },
+      }, '2026-07-30T00:00:00.000Z'),
+      {
+        ...job('curate-b', 'curate', {
+          remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-b'], action: 'curate' },
+        }, '2026-07-30T00:01:00.000Z'),
+        status: 'pending' as const,
+      },
+      {
+        ...job('curate-done', 'curate', {
+          remediationContext: { lintJobId: 'lint-1', findingIds: ['finding-c'], action: 'curate' },
+        }, '2026-07-30T00:02:00.000Z'),
+        status: 'completed' as const,
+      },
+    ];
+
+    expect(findFindingJob(jobs, 'curate', 'finding-a')).toEqual({
+      jobId: 'curate-a',
+      status: 'running',
+    });
+    // 排队中的也要能取到 jobId——否则行内 Stop 无法取消尚未开跑的任务。
+    expect(findFindingJob(jobs, 'curate', 'finding-b')).toEqual({
+      jobId: 'curate-b',
+      status: 'pending',
+    });
+    expect(findFindingJob(jobs, 'curate', 'finding-c')).toBeNull();
+    expect(findFindingJob(jobs, 'fix', 'finding-a')).toBeNull();
+    expect(findFindingJob(jobs, 'curate', 'finding-z')).toBeNull();
   });
 
   it('workflow 终态同时失效 lint snapshot 与 active jobs', () => {

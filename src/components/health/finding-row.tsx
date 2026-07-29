@@ -11,6 +11,7 @@ import {
   FileWarning,
   FileX,
   Link2,
+  Square,
   Trash2,
   Unlink,
   Unplug,
@@ -109,8 +110,10 @@ export function FindingRow({
   showSubject = false,
   acting = NO_ACTING_ACTIONS,
   deleting = false,
-  busyActions,
+  disabledActions,
+  runningAction,
   onAction,
+  onStop,
   onReviewRun,
   onDeleteSource,
 }: {
@@ -119,8 +122,21 @@ export function FindingRow({
   showSubject?: boolean;
   acting?: ReadonlySet<ExecutableRemediationAction>;
   deleting?: boolean;
-  busyActions?: ReadonlySet<ExecutableRemediationAction>;
+  /**
+   * **本行**不可点的动作，由父级按 finding 算好（`rowActionDisabled`）。
+   *
+   * 不是「哪些 action 类型在忙」——那会让点了一条之后同类的其余行一起变灰，
+   * 而服务端本就为每条 finding 建独立 job 并串行执行。
+   */
+  disabledActions?: ReadonlySet<ExecutableRemediationAction>;
+  /** 本行某个动作正在跑时原位切为 Stop；`cancelling` 表示取消请求已在途。 */
+  runningAction?: {
+    type: ExecutableRemediationAction;
+    jobId: string;
+    cancelling?: boolean;
+  };
   onAction?: (action: RemediationAction) => void;
+  onStop?: (jobId: string) => void;
   /** 只有可执行视图会挂：打开该 finding 自己的 Research 候选审批。 */
   onReviewRun?: (runId: string) => void;
   onDeleteSource?: () => void;
@@ -131,7 +147,7 @@ export function FindingRow({
   const Icon = TYPE_ICON[finding.type];
   const href = findingHref(finding);
   const planActionBusy = plan?.actions.some(
-    (action) => action.type !== 'review-source' && busyActions?.has(action.type),
+    (action) => action.type !== 'review-source' && disabledActions?.has(action.type),
   ) ?? false;
   const hasDetails = Boolean(finding.suggestedFix || plan?.reason);
   // 待审批的 Research 有自己的 run 时，行内入口取代重复的「再研究一次」按钮。
@@ -243,6 +259,21 @@ export function FindingRow({
                 >
                   {t(ACTION_LABEL[item.type])}
                 </Link>
+              ) : item.type !== 'review-source'
+                && runningAction?.type === item.type
+                && onStop ? (
+                <Button
+                  key={item.type}
+                  intent="danger"
+                  size="sm"
+                  loading={runningAction.cancelling}
+                  disabled={deleting || runningAction.cancelling}
+                  title={t('jobs.stop')}
+                  onClick={() => onStop(runningAction.jobId)}
+                >
+                  {!runningAction.cancelling && <Square className="h-3 w-3" aria-hidden />}
+                  {t('jobs.stop')}
+                </Button>
               ) : (
                 <Button
                   key={item.type}
@@ -251,7 +282,7 @@ export function FindingRow({
                   loading={item.type !== 'review-source' && acting.has(item.type)}
                   disabled={
                     deleting
-                    || (item.type !== 'review-source' && busyActions?.has(item.type))
+                    || (item.type !== 'review-source' && disabledActions?.has(item.type))
                   }
                   onClick={() => {
                     setDeleteArmed((current) => nextDeleteArmed(current, 'action'));
