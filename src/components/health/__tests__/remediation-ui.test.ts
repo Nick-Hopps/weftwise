@@ -929,6 +929,7 @@ describe('Health remediation UI helper', () => {
         source: 'remediation',
         createdAt: '2026-07-21T00:00:00.000Z',
         blocksAction: true,
+        target: 'finding-1',
       }],
       research: [{
         jobId: 'research-completed',
@@ -936,6 +937,7 @@ describe('Health remediation UI helper', () => {
         source: 'remediation',
         createdAt: '2026-07-21T00:00:00.000Z',
         blocksAction: false,
+        target: BATCH_TARGET,
       }],
     })]).toEqual(['fix']);
   });
