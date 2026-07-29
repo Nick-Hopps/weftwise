@@ -31,6 +31,7 @@ import type {
 import { verifyJobPostconditions } from './postcondition-service';
 import { readRemediationContext } from './remediation-context';
 import { selectLatestFindings } from './lint-latest';
+import { pageHasInboundLinks } from './lint-deterministic';
 
 /** 工具循环最大步数（bound 读取轮次；写次数由 guard caps 真正兜底）。 */
 export const CURATE_MAX_STEPS = 40;
@@ -71,6 +72,8 @@ async function completeCurate(
   const perFindingOutcomes = buildCuratePerFindingOutcomes(
     worklist,
     postcondition,
+    // 后置校验之后现场重查，读到的是本次写入落盘并 reindex 之后的事实
+    (slug) => pageHasInboundLinks(subject, slug),
   );
   const result = {
     ...totals,
@@ -122,10 +125,18 @@ function resolveCurateWorklist(
   return worklist;
 }
 
-/** 按 residual 的 pageSlug / relatedSlugs 将 Curate 批次结果归因到原 orphan。 */
+/**
+ * 按 residual 的 pageSlug / relatedSlugs 将 Curate 批次结果归因到原 orphan。
+ *
+ * `fixed` 的判据是**孤页现在是否真有非 meta 入链**（`hasInbound`），不是「孤页有没有被写过」——
+ * 孤页的修复天然写在**源页**上，孤页自己永远不会出现在 `postcondition.scope.touchedSlugs` 里，
+ * 按 touchedSlugs 判会让补链成功也被记成 skipped。这个判据也更强：它验的是问题本身没了。
+ * `failed` 的三条既有路径（校验异常 / 未归因 residual / 命中 residual）优先级不变，仍然最保守。
+ */
 function buildCuratePerFindingOutcomes(
   worklist: EnrichedLintFinding[],
   postcondition: PostconditionReport,
+  hasInbound: (slug: string) => boolean,
 ): Record<string, CurateFindingOutcome> {
   const outcomes: Record<string, CurateFindingOutcome> = {};
   if (worklist.length === 0) return outcomes;
@@ -137,13 +148,6 @@ function buildCuratePerFindingOutcomes(
     );
   const failedIds = new Set<string>();
   let hasUnattributedResidual = false;
-  const touchedSlugs = postcondition.scope.touchedSlugs.length > 0
-    ? new Set(postcondition.scope.touchedSlugs)
-    : new Set([
-      ...postcondition.scope.createdSlugs,
-      ...postcondition.scope.updatedSlugs,
-      ...postcondition.scope.deletedSlugs,
-    ]);
 
   if (!allFailed) {
     for (const residual of postcondition.residualFindings) {
@@ -163,7 +167,7 @@ function buildCuratePerFindingOutcomes(
   for (const finding of worklist) {
     if (allFailed || hasUnattributedResidual || failedIds.has(finding.id)) {
       outcomes[finding.id] = 'failed';
-    } else if (!touchedSlugs.has(finding.pageSlug)) {
+    } else if (!hasInbound(finding.pageSlug)) {
       outcomes[finding.id] = 'skipped';
     } else {
       outcomes[finding.id] = 'fixed';

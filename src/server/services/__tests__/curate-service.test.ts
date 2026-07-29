@@ -62,6 +62,9 @@ vi.mock('@/server/wiki/page-ops', () => pageOpsMock);
 vi.mock('@/server/search/hybrid-retrieval', () => ({ hybridRankSlugs: vi.fn(async () => []) }));
 const postconditionMock = vi.hoisted(() => ({ verifyJobPostconditions: vi.fn() }));
 vi.mock('@/server/services/postcondition-service', () => postconditionMock);
+// orphan 归因改按「当前是否有非 meta 入链」判定，不再按 touchedSlugs
+const lintDetMock = vi.hoisted(() => ({ pageHasInboundLinks: vi.fn(() => false) }));
+vi.mock('@/server/services/lint-deterministic', () => lintDetMock);
 
 import { runCurateJob } from '../curate-service';
 import { identifyFindings } from '../finding-identity';
@@ -152,6 +155,8 @@ describe('runCurateJob (tool-loop)', () => {
     queueMock.isCancelRequested.mockReturnValue(false);
     postconditionMock.verifyJobPostconditions.mockReset();
     postconditionMock.verifyJobPostconditions.mockResolvedValue(cleanReport);
+    lintDetMock.pageHasInboundLinks.mockReset();
+    lintDetMock.pageHasInboundLinks.mockReturnValue(false);
   });
   it('manual：驱动 generateTextWithTools(curate) + emit start/complete', async () => {
     const emit = vi.fn();
@@ -379,6 +384,7 @@ describe('runCurateJob (tool-loop)', () => {
         description: 'B 仍没有入链',
       }],
     });
+    lintDetMock.pageHasInboundLinks.mockImplementation((_s: unknown, slug: string) => slug === 'a');
 
     const result = await runCurateJob(job({
       scope: 'pages',
@@ -415,6 +421,7 @@ describe('runCurateJob (tool-loop)', () => {
         description: '关联页仍异常',
       }],
     });
+    lintDetMock.pageHasInboundLinks.mockImplementation((_s: unknown, slug: string) => slug === 'a');
 
     const result = await runCurateJob(job({
       scope: 'pages',
@@ -506,11 +513,11 @@ describe('runCurateJob (tool-loop)', () => {
     });
   });
 
-  it('批量 Curate 只有实际触达页为 fixed，未触达 orphan 为 skipped', async () => {
-    const touched = orphan('a');
-    const untouched = orphan('b');
-    const context = remediationContext([touched, untouched]);
-    queueMock.get.mockReturnValueOnce(lintJob([touched, untouched]));
+  it('批量 Curate 按当前入链事实归因：有入链为 fixed，仍无入链为 skipped', async () => {
+    const linked = orphan('a');
+    const stillOrphan = orphan('b');
+    const context = remediationContext([linked, stillOrphan]);
+    queueMock.get.mockReturnValueOnce(lintJob([linked, stillOrphan]));
     postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
       ...cleanReport,
       scope: {
@@ -519,6 +526,7 @@ describe('runCurateJob (tool-loop)', () => {
         touchedSlugs: ['a'],
       },
     });
+    lintDetMock.pageHasInboundLinks.mockImplementation((_s: unknown, slug: string) => slug === 'a');
 
     const result = await runCurateJob(job({
       scope: 'pages',
@@ -528,9 +536,61 @@ describe('runCurateJob (tool-loop)', () => {
     }), vi.fn());
 
     expect(result.perFindingOutcomes).toEqual({
-      [touched.id]: 'fixed',
-      [untouched.id]: 'skipped',
+      [linked.id]: 'fixed',
+      [stillOrphan.id]: 'skipped',
     });
+  });
+
+  it('写的是源页、孤页自己未被 touch，但孤页已获入链时判 fixed', async () => {
+    // 孤页的修复天然写在**别的页**上，按 touchedSlugs 判会永远判成未触达
+    const target = orphan('mongol-empire');
+    const context = remediationContext([target]);
+    queueMock.get.mockReturnValueOnce(lintJob([target]));
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+      ...cleanReport,
+      scope: {
+        ...cleanReport.scope,
+        updatedSlugs: ['global-history-from-states-to-modernity'],
+        touchedSlugs: ['global-history-from-states-to-modernity'],
+      },
+    });
+    lintDetMock.pageHasInboundLinks.mockReturnValue(true);
+
+    const result = await runCurateJob(job({
+      scope: 'pages',
+      slugs: ['mongol-empire'],
+      subjectId: 's1',
+      remediationContext: context,
+    }), vi.fn());
+
+    expect(result.perFindingOutcomes).toEqual({ [target.id]: 'fixed' });
+  });
+
+  it('孤页已获入链但后置 residual 命中它时仍判 failed（保守优先）', async () => {
+    const target = orphan('a');
+    const context = remediationContext([target]);
+    queueMock.get.mockReturnValueOnce(lintJob([target]));
+    postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+      ...cleanReport,
+      status: 'residual',
+      scope: { ...cleanReport.scope, updatedSlugs: ['other'], touchedSlugs: ['other'] },
+      residualFindings: [{
+        type: 'dangling-incoming-link',
+        severity: 'warning',
+        pageSlug: 'a',
+        description: '入链指向了错误目标',
+      }],
+    });
+    lintDetMock.pageHasInboundLinks.mockReturnValue(true);
+
+    const result = await runCurateJob(job({
+      scope: 'pages',
+      slugs: ['a'],
+      subjectId: 's1',
+      remediationContext: context,
+    }), vi.fn());
+
+    expect(result.perFindingOutcomes).toEqual({ [target.id]: 'failed' });
   });
 
   it('Curate 后置校验异常时 scoped orphan 全部记录为 failed', async () => {
