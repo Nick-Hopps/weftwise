@@ -230,6 +230,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-29 | `CURATE_AGENTIC_SYSTEM_PROMPT` 增加 `wiki_patch` 说明（只在页面确实需要说一句它现在没说的话时用，禁止借它重构/精简/改写既有散文）；`renderOrphanAssignment` 从「无锚点就不要写」改为**两条有优先级的路**：① 有现成锚点走 `wiki_link_ensure`；② 无锚点才 `wiki_patch` 在最相关页补**一句**含 `[[target]]` 的话，并列出补句纪律（一句、一条新链接、不建 Related/不加标题、不改写周边、宁可换候选也不牵强）。同时说明 scope 内已含语义检索出的候选源页、须先 `wiki_read` 再定落点 |
 | 2026-07-28 | `buildCurateAgenticUserPrompt` 第三参新增可选 `orphans: CurateOrphanAssignment[]`：非空时在 `## Pages` 之前插入 assignment 段（逐条列出孤页 + description + suggestedFix，**不注入 finding ID**）并给出「无自然锚点则不写、只报告原因」的出路；空/缺省时输出逐字节不变。`CURATE_AGENTIC_SYSTEM_PROMPT` 一字未改 —— 保守纪律是宪法，任务语境走 user prompt |
 | 2026-07-17 | Query Agentic prompt 改由单一 `read/propose/image-insert` mode 构造；配图 prompt 只描述 `wiki_image_insert`，不再伴随通用 `wiki_preview_change` 工具 schema |
 | 2026-07-17 | Query 意图 schema 从选区二分类扩展为统一结构化契约，覆盖 read/propose、直接 Re-enrich、选区配图、重置请求/确认/取消/不明确；输入显式携带 selection/current-page/reset phase 可信上下文 |

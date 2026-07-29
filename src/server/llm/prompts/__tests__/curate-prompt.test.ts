@@ -6,7 +6,7 @@ describe('CURATE_AGENTIC_SYSTEM_PROMPT', () => {
   it('列出结构写与两个窄写工具，且强调保守 + 无人确认', () => {
     for (const t of [
       'wiki_merge', 'wiki_split', 'wiki_delete', 'wiki_create', 'wiki_read',
-      'wiki_metadata_patch', 'wiki_link_ensure',
+      'wiki_metadata_patch', 'wiki_link_ensure', 'wiki_patch',
     ]) {
       expect(CURATE_AGENTIC_SYSTEM_PROMPT).toContain(t);
     }
@@ -67,12 +67,27 @@ describe('buildCurateAgenticUserPrompt', () => {
       expect(out.search(/assignment/i)).toBeLessThan(out.indexOf('## Pages'));
     });
 
-    it('给出「找不到自然锚点就不要写」的明确出路', () => {
+    it('给出两条路的优先级：先 link_ensure，无锚点才 patch 补一句', () => {
       const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
       expect(out).toContain('wiki_link_ensure');
-      expect(out).toMatch(/no[\s\S]{0,40}anchor[\s\S]{0,80}(do NOT write|not write)/i);
-      expect(out).toMatch(/(inventing|invent)[\s\S]{0,60}anchor/i);
+      expect(out).toContain('wiki_patch');
+      // link_ensure 必须先于 patch 出现（优先级即顺序）
+      expect(out.indexOf('wiki_link_ensure')).toBeLessThan(out.indexOf('wiki_patch'));
+      expect(out).toMatch(/prefer|first|preferred/i);
+    });
+
+    it('补句纪律：一句、含目标链接、不建 Related、不改写周边', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
+      expect(out).toMatch(/(one|single) sentence/i);
+      expect(out).toMatch(/\[\[/);
       expect(out).toMatch(/Related/);
+      expect(out).toMatch(/(do not|never)[\s\S]{0,120}rewrit/i);
+    });
+
+    it('说明候选源页已含语义检索结果、须先 read 再定落点', () => {
+      const out = buildCurateAgenticUserPrompt(pages, ctx, { auto: true, orphans });
+      expect(out).toMatch(/wiki_read/);
+      expect(out).toMatch(/(search|retriev|semantic)/i);
     });
 
     it('不注入 finding ID', () => {

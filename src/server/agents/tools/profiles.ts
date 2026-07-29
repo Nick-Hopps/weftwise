@@ -64,6 +64,9 @@ const CURATE_AUTO_TOOLS = [
   'wiki.split',
   'wiki.link.ensure',
   'wiki.metadata.patch',
+  // 孤页的源页压根没提过目标概念时，link.ensure 要求的「已存在锚点」不存在，
+  // 补一句真实相关的话是唯一出路。写侧仍受 allowedSet + update cap + 忠实度护栏三重约束。
+  'wiki.patch',
 ] as const;
 
 const PROFILES: Record<ToolProfileId, ToolProfile> = {

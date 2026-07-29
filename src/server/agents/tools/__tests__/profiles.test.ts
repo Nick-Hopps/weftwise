@@ -63,11 +63,11 @@ describe('resolveToolProfile', () => {
     expect(resolveToolProfile('fix:contradiction').tools).not.toContain('wiki.metadata.patch');
   });
 
-  it('Curate auto/manual 均含两个窄写工具与 update 副作用', () => {
+  it('Curate auto/manual 均含窄写工具、补句用 patch 与 update 副作用', () => {
     const auto = resolveToolProfile('curate:auto');
     expect(auto.tools).toEqual([
       'wiki.search', 'wiki.read', 'wiki.inspect', 'wiki.merge', 'wiki.split',
-      'wiki.link.ensure', 'wiki.metadata.patch',
+      'wiki.link.ensure', 'wiki.metadata.patch', 'wiki.patch',
     ]);
     expect(auto.allowedSideEffects).toEqual(['none', 'merge', 'split', 'update']);
 

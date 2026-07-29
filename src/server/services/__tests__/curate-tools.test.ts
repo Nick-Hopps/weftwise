@@ -21,6 +21,10 @@ const opsMocks = vi.hoisted(() => ({
     targetSubjectSlug: input.targetSubjectSlug ?? 'general',
     targetSlug: input.targetSlug,
   })),
+  executePagePatch: vi.fn(async (_j: string, _s: unknown, input: { slug: string }) => ({
+    updatedSlug: input.slug,
+    appliedEdits: 1,
+  })),
 }));
 const pagesMocks = vi.hoisted(() => ({
   getPageBySlug: vi.fn(() => ({ slug: 'inside', title: 'Inside', summary: '', tags: [] })),
@@ -223,5 +227,97 @@ describe('buildCurateToolContext write capabilities', () => {
     expect(ctx.searchSources).toBeTypeOf('function');
     expect(ctx.readSource).toBeTypeOf('function');
     expect(ctx.listPages).toBeTypeOf('function');
+  });
+
+  describe('patchPage（孤页补一句用）', () => {
+    const UNIQUE_ANCHOR = '这些商路的畅通改变了欧亚交流的格局。';
+    const LONG_BODY = `${'这是一段足够长的原文。'.repeat(20)}\n\n${UNIQUE_ANCHOR}`;
+
+    beforeEach(() => {
+      readMock.mockReturnValue({ body: LONG_BODY } as never);
+    });
+
+    it('正常补一句含 wikilink 的话 → 执行、计一次 update、emit curate:update', async () => {
+      const { ctx, emit, guard } = ctxWith(new Set(['a']), new Set(['a']));
+      const res = await ctx.patchPage!({
+        slug: 'a',
+        edits: [{
+          oldString: UNIQUE_ANCHOR,
+          newString: `${UNIQUE_ANCHOR}这一格局的形成得益于[[mongol-empire]]对欧亚大陆的统一。`,
+        }],
+      });
+
+      expect(opsMocks.executePagePatch).toHaveBeenCalledTimes(1);
+      expect(res).toMatchObject({ updatedSlug: 'a' });
+      expect(guard.totals()).toMatchObject({ update: 1, writes: 1 });
+      expect(emit).toHaveBeenCalledWith('curate:update', expect.any(String), expect.any(Object));
+    });
+
+    it('越 allowedSet → 拒绝且不写', async () => {
+      const { ctx, emit, guard } = ctxWith(new Set(['a']), new Set(['a']));
+      await expect(ctx.patchPage!({
+        slug: 'outside',
+        edits: [{ oldString: UNIQUE_ANCHOR, newString: '改写' }],
+      })).rejects.toThrow(/scope/);
+      expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+      expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+      expect(emit).toHaveBeenCalledWith('curate:skip', expect.any(String), expect.any(Object));
+    });
+
+    it('保护页 index → 拒绝且不写', async () => {
+      const { ctx, guard } = ctxWith(null, new Set(['index']));
+      await expect(ctx.patchPage!({
+        slug: 'index',
+        edits: [{ oldString: UNIQUE_ANCHOR, newString: '改写' }],
+      })).rejects.toThrow(/protected/);
+      expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+      expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+    });
+
+    it('超 update cap → 拒绝且不写', async () => {
+      const emit = vi.fn();
+      const guard = createCurateGuard({
+        seedSet: null,
+        allowedSet: new Set(['a']),
+        caps: { merge: 5, split: 5, delete: 5, create: 5, update: 0 },
+      });
+      const ctx = buildCurateToolContext(subject, { guard, jobId: 'j1', emit });
+      await expect(ctx.patchPage!({
+        slug: 'a',
+        edits: [{ oldString: UNIQUE_ANCHOR, newString: '改写' }],
+      })).rejects.toThrow(/limit/);
+      expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+    });
+
+    it('忠实度不过（删掉大半正文）→ 拒绝、零调用、cap 不计数', async () => {
+      const { ctx, emit, guard } = ctxWith(new Set(['a']), new Set(['a']));
+      await expect(ctx.patchPage!({
+        slug: 'a',
+        edits: [{ oldString: LONG_BODY, newString: '只剩一句。' }],
+      })).rejects.toThrow(/fidelity|忠实/i);
+      expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+      expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+      expect(emit).toHaveBeenCalledWith('curate:skip', expect.any(String), expect.any(Object));
+    });
+
+    it('丢失原有 wikilink → 忠实度拒绝', async () => {
+      readMock.mockReturnValue({ body: `${LONG_BODY}\n\n参见[[existing-target]]。` } as never);
+      const { ctx, guard } = ctxWith(new Set(['a']), new Set(['a']));
+      await expect(ctx.patchPage!({
+        slug: 'a',
+        edits: [{ oldString: '参见[[existing-target]]。', newString: '参见别处。' }],
+      })).rejects.toThrow(/fidelity|忠实/i);
+      expect(guard.totals()).toMatchObject({ update: 0, writes: 0 });
+    });
+
+    it('目标页读不到时拒绝，不盲写', async () => {
+      readMock.mockReturnValue(null as never);
+      const { ctx } = ctxWith(new Set(['a']), new Set(['a']));
+      await expect(ctx.patchPage!({
+        slug: 'a',
+        edits: [{ oldString: 'x', newString: 'y' }],
+      })).rejects.toThrow();
+      expect(opsMocks.executePagePatch).not.toHaveBeenCalled();
+    });
   });
 });

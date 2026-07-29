@@ -13,8 +13,11 @@ import {
   executePageLinkEnsure,
   executePageMerge,
   executePageMetadataPatch,
+  executePagePatch,
   executePageSplit,
 } from '../wiki/page-ops';
+import { applyPatchEdits } from '../wiki/page-operation-plan';
+import { checkRewriteFidelity, FIDELITY_PROFILES } from '../wiki/rewrite-fidelity';
 import type { CurateGuard } from '../wiki/curate-plan';
 import type { Subject } from '@/lib/contracts';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
@@ -150,6 +153,58 @@ export function buildCurateToolContext(
         emit('curate:update', `Maintained one link in "${res.updatedSlug}".`, {
           slug: res.updatedSlug,
           mode: res.mode,
+        });
+        return res;
+      });
+    },
+    /**
+     * 局部改正文。存在的理由只有一个：孤页的源页压根没提过目标概念时，`linkEnsure` 要求的
+     * 「已存在的唯一自然锚点」不存在，补一句真实相关的话是唯一出路。
+     *
+     * `wiki.patch` 在 fix/query 两条既有路径上都没有忠实度护栏（精确唯一替换风险面小）。
+     * 这里补上——Curate auto 是无人复核的后台任务，`FIDELITY_PROFILES.fix` 至少拦住
+     * 「正文缩水」与「丢失原有链接」。护栏挡不住「顺手改写别处 / 一次插多段」，那部分只有
+     * prompt 纪律，取舍已记录在 docs/specs/2026-07-29-curate-orphan-autofix.md 的 C1。
+     */
+    async patchPage(input) {
+      return runWrite(async () => {
+        const d = guard.canEditPage(input.slug);
+        if (!d.ok) {
+          emit('curate:skip', `Skip patch ${input.slug}: ${d.reason}`, {
+            slug: input.slug,
+            reason: d.reason,
+          });
+          throw new Error(d.reason);
+        }
+
+        const current = readPageInSubject(subject.slug, input.slug);
+        if (!current) {
+          const reason = `page "${input.slug}" could not be read`;
+          emit('curate:skip', `Skip patch ${input.slug}: ${reason}`, { slug: input.slug, reason });
+          throw new Error(reason);
+        }
+        // 先在内存里算出候选正文过护栏，再落 Saga——不过就一次盘都不写
+        const candidate = applyPatchEdits(current.body, input.edits);
+        const fidelity = checkRewriteFidelity(
+          current.body,
+          candidate,
+          FIDELITY_PROFILES.fix,
+        );
+        if (!fidelity.ok) {
+          const reason = `fidelity guard rejected the patch: ${fidelity.violations.join('; ')}`;
+          emit('curate:skip', `Skip patch ${input.slug}: ${reason}`, {
+            slug: input.slug,
+            reason,
+            violations: fidelity.violations,
+          });
+          throw new Error(reason);
+        }
+
+        const res = await executePagePatch(jobId, subject, input);
+        guard.record('update');
+        emit('curate:update', `Patched "${res.updatedSlug}" (${res.appliedEdits} edit(s)).`, {
+          slug: res.updatedSlug,
+          appliedEdits: res.appliedEdits,
         });
         return res;
       });
