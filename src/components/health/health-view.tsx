@@ -1612,7 +1612,7 @@ export function HealthView() {
                             showSubject={allSubjects}
                             acting={actingActions}
                             deleting={deleting}
-                            busyActions={effectiveBusyActions}
+                            disabledActions={effectiveBusyActions}
                             onAction={!allSubjects ? (action) => {
                               if (action.type !== 'review-source') {
                                 void runRemediation(action.type, [finding.id], finding.id);

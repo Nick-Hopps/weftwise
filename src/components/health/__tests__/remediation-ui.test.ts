@@ -594,6 +594,62 @@ describe('Health remediation UI helper', () => {
     expect(html).toContain('<button disabled="">Retry ingest</button>');
   });
 
+  it('FindingRow 只看本行的 disabledActions，别的 finding 在跑不再牵连本行', () => {
+    const tidyPlan: RemediationPlan = {
+      findingId: readonly.id,
+      workflow: 'curate',
+      status: 'queued',
+      actions: [{ type: 'curate', label: 'Tidy', destructive: false }],
+      reason: '整理结构',
+    };
+
+    // 父级已按 finding 算过：本行没被任何在途 job 覆盖 → 可点。
+    expect(renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      disabledActions: new Set<ExecutableRemediationAction>(),
+      onAction: () => undefined,
+    }))).toContain('<button>Curate page</button>');
+
+    // 本行确实被覆盖时才禁用。
+    expect(renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      disabledActions: new Set<ExecutableRemediationAction>(['curate']),
+      onAction: () => undefined,
+    }))).toContain('<button disabled="">Curate page</button>');
+  });
+
+  it('FindingRow 在本行动作运行中时原位切为 Stop，其他动作运行中不影响本行标签', () => {
+    const tidyPlan: RemediationPlan = {
+      findingId: readonly.id,
+      workflow: 'curate',
+      status: 'queued',
+      actions: [{ type: 'curate', label: 'Tidy', destructive: false }],
+      reason: '整理结构',
+    };
+
+    const running = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      runningAction: { type: 'curate', jobId: 'curate-job-1' },
+      onAction: () => undefined,
+      onStop: () => undefined,
+    }));
+    expect(running).toContain('Stop job');
+    expect(running).not.toContain('Curate page');
+
+    const otherRunning = renderToStaticMarkup(React.createElement(FindingRow, {
+      finding: readonly,
+      plan: tidyPlan,
+      runningAction: { type: 'fix', jobId: 'fix-job-1' },
+      onAction: () => undefined,
+      onStop: () => undefined,
+    }));
+    expect(otherRunning).toContain('Curate page');
+    expect(otherRunning).not.toContain('Stop job');
+  });
+
   it('awaiting-approval 且带 runId 时行内渲染 Review candidates，并取代重复的 Research 按钮', () => {
     const html = renderToStaticMarkup(React.createElement(FindingRow, {
       finding: gap,
