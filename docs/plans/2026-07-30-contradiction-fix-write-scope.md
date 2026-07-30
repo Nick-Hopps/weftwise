@@ -136,6 +136,35 @@
 
 ---
 
+## T6 验收记录（2026-07-30 实测）
+
+**环境**：主检出原有两个 `npm run dev` 的 worker 跑着旧代码（PID 78006 / 18460，非 watch 模式不会热重载），会抢走 job 让验收失真 —— 经 Nick 同意后停掉，从 worktree 起单个新代码 worker（`data` / `llm-config.json` / `.env.local` 软链到主检出，验收后删除，worktree 保持干净）。
+
+**基线**：vault HEAD `1be87424`。
+
+1. **新 discovery lint** `ef686cc6`（77.8s，`openai:gpt-5.6-terra`）→ critical 2；1377 拉古萨那条稳定 ID 不变 `92fa9c4e…`，`evidence` 页 = `black-death-and-silk-road` + `black-death-europe`。
+2. **`remediate({ action:'fix', findingIds:['92fa9c4e…'] })`** → job `0fbbe054`，`deduplicated:false`。
+3. **模型行为**（`job_events`）：
+   ```
+   fix:agent:start  Analyzing 1 finding(s) across 1 page(s)…
+   fix:tool         Reading "black-death-and-silk-road"…
+   fix:tool         Reading "black-death-europe"…
+   fix:page         Patched "black-death-europe" (1 edits).
+   fix:verify:complete  后置校验通过，未发现残留问题。
+   fix:complete     Fix complete: 0 frontmatter, 1 edited, 0 created.
+   ```
+   **`fix:scope-blocked` 零条** —— Writable pages 一节生效，不再靠撞墙发现边界（对照修复前：连试 `wiki_patch` + `wiki_update` 两次全被拒后放弃）。
+4. **结果 JSON**：`writes:1` / `touchedSlugs:["black-death-europe"]` / `postconditionStatus:"clean"` / `semanticStatus:"clean"` / `perFindingOutcomes:{ 92fa9c4e…: "fixed" }`。
+   `touchedSlugs` 不含 `finding.pageSlug` —— 旧判据在这里必判 `skipped`，T3 的落点判据是 `fixed` 的必要条件。
+5. **vault**：commit `40c4145`，1 file changed / 2 insertions / 2 deletions。正文 `black-death-europe`：「规定来自**非流行地区**的人员或车辆」→「规定来自**疫区**的人员或车辆」，其余段落逐字未动。
+6. **Health 快照**（`buildHealthSnapshot` 真实数据）：critical **2 → 1**（剩下的是另一条无关 contradiction），`92fa9c4e…` 移出列表并在 `recentOutcomes` 标 `fixed`。
+
+**未回退**：修复正确，vault commit 保留。
+
+**测试**：`npx vitest run src/server/services src/server/llm/prompts src/components/health` → 72 文件 / 949 用例全绿；`npm run lint` 无新增 warning。
+
+---
+
 ## 任务依赖
 
 ```
