@@ -64,6 +64,8 @@
 | 已知概念地图 | 邻域取自**正文 wikilink**（`server/profile/concept-map.ts`），注入重塑 prompt + 叠成 Graph 图层；地图快照随 rendition 持久化 | 邻域 scoped 永不全库——注入量由页面自身引用数决定，与 vault 规模无关（T2.1 的 prompt 膨胀教训）；快照持久化让 `assumedKnown` 与 stale 判定都基于「当初真正告诉模型的那一份」，而不是事后重算 |
 | 逐页掌握度 | append-only `page_evidence` 证据流 + 读时纯函数派生（`server/profile/mastery.ts`），**不建物化表** | 判定规则一定会迭代，物化就要全量重算；衰减天然按 `now` 计算无需调度；**证据即解释**——任何结论都能回溯到原始条目与时间戳 |
 | 正文交互能力 | 由最外层知道语境的调用方**显式授予**（`renderMarkdown(..., { interactive })`），中间层与展示层不得推断 | `renderMarkdown` 有 6 个消费方，其中 4 个没有页面身份；让 `PageRenderer` 自行构造，编辑器预览会立刻长出判分按钮 |
+| Health 处置的写范围与归因 | 都按**该 finding 的处置落点**（`fixWritableSlugs` / `pageHasInboundLinks` 等按类型的判据），**不按 `finding.pageSlug`** | `pageSlug` 只是 lint 的挂载点，不等于修复要写哪一页：orphan 的补链写在**源页**上（7-29），contradiction 的错常常在**对侧页**上（7-30）。按 pageSlug 开写白名单会让模型判对了也写不进去，按 pageSlug 判 `touchedSlugs` 会让修好了也记成 `skipped`——两次真实缺陷同一个根因 |
+| 处置未解决时的可见性 | `fixed` 才从 Health 列表移除；`skipped`/`failed` 留在列表标注真实状态并可重试（`isUnresolvedOutcome`） | 隐藏未解决的 finding 等于谎报已处理：用户看到问题消失、下次 discovery 又原样发现同一稳定 ID。零写入必须能区分「被门控挡住」（failed）与「模型主动留着」（skipped），否则「改不了」会被渲染成「无需更改」 |
 
 ### 模块结构图
 

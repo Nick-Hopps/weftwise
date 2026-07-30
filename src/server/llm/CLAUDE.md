@@ -126,7 +126,7 @@ getEmbeddingModel(route: ResolvedTaskRoute) → LanguageModel  // ⑧ 向量模�
 | `merge-prompt.ts` | 融合两页正文与摘要（由 `page-ops.ts` 内部调用，不再是独立 job）。`MergeResultSchema` |
 | `split-prompt.ts` | 拆一页成多页（由 `page-ops.ts` 内部调用，不再是独立 job）。`SplitResultSchema` (pages.min(2)，恰一 isPrimary) |
 | `curate-prompt.ts` | 🆕 agentic tool-loop 策展 prompt：`CURATE_AGENTIC_SYSTEM_PROMPT`（保守策展系统提示，工具使用规范）+ `buildCurateAgenticUserPrompt(pages, ctx, opts)` builder（`opts.orphans` 可注入 Health 派来的孤页工单）；退休旧 triage/confirm 三套 schema（`CurateTriageSchema`/`CurateMergeConfirmSchema`/`CurateSplitConfirmSchema`）|
-| `fix-prompt.ts` | 🆕 agentic tool-loop 修复 prompt：`FIX_AGENTIC_SYSTEM_PROMPT` + `buildFixAgenticUserPrompt(reportLines, roster, ctx)`（逐页 `FixPageSchema` 三件套已退休） |
+| `fix-prompt.ts` | 🆕 agentic tool-loop 修复 prompt：`FIX_AGENTIC_SYSTEM_PROMPT` + `buildFixAgenticUserPrompt(reportLines, roster, ctx, writableSlugs?)`（逐页 `FixPageSchema` 三件套已退休） |
 
 ### `client.ts` / `errors.ts`
 
@@ -230,6 +230,7 @@ src/server/llm/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-30 | `buildFixAgenticUserPrompt` 第四参新增可选 `writableSlugs: string[]`：非空时在 Page roster 之后追加 **Writable pages** 一节（`edits to any other page WILL be refused`），事前告知 scoped Fix 的写白名单；空/缺省时输出逐字节不变（无 remediation context 的全量 Fix 不收窄写侧）。此前 system prompt 对 contradiction 写着 *"You MAY update BOTH pages"*、白名单却只给一页，模型只能靠连撞两次墙才发现边界。注入量由 worklist 决定（逐条 1–3 个 slug），不随 vault 规模增长 |
 | 2026-07-29 | `CURATE_AGENTIC_SYSTEM_PROMPT` 增加 `wiki_patch` 说明（只在页面确实需要说一句它现在没说的话时用，禁止借它重构/精简/改写既有散文）；`renderOrphanAssignment` 从「无锚点就不要写」改为**两条有优先级的路**：① 有现成锚点走 `wiki_link_ensure`；② 无锚点才 `wiki_patch` 在最相关页补**一句**含 `[[target]]` 的话，并列出补句纪律（一句、一条新链接、不建 Related/不加标题、不改写周边、宁可换候选也不牵强）。同时说明 scope 内已含语义检索出的候选源页、须先 `wiki_read` 再定落点 |
 | 2026-07-28 | `buildCurateAgenticUserPrompt` 第三参新增可选 `orphans: CurateOrphanAssignment[]`：非空时在 `## Pages` 之前插入 assignment 段（逐条列出孤页 + description + suggestedFix，**不注入 finding ID**）并给出「无自然锚点则不写、只报告原因」的出路；空/缺省时输出逐字节不变。`CURATE_AGENTIC_SYSTEM_PROMPT` 一字未改 —— 保守纪律是宪法，任务语境走 user prompt |
 | 2026-07-17 | Query Agentic prompt 改由单一 `read/propose/image-insert` mode 构造；配图 prompt 只描述 `wiki_image_insert`，不再伴随通用 `wiki_preview_change` 工具 schema |

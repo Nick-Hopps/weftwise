@@ -5,6 +5,30 @@ import {
   buildFixAgenticUserPrompt,
 } from '../fix-prompt';
 
+describe('buildFixAgenticUserPrompt — Writable pages', () => {
+  const ctx = { language: 'English', subject: { slug: 'general', name: 'General', description: '' } };
+  const report = [{ slug: 'a', lines: ['contradiction: A 与 B 冲突'] }];
+  const roster = [{ slug: 'b', title: 'B' }];
+
+  it('给出可写页清单时渲染 Writable pages 一节', () => {
+    const out = buildFixAgenticUserPrompt(report, roster, ctx, ['a', 'b']);
+    expect(out).toContain('## Writable pages');
+    const section = out.slice(out.indexOf('## Writable pages'));
+    expect(section).toContain('`a`');
+    expect(section).toContain('`b`');
+  });
+
+  it('清单为空时不输出该节（无 context 的全量 Fix 不收窄写侧）', () => {
+    const out = buildFixAgenticUserPrompt(report, roster, ctx, []);
+    expect(out).not.toContain('Writable pages');
+  });
+
+  it('省略该参数时与传空等价', () => {
+    expect(buildFixAgenticUserPrompt(report, roster, ctx))
+      .toBe(buildFixAgenticUserPrompt(report, roster, ctx, []));
+  });
+});
+
 describe('buildFixAgenticUserPrompt', () => {
   it('嵌入诊断清单、roster 与语言指令', () => {
     const out = buildFixAgenticUserPrompt(

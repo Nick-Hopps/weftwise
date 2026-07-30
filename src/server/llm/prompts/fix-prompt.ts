@@ -39,10 +39,16 @@ Stop calling tools and briefly state what you fixed, or that nothing could be sa
 /** 兼容既有调用方：常量保留 contradiction 的完整通用写提示。 */
 export const FIX_AGENTIC_SYSTEM_PROMPT = buildFixAgenticSystemPrompt(true);
 
+/**
+ * `writableSlugs`：scoped Fix 的写白名单。事前告知模型边界，省掉「试着写 → 被拒 → 换个工具
+ * 再试」的白烧步数；清单为空（无 remediation context 的全量 Fix 不收窄写侧）时整节不输出。
+ * 注入量由本次 worklist 决定（逐条处置通常 1–3 个 slug），不随 vault 规模增长。
+ */
 export function buildFixAgenticUserPrompt(
   reportLines: { slug: string; lines: string[] }[],
   roster: { slug: string; title: string }[],
   ctx: PromptContext,
+  writableSlugs: string[] = [],
 ): string {
   const languageDirective = `${renderLanguageDirective(ctx.language)}\n\n`;
   const subjectSection = ctx.subject
@@ -56,11 +62,15 @@ export function buildFixAgenticUserPrompt(
     roster.length > 0
       ? roster.map((p) => `- [[${p.title}]] (slug: \`${p.slug}\`)`).join('\n')
       : '(no other pages in this subject)';
+  const writableSection = writableSlugs.length > 0
+    ? `\n\n## Writable pages (edits to any other page WILL be refused)
+${writableSlugs.map((slug) => `- \`${slug}\``).join('\n')}`
+    : '';
   return `${languageDirective}${subjectSection}Below is the wiki's outstanding health report, grouped by page. Inspect each affected page with your tools and repair its issues conservatively (relink/unwrap broken links, add missing cross-references, reconcile contradictions). When you cannot fix something safely, leave it.
 
 ## Health report (${reportLines.length} page(s) with issues)
 ${report}
 
 ## Page roster (the ONLY valid wikilink targets in this subject)
-${rosterSection}`;
+${rosterSection}${writableSection}`;
 }

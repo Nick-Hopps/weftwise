@@ -384,6 +384,114 @@ describe('runFixJob (tool-loop)', () => {
     });
   });
 
+  describe('被门控挡住的写入不得记成「无需更改」', () => {
+    const contradictionWithEvidence = (pageSlug: string, other: string) => identified({
+      ...finding('contradiction', pageSlug, `${pageSlug} 与 ${other} 对同一事实的表述相反`),
+      evidence: [
+        { pageSlug, quote: 'qa' },
+        { pageSlug: other, quote: 'qb' },
+      ],
+    });
+
+    const driveWrite = (slug: string): void => {
+      genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+        const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+        await opts.tools.wiki_update!.execute({ slug, body: 'rewritten body text' });
+        return { text: 'done' };
+      });
+    };
+
+    it('写入被拒 + 零写入 → failed（不是 skipped）', async () => {
+      const contradiction = contradictionWithEvidence('a', 'b');
+      queueMock.get.mockReturnValueOnce(lintJob());
+      latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+      driveWrite('c');
+
+      const result = await runFixJob(job({
+        subjectId: 's1',
+        remediationContext: context([contradiction.id]),
+      }), vi.fn());
+
+      expect(result.perFindingOutcomes).toEqual({ [contradiction.id]: 'failed' });
+    });
+
+    it('无被拒写入 + 零写入 → 仍是 skipped（模型主动留着是诚实的）', async () => {
+      const contradiction = contradictionWithEvidence('a', 'b');
+      queueMock.get.mockReturnValueOnce(lintJob());
+      latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+
+      const result = await runFixJob(job({
+        subjectId: 's1',
+        remediationContext: context([contradiction.id]),
+      }), vi.fn());
+
+      expect(result.perFindingOutcomes).toEqual({ [contradiction.id]: 'skipped' });
+    });
+
+    it('contradiction 只写了对侧 evidence 页也算 fixed（落点不是 pageSlug）', async () => {
+      const contradiction = contradictionWithEvidence('a', 'b');
+      queueMock.get.mockReturnValueOnce(lintJob());
+      latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+      postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+        ...cleanReport,
+        scope: { ...cleanReport.scope, updatedSlugs: ['b'], touchedSlugs: ['b'] },
+        semanticStatus: 'clean',
+      });
+      driveWrite('b');
+
+      const result = await runFixJob(job({
+        subjectId: 's1',
+        remediationContext: context([contradiction.id]),
+      }), vi.fn());
+
+      expect(result.perFindingOutcomes).toEqual({ [contradiction.id]: 'fixed' });
+    });
+
+    it('同批有别的写入被拒，但本 finding 确实写成功 → 仍是 fixed', async () => {
+      const contradiction = contradictionWithEvidence('a', 'b');
+      queueMock.get.mockReturnValueOnce(lintJob());
+      latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+      postconditionMock.verifyJobPostconditions.mockResolvedValueOnce({
+        ...cleanReport,
+        scope: { ...cleanReport.scope, updatedSlugs: ['a'], touchedSlugs: ['a'] },
+        semanticStatus: 'clean',
+      });
+      genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+        const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+        await opts.tools.wiki_update!.execute({ slug: 'c', body: 'out of scope body' });
+        await opts.tools.wiki_update!.execute({ slug: 'a', body: 'rewritten body text' });
+        return { text: 'done' };
+      });
+
+      const result = await runFixJob(job({
+        subjectId: 's1',
+        remediationContext: context([contradiction.id]),
+      }), vi.fn());
+
+      expect(result.perFindingOutcomes).toEqual({ [contradiction.id]: 'fixed' });
+    });
+
+    it('确定性类型（missing-frontmatter）不受 blockedWrite 影响，零写入仍是 skipped', async () => {
+      const missingRaw = finding('missing-frontmatter', 'a', 'A 缺少 frontmatter');
+      const missing = identified(missingRaw);
+      const contradiction = contradictionWithEvidence('b', 'd');
+      queueMock.get.mockReturnValueOnce(lintJob());
+      latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([missing, contradiction]));
+      lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([]);
+      driveWrite('c');
+
+      const result = await runFixJob(job({
+        subjectId: 's1',
+        remediationContext: context([missing.id, contradiction.id]),
+      }), vi.fn());
+
+      expect(result.perFindingOutcomes).toEqual({
+        [missing.id]: 'skipped',
+        [contradiction.id]: 'failed',
+      });
+    });
+  });
+
   it('后置校验异常时 scoped 批次全部 finding 保守记录为 failed', async () => {
     const missingRaw = finding('missing-frontmatter', 'a', 'A 缺少 frontmatter');
     const missing = identified(missingRaw);
@@ -670,6 +778,101 @@ describe('runFixJob (tool-loop)', () => {
     expect(pageOpsMock.executePagePatch).not.toHaveBeenCalled();
     expect(pageOpsMock.executePageUpdate).not.toHaveBeenCalled();
     expect(pageOpsMock.executePageLinkEnsure).toHaveBeenCalledTimes(2);
+  });
+
+  it('contradiction 的对侧 evidence 页可写（错的那页往往不是 pageSlug）', async () => {
+    const contradiction = identified({
+      ...finding('contradiction', 'a', 'A 与 B 对同一事实的表述相反'),
+      evidence: [
+        { pageSlug: 'a', quote: '来自疫区的船只' },
+        { pageSlug: 'b', quote: '来自非流行地区的人员' },
+      ],
+    });
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+
+    const emit = vi.fn();
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const update = await opts.tools.wiki_update!.execute({ slug: 'b', body: 'corrected body text' });
+      expect(update).toEqual(expect.objectContaining({ ok: true, updatedSlug: 'b' }));
+      return { text: 'done' };
+    });
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([contradiction.id]),
+    }), emit);
+
+    expect(pageOpsMock.executePageUpdate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ slug: 'b' }),
+    );
+    expect(emit).not.toHaveBeenCalledWith('fix:scope-blocked', expect.anything(), expect.anything());
+  });
+
+  it('scoped 模式把可写页清单（含对侧 evidence 页）写进 prompt，legacy 模式不写', async () => {
+    const contradiction = identified({
+      ...finding('contradiction', 'a', 'A 与 B 对同一事实的表述相反'),
+      evidence: [
+        { pageSlug: 'a', quote: 'qa' },
+        { pageSlug: 'b', quote: 'qb' },
+      ],
+    });
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([contradiction.id]),
+    }), vi.fn());
+
+    const scopedPrompt = getFixPrompt();
+    expect(scopedPrompt).toContain('## Writable pages');
+    expect(scopedPrompt.slice(scopedPrompt.indexOf('## Writable pages'))).toContain('`b`');
+
+    genMock.generateTextWithTools.mockClear();
+    lintMock.runDeterministicChecksForSubject.mockReturnValueOnce([
+      finding('broken-link', 'a', 'A 中的坏链'),
+    ]);
+    await runFixJob(job({ subjectId: 's1' }), vi.fn());
+    expect(getFixPrompt()).not.toContain('Writable pages');
+  });
+
+  it('写入被门控拒绝时 emit fix:scope-blocked，并把允许清单带进错误消息', async () => {
+    const contradiction = identified({
+      ...finding('contradiction', 'a', 'A 与 B 对同一事实的表述相反'),
+      evidence: [
+        { pageSlug: 'a', quote: 'qa' },
+        { pageSlug: 'b', quote: 'qb' },
+      ],
+    });
+    queueMock.get.mockReturnValueOnce(lintJob());
+    latestMock.selectLatestFindings.mockReturnValueOnce(snapshot([contradiction]));
+
+    const emit = vi.fn();
+    genMock.generateTextWithTools.mockImplementationOnce(async (_task, optsValue) => {
+      const opts = optsValue as { tools: Record<string, { execute(input: unknown): Promise<unknown> }> };
+      const update = await opts.tools.wiki_update!.execute({ slug: 'c', body: 'body of an unrelated page' });
+      expect(update).toEqual(expect.objectContaining({
+        ok: false,
+        message: expect.stringContaining('a, b'),
+      }));
+      return { text: 'done' };
+    });
+
+    await runFixJob(job({
+      subjectId: 's1',
+      remediationContext: context([contradiction.id]),
+    }), emit);
+
+    expect(emit).toHaveBeenCalledWith(
+      'fix:scope-blocked',
+      expect.stringContaining('c'),
+      expect.objectContaining({ slug: 'c', allowed: ['a', 'b'] }),
+    );
+    expect(pageOpsMock.executePageUpdate).not.toHaveBeenCalled();
   });
 
   it('legacy 模式保持 subject-wide source 写范围，并仅在 job 末尾入队一次', async () => {

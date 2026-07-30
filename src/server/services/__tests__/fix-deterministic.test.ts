@@ -6,6 +6,7 @@ import {
   buildFixWorklist,
   buildSubjectReportLines,
   createFixGuard,
+  fixWritableSlugs,
 } from '../fix-deterministic';
 import type { LintFinding, WikiDocument } from '@/lib/contracts';
 
@@ -143,6 +144,56 @@ describe('createFixGuard', () => {
     const g = createFixGuard({ caps: { writes: 5 } });
     g.record('update'); g.record('update'); g.record('create');
     expect(g.totals()).toEqual({ update: 2, create: 1, writes: 3 });
+  });
+});
+
+describe('fixWritableSlugs', () => {
+  const withEvidence = (
+    type: LintFinding['type'],
+    pageSlug: string,
+    evidenceSlugs: string[],
+  ): LintFinding => ({
+    ...f(type, pageSlug),
+    evidence: evidenceSlugs.map((slug) => ({ pageSlug: slug, quote: 'q' })),
+  });
+
+  it('contradiction 的对侧页（只在 evidence 里）进入白名单', () => {
+    const out = fixWritableSlugs([
+      withEvidence('contradiction', 'a', ['a', 'b']),
+    ]);
+    expect([...out].sort()).toEqual(['a', 'b']);
+  });
+
+  it('contradiction 无 evidence（旧快照）回退为只有 pageSlug', () => {
+    const out = fixWritableSlugs([f('contradiction', 'a')]);
+    expect([...out]).toEqual(['a']);
+  });
+
+  it('missing-crossref 不因 evidence 扩大白名单', () => {
+    const out = fixWritableSlugs([
+      withEvidence('missing-crossref', 'a', ['a', 'b']),
+    ]);
+    expect([...out]).toEqual(['a']);
+  });
+
+  it('多条 finding 合并去重，evidence 含 pageSlug 自身不产生重复', () => {
+    const out = fixWritableSlugs([
+      withEvidence('contradiction', 'a', ['a', 'b']),
+      withEvidence('contradiction', 'b', ['b', 'a']),
+      f('broken-link', 'c'),
+    ]);
+    expect([...out].sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('空 slug 与非字符串 slug 被丢弃', () => {
+    const out = fixWritableSlugs([
+      { ...f('contradiction', 'a'), evidence: [
+        { pageSlug: '  ', quote: 'q' },
+        { pageSlug: null as unknown as string, quote: 'q' },
+        { pageSlug: 'b', quote: 'q' },
+      ] },
+    ]);
+    expect([...out].sort()).toEqual(['a', 'b']);
   });
 });
 
