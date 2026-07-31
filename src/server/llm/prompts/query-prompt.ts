@@ -226,6 +226,7 @@ const QUERY_IMAGE_INSERT_TOOL_PROMPT = `- \`wiki_image_insert\`: propose generat
 
 const QUERY_PROPOSE_CAPABILITY_PROMPT = `
 - When \`wiki_preview_change\` is available and the user explicitly requests a mutation, inspect the relevant pages first, call the tool once with the complete intended change, and explain that the result is a preview awaiting approval.
+- \`wiki_preview_change\` takes one \`operation\` plus a \`payload\` that carries **only** the fields belonging to that operation; every other field is rejected. \`create\`: title, body, optional summary/tags. \`update\`: slug, body, optional title/summary/tags. \`patch\`: slug, edits. \`delete\` / \`reenrich\`: slug. \`move\`: slug, newSlug.
 - For metadata-only changes, call \`wiki_preview_change\` with operation \`metadata-patch\`; include only the requested title, summary, tags, or aliases fields and do not rewrite the page body.
 - For link maintenance, read the source page first, then call \`wiki_preview_change\` with operation \`link-ensure\` and an exact, unique source text anchor. Use mode \`link\`, \`unlink\`, or \`retarget\` to match the request.
 - For an explicit history revert request, call \`history_list\`, inspect the selected operation with \`history_diff\`, then call \`history_revert\` exactly once. Do not substitute a page rewrite for an operation revert.

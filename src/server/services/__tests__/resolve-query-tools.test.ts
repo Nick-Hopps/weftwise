@@ -81,6 +81,16 @@ describe('resolveQueryTools', () => {
     ]));
   });
 
+  it('propose mode 的全部 provider schema 都以 object 为根', async () => {
+    mockGetWebSearchConfig.mockReturnValue({ provider: 'tavily', apiKey: '', maxResults: 5 });
+    const { resolveQueryTools } = await import('../query-service');
+
+    for (const tool of resolveQueryTools('propose')) {
+      const schema = await zodSchema(tool.inputSchema).jsonSchema;
+      expect(schema, tool.name).toMatchObject({ type: 'object' });
+    }
+  });
+
   it('image-insert mode 的全部 provider schema 都以 object 为根', async () => {
     mockGetWebSearchConfig.mockReturnValue({ provider: 'tavily', apiKey: '', maxResults: 5 });
     const { resolveQueryTools } = await import('../query-service');
