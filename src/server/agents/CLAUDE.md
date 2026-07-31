@@ -162,7 +162,7 @@ Worker 启动时（`worker-entry.ts`）由 `buildSkillRegistry()` 将 `examples/
 | `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
 | `builtin/image-generate.ts` | `image.generate` — enrich 专用真实图片工具；页面 slug 由 enricher 运行时可信注入，模型只提供视觉需求；通过显式 Google `ingest:image` 路由返回 PNG/JPEG/WebP，并把 UUID 命名 asset 与页面一起提交 |
 | `builtin/wiki-image-insert.ts` | `wiki.image.insert` — Query canonical 选区专用 propose 工具；模型只给 prompt/alt/比例/风格，page slug 与块锚点由运行时注入；不持有 `image.generate` 或页面写权限 |
-| `builtin/wiki-preview-change.ts` | `wiki.preview_change` — 生成 create/update/patch/delete/reenrich/metadata-patch/link-ensure 审批预览（`sideEffect:'propose'`，仅 `query:propose`）；返回 actionId，不执行 Saga 或入队 |
+| `builtin/wiki-preview-change.ts` | `wiki.preview_change` — 生成 create/update/patch/delete/reenrich/metadata-patch/link-ensure 审批预览（`sideEffect:'propose'`，仅 `query:propose`）；返回 actionId，不执行 Saga 或入队。**模型可见 schema 用 `PreviewChangeToolInputSchema`（扁平 object，零 anyOf），不是判别联合 `PreviewChangeInputSchema`** —— 后者的 JSON Schema 根节点没有 `type:"object"`，provider 直接拒绝注册；operation↔payload 的真实配对由 `normalizePreviewInput` 判定 |
 | `builtin/wiki-move.ts` | `wiki.move` — 生成当前 Subject 页面 canonical slug/path 迁移审批预览（`sideEffect:'propose'`，仅 `query:propose`）；不直接移动文件或写数据库 |
 
 ---
@@ -244,7 +244,7 @@ src/server/agents/tools/builtin/__tests__/
 - `OverlayVault`：读取命中内存 diff；commit 时 diff 正确合并到真实 vault。
 - `runtime/commit-pending.ts::commitPending`：合并 `pending ∪ supplied` 调用 Saga；重复提交 / 空集报错；它是 service-level 内部函数，不进入模型工具注册表。
 - Orchestrator step 顺序：planner 输出传入 writer context；writer 扁平 entry 累积进 `ctx.pending`。
-- Tool registry/Profile/compile：30 个 builtin 精确注册；Query 当前/跨 Subject/History 只读、通用提案与独立选区配图 ToolSet、Fix/Curate 窄写面、job capability、allowedSet 与审计脱敏均有回归；配图 ToolSet 的 provider JSON Schema 根节点均锁定为 object，`dispatch.skill` / `commit_changeset` 明确不可达。
+- Tool registry/Profile/compile：30 个 builtin 精确注册；Query 当前/跨 Subject/History 只读、通用提案与独立选区配图 ToolSet、Fix/Curate 窄写面、job capability、allowedSet 与审计脱敏均有回归；**propose 与配图两个 ToolSet 的 provider JSON Schema 根节点均锁定为 object**（此前只锁了配图 mode，而它恰好把 `wiki.preview_change` 过滤掉了，propose 的坏根节点因此裸奔到线上），`dispatch.skill` / `commit_changeset` 明确不可达。
 - 窄写 ToolDef：metadata/link schema、成功/缺能力失败、source-only scope、工具活动脱敏与 Query preview operation 均有覆盖。
 
 ---
@@ -332,6 +332,7 @@ src/server/agents/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-07-31 | **propose 问答此前 100% 必错**：`wiki.preview_change` 的 `inputSchema` 是判别联合，provider JSON Schema 根节点只有 `anyOf`、没有 `type:"object"`，DeepSeek（OpenAI 兼容）在**注册工具**时就整请求拒绝（`Invalid schema for function 'wiki_preview_change': ... got 'type: null'`）——与模型行为无关，只要工具集里带它就必错。新增 `PreviewChangeToolInputSchema`（`operation` 枚举 + 全字段可选的 strict 扁平 payload，全链路零 `anyOf`）作模型可见 schema，判别联合退为**校验**用途（唯一校验点仍是 `normalizePreviewInput`，合法性没放宽；配错字段作为工具错误回给模型自纠）。**为什么线上裸奔到今天**：2026-07-17 只给 image-insert mode 加了「根节点为 object」回归，而该 mode 恰好把这个工具过滤掉了——现补 propose mode 同款断言 + 「工具 schema 字段集与判别联合不漂移」断言。用户侧表现是「首问必错、重试就好」的假象：重试那句被 `query-intent` 判成 `direct-reenrich`，走的是 `/api/query` 不跑工具循环的确定性短路。真实验收：按生产路径编译 propose ToolSet 打真实 DeepSeek，union 变体复现逐字相同的错误、当前 schema 返回 `OK.` |
 | 2026-07-29 | `curate:auto` 与 `curate:manual` 工具集追加 `wiki.patch`：孤页的源页可能压根没提过目标概念，`wiki.link.ensure` 要求的「已存在唯一锚点」不存在，补一句是补链唯一出路。写侧仍受 allowedSet + update cap + 忠实度护栏三重约束（护栏在 `services/curate-tools.ts::patchPage`，非 profile 层）|
 | 2026-07-28 | quiz 答案分隔符护栏：新增 `runtime/quiz-separator-guard.ts::reconcileQuizSeparator`，`orchestrator.ts` 的 fanout 分支新增 **step flag** `quizSeparatorGuard`（ingest 与 re-enrich 的 enricher step 各自打开——两条流水线共用同一个 `skillId:'ingest-enricher'` step，用 flag 而非按 skillId 硬编码，与 `injectExistingPageForUpdate` 同一范式）。`commit-pending.ts` 增加 commit 前**零成本终审**：对最终内容跑同一判定，仍违规则 emit `ingest:warn`，不改内容、不阻断、不调 LLM——**这条日志是将来判断「是哪一阶段吃掉分隔符」的唯一凭据**（enricher 护栏之后仍报警就说明责任在 verify；verifier skill 要求 verbatim 复现，实测 30/30 分隔符都活着穿过了它，故没给它加重写面）。`ingest-enricher` 升 **v8**：明确 `---` 前后必须各留一个空 `>` 行（缺空行会被解析成 setext 标题，条文此前一个字都没提）+ 禁止自造 `问：/答：/Q:/A:` 标签前缀（实测受损块**全部**带这类自造标签，是脱离模板的病征）。三处版本门照旧同步：两个 service 的 `MIN_SKILL_VERSIONS` 7→8、`BUILTIN_UPGRADE_HASHES` 追加 v7 原版 SHA-256，并实跑 `upgradeBuiltinSkillFiles` 验证 v7 副本确实被替换成 v8。spec/plan 见 `docs/{specs,plans}/2026-07-28-quiz-answer-separator-guard.md` |
 | 2026-07-26 | `ingest-enricher` 升 **v7**：`[!quiz]` callout 必须用一行 `---` 分隔问题与答案（结构化分隔符，语言无关，不得翻译或替换成「答案：」这类标记；答案 1–3 句且**不得引入正文没有的事实**）。三处同步：`ingest-service` / `reenrich-service` 版本门 6→7，`BUILTIN_UPGRADE_HASHES` 追加 v6 原版 SHA-256（**漏这一条，所有未改过 skill 的既有 vault 都会卡在 v6 撞版本门**）。新增 `builtin-manifest.test.ts` 断言 v6 hash 在白名单内、且当前模板 hash 不在（防自我替换循环） |

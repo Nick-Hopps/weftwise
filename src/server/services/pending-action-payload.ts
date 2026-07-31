@@ -121,6 +121,58 @@ export const PreviewChangeInputSchema = z.discriminatedUnion('operation', [
   }).strict(),
 ]);
 
+/**
+ * `wiki.preview_change` 的**模型可见 schema**：根节点必须是 object。
+ *
+ * 上面的 `PreviewChangeInputSchema` 是判别联合，转成 provider JSON Schema 后根节点
+ * 只有 `anyOf`、没有 `type: "object"`——OpenAI 兼容接口（DeepSeek 等）在注册工具时
+ * 就直接拒绝整个请求（`Invalid schema for function 'wiki_preview_change'`），导致
+ * 每一次 propose 问答必错。所以这里给模型一份「operation 枚举 + 全字段可选的扁平
+ * payload」：全链路零 `anyOf`，provider 兼容性最好。
+ *
+ * **合法性没有放宽**：operation 与 payload 字段的真实配对仍由 `normalizePreviewInput`
+ * 里那次 `PreviewChangeInputSchema.parse`（每个变体都 `.strict()`）判定，用错字段会
+ * 作为工具错误返回给模型自纠。字段集必须与判别联合保持同步，由
+ * `pending-action-payload.test.ts` 的漂移测试守住。
+ */
+const PreviewChangeToolPayloadSchema = z.object({
+  slug: z.string().optional().describe('update / patch / delete / reenrich / metadata-patch / move'),
+  newSlug: z.string().optional().describe('move only: the new canonical slug'),
+  title: z.string().optional().describe('create / update / metadata-patch'),
+  body: z.string().optional().describe('create / update: the full page markdown body'),
+  summary: z.string().optional().describe('create / update / metadata-patch'),
+  tags: z.array(z.string()).optional().describe('create / update / metadata-patch'),
+  aliases: z.array(z.string()).optional().describe('metadata-patch only'),
+  edits: z.array(z.object({
+    oldString: z.string(),
+    newString: z.string(),
+  }).strict()).optional().describe('patch only: exact unique old_string/new_string replacements'),
+  sourceSlug: z.string().optional().describe('link-ensure only: the page whose body is edited'),
+  targetSlug: z.string().optional().describe('link-ensure only: the link target page'),
+  targetSubjectSlug: z.string().optional().describe('link-ensure only: cross-subject target'),
+  oldString: z.string().optional().describe('link-ensure only: the exact unique source text anchor'),
+  displayText: z.string().optional().describe('link-ensure only: optional wikilink display text'),
+  mode: z.enum(['link', 'unlink', 'retarget']).optional().describe('link-ensure only'),
+}).strict();
+
+export const PreviewChangeToolInputSchema = z.object({
+  operation: z.enum([
+    'create',
+    'update',
+    'patch',
+    'delete',
+    'reenrich',
+    'metadata-patch',
+    'link-ensure',
+    'move',
+  ]),
+  payload: PreviewChangeToolPayloadSchema.describe(
+    'Only the fields that belong to this operation; any other field is rejected.',
+  ),
+}).strict();
+
+export type PreviewChangeToolInput = z.infer<typeof PreviewChangeToolInputSchema>;
+
 export const WorkflowPreviewInputSchema = z.discriminatedUnion('operation', [
   z.object({
     operation: z.literal('workflow-reenrich-start'),

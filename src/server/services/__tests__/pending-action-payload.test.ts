@@ -1,13 +1,60 @@
 import { describe, expect, it } from 'vitest';
+import { zodSchema } from 'ai';
 import {
   canonicalJson,
   hashPendingActionPayload,
   normalizePreviewInput,
   normalizeTagBatchPreviewInput,
   normalizeWorkflowPreviewInput,
+  PreviewChangeInputSchema,
+  PreviewChangeToolInputSchema,
 } from '../pending-action-payload';
 
+/** 从判别联合的 provider JSON Schema 里取出全部 operation 与 payload 字段名。 */
+async function unionSurface(): Promise<{ operations: string[]; payloadKeys: string[] }> {
+  const json = await zodSchema(PreviewChangeInputSchema).jsonSchema as {
+    anyOf: Array<{ properties: {
+      operation: { const: string };
+      payload: { properties?: Record<string, unknown> };
+    } }>;
+  };
+  const operations = json.anyOf.map((variant) => variant.properties.operation.const);
+  const payloadKeys = new Set<string>();
+  for (const variant of json.anyOf) {
+    for (const key of Object.keys(variant.properties.payload.properties ?? {})) {
+      payloadKeys.add(key);
+    }
+  }
+  return { operations, payloadKeys: [...payloadKeys].sort() };
+}
+
 describe('pending-action payload', () => {
+  it('preview_change 的工具 schema 以 object 为根，且字段集与判别联合不漂移', async () => {
+    const toolJson = await zodSchema(PreviewChangeToolInputSchema).jsonSchema as {
+      type: string;
+      properties: {
+        operation: { enum: string[] };
+        payload: { type: string; properties: Record<string, unknown> };
+      };
+    };
+    const union = await unionSurface();
+
+    expect(toolJson.type).toBe('object');
+    expect(toolJson.properties.payload.type).toBe('object');
+    expect(JSON.stringify(toolJson)).not.toContain('anyOf');
+    expect(toolJson.properties.operation.enum).toEqual(union.operations);
+    expect(Object.keys(toolJson.properties.payload.properties).sort()).toEqual(union.payloadKeys);
+  });
+
+  it('工具 schema 放宽的只是形状，operation 与 payload 的配对仍由 normalize 判定', () => {
+    const wrongPair = { operation: 'delete', payload: { slug: 'a', title: 'nope' } };
+    expect(() => PreviewChangeToolInputSchema.parse(wrongPair)).not.toThrow();
+    expect(() => normalizePreviewInput(wrongPair as never, '2026-07-31T00:00:00.000Z')).toThrow();
+    expect(() => PreviewChangeToolInputSchema.parse({
+      operation: 'delete', payload: { slug: 'a', unexpected: true },
+    })).toThrow();
+  });
+
   it('选区配图 workflow payload 严格规范化图片请求与持久化块锚点', () => {
     const effectiveAt = '2026-07-17T00:00:00.000Z';
     const normalized = normalizeWorkflowPreviewInput({
