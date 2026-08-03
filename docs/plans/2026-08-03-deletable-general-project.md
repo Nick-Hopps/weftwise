@@ -200,4 +200,67 @@
 
 ## 验收记录
 
-（T8 完成时填写）
+日期：2026-08-03，分支 `feat/deletable-general-project`。
+
+### 实现与 plan 的偏差（一处）
+
+T1 只设计了一个 `ensureDefaultSubject()`，T6 实做时发现**它满足不了 reset**：reset 需要的是「**slug 为 general 的行**存在」（它保留 general 行、重建 stub 页、拿它的 id 当 vault staging marker），而 `ensureDefaultSubject` 的语义是「至少有一个 project」——库里还有 `physics` 时它返回 `physics` 且不建 general，`generalMarker.id` 照样空指针。T6 的测试正是先以这个原因红掉的。
+
+改法：把插入抽成 `insertGeneralSubject()`，对外分成语义明确的两个入口——`ensureDefaultSubject()`（零 project 才建，删除路径与启动期用）与 `ensureGeneralSubject()`（即使有其他 project 也补 general，**仅** reset 用）。两者的分工由 `subjects-default-fallback.test.ts` 的第 4 个用例锁定。
+
+### 自动化验证
+
+```
+$ npx vitest run
+ Test Files  337 passed (337)
+      Tests  3004 passed (3004)
+   Duration  14.62s
+
+$ npm run lint          # 仅既有 no-unused-vars warning，0 error
+$ npx tsc --noEmit      # 仅 1 条既有报错（src/server/services/__tests__/reenrich-service.test.ts:140），
+                        # 已用 git stash 在基线上复现确认与本次改动无关
+```
+
+### 真实应用验收
+
+`next dev -p 3010`，`VAULT_PATH`/`DATABASE_PATH` 指向全新临时 vault（**未动 Nick 的真实 vault**——本需求是破坏性删除）。**worker 未启动**：worktree 里没有 `llm-config.json`（含 API key，复制被权限策略拦下）。本次验收零 LLM、零 job，而启动期 seeding 走的是 `getDb()`，Next.js 进程同样执行，故不影响结论；另单独直跑了一次 worker 的启动路径（见第 3 步）。
+
+浏览器操作经 Playwright 驱动真实 UI（不是直接打 API）。
+
+1. **启动 seed**：空库起应用 → `/subjects` 只有 `General`，侧栏 0 页。
+2. **删 general（当前 active 是 Physics）**：先建 Physics，再往 vault 塞真实文件（`wiki/{general,physics}/note.md`、`raw/{general,physics}/a.txt`）并 git commit。打开 General 设置 → 危险区渲染的是**「删除主题」按钮**（旧行为是「不能删除 general 主题」文案）→ 两步确认。结果：
+   ```
+   $ sqlite3 wiki.db 'select id,slug,name from subjects order by slug;'
+   52b50d5e-76ae-417f-bc19-23e6c0349321|physics|Physics
+   $ find vault -type f            # wiki/general 与 raw/general 都已消失
+   raw/physics/a.txt
+   wiki/physics/note.md
+   ```
+   git commit 未落：`git add` 的 pathspec 里有从未存在过的 `.llm-wiki/sources/general`，`fatal: pathspec ... did not match any files` 被路由既有的 `// git failure is non-fatal` 吞掉。**这是既有行为，删任何 project 都一样**（真实 vault 里该目录随 ingest 建出，故实际不触发），本次不改。第 4 步补齐该目录后 git 路径走通。
+3. **重启不复活 general**（本需求最容易做错的一条）：
+   ```
+   $ node --import tsx -e "getDb(); console.log(listSubjects().map(s=>s.slug))"
+   subjects after startup: ["physics"]
+   ```
+   随后杀掉并重启真实 `next dev`，`/subjects` 仍只有 Physics。
+4. **删最后一个 project（Physics，且它是 active）**：先补 `.llm-wiki/sources/physics/src1.json` 并 commit。危险区同样有删除按钮（旧行为是「请先切换到其他主题再删除」）→ 两步确认。结果：UI 自动跳到 `/`，顶栏主题切换器显示 **General**，侧栏 0 页。
+   ```
+   $ sqlite3 wiki.db 'select id,slug,name,description,augmentation_level,maintenance_state from subjects;'
+   a5038e98-a2d1-4a4f-a6ed-01469654fecc|general|General||standard|active
+   # 旧 general id = b85f44e1-…、旧 physics id = 52b50d5e-… → 新 general 是新建的行，不是没删掉
+   $ find vault -type f            # 空
+   $ git -C vault log --oneline | head -1
+   206fca1 [subject:physics] Delete subject and all contents
+   $ git -C vault show --stat --oneline HEAD
+    .llm-wiki/sources/physics/src1.json | 1 -
+    raw/physics/a.txt                   | 1 -
+    wiki/physics/note.md                | 5 -----
+   $ git -C vault status --porcelain     # 空（工作区干净）
+   ```
+
+对照成功标准 1–6 全部命中（第 5 条中「general 不存在时 SSR/API 正常」由第 3 步重启后 `/subjects` 与首页正常渲染、侧栏与统计都取到 `physics` 佐证；reset 的 500 由 T6 单测覆盖）。
+
+### 已知遗留（不在本次范围）
+
+- 删**当前 active** project 时，一个已在途的 `GET /api/pages?subjectId=<旧 id>` 会拿到一次 404（浏览器控制台可见）。切换完成后所有查询都用新 subject，页面渲染正常。这是「删除自己正站在上面的目标」的固有竞态，与 general 无关；要消掉得在删除前后主动移除旧 subject 的 query 缓存，超出本次范围。
+- 上述 `commitVaultChanges` 对不存在目录的 pathspec 失败（既有行为，且被设计为非致命）。

@@ -132,7 +132,7 @@
 
 ### `providers.tsx`
 
-客户端 providers：TanStack Query 的 `QueryClientProvider`、主题初始化、内置 `<SubjectsBootstrap />`（启动时按 `?s=` URL > 持久化 > general 兜底初始化 `currentSubject*`，并通过引用比较跳过重复 set 防循环）。
+客户端 providers：TanStack Query 的 `QueryClientProvider`、主题初始化、内置 `<SubjectsBootstrap />`（启动时按 `?s=` URL > 持久化 > general > 列表第一个兜底初始化 `currentSubject*`，并通过引用比较跳过重复 set 防循环）。
 
 ### `error-boundary.tsx`
 
@@ -202,6 +202,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | `subject-dialog.tsx` 危险区**无条件**渲染删除按钮：`canDelete = !isActive && slug !== 'general'` 整条删除，连同 `subjects.dialog.generalProtected` / `activeProtected` 两个 i18n key。`!isActive` 必须一起放宽——最后剩下的 project 必然是 active，留着它「删到零」在结构上不可达，而服务端从来没有这条守卫（它是 cookie + Zustand 的客户端概念）。`deleteSubject` 返回值从 `void` 改为 `{ subjectId, replacement? }`；`onSuccess` 先把 `replacement` 乐观写进 `['subjects']`（同 `CreateSubjectBody` 的理由：后台 refetch 未回来前 `SubjectsBootstrap` 会把切换目标当悬空选择重置掉），再在删的是 active 时 `switchSubject(..., { navigateTo: '/' })`。**已知**：删 active project 时一个已在途的 `/api/pages?subjectId=<旧 id>` 会拿到一次 404（切换完成后即恢复正常），属于删除 active 目标的固有竞态。spec/plan 见 `docs/{specs,plans}/2026-08-03-deletable-general-project.md` |
 | 2026-07-28 | 阅读页控制台三条报错清零：① hover peek 抽成 `wiki-link-peek.tsx` 并改为**纯行内元素**——正文 wikilink 一定处在 `<p>`（callout 内同理）里，原来的 `<div>`/`<p>` 卡片让浏览器就地截断段落，React 连报 `<p> cannot contain a nested <p>/<div>` + hydration 失败；② `graph-stylesheet.ts` 删掉 `node:hover`——cytoscape 无此伪类，整条规则被判非法**整体丢弃**，连同一行的 `.labelled` 一起失效，`use-wiki-graph` 的 mouseover 加了 class 也点不亮标签（hover 本就由 class 承载）；③ 根 `layout.tsx` 补 `data-scroll-behavior="smooth"` 消掉 Next 15 平滑滚动警告 |
 | 2026-07-28 | Job 详情弹窗日志行图标统一 + 标题补 i18n：`tool-activity-icon.tsx` 抽出按图标键渲染的 `SemanticIcon`（`ToolActivityIcon` 降为薄封装），`job-detail-dialog.tsx` 的 default 行不再退化成 `h-1.5` 实心小圆点而是渲染 `line.icon` 的阶段图标——「一半圆点一半图标」的割裂感来自这一个分支，其余三个语气分支一直是图标；同一文件的 `jobActivityTitle(events)` 返回的是 message key，**必须过 `t()`**（`progress-toast` 一直是对的，只有弹窗漏了，实测上屏的就是 `jobs.activity.ingest` 原文）。已全量核对所有返回 `MessageKey` 的函数，无其他漏 `t()` 的渲染点 |
 | 2026-07-30 | Health **逐条处置互不阻塞**：`finding-row` 的禁用条件原本读全局 `busyActions.has(item.type)`，点一条 Tidy 会让**所有**同类行 + 工具栏一起变灰（7-27 只修了跨类型，同类跨 finding 这一半留在原地）。服务端从来不需要这个限制——不同 finding 不同 context → 独立 job，worker 串行排队。根因是客户端三个追踪结构全按 action 类型开槽（`createActionGate` / `actingFindingByAction` / `actionJobMetaRef`），其中 `actingFindingByAction: Partial<Record<action, string>>` 的**类型本身**就规定了「一个 action 只能有一个进行中的 finding」。改法：gate 键下沉到 `action + target`；禁用与 Stop 改由服务端 active jobs 派生（`coveredFindingIds` / `findFindingJob`，刷新天然不丢）；`selectRecoverableHealthJobs` 对**每个** workflow 保留全部在途 job（原先非 research 只留最新一个，其余永远观察不到、Stop 也拿不到 jobId）；四条 SSE 流统一遵守切换前 `reset()`。真实验收：同一份 game-development 数据在 main（:3001）与本分支（:3002）A/B——main 点第一行后第二行禁用、只建 1 个 job；本分支两行各建独立 job（`findingIds` 不同）、行内 Stop 只取消自己那一个、刷新后在途行正确恢复为 Stop；3 个验证 job `started_at` 全为 NULL（零 LLM、零 vault 写入）。spec/plan 见 `docs/{specs,plans}/2026-07-30-health-row-actions-unblock.md` |

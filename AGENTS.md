@@ -59,7 +59,8 @@
 | Wikilink 解析 | 单一 `resolveWikiLinkTarget()`（`src/server/wiki/wikilinks.ts`）| 避免前端/indexer/lint/LLM 校验多份实现语义漂移 |
 | 并发控制 | `vault-mutex.ts` + worker 的 Ingest 有界并发/非 Ingest 独占 + SQLite WAL | Ingest 可并发处理，所有 vault 写入仍由进程内队列和跨进程文件锁串行保护 |
 | 源数据 | `vault/.llm-wiki/sources/<subject>/*.json` 同时落地 | SQLite 仅作为可重建缓存 |
-| Subject 隔离 | first-class `subjects` 表 + `pages` 复合 PK `(subject_id, slug)` + `path UNIQUE` | 跨主题同名 slug 合法；fs 路径仍唯一；删除 subject 级联清理全部关联数据（DB 单事务 + vault 目录 + git commit），`general`/active/被跨主题引用者禁删 |
+| Subject 隔离 | first-class `subjects` 表 + `pages` 复合 PK `(subject_id, slug)` + `path UNIQUE` | 跨主题同名 slug 合法；fs 路径仍唯一；删除 subject 级联清理全部关联数据（DB 单事务 + vault 目录 + git commit），仅「有 active job」与「被跨主题引用」禁删 |
+| 默认 Subject 的形态 | `general` 是**零 project 时的自动兜底**，不是受保护的特例 | 任何 project（含 `general`、含当前 active）都可删；不变量是「**至少有一个 project**」，由 `subjectsRepo.ensureDefaultSubject()` 在**删除路径尾部**与**启动期**（`db/client.ts::ensureSubjectsAndGeneral` 判据＝零 project 才建）两处维护。判据必须是「零 project」而非「没有 general」——后者会让用户删掉的 `general` 在下次启动原地复活。`general` 缺失是合法状态，读路径统一走 `subjectsRepo.getFallbackSubject()`（general → 第一个 project → null）**只读不补建**。唯一仍要求具体 general 的是全局 `/api/reset`（保留它的行、重建 stub 页、拿它的 id 当 vault staging marker），故另有 `ensureGeneralSubject()` |
 | Subject 解析 | `src/server/middleware/subject.ts::resolveSubjectFromRequest()`（`?subjectId` > `?s=` > body > cookie `wiki_subject` > general 兜底）| 服务端唯一真实源；前端通过 store + cookie 同步 |
 | 已知概念地图 | 邻域取自**正文 wikilink**（`server/profile/concept-map.ts`），注入重塑 prompt + 叠成 Graph 图层；地图快照随 rendition 持久化 | 邻域 scoped 永不全库——注入量由页面自身引用数决定，与 vault 规模无关（T2.1 的 prompt 膨胀教训）；快照持久化让 `assumedKnown` 与 stale 判定都基于「当初真正告诉模型的那一份」，而不是事后重算 |
 | 逐页掌握度 | append-only `page_evidence` 证据流 + 读时纯函数派生（`server/profile/mastery.ts`），**不建物化表** | 判定规则一定会迭代，物化就要全量重算；衰减天然按 `now` 计算无需调度；**证据即解释**——任何结论都能回溯到原始条目与时间戳 |

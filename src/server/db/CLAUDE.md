@@ -7,7 +7,7 @@
 1. 启动并持有**全局唯一** better-sqlite3 连接（`client.ts`）。
 2. 声明 Drizzle schema（`schema.ts`）—— 但实际建表是启动时的原生 `CREATE TABLE IF NOT EXISTS`（见 `client.ts` 的 `ensureTables`，含 FTS5 虚拟表与触发器）。
 3. **legacy schema 自迁移**（`client.ts::ensureTables`）：检测到旧的 `pages.slug PK / sources` 没 `subject_id` 等 → 用 `pragma foreign_keys=OFF` 包裹 `_new + INSERT FROM + DROP + RENAME`，所有 legacy 行继承 `general` subject_id。
-4. 启动时确保 `general` subject 存在（`ensureSubjectsAndGeneral()`）。
+4. 启动时确保**至少有一个** subject 存在（`ensureSubjectsAndGeneral()`；判据是「零 project 才建 general」，不是「没有 general 就建」——`general` 可被用户删除）。
 5. 对外提供 `repos/*` —— 面向领域的 CRUD + 聚合查询。
 
 ## 入口与启动
@@ -24,9 +24,12 @@
 - `create({ slug, name, description? }): Subject` —— slug 必须 `^[a-z0-9][a-z0-9-]*$`，冲突 throw `SubjectError('slug-conflict')`
 - `rename(id, { name?, description? })` —— 不允许改 slug
 - `countPages(subjectId): number`
-- `deleteWithContents(id): void` —— 级联删除：守卫（不存在→`not-found`；`general`→`protected`；有入站跨主题引用→`has-inbound-refs`）后单事务按子→父清全部 subject-scoped 行 + subject 行（原生 SQL，同 `/api/reset?subjectId` 风格）
+- `deleteWithContents(id): void` —— 级联删除：守卫（不存在→`not-found`；维护中→`maintenance`；有 active job→`active-jobs`；有入站跨主题引用→`has-inbound-refs`）后单事务按子→父清全部 subject-scoped 行 + subject 行（原生 SQL，同 `/api/reset?subjectId` 风格）。**`general` 不再有 `protected` 守卫**，与其他 subject 同权
+- `getFallbackSubject(): Subject | null` —— 「没指定 subject 时用哪个」的唯一真实源：general → 列表第一个 → null；**只读不补建**（middleware/subject 与两个 SSR 页共用）
+- `ensureDefaultSubject(): { subject, created }` —— 保证「至少有一个 project」：零 project 时建一个空 `general`（只插 DB 行，形态同手动新建）；非零时返回 `getFallbackSubject()` 且 `created:false`。`IMMEDIATE` 事务保证双进程并发下幂等。调用点：`DELETE /api/subjects/[id]` 成功路径尾部
+- `ensureGeneralSubject(): { subject, created }` —— 保证「**slug 为 general 的行**存在」，即使已有其他 project 也补建。唯一调用点是全局 `/api/reset`（它保留 general 行、重建 stub 页、拿它的 id 当 vault staging marker）
 - `listInboundReferences(id): { id, slug }[]` —— 其他 subject 指向本 subject 的去重 referrer（删除前入站引用守卫用）
-- 错误类：`SubjectError` 含 `code: 'invalid-slug' | 'slug-conflict' | 'not-found' | 'protected' | 'has-inbound-refs'`
+- 错误类：`SubjectError` 含 `code: 'invalid-slug' | 'slug-conflict' | 'not-found' | 'protected' | 'has-inbound-refs' | 'active-jobs' | 'maintenance'`（`protected` 自 2026-08-03 起无生产方，联合成员保留以免混入无关类型改动）
 
 ### `pages-repo.ts`
 
@@ -180,7 +183,7 @@
 
 | 表 | 主键 | 关键约束 |
 |----|------|---------|
-| `subjects` | `id` | `slug` UNIQUE；`general` 必须存在；`description` 默认 `''` |
+| `subjects` | `id` | `slug` UNIQUE；**至少有一行**（不要求是 `general`）；`description` 默认 `''` |
 | `pages` | `(subject_id, slug)` 复合 PK | 同时 `path` UNIQUE；跨 subject 同名 slug 合法但 path 不能撞 |
 | `page_aliases` | `(subject_id, old_slug, new_slug)` | 复合主键；`(subject_id, old_slug)` UNIQUE，单个旧身份只能解析到一个 canonical page；alias 不跨 subject |
 | `wiki_links` | `id`（自增） | `subject_id` + `target_subject_id` 必填，allows graph join |
@@ -257,6 +260,7 @@ src/server/db/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | `general` 可删除：`subjects-repo` 删掉 `beginDeleteMaintenance`/`deleteWithContents` 两处 `slug === 'general'` → `protected` 守卫，新增 `getFallbackSubject()`（只读兜底单一真实源）/ `ensureDefaultSubject()`（零 project 补空 general）/ `ensureGeneralSubject()`（reset 专用，即使有其他 project 也补 general）；`client.ts::ensureSubjectsAndGeneral` 判据由「没有 general 就建」改为「**零 project 才建**」——前者会让用户删掉的 general 在下次启动原地复活。表不变，无迁移。spec/plan 见 `docs/{specs,plans}/2026-08-03-deletable-general-project.md` |
 | 2026-07-27 | `page_evidence` 调优：`ensureIndexes` 补 `page_evidence_style_idx (user_id, kind, created_at)`（`listStyleEvidence` 跨 subject，原本只吃到 `user_id` 前缀且挂在 `POST /api/evidence` 同步路径上）；`appendEvidence` 对超 `MAX_DETAIL_BYTES`(4096) 的 `detail` 截断为 `{truncated,bytes}` 但**证据照常落库**（闸门在 repo 层，三个服务端生产方经 `recordEvidence` 绕过路由）；沉淀证据表保留策略决策（只折叠 12 个月以上 exposure/weak negative，正证据永久保留）。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | 新增 `page_evidence` 表 + `evidence-repo`（逐页掌握度证据流，append-only，FK CASCADE，两个热路径索引）；`user_profiles` 新增 `style_prefs_updated_at`（reducer 消费边界，**走守卫式 ALTER 补列**，不能只靠 `CREATE TABLE IF NOT EXISTS`）；**`profile_signals` 表退役**（`DROP TABLE`，`signals-repo` 删除）。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
 | 2026-07-21 | checkpoint 写入边界按 `jobs.cancel_requested` 原子拒绝已取消任务的迟到 upsert；`getProgress` 同步屏蔽历史 cancelled checkpoint，避免结束后的 Ingest 刷新复活 |
