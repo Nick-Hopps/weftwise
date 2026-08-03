@@ -4,6 +4,10 @@ import { getDb, getRawDb } from '../client';
 import { subjects, pages } from '../schema';
 import type { Subject } from '@/lib/contracts';
 import { SUBJECT_SLUG_RE } from '@/lib/slug';
+import { GENERAL_SUBJECT_SLUG } from '@/server/wiki/page-identity';
+
+/** 自动生成兜底 project 时用的显示名（slug 固定为 GENERAL_SUBJECT_SLUG）。 */
+const DEFAULT_SUBJECT_NAME = 'General';
 
 export class SubjectError extends Error {
   constructor(
@@ -79,6 +83,69 @@ export function create(input: CreateSubjectInput): Subject {
   const db = getDb();
   db.insert(subjects).values(subject).run();
   return subject;
+}
+
+export interface EnsureDefaultSubjectResult {
+  subject: Subject;
+  /** 本次调用是否真的插了一行（调用方据此决定要不要通知前端切换）。 */
+  created: boolean;
+}
+
+/**
+ * 保证「至少有一个 project」这个不变量：零 project 时建一个 slug 为
+ * `general` 的空 project（只插一行 DB，不建 vault 目录、不生成 stub 页，
+ * 与 `POST /api/subjects` 手动新建的形态一致）。
+ *
+ * 非零时不做任何写入：优先返回 general，general 不存在则返回列表第一个
+ * ——「general 缺失」在 general 可删之后是合法状态，不得据此补建。
+ *
+ * 事务用 `immediate()`：Next.js 与 worker 两个进程可能同时发现零 project，
+ * slug UNIQUE 会拒掉第二次插入，而调用方要的是幂等返回而不是抛错。
+ */
+export function ensureDefaultSubject(): EnsureDefaultSubjectResult {
+  const sqlite = getRawDb();
+  const ensure = sqlite.transaction((): EnsureDefaultSubjectResult => {
+    const existing = sqlite
+      .prepare(`SELECT id FROM subjects WHERE slug = ?`)
+      .get(GENERAL_SUBJECT_SLUG) as { id: string } | undefined;
+    if (existing) {
+      return { subject: getById(existing.id)!, created: false };
+    }
+
+    const anyOther = sqlite
+      .prepare(`SELECT id FROM subjects ORDER BY name ASC LIMIT 1`)
+      .get() as { id: string } | undefined;
+    if (anyOther) {
+      return { subject: getById(anyOther.id)!, created: false };
+    }
+
+    const now = new Date().toISOString();
+    const subject: Subject = {
+      id: randomUUID(),
+      slug: GENERAL_SUBJECT_SLUG,
+      name: DEFAULT_SUBJECT_NAME,
+      description: '',
+      augmentationLevel: 'standard',
+      createdAt: now,
+      updatedAt: now,
+    };
+    sqlite
+      .prepare(
+        `INSERT INTO subjects (id, slug, name, description, augmentation_level, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        subject.id,
+        subject.slug,
+        subject.name,
+        subject.description,
+        subject.augmentationLevel,
+        subject.createdAt,
+        subject.updatedAt,
+      );
+    return { subject, created: true };
+  });
+  return ensure.immediate();
 }
 
 export interface RenameSubjectInput {
