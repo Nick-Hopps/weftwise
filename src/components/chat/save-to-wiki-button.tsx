@@ -9,15 +9,22 @@ import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/keyboard';
 import { dispatchJobStarted } from '@/lib/job-started-event';
 import type { Citation } from './message-list';
+import type { WebCitation } from '@/lib/contracts';
 import { useI18n } from '@/components/i18n-provider';
 
 interface SaveToWikiButtonProps {
   answer: string | null;
   citations: Citation[];
+  webCitations?: WebCitation[];
   disabled?: boolean;
 }
 
-export function SaveToWikiButton({ answer, citations, disabled = false }: SaveToWikiButtonProps) {
+export function SaveToWikiButton({
+  answer,
+  citations,
+  webCitations = [],
+  disabled = false,
+}: SaveToWikiButtonProps) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -57,6 +64,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
           pageTitle: title.trim(),
           answer,
           citations,
+          webCitations,
           subjectId,
         }),
       });

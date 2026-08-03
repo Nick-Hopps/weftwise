@@ -1,7 +1,14 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { MarkdownText, UserMessageReferenceCapsule } from '@/components/chat/message-list';
+import { describe, expect, it, vi } from 'vitest';
+
+// MessageCitations 的 wiki 行用 router.push 跳转；静态渲染只需要一个可用的 router 对象。
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+import {
+  MarkdownText,
+  MessageCitations,
+  UserMessageReferenceCapsule,
+} from '@/components/chat/message-list';
 import type { UserMessageReference } from '@/lib/contracts';
 
 const references: UserMessageReference[] = [
@@ -74,5 +81,53 @@ describe('MarkdownText', () => {
     expect(html).toContain('<table>');
     expect(html).toContain('overflow-x-auto');
     expect(html).toContain('[&amp;&gt;table]:table-fixed');
+  });
+});
+
+describe('MessageCitations', () => {
+  const wiki = [{ pageSlug: 'page-a', excerpt: '页面证据' }];
+  const web = [
+    { url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' },
+    { url: 'https://example.com/perf', title: 'Perf notes' },
+  ];
+
+  it('wiki 与 web 条目同区呈现，计数为两者之和', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(MessageCitations, { citations: wiki, webCitations: web }),
+    );
+
+    expect(html).toContain('page-a');
+    expect(html).toContain('WAL 官方文档');
+    expect(html).toContain('Perf notes');
+    // 计数徽标：1 个 wiki + 2 个 web
+    expect(html).toMatch(/>3</);
+  });
+
+  it('web 条目是新标签页打开的安全外链，并显示域名', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(MessageCitations, { citations: [], webCitations: web }),
+    );
+
+    expect(html).toContain('href="https://sqlite.org/wal.html"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain('sqlite.org');
+  });
+
+  it('总数 ≤3 默认展开、>3 默认折叠（按 wiki+web 总数判断）', () => {
+    const expanded = renderToStaticMarkup(
+      React.createElement(MessageCitations, { citations: wiki, webCitations: web }),
+    );
+    expect(expanded).toContain('aria-expanded="true"');
+    expect(expanded).toContain('WAL 官方文档');
+
+    const collapsed = renderToStaticMarkup(
+      React.createElement(MessageCitations, {
+        citations: [...wiki, { pageSlug: 'page-b', excerpt: 'x' }],
+        webCitations: web,
+      }),
+    );
+    expect(collapsed).toContain('aria-expanded="false"');
+    expect(collapsed).not.toContain('WAL 官方文档');
   });
 });

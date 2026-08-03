@@ -842,7 +842,8 @@ export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   references: UserMessageReference[] | null;
-  citations: WikiCitation[] | null;
+  /** wiki 与 web 条目混存；消费方用 `splitAnswerCitations` 拆开。 */
+  citations: AnswerCitation[] | null;
   createdAt: string;
 }
 

@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useRef, useState, memo, useMemo } from 'react';
-import { ChevronDown, MessageCircleQuestion, TextQuote } from 'lucide-react';
+import { ChevronDown, Globe, MessageCircleQuestion, TextQuote } from 'lucide-react';
 import { renderMarkdown } from '@/lib/markdown-client';
 import { cn } from '@/lib/cn';
 import { toolActivityVerb } from '@/lib/tool-activity';
@@ -14,7 +14,7 @@ import {
   shouldPauseMessageFollowForWheel,
   updateMessageScrollFollowState,
 } from './message-scroll';
-import type { UserMessageReference } from '@/lib/contracts';
+import type { UserMessageReference, WebCitation } from '@/lib/contracts';
 import type { ChatMessage, Citation } from './chat-message';
 import { useI18n } from '@/components/i18n-provider';
 
@@ -52,13 +52,29 @@ export const MarkdownText = memo(function MarkdownText({ content }: { content: s
   );
 });
 
-// 单条消息引用列表的可折叠区块。
-// citations.length > 3 → 默认折叠；<= 3 → 默认展开。
+/** 网页来源只显示域名作副行：搜索摘要不具备 wiki excerpt 的原文保证，不上屏。 */
+function citationHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+// 单条消息来源列表的可折叠区块（wiki 页面 + 联网网页同区，图标区分）。
+// 总数 > 3 → 默认折叠；<= 3 → 默认展开。
 // 每条消息独立维护本地折叠状态，交互模式仿 layout/sidebar.tsx 现有的 "Sources" 分组折叠。
-const MessageCitations = memo(function MessageCitations({ citations }: { citations: Citation[] }) {
+export const MessageCitations = memo(function MessageCitations({
+  citations,
+  webCitations = [],
+}: {
+  citations: Citation[];
+  webCitations?: WebCitation[];
+}) {
   const { t } = useI18n();
   const router = useRouter();
-  const [expanded, setExpanded] = useState(citations.length <= 3);
+  const total = citations.length + webCitations.length;
+  const [expanded, setExpanded] = useState(total <= 3);
 
   return (
     <div className="mt-3 pt-2 border-t border-border">
@@ -73,7 +89,7 @@ const MessageCitations = memo(function MessageCitations({ citations }: { citatio
           {t('chat.sources')}
         </span>
         <span className="tabular-nums text-xs font-normal normal-case tracking-normal">
-          {citations.length}
+          {total}
         </span>
       </button>
       {expanded && (
@@ -93,6 +109,25 @@ const MessageCitations = memo(function MessageCitations({ citations }: { citatio
                 </p>
               )}
             </button>
+          ))}
+          {webCitations.map((cite) => (
+            <a
+              key={cite.url}
+              href={cite.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex w-full items-start gap-1.5 rounded-sm px-2 py-1.5 bg-subtle hover:bg-accent-subtle transition-colors focus-ring"
+            >
+              <Globe className="mt-0.5 h-3 w-3 shrink-0 text-foreground-tertiary" aria-hidden />
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium text-accent-strong">
+                  {cite.title}
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-foreground-secondary">
+                  {citationHostname(cite.url)}
+                </span>
+              </span>
+            </a>
           ))}
         </div>
       )}
@@ -196,8 +231,12 @@ const MessageRow = memo(function MessageRow({
         )}
         {showStreaming && <StreamingIndicator />}
 
-        {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
-          <MessageCitations citations={message.citations} />
+        {message.role === 'assistant'
+          && ((message.citations?.length ?? 0) > 0 || (message.webCitations?.length ?? 0) > 0) && (
+          <MessageCitations
+            citations={message.citations ?? []}
+            webCitations={message.webCitations ?? []}
+          />
         )}
       </div>
     </div>

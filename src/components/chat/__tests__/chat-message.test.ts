@@ -59,3 +59,27 @@ describe('chatMessageFromConversation', () => {
     });
   });
 });
+
+describe('chatMessageFromConversation — 混合来源', () => {
+  it('把混存数组拆回 wiki citations 与 webCitations', () => {
+    const message: ConversationMessage = {
+      id: 'm3',
+      conversationId: 'c1',
+      role: 'assistant',
+      content: '回答',
+      references: null,
+      citations: [
+        { pageSlug: 'source-a', excerpt: '证据' },
+        { url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' },
+      ],
+      createdAt: '2026-08-03T00:00:00Z',
+    };
+
+    expect(chatMessageFromConversation(message)).toEqual({
+      role: 'assistant',
+      content: '回答',
+      citations: [{ pageSlug: 'source-a', excerpt: '证据' }],
+      webCitations: [{ url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' }],
+    });
+  });
+});
