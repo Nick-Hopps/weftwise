@@ -32,7 +32,7 @@ import {
   COVERAGE_SYSTEM_PROMPT,
   buildCoverageUserPrompt,
 } from '../llm/prompts/query-prompt';
-import { extractCitationsFromAnswer } from './citation-extract';
+import { extractCitationsFromAnswer, extractWebCitationsFromAnswer } from './citation-extract';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 import {
@@ -222,9 +222,10 @@ export async function runQuery(
 
   const answer = text.trim().length > 0 ? text : NO_QUERY_CONTEXT_ANSWER;
   const citations = extractCitationsFromAnswer(answer, accessed, subject.slug);
+  const webCitations = extractWebCitationsFromAnswer(answer, accessed);
   assessCoverageInBackground(subject, question, answer);
 
-  return { answer, citations, savedAsPage: null };
+  return { answer, citations, webCitations, savedAsPage: null };
 }
 
 export async function saveQueryAsPage(

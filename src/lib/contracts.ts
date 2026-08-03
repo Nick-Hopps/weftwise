@@ -376,6 +376,7 @@ export interface IngestResult {
 export interface QueryResult {
   answer: string;
   citations: WikiCitation[];
+  webCitations: WebCitation[];
   savedAsPage: string | null;
 }
 

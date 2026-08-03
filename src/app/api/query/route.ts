@@ -6,7 +6,10 @@ import {
   runQuery,
   streamAgenticQuery,
 } from '@/server/services/query-service';
-import { extractCitationsFromAnswer } from '@/server/services/citation-extract';
+import {
+  extractCitationsFromAnswer,
+  extractWebCitationsFromAnswer,
+} from '@/server/services/citation-extract';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { resolveSubjectFromRequest } from '@/server/middleware/subject';
 import { resolveUserId } from '@/server/middleware/user';
@@ -23,7 +26,7 @@ import {
 } from '@/server/services/query-intent';
 import { createPendingWorkflowActionPreview } from '@/server/services/pending-action-service';
 import { MAX_USER_MESSAGE_REFERENCES } from '@/lib/chat-reference';
-import type { UserMessageReference, WikiCitation } from '@/lib/contracts';
+import type { UserMessageReference, WebCitation, WikiCitation } from '@/lib/contracts';
 
 export const runtime = 'nodejs';
 
@@ -39,6 +42,10 @@ const QueryBodySchema = z.object({
     pageSlug: z.string(),
     excerpt: z.string(),
     subjectSlug: z.string().optional(),
+  })).optional(),
+  webCitations: z.array(z.object({
+    url: z.string().url(),
+    title: z.string(),
   })).optional(),
   messageReferences: z.array(z.object({
     section: z.string().trim().max(500).nullable(),
@@ -91,6 +98,7 @@ export async function POST(request: NextRequest) {
     pageTitle,
     answer,
     citations,
+    webCitations,
     messageReferences: requestedMessageReferences,
     pageSlug,
     selection,
@@ -104,6 +112,7 @@ export async function POST(request: NextRequest) {
         answer,
         title: pageTitle.trim(),
         citations: citations ?? [],
+        webCitations: webCitations ?? [],
         subjectId: subject.id,
       },
       subject.id,
@@ -112,6 +121,7 @@ export async function POST(request: NextRequest) {
       jobId: job.id,
       answer,
       citations: citations ?? [],
+      webCitations: webCitations ?? [],
       subjectId: subject.id,
     }, { status: 202 });
   }
@@ -131,6 +141,7 @@ export async function POST(request: NextRequest) {
           answer: result.answer,
           title: pageTitle.trim(),
           citations: result.citations,
+          webCitations: result.webCitations,
           subjectId: subject.id,
         },
         subject.id,
@@ -140,6 +151,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       answer: result.answer,
       citations: result.citations,
+      webCitations: result.webCitations,
       saveJobId,
       subjectId: subject.id,
     });
@@ -242,6 +254,7 @@ export async function POST(request: NextRequest) {
       const persistTurn = (
         answer: string,
         cits: WikiCitation[],
+        webCits: WebCitation[] = [],
       ) => {
         try {
           conversationsRepo.appendMessage(
@@ -254,7 +267,8 @@ export async function POST(request: NextRequest) {
             activeConversationId,
             'assistant',
             answer,
-            JSON.stringify(cits),
+            // wiki 与 web 条目共用同一个数组（见 lib/wiki-citation::splitAnswerCitations）
+            JSON.stringify([...cits, ...webCits]),
           );
           conversationsRepo.touchConversation(activeConversationId);
         } catch (err) {
@@ -288,7 +302,7 @@ export async function POST(request: NextRequest) {
               : '我没太确定你的意思。请明确确认执行重置，或取消重置。';
           emit('reset-confirmation', { decision });
           emit('answer-delta', { delta: answer });
-          emit('citations', { citations: [] });
+          emit('citations', { citations: [], webCitations: [] });
           persistTurn(answer, []);
           emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           return;
@@ -298,7 +312,7 @@ export async function POST(request: NextRequest) {
           const answer = '你确定要重置当前 Wiki 吗？这会清空当前 Subject 的所有页面、数据源和任务记录，且无法恢复。请明确确认执行，或取消。';
           emit('reset-confirmation', { decision: 'requested' });
           emit('answer-delta', { delta: answer });
-          emit('citations', { citations: [] });
+          emit('citations', { citations: [], webCitations: [] });
           persistTurn(answer, []);
           emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           return;
@@ -307,7 +321,7 @@ export async function POST(request: NextRequest) {
         if (selection?.sourceKind === 'reshape' && intent.intent === 'image-insert') {
           const answer = '当前选区来自 Reshape 内容。请切换至 Original 后重新选择正文，再发起配图插入。';
           emit('answer-delta', { delta: answer });
-          emit('citations', { citations: [] });
+          emit('citations', { citations: [], webCitations: [] });
           persistTurn(answer, []);
           emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           return;
@@ -328,7 +342,7 @@ export async function POST(request: NextRequest) {
           emit('tool-call', { toolName: 'workflow.reenrich.start', args: directReenrichSlug });
           emit('pending-action', action);
           emit('answer-delta', { delta: answer });
-          emit('citations', { citations: [] });
+          emit('citations', { citations: [], webCitations: [] });
           persistTurn(answer, []);
           emit('done', { subjectId: subject.id, conversationId: activeConversationId });
           return;
@@ -371,8 +385,9 @@ export async function POST(request: NextRequest) {
         }
 
         const citations = extractCitationsFromAnswer(fullAnswer, accessed, subject.slug);
-        emit('citations', { citations });
-        persistTurn(fullAnswer, citations);
+        const webCitations = extractWebCitationsFromAnswer(fullAnswer, accessed);
+        emit('citations', { citations, webCitations });
+        persistTurn(fullAnswer, citations, webCitations);
         emit('done', { subjectId: subject.id, conversationId: activeConversationId });
         assessCoverageInBackground(subject, intentQuestion, fullAnswer);
       } catch (error) {
