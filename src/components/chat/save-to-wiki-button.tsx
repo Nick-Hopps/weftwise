@@ -94,7 +94,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
         size="sm"
         aria-label={t('chat.save.savingLabel')}
         data-tip={`Saving… ${savedJobId.slice(0, 8)}`}
-        className="tip tip-b text-success"
+        className="tip tip-br text-success"
         disabled
       >
         <Check />
@@ -110,7 +110,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         data-tip={t('chat.save.tip')}
-        className="tip tip-b"
+        className="tip tip-br"
         disabled={disabled || !answer}
         onClick={() => setIsOpen((current) => !current)}
       >

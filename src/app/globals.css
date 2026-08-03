@@ -416,9 +416,14 @@
 
 /* =============================================================================
  * CSS-only tooltip for icon-only controls.
- *   Set `data-tip="…"` + class `tip` (above), `tip tip-b` (below), or
- *   `tip tip-l` (to the left — for controls pinned to the right edge of an
- *   overflow-clipping container, where a centered tip would be cut off).
+ *   Set `data-tip="…"` + class `tip` (above), `tip tip-b` (below),
+ *   `tip tip-br` (below, right-aligned) or `tip tip-l` (to the left).
+ *   The last two are for controls pinned to the right edge of an
+ *   overflow-clipping container, where a centered tip would be cut off:
+ *   `tip-br` grows leftwards from the control's right edge and keeps the
+ *   button row unobscured; `tip-l` is for when there is no room below.
+ *   Note the clipping is `overflow: hidden` on an ancestor — raising
+ *   `z-index` does nothing for it.
  *   Keep a real `aria-label` on the control — this is purely visual.
  * ============================================================================= */
 .tip {
@@ -453,6 +458,13 @@
   top: calc(100% + 6px);
   transform: translateX(-50%) translateY(-4px);
 }
+.tip.tip-br::after {
+  left: auto;
+  right: 0;
+  bottom: auto;
+  top: calc(100% + 6px);
+  transform: translateY(-4px);
+}
 .tip.tip-l::after {
   left: auto;
   right: calc(100% + 6px);
@@ -464,6 +476,11 @@
 .tip:focus-visible::after {
   opacity: 1;
   transform: translateX(-50%);
+}
+/* 右对齐变体不能沿用共享 hover 规则里的 translateX(-50%)，否则气泡会横向偏出半个宽度。 */
+.tip.tip-br:hover::after,
+.tip.tip-br:focus-visible::after {
+  transform: none;
 }
 .tip.tip-l:hover::after,
 .tip.tip-l:focus-visible::after {
