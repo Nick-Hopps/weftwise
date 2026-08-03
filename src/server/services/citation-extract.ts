@@ -198,15 +198,57 @@ export function extractWebCitationsFromAnswer(
 ): WebCitation[] {
   if (accessed.webResults.size === 0) return [];
 
+  /**
+   * origin+pathname 索引，用于「搜索结果带跟踪参数、答案写干净 URL」这一类真实错配
+   * （实测 Tavily 会返回 `…/a/20260720A09YMY00?uid[0]=…`，模型抄的是无参版本）。
+   * 只在**答案侧无 query 且该路径只有唯一候选**时回退，多义一律不猜——
+   * 否则 `?id=1` 与 `?id=2` 会被错认成同一篇。
+   */
+  const byPath = new Map<string, WebCitation[]>();
+  for (const citation of accessed.webResults.values()) {
+    const key = urlPathKey(citation.url);
+    if (!key) continue;
+    const bucket = byPath.get(key);
+    if (bucket) bucket.push(citation);
+    else byPath.set(key, [citation]);
+  }
+
   const out: WebCitation[] = [];
   const seen = new Set<string>();
   for (const match of answer.matchAll(URL_OCCURRENCE_RE)) {
     const url = normalizeCitationUrl(match[0]);
-    if (!url || seen.has(url)) continue;
-    const searched = accessed.webResults.get(url);
-    if (!searched) continue;
-    seen.add(url);
+    if (!url) continue;
+    const searched = accessed.webResults.get(url) ?? resolveByPath(url, byPath);
+    // 去重按最终命中的服务端 URL，避免同一来源的两种写法各占一行
+    if (!searched || seen.has(searched.url)) continue;
+    seen.add(searched.url);
     out.push(searched);
   }
   return out;
+}
+
+/** `origin + pathname`（已由 normalizeCitationUrl 统一大小写与末尾斜杠）。 */
+function urlPathKey(normalizedUrl: string): string | null {
+  try {
+    const url = new URL(normalizedUrl);
+    return `${url.origin}${url.pathname}`;
+  } catch {
+    return null;
+  }
+}
+
+function resolveByPath(
+  normalizedUrl: string,
+  byPath: Map<string, WebCitation[]>,
+): WebCitation | undefined {
+  let url: URL;
+  try {
+    url = new URL(normalizedUrl);
+  } catch {
+    return undefined;
+  }
+  // 答案自带 query 时它是可辨识身份的一部分，只接受精确匹配
+  if (url.search) return undefined;
+  const bucket = byPath.get(`${url.origin}${url.pathname}`);
+  return bucket?.length === 1 ? bucket[0] : undefined;
 }

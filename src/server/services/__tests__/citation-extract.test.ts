@@ -253,3 +253,48 @@ describe('extractWebCitationsFromAnswer', () => {
     expect(out).toEqual([]);
   });
 });
+
+describe('extractWebCitationsFromAnswer — 搜索结果带跟踪参数', () => {
+  // 真实场景（2026-08-03 实测）：Tavily 返回 `…/a/20260720A09YMY00?uid%5B0%5D=…`，
+  // 模型按纪律逐字抄的是干净 URL，若只做精确匹配，这条真实来源会被当幻觉丢掉。
+  const TRACKED = 'https://view.inews.qq.com/a/20260720A09YMY00?uid%5B0%5D=100218392471';
+
+  it('答案写干净 URL、搜索结果带跟踪参数 → 仍命中，链接用服务端记录的那一个', () => {
+    const out = extractWebCitationsFromAnswer(
+      '[埃及萨卡拉遗址再获重大考古发现](https://view.inews.qq.com/a/20260720A09YMY00)',
+      accessedWithWeb([{ url: TRACKED, title: '腾讯新闻报道' }]),
+    );
+
+    expect(out).toEqual([{ url: TRACKED, title: '腾讯新闻报道' }]);
+  });
+
+  it('同路径有多条候选时不猜，整条丢弃', () => {
+    const out = extractWebCitationsFromAnswer(
+      '见 https://example.com/article',
+      accessedWithWeb([
+        { url: 'https://example.com/article?id=1', title: '第一篇' },
+        { url: 'https://example.com/article?id=2', title: '第二篇' },
+      ]),
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('答案自带 query 时只走精确匹配，不做路径回退', () => {
+    const out = extractWebCitationsFromAnswer(
+      '见 https://example.com/article?id=999',
+      accessedWithWeb([{ url: 'https://example.com/article?id=1', title: '第一篇' }]),
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('路径回退命中后仍按 URL 去重，不与精确命中重复', () => {
+    const out = extractWebCitationsFromAnswer(
+      '先 https://view.inews.qq.com/a/20260720A09YMY00 再 ' + TRACKED,
+      accessedWithWeb([{ url: TRACKED, title: '腾讯新闻报道' }]),
+    );
+
+    expect(out).toHaveLength(1);
+  });
+});
