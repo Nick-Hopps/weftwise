@@ -278,9 +278,6 @@ export function beginDeleteMaintenance(id: string): SubjectMaintenanceClaim {
     if (!subject) {
       throw new SubjectError('not-found', `Subject ${id} not found`);
     }
-    if (subject.slug === 'general') {
-      throw new SubjectError('protected', `The general subject can't be deleted`);
-    }
     if (subject.maintenance_state !== 'active') {
       throw new SubjectError('maintenance', 'Subject is currently under maintenance');
     }
@@ -317,7 +314,9 @@ export function cancelDeleteMaintenance(id: string, expectedMutationEpoch: numbe
 
 /**
  * 级联删除 subject 及其全部关联数据（单事务，按子→父顺序原生删除）。
- * 守卫：subject 不存在→not-found；general→protected；有入站跨主题引用→has-inbound-refs。
+ * 守卫：subject 不存在→not-found；维护中→maintenance；有 active job→active-jobs；
+ * 有入站跨主题引用→has-inbound-refs。`general` **不再受特殊保护**，与其他 subject 同权；
+ * 「至少留一个 project」的不变量由调用方（DELETE 路由）用 `ensureDefaultSubject` 补齐。
  * 仅清理 DB 行；vault 目录与 git commit 由路由层负责。
  */
 export function deleteWithContents(
@@ -335,9 +334,6 @@ export function deleteWithContents(
     } | undefined;
     if (!subject) {
       throw new SubjectError('not-found', `Subject ${id} not found`);
-    }
-    if (subject.slug === 'general') {
-      throw new SubjectError('protected', `The general subject can't be deleted`);
     }
     const expectedEpoch = options.expectedMutationEpoch;
     const expectedState = expectedEpoch === undefined ? 'active' : 'resetting';
