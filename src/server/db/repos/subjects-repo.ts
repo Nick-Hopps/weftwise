@@ -85,6 +85,15 @@ export function create(input: CreateSubjectInput): Subject {
   return subject;
 }
 
+/**
+ * 「没有明确指定 subject 时用哪一个」的唯一真实源：优先 `general`，它已被删除时
+ * 退到列表第一个（按 name 排序）。零 project 时返回 null，由调用方决定如何呈现。
+ * **只读，不补建** —— 不变量由 `ensureDefaultSubject` 在删除路径与启动期维护。
+ */
+export function getFallbackSubject(): Subject | null {
+  return getBySlug(GENERAL_SUBJECT_SLUG) ?? listSubjects()[0] ?? null;
+}
+
 export interface EnsureDefaultSubjectResult {
   subject: Subject;
   /** 本次调用是否真的插了一行（调用方据此决定要不要通知前端切换）。 */
