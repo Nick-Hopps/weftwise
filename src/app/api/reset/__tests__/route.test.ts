@@ -179,6 +179,25 @@ describe('POST /api/reset', () => {
       .toEqual({ count: 0 });
   });
 
+  it('general 已被用户删除时全局 reset 先补回它，不再空指针', async () => {
+    const subjectsRepo = await import('@/server/db/repos/subjects-repo');
+    const { getRawDb } = await import('@/server/db/client');
+    const sqlite = getRawDb();
+    const general = subjectsRepo.getBySlug('general')!;
+    subjectsRepo.create({ slug: 'physics', name: 'Physics' });
+    subjectsRepo.deleteWithContents(general.id);
+    expect(subjectsRepo.getBySlug('general')).toBeNull();
+    const { POST } = await import('../route');
+
+    const response = await POST(request({ allSubjects: true }));
+
+    expect(response.status).toBe(200);
+    expect(subjectsRepo.listSubjects().map((s) => s.slug)).toEqual(['general']);
+    expect(existsSync(join(dir, 'vault', 'wiki', 'general', 'index.md'))).toBe(true);
+    expect(existsSync(join(dir, 'vault', 'wiki', 'general', 'log.md'))).toBe(true);
+    expect((sqlite.prepare(`SELECT COUNT(*) AS count FROM sources`).get() as { count: number }).count).toBe(0);
+  });
+
   it('维护步骤失败时仍恢复 active，但保留已提升的 epoch', async () => {
     const subjectsRepo = await import('@/server/db/repos/subjects-repo');
     const { getRawDb } = await import('@/server/db/client');

@@ -155,16 +155,42 @@ describe('subjects-repo deleteWithContents', () => {
     expect(subjectsRepo.getBySlug('general')).not.toBeNull();
   });
 
-  it('refuses to delete the general subject', async () => {
+  it('deletes the general subject like any other, cascading its data', async () => {
     const subjectsRepo = await import('../subjects-repo');
-    const { SubjectError } = subjectsRepo;
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
     const general = subjectsRepo.getBySlug('general')!;
-    expect(() => subjectsRepo.deleteWithContents(general.id)).toThrow(SubjectError);
-    try {
-      subjectsRepo.deleteWithContents(general.id);
-    } catch (error) {
-      expect((error as { code?: string }).code).toBe('protected');
-    }
+    seedSubjectData(sqlite, general.id);
+    expect(totalRowsForSubject(sqlite, general.id)).toBeGreaterThan(0);
+
+    subjectsRepo.deleteWithContents(general.id);
+
+    expect(subjectsRepo.getBySlug('general')).toBeNull();
+    expect(totalRowsForSubject(sqlite, general.id)).toBe(0);
+  });
+
+  it('lets general go through the delete-maintenance claim path', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const general = subjectsRepo.getBySlug('general')!;
+
+    const claim = subjectsRepo.beginDeleteMaintenance(general.id);
+
+    expect(claim.slug).toBe('general');
+    subjectsRepo.deleteWithContents(general.id, { expectedMutationEpoch: claim.mutationEpoch });
+    expect(subjectsRepo.getBySlug('general')).toBeNull();
+  });
+
+  it('still refuses to delete general when it has active jobs', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    const { getRawDb } = await import('../../client');
+    const sqlite = getRawDb();
+    const general = subjectsRepo.getBySlug('general')!;
+    sqlite.prepare(`
+      INSERT INTO jobs (id, type, status, subject_id, params_json, created_at)
+      VALUES ('general-job', 'ingest', 'running', ?, '{}', ?)
+    `).run(general.id, new Date().toISOString());
+
+    expect(() => subjectsRepo.beginDeleteMaintenance(general.id)).toThrow(/still active/i);
     expect(subjectsRepo.getBySlug('general')).not.toBeNull();
   });
 

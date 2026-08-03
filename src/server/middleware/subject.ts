@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as subjectsRepo from '@/server/db/repos/subjects-repo';
-import { GENERAL_SUBJECT_SLUG } from '@/server/wiki/page-identity';
 import type { Subject } from '@/lib/contracts';
 
 const SUBJECT_COOKIE = 'wiki_subject';
@@ -11,9 +10,10 @@ export type SubjectResolution =
 
 interface ResolveSubjectOptions {
   /**
-   * When `false`, missing/unknown subject falls back to the `general` subject
-   * (creating it if absent). When `true`, missing/unknown subject results in
-   * a 400/404 error response. Defaults to `false`.
+   * When `false`, missing/unknown subject falls back to `general` — or, once
+   * general has been deleted, to the first existing project. When `true`,
+   * missing/unknown subject results in a 400/404 error response.
+   * Defaults to `false`.
    */
   required?: boolean;
   /**
@@ -41,7 +41,8 @@ function readSubjectFromBody(body: unknown): {
  *   2. `?s=<slug>` query param (deep-link friendly)
  *   3. body `subjectId` / `subjectSlug` (POST/PUT/PATCH bodies)
  *   4. `wiki_subject=<slug>` cookie (set by the frontend store)
- *   5. fallback to the `general` subject (unless `required` is true)
+ *   5. fallback to `general`, or the first project once general was deleted
+ *      (unless `required` is true)
  *
  * Returns either `{ subject }` or `{ error }` so callers can pattern-match
  * without try/catch noise.
@@ -74,7 +75,7 @@ export function resolveSubjectFromRequest(
       if (required) {
         return { subject: null, error: subjectNotFound(candidateSlug) };
       }
-      return resolveGeneralOrFail(required);
+      return resolveFallbackOrFail(required);
     }
     return { subject: found, error: null };
   }
@@ -89,16 +90,21 @@ export function resolveSubjectFromRequest(
     };
   }
 
-  return resolveGeneralOrFail(false);
+  return resolveFallbackOrFail(false);
 }
 
-function resolveGeneralOrFail(required: boolean): SubjectResolution {
-  const general = subjectsRepo.getBySlug(GENERAL_SUBJECT_SLUG);
-  if (!general) {
+/**
+ * 兜底解析：优先 `general`，它已被用户删除时退到第一个 project。
+ * **刻意不在这里补建 project**——读路径不该有副作用；能走到「零 project」只可能是
+ * 数据库被外部清空，而删除路径与启动期已各自兜住不变量。
+ */
+function resolveFallbackOrFail(required: boolean): SubjectResolution {
+  const fallback = subjectsRepo.getFallbackSubject();
+  if (!fallback) {
     return {
       subject: null,
       error: NextResponse.json(
-        { error: 'Default "general" subject not found. Run database migration.' },
+        { error: 'No project exists yet. Create one before using this endpoint.' },
         { status: 500 }
       ),
     };
@@ -112,7 +118,7 @@ function resolveGeneralOrFail(required: boolean): SubjectResolution {
       ),
     };
   }
-  return { subject: general, error: null };
+  return { subject: fallback, error: null };
 }
 
 function subjectNotFound(idOrSlug: string): NextResponse {

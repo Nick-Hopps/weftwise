@@ -96,7 +96,19 @@ export async function importSubject(file: File, slug?: string): Promise<ImportSu
   return res.json();
 }
 
-export async function deleteSubject(id: string): Promise<void> {
+export interface DeleteSubjectResult {
+  subjectId: string;
+  /** 删完为零时服务端自动补出的接任 project（slug 恒为 `general`）；否则缺省。 */
+  replacement?: SubjectListEntry;
+}
+
+export async function deleteSubject(id: string): Promise<DeleteSubjectResult> {
   const res = await apiFetch(`/api/subjects/${id}`, { method: 'DELETE' });
   if (!res.ok) throw new Error(await readError(res));
+  const body = (await res.json()) as { subjectId: string; replacement?: Subject };
+  return {
+    subjectId: body.subjectId,
+    // 服务端补出的 project 必然是空的，直接补 pageCount 便于乐观写入列表缓存。
+    ...(body.replacement ? { replacement: { ...body.replacement, pageCount: 0 } } : {}),
+  };
 }

@@ -30,7 +30,7 @@
 | 路由 | 方法 | 说明 |
 |------|------|------|
 | `/api/subjects` | GET / POST | 🆕 列出 subjects / 创建（`{ slug, name, description? }`，slug `^[a-z0-9][a-z0-9-]*$`，冲突 409） |
-| `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；`general` / 有入站跨主题引用 → 409） |
+| `/api/subjects/[id]` | GET / PATCH / DELETE | 🆕 详情 / 重命名（仅 name & description）/ 删除（级联清理 DB+vault；有 active job / 有入站跨主题引用 → 409；**`general` 与当前 active 都可删**）。删完为零时仍在 vault 锁内经 `ensureDefaultSubject()` 补一个空 `general`，响应体附 `replacement`（仅新建时才有）供前端切换 |
 | `/api/sources` | GET | 无 `slug` 时返回左侧 Sources 轻量列表：任何 Source 优先使用已持久化的展示元数据（`readSourcePresentation`）——URL Source 由 worker 抓取写回，Ingest 联网核查导入的网页快照在 finalize 写入；缺失时 URL Source 回退 hostname，普通文件回退 filename；带 `slug` 时返回页面 Sources 分栏文档 DTO，URL Source 同时携带有界本地阅读正文与截断状态 |
 | `/api/usage` | GET | app 级 LLM 用量统计；`window=7d\|30d\|all` 控制时间范围，可选 `subjectId` 精确筛选项目；未知项目返回 400，缺省项目包含历史/全局未归因记录 |
 | `/api/ingest` | POST | 接受 multipart/form-data（`subjectId` + `text` + `filename`），存原始源到 `vault/raw/<subject>/` + 入队 `ingest` 任务；返回 `{ jobId, sourceId }`；或 JSON `{ urls: string[], subjectId }` 批量 URL（≤20），只持久化规范化网页链接与 source sidecar，不下载 raw HTML；每 URL 独立 ingest job，worker 执行时临时抓取并解析；202 部分成功 `{ results: [{url, jobId?, sourceId?, error?}], subjectId, subjectSlug }` 或 422 全失败 `{ error, results }` |
@@ -76,7 +76,7 @@
 | `/api/evidence` | POST | 追加一条逐页掌握度证据；`requireAuth` + `requireCsrf` + `resolveSubjectFromRequest(required)`；body `{ slug, kind, anchor?, strength?, detail? }`。**写前用 `getPageBySlug` 校验 slug 在该 subject 内存在，不存在 404 不落行**（否则陈旧客户端会持续累积指向幽灵页的证据，生命周期闭合兜不住从未存在过的 slug）。写入 style-bearing 证据（`self-report-hard/easy`）后顺带跑一遍风格 reducer，响应带 `style: { changed, version }` 供客户端决定是否失效 lens 缓存 |
 | `/api/mastery` | GET | **无参**：全量 `slug → MasteryVerdictLite`（**不含 `recent`**，否则响应体随使用量线性膨胀）；**带 `slug`**：单页完整 `MasteryVerdict` 含 `recent`，供审计面；**带 `due=1`**：复习清单 `{ entries, total, limit }`——`mastered` 且已过 `dueAt` 的页按 `dueAt` 升序、上限 20（已失效回落 `exposed` 的**不含**，否则清单会单调膨胀成清不完的待办）。三条分支共用同一份 meta 页排除口径（同 `/api/graph`）与同一个 `deriveMastery`；空库返回空，下游按全 `unknown` 处理（冷启动零回归） |
 | `/api/session` | POST | 使用 `WIKI_API_KEY` 换取 HttpOnly `wiki_session` cookie |
-| `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录；两种模式都按外键顺序清理 Research provenance 五表（需 auth + CSRF） |
+| `/api/reset` | POST | **危险**操作：默认全量重置（保留 general 不删；general 已被用户删掉时先经 `ensureGeneralSubject()` 补回，否则 vault staging marker 会空指针）；带 `subjectId` 时仅删该 subject 的 SQLite 行 + vault 子目录；两种模式都按外键顺序清理 Research provenance 五表（需 auth + CSRF） |
 
 ### `POST /api/health/remediations` 错误契约
 
@@ -92,7 +92,7 @@
 
 > **鉴权约定**：所有 **写** 或 **敏感读** 路由都在顶部调 `requireAuth(request)`；浏览器发起的 POST 还要调 `requireCsrf(request)`（Origin 校验）。SSE 因 EventSource 不能发 header，允许 `?apiKey=` query 兜底（见 `src/server/middleware/auth.ts:55`）。
 >
-> **Subject 解析约定**：所有 subject-scoped 路由顶部调 `resolveSubjectFromRequest(request, { required, body })`。优先级：`?subjectId=` UUID > `?s=` slug > body subjectId/Slug > cookie `wiki_subject` > general 兜底；`required:true` 时缺失返回 400。
+> **Subject 解析约定**：所有 subject-scoped 路由顶部调 `resolveSubjectFromRequest(request, { required, body })`。优先级：`?subjectId=` UUID > `?s=` slug > body subjectId/Slug > cookie `wiki_subject` > 兜底（`getFallbackSubject()`：general → 第一个 project）；`required:true` 时缺失返回 400。
 
 ## 关键依赖与配置
 
@@ -173,6 +173,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | `general` 可删除：`DELETE /api/subjects/[id]` 去掉 409 `protected`，成功路径在 vault 锁内补齐「至少一个 project」并把新建的 general 放进响应 `replacement`；全局 `/api/reset` 先 `ensureGeneralSubject()`（否则 `generalMarker.id` 空指针 500）；`(app)/page.tsx` 与 `(app)/wiki/[...slug]/page.tsx` 的 `getBySlugOrThrow(general)` 兜底改为 `getFallbackSubject()`，general 缺失时不再 SSR 抛错。spec/plan 见 `docs/{specs,plans}/2026-08-03-deletable-general-project.md` |
 | 2026-07-27 | `POST /api/health/remediations` 响应从 `{ jobId, deduplicated }` 改为 `{ jobIds, deduplicated }`，并新增 400 `invalid-research-batch`（research 单次最多 10 个 finding）；`GET /api/lint/latest` 的 research plan 在有持久化 run 时附带 `runId`。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-27 | `POST /api/evidence` 身份字段加上限（`slug` ≤512 / `anchor` ≤256，超限 400 不落行——App Router 无默认 body 上限而 `page_evidence` 永不删除）；`GET /api/mastery` 新增 `?due=1` 复习清单分支（`mastered` 且已过 `dueAt`，按 `dueAt` 升序，上限 20 带 `total`），与全量分支共用同一次 `listForSubject`、同一份 meta 页口径与同一个 `deriveMastery`；Dashboard 挂载「该复习了」区块。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | Lens 接入已知概念地图：`POST /api/lens/[...slug]` 算邻域地图注入重塑 prompt（抛错按无地图继续，**不阻断重塑**）并把快照写进 `page_renditions.known_concepts_json`；`GET` 的 `assumedKnown` **从存储列派生而非重算**（必须是当初真正告诉模型的那一份），并补算当前地图与之比对纳入 `stale`——掌握度变化不改 `profileVersion`，没有这一项纠错闭环在 UI 上无从触发。`known_concepts_json` 为 null 的旧行不参与比对，存量重塑版不会一上线全变 stale。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |

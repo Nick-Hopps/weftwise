@@ -29,10 +29,11 @@ const MiniGraphView = dynamic(
 async function resolveActiveSubject(): Promise<Subject> {
   const store = await cookies();
   const slug = store.get(SUBJECT_COOKIE)?.value ?? GENERAL_SUBJECT_SLUG;
-  return (
-    subjectsRepo.getBySlug(slug) ??
-    subjectsRepo.getBySlugOrThrow(GENERAL_SUBJECT_SLUG)
-  );
+  const resolved = subjectsRepo.getBySlug(slug) ?? subjectsRepo.getFallbackSubject();
+  if (!resolved) {
+    throw new Error('No project exists yet');
+  }
+  return resolved;
 }
 
 function countSources(subjectId: string): number {

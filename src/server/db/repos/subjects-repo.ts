@@ -4,6 +4,10 @@ import { getDb, getRawDb } from '../client';
 import { subjects, pages } from '../schema';
 import type { Subject } from '@/lib/contracts';
 import { SUBJECT_SLUG_RE } from '@/lib/slug';
+import { GENERAL_SUBJECT_SLUG } from '@/server/wiki/page-identity';
+
+/** 自动生成兜底 project 时用的显示名（slug 固定为 GENERAL_SUBJECT_SLUG）。 */
+const DEFAULT_SUBJECT_NAME = 'General';
 
 export class SubjectError extends Error {
   constructor(
@@ -79,6 +83,93 @@ export function create(input: CreateSubjectInput): Subject {
   const db = getDb();
   db.insert(subjects).values(subject).run();
   return subject;
+}
+
+/**
+ * 「没有明确指定 subject 时用哪一个」的唯一真实源：优先 `general`，它已被删除时
+ * 退到列表第一个（按 name 排序）。零 project 时返回 null，由调用方决定如何呈现。
+ * **只读，不补建** —— 不变量由 `ensureDefaultSubject` 在删除路径与启动期维护。
+ */
+export function getFallbackSubject(): Subject | null {
+  return getBySlug(GENERAL_SUBJECT_SLUG) ?? listSubjects()[0] ?? null;
+}
+
+export interface EnsureDefaultSubjectResult {
+  subject: Subject;
+  /** 本次调用是否真的插了一行（调用方据此决定要不要通知前端切换）。 */
+  created: boolean;
+}
+
+/** 在已开启的事务内插一行空 general（不建 vault 目录、不生成 stub 页）。 */
+function insertGeneralSubject(sqlite: ReturnType<typeof getRawDb>): Subject {
+  const now = new Date().toISOString();
+  const subject: Subject = {
+    id: randomUUID(),
+    slug: GENERAL_SUBJECT_SLUG,
+    name: DEFAULT_SUBJECT_NAME,
+    description: '',
+    augmentationLevel: 'standard',
+    createdAt: now,
+    updatedAt: now,
+  };
+  sqlite
+    .prepare(
+      `INSERT INTO subjects (id, slug, name, description, augmentation_level, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      subject.id,
+      subject.slug,
+      subject.name,
+      subject.description,
+      subject.augmentationLevel,
+      subject.createdAt,
+      subject.updatedAt,
+    );
+  return subject;
+}
+
+/**
+ * 保证「至少有一个 project」这个不变量：零 project 时建一个 slug 为
+ * `general` 的空 project，形态与 `POST /api/subjects` 手动新建完全一致。
+ *
+ * 非零时不做任何写入：优先返回 general，general 不存在则返回列表第一个
+ * ——「general 缺失」在 general 可删之后是合法状态，不得据此补建。
+ *
+ * 事务用 `immediate()`：Next.js 与 worker 两个进程可能同时发现零 project，
+ * slug UNIQUE 会拒掉第二次插入，而调用方要的是幂等返回而不是抛错。
+ */
+export function ensureDefaultSubject(): EnsureDefaultSubjectResult {
+  const sqlite = getRawDb();
+  const ensure = sqlite.transaction((): EnsureDefaultSubjectResult => {
+    const existing = sqlite
+      .prepare(`SELECT id FROM subjects ORDER BY name ASC`)
+      .all() as Array<{ id: string }>;
+    if (existing.length > 0) {
+      return { subject: getFallbackSubject()!, created: false };
+    }
+    return { subject: insertGeneralSubject(sqlite), created: true };
+  });
+  return ensure.immediate();
+}
+
+/**
+ * 保证「**slug 为 general 的行**存在」——与 `ensureDefaultSubject` 不同，
+ * 即使已有其他 project 也会补建。唯一使用方是全局 `/api/reset`：它保留 general 行、
+ * 重建它的 stub 页、并拿它的 id 当 vault staging marker，这三件事都需要具体的 general。
+ */
+export function ensureGeneralSubject(): EnsureDefaultSubjectResult {
+  const sqlite = getRawDb();
+  const ensure = sqlite.transaction((): EnsureDefaultSubjectResult => {
+    const existing = sqlite
+      .prepare(`SELECT id FROM subjects WHERE slug = ?`)
+      .get(GENERAL_SUBJECT_SLUG) as { id: string } | undefined;
+    if (existing) {
+      return { subject: getById(existing.id)!, created: false };
+    }
+    return { subject: insertGeneralSubject(sqlite), created: true };
+  });
+  return ensure.immediate();
 }
 
 export interface RenameSubjectInput {
@@ -211,9 +302,6 @@ export function beginDeleteMaintenance(id: string): SubjectMaintenanceClaim {
     if (!subject) {
       throw new SubjectError('not-found', `Subject ${id} not found`);
     }
-    if (subject.slug === 'general') {
-      throw new SubjectError('protected', `The general subject can't be deleted`);
-    }
     if (subject.maintenance_state !== 'active') {
       throw new SubjectError('maintenance', 'Subject is currently under maintenance');
     }
@@ -250,7 +338,9 @@ export function cancelDeleteMaintenance(id: string, expectedMutationEpoch: numbe
 
 /**
  * 级联删除 subject 及其全部关联数据（单事务，按子→父顺序原生删除）。
- * 守卫：subject 不存在→not-found；general→protected；有入站跨主题引用→has-inbound-refs。
+ * 守卫：subject 不存在→not-found；维护中→maintenance；有 active job→active-jobs；
+ * 有入站跨主题引用→has-inbound-refs。`general` **不再受特殊保护**，与其他 subject 同权；
+ * 「至少留一个 project」的不变量由调用方（DELETE 路由）用 `ensureDefaultSubject` 补齐。
  * 仅清理 DB 行；vault 目录与 git commit 由路由层负责。
  */
 export function deleteWithContents(
@@ -268,9 +358,6 @@ export function deleteWithContents(
     } | undefined;
     if (!subject) {
       throw new SubjectError('not-found', `Subject ${id} not found`);
-    }
-    if (subject.slug === 'general') {
-      throw new SubjectError('protected', `The general subject can't be deleted`);
     }
     const expectedEpoch = options.expectedMutationEpoch;
     const expectedState = expectedEpoch === undefined ? 'active' : 'resetting';

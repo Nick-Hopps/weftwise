@@ -198,8 +198,6 @@ export const zhCN = {
   'subjects.dialog.deleteWarning': '这会永久删除“{name}”、其中 {count} 个页面及全部来源，且无法撤销。',
   'subjects.dialog.confirmDelete': '再次点击确认',
   'subjects.dialog.delete': '删除主题',
-  'subjects.dialog.generalProtected': '不能删除 general 主题。',
-  'subjects.dialog.activeProtected': '该主题当前正在使用。请先切换到其他主题再删除。',
   'augmentation.label': '内容增强级别',
   'augmentation.off.label': '关闭',
   'augmentation.off.helper': '只忠实整理原文',

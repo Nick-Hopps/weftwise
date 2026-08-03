@@ -101,6 +101,10 @@ function legacyMigrateTable(migration: LegacyTableMigration): void {
   if (postSql) sqlite.exec(postSql);
 }
 
+/**
+ * 建 subjects 表并保证「**至少有一个** subject 存在」（不是「general 存在」——
+ * general 自 2026-08-03 起可被用户删除）。返回一个可用于 legacy 行 backfill 的 subject id。
+ */
 function ensureSubjectsAndGeneral(): string {
   const sqlite = rawSqlite!;
   sqlite.exec(`
@@ -134,6 +138,14 @@ function ensureSubjectsAndGeneral(): string {
     .prepare(`SELECT id FROM subjects WHERE slug = 'general'`)
     .get() as { id: string } | undefined;
   if (existing) return existing.id;
+
+  // general 可被用户删除，「没有 general」是合法状态——只要还有任何 subject 就不补建，
+  // 否则删掉 general 的用户会在下次启动时看到它原地复活。legacy 迁移需要一个 subject id
+  // 来 backfill 无 subject 的旧行，随便哪个都合法（真正的 legacy 库必然是空表，走不到这里）。
+  const anySubject = sqlite
+    .prepare(`SELECT id FROM subjects LIMIT 1`)
+    .get() as { id: string } | undefined;
+  if (anySubject) return anySubject.id;
 
   const id = randomUUID();
   const now = new Date().toISOString();

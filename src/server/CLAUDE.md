@@ -30,7 +30,7 @@ Route Handler / Worker Handler
 - **Worker 进程入口**：`worker-entry.ts`
   - 自加载 `.env`；
   - 初始化 DB；
-  - **确保 `general` subject 存在**（首次启动 seed）；
+  - **确保至少有一个 subject 存在**（零 project 时 seed 一个空 `general`；`general` 可被用户删除，故判据不是「general 存在」）；
   - FTS 自愈（空索引重建）；
   - 回收过期租约的任务 (`queue.reclaimExpired`)；
   - 回滚 `operations` 表中 `status='pending'` 的记录（按 `operations.subject_id` 仅 reindex 该 subject，缺失则 warn 跳过）；
@@ -63,7 +63,7 @@ Route Handler / Worker Handler
 | `db/repos/*` | `subjectsRepo / pagesRepo / jobsRepo / sourcesRepo / embeddingsRepo` 的 CRUD + FTS search（全部要求 `subjectId`）|
 | `git/git-service` | `ensureVaultRepo / getVaultHead / commitVaultChanges / restoreToHead / getFileAtCommit / getDiff / getVaultLog / parseGitLog` |
 | `middleware/auth` | `requireAuth / requireCsrf / createSessionResponse` |
-| `middleware/subject` | `resolveSubjectFromRequest(request, { required?, body? })` |
+| `middleware/subject` | `resolveSubjectFromRequest(request, { required?, body? })`（兜底走 `subjectsRepo.getFallbackSubject()`：general → 第一个 project → 500）|
 | `config/env` | `getConfig / vaultPath` |
 
 ## 关键依赖与配置
@@ -79,7 +79,7 @@ Route Handler / Worker Handler
 
 | 表 | 用途 |
 |----|------|
-| `subjects` | first-class 主题（`id` PK + `slug` UNIQUE + `name` + `description`），`general` 必须存在 |
+| `subjects` | first-class 主题（`id` PK + `slug` UNIQUE + `name` + `description`），**至少有一行**（不要求是 `general`）|
 | `pages` | wiki 页面索引（**复合 PK `(subject_id, slug)`** + `path UNIQUE` + title + summary + tags + hashes） |
 | `page_aliases` | slug 重命名映射（PK `(subject_id, old_slug, new_slug)`） |
 | `wiki_links` | 每条 `[[link]]` 的 source/target/context；`subject_id` + `target_subject_id` 让 graph/lint 能 join |
@@ -129,6 +129,7 @@ src/server/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | `general` project 可删除：不变量从「general 必存」改为「**至少有一个 project**」。`middleware/subject.ts` 的 `resolveGeneralOrFail` 改名 `resolveFallbackOrFail` 并改走 `subjectsRepo.getFallbackSubject()`（**读路径不补建** project——能走到零 project 只可能是数据库被外部清空，删除路径与启动期已各自兜住）；500 文案由误导性的「Run database migration」改为「No project exists yet」。spec/plan 见 `docs/{specs,plans}/2026-08-03-deletable-general-project.md` |
 | 2026-07-27 | 掌握度模型调优：`profile/mastery.ts` 连击折叠由 UTC 日改为**滚动 `STREAK_MIN_GAP_HOURS`(16h) 间隔**（日历日需要时区，而服务端不知道读者在哪个时区，UTC+8 的早 7:30/8:30 同一坐被算成两次复习）；判定主体改名 `explainMastery` 并返回归因（`rule`/连击/strength 计数/`blockedByStrengthGate`/`expiredPositives`），`deriveMastery` 降为其薄封装；verdict 新增 `dueAt`（此前算了即丢，无消费者）与 `isDueForReview`；新增 `profile/mastery-report.ts` 聚合纯函数供 `npm run mastery:report`。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | 已知概念地图的两个消费面：新增 `profile/concept-map.ts`（`selectNeighborhood` / `groupByMastery` / `renderKnownConcepts` 三个纯函数，邻域取自**正文 wikilink** 而非图查询，硬上界 `MAX_NEIGHBORHOOD=40` 且截断时明说不静默）与 `profile/concept-map-io.ts`（`buildKnownConceptsForPage`，接受预取证据 map 让 GET/POST 只查一次）；`llm/prompts/reshape-prompt.ts` 与 `services/reshape-service.ts` 接受可选 `knownConcepts`（三段全空则整段不注入，零证据时 prompt 逐字节不变）。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |
 | 2026-07-26 | 证据流与逐页掌握度模型：新增 `page_evidence` 表 + `db/repos/evidence-repo.ts` + `profile/mastery.ts::deriveMastery`（四态 `unknown/exposed/mastered/struggling` × 三档置信度，显式优先级判定，`mastered` 两级有效期 = 复习到期再逾期一档）；`profile/signal-reducer.ts` 输入换 `EvidenceRow[]` 并加时间窗/衰减/消费边界/三维独立阈值；新增 `services/{record-evidence,style-learning}.ts`；**`profile_signals` 表与 `signals-repo` 已退役**。spec/plan 见 `docs/{specs,plans}/2026-07-26-mastery-evidence-model.md` |
