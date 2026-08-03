@@ -173,6 +173,7 @@ src/app/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | `POST /api/query`：流式 `citations` SSE 事件新增 `webCitations`（**所有分支恒有该字段**，包括 reset 确认、Reshape 选区拒绝、direct-reenrich 等短路分支都发空数组，客户端不必判 undefined）；落库把 wiki 与 web 条目写进**同一个** `citations_json` 数组（判别字段 `pageSlug` / `url`，不加列不写迁移）；掌握度证据仍只由 wiki 引用产生（web 条目没有 slug 可归属）。body 新增可选 `webCitations`，两处 `save-to-wiki` enqueue 透传（缺省显式落 `[]`）。`globals.css` 新增 `tip-br` tooltip 变体。spec/plan 见 `docs/{specs,plans}/2026-08-03-ask-ai-web-sources-and-tooltip.md` |
 | 2026-07-27 | `POST /api/health/remediations` 响应从 `{ jobId, deduplicated }` 改为 `{ jobIds, deduplicated }`，并新增 400 `invalid-research-batch`（research 单次最多 10 个 finding）；`GET /api/lint/latest` 的 research plan 在有持久化 run 时附带 `runId`。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-27 | `POST /api/evidence` 身份字段加上限（`slug` ≤512 / `anchor` ≤256，超限 400 不落行——App Router 无默认 body 上限而 `page_evidence` 永不删除）；`GET /api/mastery` 新增 `?due=1` 复习清单分支（`mastered` 且已过 `dueAt`，按 `dueAt` 升序，上限 20 带 `total`），与全量分支共用同一次 `listForSubject`、同一份 meta 页口径与同一个 `deriveMastery`；Dashboard 挂载「该复习了」区块。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |
 | 2026-07-26 | Lens 接入已知概念地图：`POST /api/lens/[...slug]` 算邻域地图注入重塑 prompt（抛错按无地图继续，**不阻断重塑**）并把快照写进 `page_renditions.known_concepts_json`；`GET` 的 `assumedKnown` **从存储列派生而非重算**（必须是当初真正告诉模型的那一份），并补算当前地图与之比对纳入 `stale`——掌握度变化不改 `profileVersion`，没有这一项纠错闭环在 UI 上无从触发。`known_concepts_json` 为 null 的旧行不参与比对，存量重塑版不会一上线全变 stale。spec/plan 见 `docs/{specs,plans}/2026-07-26-known-concept-map-surfaces.md` |

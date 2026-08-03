@@ -146,3 +146,13 @@
 - `src/server/agents/CLAUDE.md`：`web.search` 一行补「结果由 query 侧留痕供 web 引用求交」。
 - 根 `AGENTS.md` / `CHANGELOG.md` 按既有惯例追加。
 - `docs:` 与 `feat:` 提交成对。
+
+---
+
+## 实际执行补记（2026-08-03）
+
+- **T2 拆分**：`QueryResult.webCitations` 与 `ConversationMessage.citations` 的类型收紧会波及 T6/T7 的接线点，为保证每个提交都能编译，这两处分别下沉到 T6 / T7 完成。
+- **T4 落点调整**：`normalizeCitationUrl` 放进 `lib/wiki-citation.ts` 而非 `citation-extract.ts` —— 记录侧（`query-tools`）与解析侧（`citation-extract`）必须共用同一把尺子，放服务端会让 `query-tools` 反向依赖 `citation-extract`。
+- **T8 追加一次修复（非计划内）**：真实验收发现搜索结果带跟踪参数时真实来源被误杀，补 `origin+pathname` 回退并固化 4 条回归用例，单独提交 `d5faf0cf`。
+- **T8 实测数据**：tooltip 气泡右缘 849 / 面板右缘 860（在内 11px），对照居中变体越界 22.3px；真实问答 2 次 `web_search` → 2 条网页来源，UI「来源 2」渲染并可新标签页打开；`saveQueryAsPage` 真实落页（vault `6ee2e2d`）References 两类行齐备、frontmatter `sources` 为 `[]`，验收产物已删除（`4454edd`）。
+- **未覆盖**：`save-to-wiki` **job 队列**这一段没有端到端跑（主 checkout 的 worker 与本 worktree 共用同一个 DB，会抢任务并以主分支代码执行），改为在本分支代码里直接调用 `saveQueryAsPage` 走真实 Saga + git commit 验证；job params 透传由路由契约测试覆盖。

@@ -18,7 +18,7 @@
 | `api-fetch.ts` | 客户端 `fetch` 封装 + `useApiFetch()` hook（自动注入 `?subjectId`，POST 由调用方在 body 中显式带） |
 | `markdown-client.ts` | 客户端 markdown 解析（供 hover peek 等轻量场景）；`createRemarkQuiz()` 按 blockquote 内**首个** `thematicBreak` 把 `[!quiz]` 切成问题段 / 答案段（语言无关，不依赖「答案：」这类会随 `wikiLanguage` 漂移的标记；**没有 `thematicBreak` 时不折叠是刻意设计，不是遗漏**——语言标记兜底只放在摄入侧 `server/wiki/quiz-separator.ts`，见 `docs/specs/2026-07-28-quiz-answer-separator-guard.md` 约束 C1），答案段包进 `data-quiz-answer` 容器、问题段文本 hash 写 `data-quiz-id`；`RenderOptions.interactive` 是正文交互块的能力接缝（`{ pageSlug, subjectSlug, assumedKnown? }`），**只有 Wiki 阅读页会传**；`a` 覆盖据 `assumedKnown` 给「被判为已掌握」的 wikilink 挂纠错入口，**匹配同时比对 subject**（跨主题同名 slug 合法且常见，只比 slug 会把负证据归错页）；`[[subject:page]]` 跨主题语法的渲染镜像，跨主题链接 href 用 `?s=<subject-slug>` query；已接入 `remark-gfm`，支持表格/删除线/任务列表/自动链接（所有共用 `renderMarkdown()` 的消费方一并获得该能力） |
 | `tags.ts` | Tags 工作台纯分析：标签摘要/覆盖率/格式变体/组合筛选，以及 `buildTagReviewQueue` / `filterTagReviewQueue` 即时投影格式变体、非重复单次标签与未标记页面；不持久化 Review 状态 |
-| `wiki-citation.ts` | Ask AI 引用纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径，以及保存回答时的 current/cross Subject wikilink |
+| `wiki-citation.ts` | Ask AI 来源纯函数：citation → 可点击 `/wiki/<slug>?s=` 路径、保存回答时的 current/cross Subject wikilink，以及**网页来源**侧的 `normalizeCitationUrl`（记录侧与解析侧必须共用同一把尺子）/ `isWebCitation` / `splitAnswerCitations`（混存数组 → `{wiki, web}`，同时是「不加迁移」的存量兼容层）|
 | `chat-reference.ts` | Ask AI 用户消息引用纯函数：把本轮 Passage 绑定到当前 Subject/page，过滤空摘录并限制最多 40 条，供即时消息展示与 API 持久化共用 |
 | `selection-text.ts` | 🆕 正文选区文本纯函数：`normalizeSelectionText`（trim/空→null）/`truncateForContext`（4000 字符上限）/`selectionRefId`（djb2 哈希去重）/`findNearestHeadingText`（`HeadingScanNode` 结构子集，供 `hooks/use-text-selection` 消费） |
 | `search-snippet.ts` | 搜索片段纯函数：只解析 FTS 生成的受控 `<mark>` 对，返回普通/高亮文本段供 React 安全渲染；其他 HTML 与损坏标记保持普通文本 |
@@ -46,8 +46,10 @@ Source         { id, subjectId, filename, contentHash, parsedAt, metadataJson }
 IngestResult   { pagesCreated: string[], pagesUpdated: string[],
                  linksAdded: number, commitSha: string }
 WikiCitation  { pageSlug, excerpt, subjectSlug? }
+WebCitation   { url, title }          // 联网来源：只有身份与标题，刻意无 excerpt
+AnswerCitation = WikiCitation | WebCitation  // 判别字段 pageSlug / url，混存同一数组
 UserMessageReference { pageSlug, pageTitle?, subjectSlug, section, excerpt }
-QueryResult    { answer, citations: WikiCitation[], savedAsPage }
+QueryResult    { answer, citations: WikiCitation[], webCitations: WebCitation[], savedAsPage }
 LintFinding    { type, severity, pageSlug, description, suggestedFix }
 EnrichedLintFinding { ...LintFinding, id, subjectId, subjectSlug }
 RemediationAction { type: 'fix'|'curate'|'research'|'re-ingest'|'review-source', label, destructive:false, href? }
@@ -64,7 +66,7 @@ HistoryAffectedPage { slug, action: 'create'|'update'|'delete' }
 HistoryListInput/Result { slug?, limit? } / { entries }
 HistoryDiffInput/Result { operationId } / { operationId, status, affectedPages, diff }
 Conversation   { id, subjectId, title, createdAt, updatedAt }
-ConversationMessage { id, conversationId, role: 'user'|'assistant', content, references: UserMessageReference[]|null, citations: WikiCitation[]|null, createdAt }
+ConversationMessage { id, conversationId, role: 'user'|'assistant', content, references: UserMessageReference[]|null, citations: AnswerCitation[]|null, createdAt }
 MetadataPatchInput { slug, title?, summary?, tags?, aliases? }
 LinkEnsureInput { sourceSlug, targetSubjectSlug?, targetSlug, oldString, displayText?, mode:'link'|'unlink'|'retarget' }
 PendingActionOperation = 'create'|'update'|'patch'|'delete'|'move'|'reenrich'|'metadata-patch'|'link-ensure'|'history-revert'|'workflow-reenrich-start'|'workflow-research-start'|'workflow-image-insert-start'|'workflow-cancel'
@@ -168,6 +170,7 @@ src/lib/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | Ask AI 联网来源：`contracts.ts` 新增 `WebCitation` 与 `AnswerCitation`（**判别字段 `pageSlug` / `url`，两类条目混存同一个 `messages.citations_json` 数组**——该列本就是 role-aware 证据 blob、repo 只校验 `Array.isArray`，故不加列不写迁移，存量行解析逐字节不变）；`QueryResult` 增 `webCitations`；`wiki-citation.ts` 新增 `normalizeCitationUrl` / `isWebCitation` / `splitAnswerCitations`。`normalizeCitationUrl` 放 lib 而非服务端是因为**记录侧（`query-tools` 存搜索结果）与解析侧（`citation-extract` 读答案）必须共用同一把尺子**，两边漂移会让真实来源因末尾斜杠/host 大小写/句末标点这类无意义差异对不上。spec/plan 见 `docs/{specs,plans}/2026-08-03-ask-ai-web-sources-and-tooltip.md` |
 | 2026-07-28 | `tool-activity.ts` 新增 `jobStageIcon(eventType)`：按事件类型前缀派生阶段图标（ingest→import / lint→scan-search / curate→folder-tree / fix→wrench / reenrich→sparkles / save→file-plus / research(-import)→globe / `job:cancelled`→stop / 其余 circle-dot），并把 `ToolActivityIconName` 扩到 28 个键。**刻意复用工具图标的同一套键**而非另起一套——日志时间线里工具行与阶段行混排，两套图标体系必然又长回「视觉割裂」；`job-log.ts` 的 `JobLogLine` 随之增加 `icon`（有 tool 取工具图标，否则取阶段图标），把图标决策留在可单测的纯函数层。**`agent:*` 不按前缀走而是拆三态**（`run-started`→circle-play / `step`→bot / `run-completed`→circle-check，其余 agent 子事件回退 bot）：实测一个 Ingest job 里 agent 事件占 1150/1154，只给一枚图标的话整列日志退化成同一个符号，读不出节奏；拆开后实测分布 400/379/379。run-completed 用中性灰 CircleCheck，与 job 级成功态的绿色裸 Check 分属两个层级 |
 | 2026-07-27 | `contracts.ts`：`RemediationPlan` 新增可选 `runId`（只在服务端确实读到持久化 Research run 时出现，供 finding 行内审批入口免去一次 `GET /api/jobs/:id`）；`research-plan.ts` 新增 `MAX_RESEARCH_BATCH_JOBS=10`——放在 lib 是因为服务端校验与工具栏计数必须共用同一个上限，两端漂移会让「研究 (10 / 23)」和 400 拒绝对不上。spec/plan 见 `docs/{specs,plans}/2026-07-27-research-batch-per-topic-jobs.md` |
 | 2026-07-27 | `contracts.ts`：`MasteryVerdictLite` 新增 `dueAt`（与 `expiresAt` 同规格、同只在 `mastered` 时非空，决策 4 两级语义的另一半）；新增 `MasteryDueEntry` / `MasteryDueResult` 供 `GET /api/mastery?due=1` 与 Dashboard 复习区块共用。spec/plan 见 `docs/{specs,plans}/2026-07-27-mastery-model-tuning.md` |

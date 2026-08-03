@@ -52,6 +52,7 @@ Ask AI 悬浮面板右上角的图标动作条里，最右侧的保存按钮悬�
 - 模型按 prompt 纪律用 markdown 链接 `[标题](url)` 标注 web 依据；服务端流结束后**确定性解析**答案里的 URL，与本轮累积的搜索结果求交。
 - 与既有 wiki 引用「prompt 纪律 + 流后确定性解析」完全同构（`citation-extract.ts` 的设计），**零额外 LLM 调用**。
 - 求交是反幻觉闸门：模型凭空写的 URL 不会进 Sources。
+- **精确匹配之外需要一层 `origin+pathname` 回退**（真实验收补充的约束）：实测 Tavily 会返回带跟踪参数的 URL（`…/a/20260720A09YMY00?uid[0]=…`），而模型按纪律抄的是干净 URL，只做精确匹配会把**真实来源判成幻觉丢掉**。回退只在「答案侧无 query」且「该路径只有唯一候选」时生效，多义一律不猜——否则 `?id=1` 与 `?id=2` 会被错认成同一篇。
 - 已知代价：模型漏写链接则该来源不显示。这与 wiki 引用「an uncited claim will show no source」的既有语义一致，不为它加兜底。
 - **不**把本轮搜索返回的全部结果一股脑列进来：搜了没用上的结果不是依据，多轮搜索会把 Sources 冲成噪声。
 
@@ -108,7 +109,7 @@ Ask AI 悬浮面板右上角的图标动作条里，最右侧的保存按钮悬�
 | `lib/contracts.ts` | 新增 `WebCitation { url; title }`；`AnswerCitation = WikiCitation \| WebCitation`；`QueryResult` 增 `webCitations` |
 | `lib/wiki-citation.ts` | 新增纯函数 `isWebCitation` / `splitAnswerCitations`（union 数组 → `{ wiki, web }`），供客户端与 repo 读取侧共用 |
 | `services/query-tools.ts` | `AccessedPages` 增 `webResults: Map<normalizedUrl, WebCitation>`；`buildQueryToolContext` 的 `webSearch` 包装在返回前累积结果（与 `onSourceAccess` 同层级的留痕职责） |
-| `services/citation-extract.ts` | 新增纯函数 `extractWebCitationsFromAnswer(answer, accessed)`：抽 markdown 链接 URL + 裸 URL → `normalizeCitationUrl` 规范化（去尾随标点/尾斜杠差异）→ 与 `webResults` 求交 → 按首次出现顺序去重，标题取服务端记录（C3） |
+| `services/citation-extract.ts` | 新增纯函数 `extractWebCitationsFromAnswer(answer, accessed)`：扫描答案里所有 http(s) URL（`[t](url)`、裸 URL、`<url>`、括号包裹都由同一次扫描覆盖，**不解析 markdown 结构**）→ `normalizeCitationUrl` 规范化 → 与 `webResults` 求交（精确优先，必要时 `origin+pathname` 唯一候选回退）→ 按首次出现顺序去重，标题取服务端记录（C3） |
 | `llm/prompts/query-prompt.ts` | 「Web search」一节改纪律：仍禁止 `[[…]]`，改为要求用 `[标题](url)` 内联标注，且 URL 必须是 `web_search` 原样返回的；说明这些链接就是 web 来源的收集方式 |
 | `api/query/route.ts` | 流末算 `webCitations`；`emit('citations', { citations, webCitations })`；持久化写 `[...citations, ...webCitations]`（C6）；`recordTurnEvidence` 仍只吃 wiki 条目（掌握度证据按 `(user, subject, slug)` 归属，web 条目没有 slug） |
 | `services/query-service.ts` | `runQuery` 一并返回 `webCitations`；`saveQueryAsPage` 接收并渲染 web References（抽纯函数 `buildReferencesSection` 便于单测）；`save-to-wiki` job params 增 `webCitations`（缺省 `[]`，兼容在途旧 job） |
