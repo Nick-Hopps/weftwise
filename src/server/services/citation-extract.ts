@@ -8,7 +8,8 @@
  */
 import { extractWikiLinks } from '../wiki/wikilinks';
 import { normalizeSlug } from '../wiki/page-identity';
-import type { WikiCitation } from '@/lib/contracts';
+import type { WebCitation, WikiCitation } from '@/lib/contracts';
+import { normalizeCitationUrl } from '@/lib/wiki-citation';
 import { crossSubjectPageKey, type AccessedPages } from './query-tools';
 
 const EXCERPT_MAX_CHARS = 400;
@@ -171,6 +172,41 @@ export function extractCitationsFromAnswer(
       excerpt: pickExcerpt(anchor, page.body),
       ...(isCurrentSubject ? {} : { subjectSlug: link.targetSubjectSlug }),
     });
+  }
+  return out;
+}
+
+/** 答案正文里所有 http(s) URL 出现位置：取到下一个空白为止的最长片段。 */
+const URL_OCCURRENCE_RE = /https?:\/\/[^\s<>]+/gi;
+
+/**
+ * Ask AI 联网来源的确定性解析（零 LLM）。
+ *
+ * 与 wiki 引用同构：prompt 纪律要求模型用 `[标题](url)` 内联标注 web 依据，
+ * 这里在流末扫描答案里出现的 URL，与本轮 `web.search` 真实返回过的
+ * `accessed.webResults` **求交**——凭空写出的 URL 一律不进来源。
+ *
+ * 不解析 markdown 语法：`[t](url)` 与裸 URL 都会被同一个 URL 扫描命中，
+ * 收尾括号/句末标点由 `normalizeCitationUrl` 的平衡规则剥掉，反而比按
+ * markdown 结构解析覆盖面更广（`<url>`、括号包裹的裸链接都能命中）。
+ *
+ * 标题取 `webResults` 里的服务端记录，不取模型写的锚文本（锚文本可与目标页无关）。
+ */
+export function extractWebCitationsFromAnswer(
+  answer: string,
+  accessed: AccessedPages,
+): WebCitation[] {
+  if (accessed.webResults.size === 0) return [];
+
+  const out: WebCitation[] = [];
+  const seen = new Set<string>();
+  for (const match of answer.matchAll(URL_OCCURRENCE_RE)) {
+    const url = normalizeCitationUrl(match[0]);
+    if (!url || seen.has(url)) continue;
+    const searched = accessed.webResults.get(url);
+    if (!searched) continue;
+    seen.add(url);
+    out.push(searched);
   }
   return out;
 }
