@@ -32,7 +32,7 @@ import {
   COVERAGE_SYSTEM_PROMPT,
   buildCoverageUserPrompt,
 } from '../llm/prompts/query-prompt';
-import { extractCitationsFromAnswer } from './citation-extract';
+import { extractCitationsFromAnswer, extractWebCitationsFromAnswer } from './citation-extract';
 import { getWikiLanguage } from '../db/repos/settings-repo';
 import type { PromptContext } from '../llm/prompts/prompt-context';
 import {
@@ -42,7 +42,15 @@ import {
 } from '../wiki/page-identity';
 import { readPageInSubject } from '../wiki/wiki-store';
 import { registerHandler } from '../jobs/worker';
-import type { PendingActionView, QueryResult, Job, Subject, WikiCitation, SelectionAnchorInput } from '@/lib/contracts';
+import type {
+  PendingActionView,
+  QueryResult,
+  Job,
+  Subject,
+  WebCitation,
+  WikiCitation,
+  SelectionAnchorInput,
+} from '@/lib/contracts';
 import { isWebSearchConfigured } from '@/server/search/web-search';
 import * as researchBacklogRepo from '../db/repos/research-backlog-repo';
 import type { QueryMode } from './query-intent';
@@ -222,15 +230,41 @@ export async function runQuery(
 
   const answer = text.trim().length > 0 ? text : NO_QUERY_CONTEXT_ANSWER;
   const citations = extractCitationsFromAnswer(answer, accessed, subject.slug);
+  const webCitations = extractWebCitationsFromAnswer(answer, accessed);
   assessCoverageInBackground(subject, question, answer);
 
-  return { answer, citations, savedAsPage: null };
+  return { answer, citations, webCitations, savedAsPage: null };
+}
+
+/**
+ * 保存回答时的 `## References` 区：wiki 引用写 wikilink（跨 Subject 带前缀），
+ * 网页来源写 markdown 链接。两侧皆空则整节不出现。
+ *
+ * 网页来源**只**进正文这一节；frontmatter 的 `sources` 专用于 raw source ID，
+ * 本路径不写。
+ */
+export function buildReferencesSection(
+  citations: WikiCitation[],
+  webCitations: WebCitation[],
+  activeSubjectSlug: string,
+): string {
+  if (citations.length === 0 && webCitations.length === 0) return '';
+  return [
+    '',
+    '',
+    '## References',
+    '',
+    ...citations.map((citation) =>
+      `- ${citationWikiLink(citation, activeSubjectSlug)}: ${citation.excerpt}`),
+    ...webCitations.map((citation) => `- [${citation.title}](${citation.url})`),
+  ].join('\n');
 }
 
 export async function saveQueryAsPage(
   answer: string,
   title: string,
   citations: WikiCitation[],
+  webCitations: WebCitation[],
   subject: Subject,
   jobId: string,
 ): Promise<string> {
@@ -282,19 +316,7 @@ export async function saveQueryAsPage(
     return parsed.slug;
   }
 
-  const citationsSection =
-    citations.length > 0
-      ? [
-          '',
-          '',
-          '## References',
-          '',
-          ...citations.map((citation) =>
-            `- ${citationWikiLink(citation, subject.slug)}: ${citation.excerpt}`),
-        ].join('\n')
-      : '';
-
-  const body = `${answer}${citationsSection}\n`;
+  const body = `${answer}${buildReferencesSection(citations, webCitations, subject.slug)}\n`;
   const result = await createPageInSubject(
     subject,
     { title, body, tags: ['query-answer'] },
@@ -311,6 +333,8 @@ async function runSaveToWikiJob(
     answer: string;
     title: string;
     citations: WikiCitation[];
+    // 在途旧 job 没有这个字段，按「无网页来源」处理
+    webCitations?: WebCitation[];
     subjectId?: string;
   };
 
@@ -328,6 +352,7 @@ async function runSaveToWikiJob(
     params.answer,
     params.title,
     params.citations,
+    params.webCitations ?? [],
     subject,
     job.id,
   );

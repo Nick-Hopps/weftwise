@@ -9,6 +9,7 @@ const {
   mockGenerateStructured,
   mockBacklogCreate,
   mockExtractCitations,
+  mockExtractWebCitations,
   mockStreamTools,
 } = vi.hoisted(() => ({
   mockGenerateTools: vi.fn(),
@@ -18,6 +19,7 @@ const {
   mockGenerateStructured: vi.fn(),
   mockBacklogCreate: vi.fn(),
   mockExtractCitations: vi.fn(() => [] as { pageSlug: string; excerpt: string }[]),
+  mockExtractWebCitations: vi.fn(() => [] as { url: string; title: string }[]),
   mockStreamTools: vi.fn(),
 }));
 
@@ -39,6 +41,7 @@ vi.mock('../query-tools', () => ({
 }));
 vi.mock('../citation-extract', () => ({
   extractCitationsFromAnswer: mockExtractCitations,
+  extractWebCitationsFromAnswer: mockExtractWebCitations,
 }));
 vi.mock('@/server/agents/tools/builtin', () => ({
   createBuiltinToolRegistry: () => ({

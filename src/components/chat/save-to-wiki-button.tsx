@@ -9,15 +9,22 @@ import { Input } from '@/components/ui/input';
 import { isImeComposing } from '@/lib/keyboard';
 import { dispatchJobStarted } from '@/lib/job-started-event';
 import type { Citation } from './message-list';
+import type { WebCitation } from '@/lib/contracts';
 import { useI18n } from '@/components/i18n-provider';
 
 interface SaveToWikiButtonProps {
   answer: string | null;
   citations: Citation[];
+  webCitations?: WebCitation[];
   disabled?: boolean;
 }
 
-export function SaveToWikiButton({ answer, citations, disabled = false }: SaveToWikiButtonProps) {
+export function SaveToWikiButton({
+  answer,
+  citations,
+  webCitations = [],
+  disabled = false,
+}: SaveToWikiButtonProps) {
   const { t } = useI18n();
   const [isOpen, setIsOpen] = useState(false);
   const [title, setTitle] = useState('');
@@ -57,6 +64,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
           pageTitle: title.trim(),
           answer,
           citations,
+          webCitations,
           subjectId,
         }),
       });
@@ -94,7 +102,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
         size="sm"
         aria-label={t('chat.save.savingLabel')}
         data-tip={`Saving… ${savedJobId.slice(0, 8)}`}
-        className="tip tip-b text-success"
+        className="tip tip-br text-success"
         disabled
       >
         <Check />
@@ -110,7 +118,7 @@ export function SaveToWikiButton({ answer, citations, disabled = false }: SaveTo
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         data-tip={t('chat.save.tip')}
-        className="tip tip-b"
+        className="tip tip-br"
         disabled={disabled || !answer}
         onClick={() => setIsOpen((current) => !current)}
       >

@@ -376,6 +376,7 @@ export interface IngestResult {
 export interface QueryResult {
   answer: string;
   citations: WikiCitation[];
+  webCitations: WebCitation[];
   savedAsPage: string | null;
 }
 
@@ -385,6 +386,22 @@ export interface WikiCitation {
   excerpt: string;
   subjectSlug?: string;
 }
+
+/**
+ * Ask AI 的联网来源：本轮 `web.search` 真实返回、且答案里确实引用过的网页。
+ * 标题取搜索结果的服务端记录，不取模型写的锚文本。刻意不带 excerpt——
+ * 搜索引擎摘要不具备 wiki excerpt「恒为页面原文字面子串」的保证。
+ */
+export interface WebCitation {
+  url: string;
+  title: string;
+}
+
+/**
+ * 一条回答的来源条目：wiki 页面或网页。两者存在同一个 `messages.citations_json`
+ * 数组里（判别字段：wiki 有 `pageSlug`、web 有 `url`），故存量行无需迁移。
+ */
+export type AnswerCitation = WikiCitation | WebCitation;
 
 /** 用户提问显式携带的正文引用；页面身份由服务端当前 Subject/page 补全。 */
 export interface UserMessageReference {
@@ -825,7 +842,8 @@ export interface ConversationMessage {
   role: 'user' | 'assistant';
   content: string;
   references: UserMessageReference[] | null;
-  citations: WikiCitation[] | null;
+  /** wiki 与 web 条目混存；消费方用 `splitAnswerCitations` 拆开。 */
+  citations: AnswerCitation[] | null;
   createdAt: string;
 }
 

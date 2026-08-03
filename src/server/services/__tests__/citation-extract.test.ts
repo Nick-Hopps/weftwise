@@ -1,15 +1,23 @@
 import { describe, it, expect } from 'vitest';
-import { extractCitationsFromAnswer, pickExcerpt } from '../citation-extract';
-import type { AccessedPages } from '../query-tools';
+import {
+  extractCitationsFromAnswer,
+  extractWebCitationsFromAnswer,
+  pickExcerpt,
+} from '../citation-extract';
+import { createAccessedPages, type AccessedPages } from '../query-tools';
 
 function accessedWith(bodies: Record<string, { title: string; body: string }>): AccessedPages {
   return {
-    meta: new Map(),
+    ...createAccessedPages(),
     bodies: new Map(Object.entries(bodies)),
-    crossMeta: new Map(),
-    crossBodies: new Map(),
-    sourceRefs: new Map(),
   };
+}
+
+/** 模拟本轮 web.search 真实返回过的网页（key 必须是规范化 URL）。 */
+function accessedWithWeb(results: { url: string; title: string }[]): AccessedPages {
+  const accessed = createAccessedPages();
+  for (const result of results) accessed.webResults.set(result.url, result);
+  return accessed;
 }
 
 describe('extractCitationsFromAnswer', () => {
@@ -159,5 +167,134 @@ describe('pickExcerpt', () => {
   it('excerpt 长度受上限约束（≤400 字符）', () => {
     const long = 'A'.repeat(1000) + '。' + 'B'.repeat(1000) + '。';
     expect(pickExcerpt('AAAA', long).length).toBeLessThanOrEqual(400);
+  });
+});
+
+describe('extractWebCitationsFromAnswer', () => {
+  const SEARCHED = [
+    { url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' },
+    { url: 'https://example.com/perf', title: 'Perf notes' },
+  ];
+
+  it('命中 markdown 链接，标题取搜索结果记录而非模型写的锚文本', () => {
+    const out = extractWebCitationsFromAnswer(
+      '来自网络（不在你的 wiki 里）：[随便写的标题](https://sqlite.org/wal.html)。',
+      accessedWithWeb(SEARCHED),
+    );
+
+    expect(out).toEqual([{ url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' }]);
+  });
+
+  it('裸 URL 也能命中', () => {
+    const out = extractWebCitationsFromAnswer(
+      '见 https://example.com/perf 的说明。',
+      accessedWithWeb(SEARCHED),
+    );
+
+    expect(out.map((c) => c.url)).toEqual(['https://example.com/perf']);
+  });
+
+  it('本轮未搜到过的 URL 一律丢弃（反幻觉闸门）', () => {
+    const out = extractWebCitationsFromAnswer(
+      '参见 [编造的来源](https://hallucinated.example/a) 与 https://also-fake.example/b。',
+      accessedWithWeb(SEARCHED),
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('同一 URL 多次出现只留一条，并按首次出现顺序排列', () => {
+    const out = extractWebCitationsFromAnswer(
+      [
+        '先说性能 https://example.com/perf 。',
+        '再说 WAL [文档](https://sqlite.org/wal.html)。',
+        '性能那篇再提一次 https://example.com/perf 。',
+      ].join('\n'),
+      accessedWithWeb(SEARCHED),
+    );
+
+    expect(out.map((c) => c.url)).toEqual([
+      'https://example.com/perf',
+      'https://sqlite.org/wal.html',
+    ]);
+  });
+
+  it('句末标点、括号包裹、末尾斜杠与 host 大小写差异仍能命中', () => {
+    const out = extractWebCitationsFromAnswer(
+      [
+        '（见 https://example.com/perf ）',
+        '中文句末 https://SQLite.org/wal.html/。',
+      ].join('\n'),
+      accessedWithWeb(SEARCHED),
+    );
+
+    expect(out.map((c) => c.url)).toEqual([
+      'https://example.com/perf',
+      'https://sqlite.org/wal.html',
+    ]);
+  });
+
+  it('非 http(s) 的链接不进结果', () => {
+    const accessed = accessedWithWeb(SEARCHED);
+    const out = extractWebCitationsFromAnswer(
+      '联系 mailto:a@b.com 或 javascript:alert(1)。',
+      accessed,
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('webResults 为空时恒为空数组（未配置联网检索的零回归）', () => {
+    const out = extractWebCitationsFromAnswer(
+      '见 https://sqlite.org/wal.html 。',
+      createAccessedPages(),
+    );
+
+    expect(out).toEqual([]);
+  });
+});
+
+describe('extractWebCitationsFromAnswer — 搜索结果带跟踪参数', () => {
+  // 真实场景（2026-08-03 实测）：Tavily 返回 `…/a/20260720A09YMY00?uid%5B0%5D=…`，
+  // 模型按纪律逐字抄的是干净 URL，若只做精确匹配，这条真实来源会被当幻觉丢掉。
+  const TRACKED = 'https://view.inews.qq.com/a/20260720A09YMY00?uid%5B0%5D=100218392471';
+
+  it('答案写干净 URL、搜索结果带跟踪参数 → 仍命中，链接用服务端记录的那一个', () => {
+    const out = extractWebCitationsFromAnswer(
+      '[埃及萨卡拉遗址再获重大考古发现](https://view.inews.qq.com/a/20260720A09YMY00)',
+      accessedWithWeb([{ url: TRACKED, title: '腾讯新闻报道' }]),
+    );
+
+    expect(out).toEqual([{ url: TRACKED, title: '腾讯新闻报道' }]);
+  });
+
+  it('同路径有多条候选时不猜，整条丢弃', () => {
+    const out = extractWebCitationsFromAnswer(
+      '见 https://example.com/article',
+      accessedWithWeb([
+        { url: 'https://example.com/article?id=1', title: '第一篇' },
+        { url: 'https://example.com/article?id=2', title: '第二篇' },
+      ]),
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('答案自带 query 时只走精确匹配，不做路径回退', () => {
+    const out = extractWebCitationsFromAnswer(
+      '见 https://example.com/article?id=999',
+      accessedWithWeb([{ url: 'https://example.com/article?id=1', title: '第一篇' }]),
+    );
+
+    expect(out).toEqual([]);
+  });
+
+  it('路径回退命中后仍按 URL 去重，不与精确命中重复', () => {
+    const out = extractWebCitationsFromAnswer(
+      '先 https://view.inews.qq.com/a/20260720A09YMY00 再 ' + TRACKED,
+      accessedWithWeb([{ url: TRACKED, title: '腾讯新闻报道' }]),
+    );
+
+    expect(out).toHaveLength(1);
   });
 });

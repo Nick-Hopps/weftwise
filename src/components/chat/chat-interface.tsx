@@ -33,7 +33,12 @@ import { isImeComposing } from '@/lib/keyboard';
 import { dispatchJobStarted, jobStartedDetailForAction } from '@/lib/job-started-event';
 import { buildUserMessageReferences } from '@/lib/chat-reference';
 import type { ChatMessage, Citation } from './chat-message';
-import type { ConversationMessage, PendingActionView, SelectionAnchorInput } from '@/lib/contracts';
+import type {
+  ConversationMessage,
+  PendingActionView,
+  SelectionAnchorInput,
+  WebCitation,
+} from '@/lib/contracts';
 
 interface Passage {
   id: string;
@@ -465,8 +470,15 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
                 activity: [...(msg.activity ?? []), { tool: toolName, label: args }],
               }));
             } else if (event === 'citations') {
-              const citations = (data as { citations: Citation[] }).citations;
-              updateLastAssistant((msg) => ({ ...msg, citations }));
+              const { citations, webCitations } = data as {
+                citations: Citation[];
+                webCitations?: WebCitation[];
+              };
+              updateLastAssistant((msg) => ({
+                ...msg,
+                citations,
+                webCitations: webCitations ?? [],
+              }));
             } else if (event === 'pending-action') {
               setPendingActions((current) =>
                 upsertPendingAction(current, data as PendingActionView),
@@ -594,6 +606,7 @@ export function ChatInterface({ variant = 'standalone', hideHeader = false }: Ch
               ? lastAssistantMessage.content
               : null}
             citations={lastAssistantMessage?.citations ?? []}
+            webCitations={lastAssistantMessage?.webCitations ?? []}
             disabled={isLoading}
           />
         )}

@@ -73,9 +73,9 @@
 - `reset-confirmation-state.ts` —— Chat 重置确认纯状态机：`idle/pending` + `requested/confirm/cancel/unclear` 转换；孤立 confirm 不产生 `shouldReset`，并集中派生 reset intent context
 - `pending-action-card.tsx` / `pending-action-state.ts` —— 可访问审批卡片（页面变更/move/标签治理/History/工作流/选区配图）与 actionId 原位替换；配图卡显示完整 Markdown 块、prompt、alt、比例/风格，`applied` 只表示后台任务已启动；受影响页面默认只显示前 8 条
 - `conversation-switcher.tsx` —— chat 工具区的当前会话标题下拉 + 重命名 + 删除，React Query `['conversations',subjectId]`；New 由统一工具区持有；菜单支持点击外部/Escape 关闭
-- `chat-message.ts` —— Chat 内存消息纯契约与 role-aware 映射：新发送用户消息保留 references，历史 `ConversationMessage` 分别恢复 user references / assistant citations
-- `message-list.tsx` —— 消息流渲染；工具活动经共享 `ToolActivityIcon` 渲染 Lucide 语义图标；用户消息正文上方最多展示一个可点击的“页面标题 · 章节/短摘要”胶囊；Assistant Sources 保持可折叠，消息行 memo 化且仅贴底时跟随流式回答
-- `save-to-wiki-button.tsx` —— 统一工具区内的稳定图标动作 + 锚定标题输入浮层；触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId`；回答变化时重置旧保存状态；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
+- `chat-message.ts` —— Chat 内存消息纯契约与 role-aware 映射：新发送用户消息保留 references，历史 `ConversationMessage` 分别恢复 user references / assistant citations；assistant 侧经 `splitAnswerCitations` 把混存数组拆回 `citations` + `webCitations`（无网页来源时不带该键，与 references 的处理一致）
+- `message-list.tsx` —— 消息流渲染；工具活动经共享 `ToolActivityIcon` 渲染 Lucide 语义图标；用户消息正文上方最多展示一个可点击的“页面标题 · 章节/短摘要”胶囊；Assistant Sources 保持可折叠（`MessageCitations` 导出供单测），**wiki 页与联网网页同区、图标区分**——wiki 行沿用 router 跳转，web 行是 Globe + 网页标题 + 域名的 `target=_blank` + `rel=noopener noreferrer` 外链（刻意不显示搜索摘要），计数与「≤3 默认展开」按两类总数判断；消息行 memo 化且仅贴底时跟随流式回答
+- `save-to-wiki-button.tsx` —— 统一工具区内的稳定图标动作 + 锚定标题输入浮层；tooltip 用 `tip tip-br`（右对齐，见下方 Changelog）；触发 `POST /api/query` with `saveAsPage=true`，body 带 `subjectId` 与 `webCitations`；回答变化时重置旧保存状态；只以服务端 `jobId` 启动任务追踪，不再从 title 提前猜测 slug（冲突后缀由 shared create planner 决定）
 
 ### `search/`
 
@@ -202,6 +202,7 @@ src/components/
 
 | 日期 | 变更 |
 |------|------|
+| 2026-08-03 | Ask AI 两处优化：① **右缘 tooltip 不再被面板裁掉** —— `globals.css` 新增 `tip-br`（下方 + 按钮右缘对齐），保存按钮两个分支换用它。裁剪来自面板 `<section>` 的 `overflow:hidden`，**与 `z-index` 无关**（`overflow` 裁剪对后代无条件生效，提高层级不会有任何变化）；`tip-l` 虽已存在但垂直居中向左弹出会盖住旁边的删除/新建按钮，这条只有 3 个按钮的工具条横向本就局促。新增变体**必须同时覆盖 `:hover` 的 `transform`**——共享 hover 规则会把它改回 `translateX(-50%)`，漏掉这条气泡横向偏出半个宽度（`tip-l` 一直是这么处理的）。真实验收（Chrome，面板宽 440）：气泡右缘 849 vs 面板右缘 860 → 在内 11px；同一按钮若仍用居中 `tip-b` 则右缘 882.3 → **越界 22.3px**，正是原截图被切掉的那一截；「新建对话」(−37px)、「清除」(−22px) 居中仍在面板内故保持 `tip-b`。② **回答的来源区展示联网网页**：`MessageCitations` 同区渲染两类来源、`chat-message` 拆分混存数组、`save-to-wiki-button` 透传 `webCitations`。spec/plan 见 `docs/{specs,plans}/2026-08-03-ask-ai-web-sources-and-tooltip.md` |
 | 2026-08-03 | `subject-dialog.tsx` 危险区**无条件**渲染删除按钮：`canDelete = !isActive && slug !== 'general'` 整条删除，连同 `subjects.dialog.generalProtected` / `activeProtected` 两个 i18n key。`!isActive` 必须一起放宽——最后剩下的 project 必然是 active，留着它「删到零」在结构上不可达，而服务端从来没有这条守卫（它是 cookie + Zustand 的客户端概念）。`deleteSubject` 返回值从 `void` 改为 `{ subjectId, replacement? }`；`onSuccess` 先把 `replacement` 乐观写进 `['subjects']`（同 `CreateSubjectBody` 的理由：后台 refetch 未回来前 `SubjectsBootstrap` 会把切换目标当悬空选择重置掉），再在删的是 active 时 `switchSubject(..., { navigateTo: '/' })`。**已知**：删 active project 时一个已在途的 `/api/pages?subjectId=<旧 id>` 会拿到一次 404（切换完成后即恢复正常），属于删除 active 目标的固有竞态。spec/plan 见 `docs/{specs,plans}/2026-08-03-deletable-general-project.md` |
 | 2026-07-28 | 阅读页控制台三条报错清零：① hover peek 抽成 `wiki-link-peek.tsx` 并改为**纯行内元素**——正文 wikilink 一定处在 `<p>`（callout 内同理）里，原来的 `<div>`/`<p>` 卡片让浏览器就地截断段落，React 连报 `<p> cannot contain a nested <p>/<div>` + hydration 失败；② `graph-stylesheet.ts` 删掉 `node:hover`——cytoscape 无此伪类，整条规则被判非法**整体丢弃**，连同一行的 `.labelled` 一起失效，`use-wiki-graph` 的 mouseover 加了 class 也点不亮标签（hover 本就由 class 承载）；③ 根 `layout.tsx` 补 `data-scroll-behavior="smooth"` 消掉 Next 15 平滑滚动警告 |
 | 2026-07-28 | Job 详情弹窗日志行图标统一 + 标题补 i18n：`tool-activity-icon.tsx` 抽出按图标键渲染的 `SemanticIcon`（`ToolActivityIcon` 降为薄封装），`job-detail-dialog.tsx` 的 default 行不再退化成 `h-1.5` 实心小圆点而是渲染 `line.icon` 的阶段图标——「一半圆点一半图标」的割裂感来自这一个分支，其余三个语气分支一直是图标；同一文件的 `jobActivityTitle(events)` 返回的是 message key，**必须过 `t()`**（`progress-toast` 一直是对的，只有弹窗漏了，实测上屏的就是 `jobs.activity.ingest` 原文）。已全量核对所有返回 `MessageKey` 的函数，无其他漏 `t()` 的渲染点 |

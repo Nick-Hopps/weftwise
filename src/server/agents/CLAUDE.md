@@ -159,7 +159,7 @@ Worker 启动时（`worker-entry.ts`）由 `buildSkillRegistry()` 将 `examples/
 | `builtin/wiki-patch.ts` | `wiki.patch` — 通过 `ToolContext.patchPage` 做 old_string/new_string 精确替换（`sideEffect:'update'`，仅 `fix:contradiction` profile） |
 | `builtin/wiki-metadata-patch.ts` | `wiki.metadata.patch` — 只改 title/summary/tags/aliases，正文逐字保留（`sideEffect:'update'`，仅 Curate profile） |
 | `builtin/wiki-link-ensure.ts` | `wiki.link.ensure` — 对 source 页维护唯一一个 link/unlink/retarget，target 只验证不写入（`sideEffect:'update'`，Fix/Curate profile） |
-| `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）|
+| `builtin/web-search.ts` | `web.search` — 只读联网检索，通过 `ToolContext.webSearch` 包装 `search/web-search.ts::webSearch`（`sideEffect:'none'`，仅 query runner 在 `isWebSearchConfigured()` 为真时解析注入）（T3.2）。query 侧的包装会把返回结果留痕进 `AccessedPages.webResults`，供流末「答案 URL ∩ 本轮搜索结果」求交产出网页来源；工具自身契约不变 |
 | `builtin/image-generate.ts` | `image.generate` — enrich 专用真实图片工具；页面 slug 由 enricher 运行时可信注入，模型只提供视觉需求；通过显式 Google `ingest:image` 路由返回 PNG/JPEG/WebP，并把 UUID 命名 asset 与页面一起提交 |
 | `builtin/wiki-image-insert.ts` | `wiki.image.insert` — Query canonical 选区专用 propose 工具；模型只给 prompt/alt/比例/风格，page slug 与块锚点由运行时注入；不持有 `image.generate` 或页面写权限 |
 | `builtin/wiki-preview-change.ts` | `wiki.preview_change` — 生成 create/update/patch/delete/reenrich/metadata-patch/link-ensure 审批预览（`sideEffect:'propose'`，仅 `query:propose`）；返回 actionId，不执行 Saga 或入队。**模型可见 schema 用 `PreviewChangeToolInputSchema`（扁平 object，零 anyOf），不是判别联合 `PreviewChangeInputSchema`** —— 后者的 JSON Schema 根节点没有 `type:"object"`，provider 直接拒绝注册；operation↔payload 的真实配对由 `normalizePreviewInput` 判定 |

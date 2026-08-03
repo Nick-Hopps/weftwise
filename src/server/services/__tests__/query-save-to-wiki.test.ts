@@ -84,6 +84,7 @@ describe('saveQueryAsPage', () => {
         { pageSlug: 'page-a', excerpt: 'Excerpt A' },
         { pageSlug: 'page-b', excerpt: 'Excerpt B', subjectSlug: 'notes' },
       ],
+      [],
       subject,
       'save-job-1',
     );
@@ -109,7 +110,7 @@ describe('saveQueryAsPage', () => {
   });
 
   it('无引用时不生成 References 空章节', async () => {
-    await saveQueryAsPage('Answer body', 'Answer Page', [], subject, 'save-job-1');
+    await saveQueryAsPage('Answer body', 'Answer Page', [], [], subject, 'save-job-1');
 
     expect(mocks.createPageInSubject).toHaveBeenCalledWith(
       subject,
@@ -126,6 +127,7 @@ describe('saveQueryAsPage', () => {
     const slug = await saveQueryAsPage(
       'Answer body',
       'Answer Page',
+      [],
       [],
       subject,
       'save-job-1',
@@ -162,6 +164,7 @@ describe('saveQueryAsPage', () => {
       'Answer body',
       'Answer Page',
       [],
+      [],
       subject,
       'save-job-1',
     )).rejects.toThrow(/recover/i);
@@ -180,11 +183,64 @@ describe('saveQueryAsPage', () => {
       'Answer body',
       'Answer Page',
       [],
+      [],
       subject,
       'save-job-1',
     )).rejects.toThrow(/no longer exists/i);
 
     expect(mocks.createPageInSubject).not.toHaveBeenCalled();
     expect(mocks.enqueueEmbedIndex).not.toHaveBeenCalled();
+  });
+});
+
+describe('saveQueryAsPage — 网页来源', () => {
+  const WEB = [
+    { url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' },
+    { url: 'https://example.com/perf', title: 'Perf notes' },
+  ];
+
+  it('wiki 与 web 来源同区呈现，wiki 在前、web 写 markdown 链接', async () => {
+    await saveQueryAsPage(
+      'Answer body',
+      'Answer Page',
+      [{ pageSlug: 'page-a', excerpt: 'Excerpt A' }],
+      WEB,
+      subject,
+      'save-job-1',
+    );
+
+    expect(mocks.createPageInSubject).toHaveBeenCalledWith(
+      subject,
+      {
+        title: 'Answer Page',
+        body: [
+          'Answer body',
+          '',
+          '## References',
+          '',
+          '- [[page-a]]: Excerpt A',
+          '- [WAL 官方文档](https://sqlite.org/wal.html)',
+          '- [Perf notes](https://example.com/perf)',
+          '',
+        ].join('\n'),
+        tags: ['query-answer'],
+      },
+      { jobId: 'save-job-1' },
+    );
+  });
+
+  it('只有网页来源时也生成 References 区', async () => {
+    await saveQueryAsPage('Answer body', 'Answer Page', [], [WEB[0]], subject, 'save-job-1');
+
+    const body = mocks.createPageInSubject.mock.calls[0][1].body as string;
+    expect(body).toContain('## References');
+    expect(body).toContain('- [WAL 官方文档](https://sqlite.org/wal.html)');
+    expect(body).not.toContain('[[');
+  });
+
+  it('frontmatter sources 仍不被网页来源污染（专用于 raw source ID）', async () => {
+    await saveQueryAsPage('Answer body', 'Answer Page', [], WEB, subject, 'save-job-1');
+
+    expect(mocks.createPageInSubject.mock.calls[0][1]).not.toHaveProperty('sources');
   });
 });

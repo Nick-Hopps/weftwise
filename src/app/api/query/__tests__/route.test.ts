@@ -5,6 +5,7 @@ const mockResolve = vi.fn();
 const mockAgentic = vi.fn();
 const mockAccessedToContext = vi.fn();
 const mockExtractCitations = vi.fn();
+const mockExtractWebCitations = vi.fn();
 const mockAssessCoverage = vi.fn();
 const mockClassifyQueryIntent = vi.fn();
 const mockQueryModeForIntent = vi.fn();
@@ -34,6 +35,7 @@ vi.mock('@/server/services/query-service', () => ({
 }));
 vi.mock('@/server/services/citation-extract', () => ({
   extractCitationsFromAnswer: (...a: unknown[]) => mockExtractCitations(...a),
+  extractWebCitationsFromAnswer: (...a: unknown[]) => mockExtractWebCitations(...a),
 }));
 vi.mock('@/server/services/query-intent', () => ({
   classifyQueryIntent: (...a: unknown[]) => mockClassifyQueryIntent(...a),
@@ -91,6 +93,8 @@ beforeEach(() => {
   mockAccessedToContext.mockReturnValue([]);
   mockExtractCitations.mockReset();
   mockExtractCitations.mockReturnValue([]);
+  mockExtractWebCitations.mockReset();
+  mockExtractWebCitations.mockReturnValue([]);
   mockAssessCoverage.mockReset();
   mockClassifyQueryIntent.mockReset().mockResolvedValue({
     intent: 'read',
@@ -143,6 +147,8 @@ describe('POST /api/query 保存到 Wiki', () => {
         answer: 'Answer body',
         title: 'Saved Answer',
         citations,
+        // 未携带 web 来源时显式落空数组，worker 侧无需区分「缺字段」与「无来源」
+        webCitations: [],
         subjectId: 's1',
       },
       's1',
@@ -673,5 +679,76 @@ describe('POST /api/query —— D2 选区追问 / D3 引用命中证据', () =>
     expect(sse).toContain('event: citations');
     expect(sse).toContain('event: done');
     expect(sse).not.toContain('event: error');
+  });
+});
+
+describe('POST /api/query — 网页来源', () => {
+  const WEB = [{ url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' }];
+
+  it('citations 事件同时携带 wiki 与 web 两个数组', async () => {
+    mockExtractCitations.mockReturnValue([{ pageSlug: 'foo', excerpt: 'bar' }]);
+    mockExtractWebCitations.mockReturnValue(WEB);
+
+    const sse = await readSSE(await call({ question: '你好', subjectId: 's1' }));
+
+    expect(mockExtractWebCitations).toHaveBeenCalledWith('hello', expect.anything());
+    const citationsBlock = sse.slice(sse.indexOf('event: citations'));
+    expect(citationsBlock).toContain('"pageSlug":"foo"');
+    expect(citationsBlock).toContain('"url":"https://sqlite.org/wal.html"');
+    expect(citationsBlock).toContain('"title":"WAL 官方文档"');
+  });
+
+  it('落库把 wiki 与 web 条目写进同一个 citations 数组（不加迁移）', async () => {
+    mockExtractCitations.mockReturnValue([{ pageSlug: 'foo', excerpt: 'bar' }]);
+    mockExtractWebCitations.mockReturnValue(WEB);
+
+    await readSSE(await call({ question: '你好', subjectId: 's1' }));
+
+    const assistantCall = mockAppend.mock.calls.find((args) => args[2] === 'hello');
+    expect(assistantCall).toBeDefined();
+    expect(JSON.parse(assistantCall![3] as string)).toEqual([
+      { pageSlug: 'foo', excerpt: 'bar' },
+      { url: 'https://sqlite.org/wal.html', title: 'WAL 官方文档' },
+    ]);
+  });
+
+  it('web 条目不产生掌握度证据（没有 slug 可归属）', async () => {
+    mockExtractCitations.mockReturnValue([]);
+    mockExtractWebCitations.mockReturnValue(WEB);
+
+    await readSSE(await call({ question: '你好', subjectId: 's1' }));
+
+    expect(mockAppendEvidence).not.toHaveBeenCalled();
+  });
+
+  it('短路分支（reset 请求）的 citations 事件也带空 webCitations，事件形状恒定', async () => {
+    mockClassifyQueryIntent.mockResolvedValue({
+      intent: 'reset-request',
+      targetPage: { reference: 'none', slug: null },
+    });
+
+    const sse = await readSSE(await call({ question: '重置 wiki', subjectId: 's1' }));
+
+    const citationsBlock = sse.slice(sse.indexOf('event: citations'));
+    expect(citationsBlock).toContain('"webCitations":[]');
+  });
+
+  it('save-only 模式把 webCitations 原样带进 job params', async () => {
+    mockEnqueue.mockReturnValue({ id: 'job-1' });
+
+    await call({
+      saveAsPage: true,
+      pageTitle: '标题',
+      answer: 'A',
+      citations: [{ pageSlug: 'p', excerpt: 'e' }],
+      webCitations: WEB,
+      subjectId: 's1',
+    });
+
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      'save-to-wiki',
+      expect.objectContaining({ webCitations: WEB }),
+      's1',
+    );
   });
 });
