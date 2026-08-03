@@ -140,6 +140,21 @@ describe('QUERY_AGENTIC_SYSTEM_PROMPT — web search 纪律', () => {
     expect(prompt).toContain('web_search');
     expect(prompt).toMatch(/not in your wiki/i);
   });
+
+  it('三种 mode 都要求用 markdown 链接内联标注 web 依据，且 URL 必须原样', () => {
+    for (const mode of ['read', 'propose', 'image-insert'] as const) {
+      const prompt = buildQueryAgenticSystemPrompt({ mode });
+      // 收集网页来源的唯一机制：链接必须出现在答案里，URL 必须与搜索返回逐字一致
+      expect(prompt).toContain('[title](url)');
+      expect(prompt).toMatch(/exact url/i);
+      expect(prompt).toMatch(/web sources are collected/i);
+    }
+  });
+
+  it('仍禁止用 wiki 引用格式标注 web 结果', () => {
+    const prompt = buildQueryAgenticSystemPrompt({ mode: 'read' });
+    expect(prompt).toMatch(/Do not cite web results using the wiki citation format/i);
+  });
 });
 
 describe('QUERY_AGENTIC_SYSTEM_PROMPT - 只读边界', () => {

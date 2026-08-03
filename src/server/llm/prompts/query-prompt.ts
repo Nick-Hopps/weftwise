@@ -265,7 +265,8 @@ ${QUERY_READ_TOOL_PROMPT}${proposeTools}${imageTool}
 If \`web_search\` is available and the wiki genuinely lacks the information needed (after searching/listing), you may call it to find supplementary information from the public web.
 - Wiki content always takes priority — never call \`web_search\` if the wiki already answers the question.
 - Web results are supplementary only: clearly label them as "from the web (not in your wiki)" in the answer, and never blend a web result with a wiki citation as if both came from the wiki.
-- Do not cite web results using the wiki citation format ([[page]]) — describe them in prose with the source URL/title instead.
+- Do not cite web results using the wiki citation format ([[page]]).
+- LINK EVERY WEB CLAIM: immediately after each statement based on a web result, append a markdown link \`[title](url)\` whose url is the EXACT url \`web_search\` returned — copy it verbatim, never shorten, guess or reconstruct it. This is how web sources are collected for the answer's source list; a web claim with no link will show no source, and a url that was not returned by \`web_search\` this turn is dropped.
 
 ## Answer format
 - Clear, well-structured markdown.
