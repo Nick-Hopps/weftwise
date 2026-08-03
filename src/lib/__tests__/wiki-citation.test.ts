@@ -3,6 +3,7 @@ import {
   citationHref,
   citationWikiLink,
   isWebCitation,
+  normalizeCitationUrl,
   splitAnswerCitations,
 } from '../wiki-citation';
 
@@ -22,6 +23,42 @@ describe('wiki citation', () => {
   it('显式 active Subject 不重复写前缀', () => {
     const citation = { pageSlug: 'sqlite', excerpt: 'x', subjectSlug: 'general' };
     expect(citationWikiLink(citation, 'general')).toBe('[[sqlite]]');
+  });
+});
+
+describe('normalizeCitationUrl', () => {
+  it('统一 host 大小写、去 fragment、去路径末尾斜杠', () => {
+    expect(normalizeCitationUrl('https://SQLite.org/wal.html/')).toBe('https://sqlite.org/wal.html');
+    expect(normalizeCitationUrl('https://example.com/a?x=1#frag')).toBe('https://example.com/a?x=1');
+    expect(normalizeCitationUrl('  https://example.com/a  ')).toBe('https://example.com/a');
+  });
+
+  it('origin 根保留单个斜杠，两种写法归一到同一把尺子', () => {
+    expect(normalizeCitationUrl('https://example.com')).toBe('https://example.com/');
+    expect(normalizeCitationUrl('https://example.com/')).toBe('https://example.com/');
+  });
+
+  it('剥掉散文/markdown 粘上的尾部标点与收尾括号', () => {
+    expect(normalizeCitationUrl('https://example.com/a。')).toBe('https://example.com/a');
+    expect(normalizeCitationUrl('https://example.com/a),')).toBe('https://example.com/a');
+    expect(normalizeCitationUrl('https://example.com/a>')).toBe('https://example.com/a');
+  });
+
+  it('配平的括号是 URL 的一部分，不能剥', () => {
+    expect(normalizeCitationUrl('https://en.wikipedia.org/wiki/Foo_(bar)'))
+      .toBe('https://en.wikipedia.org/wiki/Foo_(bar)');
+    // markdown 链接 `](…)` 扫出来会多带一个收尾括号，只该剥那一个
+    expect(normalizeCitationUrl('https://en.wikipedia.org/wiki/Foo_(bar))'))
+      .toBe('https://en.wikipedia.org/wiki/Foo_(bar)');
+  });
+
+  it('非 http(s) 与非字符串返回 null', () => {
+    expect(normalizeCitationUrl('mailto:a@b.com')).toBeNull();
+    expect(normalizeCitationUrl('javascript:alert(1)')).toBeNull();
+    expect(normalizeCitationUrl('not a url')).toBeNull();
+    expect(normalizeCitationUrl('')).toBeNull();
+    expect(normalizeCitationUrl(null)).toBeNull();
+    expect(normalizeCitationUrl(42)).toBeNull();
   });
 });
 

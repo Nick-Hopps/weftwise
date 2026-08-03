@@ -9,7 +9,13 @@ import * as pagesRepo from '../db/repos/pages-repo';
 import * as subjectsRepo from '../db/repos/subjects-repo';
 import { hybridRankSlugs } from '@/server/search/hybrid-retrieval';
 import { readPageInSubject } from '../wiki/wiki-store';
-import type { PendingActionView, SelectionAnchorInput, Subject } from '@/lib/contracts';
+import type {
+  PendingActionView,
+  SelectionAnchorInput,
+  Subject,
+  WebCitation,
+} from '@/lib/contracts';
+import { normalizeCitationUrl } from '@/lib/wiki-citation';
 import type { ToolContext } from '@/server/agents/tools/tool-context';
 import { webSearch } from '@/server/search/web-search';
 import { createSubjectEvidenceReader } from '@/server/agents/tools/evidence-reader';
@@ -65,6 +71,12 @@ export interface AccessedPages {
     body: string;
   }>;
   sourceRefs: Map<string, { sourceId: string; chunkId?: string }>;
+  /**
+   * 本轮 `web.search` 真实返回过的网页，key 为 `normalizeCitationUrl` 规范化 URL。
+   * 引用解析拿它与答案里的 URL 求交——没搜到过的 URL 一律不进来源，
+   * 标题也以这里的服务端记录为准，不采信模型写的锚文本。
+   */
+  webResults: Map<string, WebCitation>;
 }
 
 export function createAccessedPages(): AccessedPages {
@@ -74,6 +86,7 @@ export function createAccessedPages(): AccessedPages {
     crossMeta: new Map(),
     crossBodies: new Map(),
     sourceRefs: new Map(),
+    webResults: new Map(),
   };
 }
 
@@ -272,7 +285,17 @@ export function buildQueryToolContext(
       accessed.sourceRefs.set(`${sourceId}\u0000${chunkId ?? ''}`, { sourceId, chunkId });
     },
     async webSearch(query) {
-      return webSearch(query);
+      const results = await webSearch(query);
+      // 与 onSourceAccess 同一职责层：只留痕，不改动交给模型的返回值。
+      for (const result of results) {
+        const url = normalizeCitationUrl(result.url);
+        if (!url || accessed.webResults.has(url)) continue;
+        accessed.webResults.set(url, {
+          url,
+          title: result.title?.trim() || url,
+        });
+      }
+      return results;
     },
   };
 }

@@ -19,6 +19,62 @@ export function citationWikiLink(
   return `[[${target}]]`;
 }
 
+/** 常被散文/markdown 粘在 URL 尾部的标点（成对括号另有平衡规则处理）。 */
+const TRAILING_PUNCTUATION = /[.,;:!?"'“”‘’…、。，；：！？」』>]+$/u;
+
+function trimUnbalancedCloser(candidate: string): string {
+  const pairs: [string, string][] = [['(', ')'], ['[', ']'], ['{', '}']];
+  let result = candidate;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [open, close] of pairs) {
+      if (!result.endsWith(close)) continue;
+      const opens = result.split(open).length - 1;
+      const closes = result.split(close).length - 1;
+      // 括号配平时保留（如 …/wiki/Foo_(bar)），多出来的那个才是散文的收尾括号
+      if (closes <= opens) continue;
+      result = result.slice(0, -1);
+      changed = true;
+    }
+  }
+  return result;
+}
+
+/**
+ * URL 规范化：记录搜索结果与解析答案两侧必须用同一把尺子，否则求交会因
+ * 末尾斜杠、host 大小写、fragment 或句末标点这类无意义差异而漏掉真实来源。
+ *
+ * 只接受 http(s)；协议与 host 小写（`URL` 自带）、去 fragment、去路径末尾单个 `/`。
+ * 非字符串、空串、解析失败或非 http(s) 返回 null。
+ */
+export function normalizeCitationUrl(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  let candidate = raw.trim();
+  if (!candidate) return null;
+
+  let previous = '';
+  while (candidate !== previous) {
+    previous = candidate;
+    candidate = trimUnbalancedCloser(candidate.replace(TRAILING_PUNCTUATION, ''));
+  }
+  if (!candidate) return null;
+
+  let url: URL;
+  try {
+    url = new URL(candidate);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+
+  url.hash = '';
+  const normalized = url.href;
+  return url.pathname !== '/' && normalized.endsWith('/')
+    ? normalized.slice(0, -1)
+    : normalized;
+}
+
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
 }

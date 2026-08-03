@@ -317,6 +317,63 @@ describe('buildQueryToolContext - onAccess 路由', () => {
   });
 });
 
+describe('buildQueryToolContext - webSearch 留痕', () => {
+  it('把本轮搜索结果记进 accessed.webResults，key 为规范化 URL', async () => {
+    const accessed = createAccessedPages();
+    mockWebSearch.mockResolvedValue([
+      { title: 'WAL 官方文档', url: 'https://SQLite.org/wal.html/', snippet: 's1' },
+      { title: 'Another', url: 'https://example.com/a?x=1#frag', snippet: 's2' },
+    ]);
+    const ctx = buildQueryToolContext(SUBJECT, accessed);
+
+    const results = await ctx.webSearch!('wal');
+
+    // 返回值原样透传给模型，不因留痕而改写
+    expect(results).toHaveLength(2);
+    expect([...accessed.webResults.keys()]).toEqual([
+      'https://sqlite.org/wal.html',
+      'https://example.com/a?x=1',
+    ]);
+    expect(accessed.webResults.get('https://sqlite.org/wal.html')).toEqual({
+      url: 'https://sqlite.org/wal.html',
+      title: 'WAL 官方文档',
+    });
+  });
+
+  it('同一 URL 跨两次搜索只留一条，保留首次标题', async () => {
+    const accessed = createAccessedPages();
+    const ctx = buildQueryToolContext(SUBJECT, accessed);
+
+    mockWebSearch.mockResolvedValue([{ title: '首次标题', url: 'https://one.example/x', snippet: '' }]);
+    await ctx.webSearch!('a');
+    mockWebSearch.mockResolvedValue([{ title: '后续标题', url: 'https://one.example/x', snippet: '' }]);
+    await ctx.webSearch!('b');
+
+    expect(accessed.webResults.size).toBe(1);
+    expect(accessed.webResults.get('https://one.example/x')?.title).toBe('首次标题');
+  });
+
+  it('丢弃非 http(s) 与无标题的结果，不污染来源池', async () => {
+    const accessed = createAccessedPages();
+    mockWebSearch.mockResolvedValue([
+      { title: 'bad scheme', url: 'javascript:alert(1)', snippet: '' },
+      { title: '', url: 'https://no-title.example/x', snippet: '' },
+      { title: 'ok', url: 'https://ok.example/x', snippet: '' },
+    ]);
+    const ctx = buildQueryToolContext(SUBJECT, accessed);
+
+    await ctx.webSearch!('q');
+
+    expect([...accessed.webResults.keys()]).toEqual(['https://no-title.example/x', 'https://ok.example/x']);
+    expect(accessed.webResults.get('https://no-title.example/x')?.title)
+      .toBe('https://no-title.example/x');
+  });
+
+  it('未调用 webSearch 时 webResults 为空（未配置联网检索的零回归）', () => {
+    expect(createAccessedPages().webResults.size).toBe(0);
+  });
+});
+
 describe('buildQueryToolContext - 只读能力面', () => {
   it('不注入任何写入、删除或入队能力', () => {
     const ctx = buildQueryToolContext(SUBJECT, createAccessedPages());
