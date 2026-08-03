@@ -63,6 +63,22 @@ describe('subjectsRepo.ensureDefaultSubject', () => {
     expect(subjectsRepo.getBySlug('general')).toBeNull();
   });
 
+  it('与 ensureGeneralSubject 的分工：后者即使已有其他 project 也补建 general', async () => {
+    const subjectsRepo = await import('../subjects-repo');
+    await emptySubjects();
+    subjectsRepo.create({ slug: 'physics', name: 'Physics' });
+
+    expect(subjectsRepo.ensureDefaultSubject().created).toBe(false);
+    expect(subjectsRepo.getBySlug('general')).toBeNull();
+
+    const ensured = subjectsRepo.ensureGeneralSubject();
+
+    expect(ensured.created).toBe(true);
+    expect(ensured.subject.slug).toBe('general');
+    expect(subjectsRepo.listSubjects().map((s) => s.slug)).toEqual(['general', 'physics']);
+    expect(subjectsRepo.ensureGeneralSubject().created).toBe(false);
+  });
+
   it('连续调用幂等：不会建出第二个 general', async () => {
     const subjectsRepo = await import('../subjects-repo');
     await emptySubjects();

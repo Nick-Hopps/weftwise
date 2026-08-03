@@ -7,6 +7,7 @@ import { getRawDb } from '@/server/db/client';
 import { vaultPath } from '@/server/config/env';
 import { commitVaultChanges } from '@/server/git/git-service';
 import { rebuildPageIndex } from '@/server/wiki/indexer';
+import * as subjectsRepo from '@/server/db/repos/subjects-repo';
 import { SubjectError } from '@/server/db/repos/subjects-repo';
 import { acquireVaultLock } from '@/server/wiki/vault-mutex';
 import {
@@ -212,6 +213,9 @@ export async function POST(request: NextRequest) {
 
 async function resetAllSubjects(now: string): Promise<NextResponse> {
   const sqlite = getRawDb();
+  // 全局 reset 保留 general 行、重建它的 stub 页，还拿它的 id 当 vault staging marker。
+  // general 自 2026-08-03 起可被用户删除，所以先把它补回来再进维护事务。
+  subjectsRepo.ensureGeneralSubject();
   const releaseVault = await acquireVaultLock();
   let maintenanceStarted = false;
   let recoveryPending = false;

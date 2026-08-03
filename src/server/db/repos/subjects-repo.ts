@@ -100,10 +100,38 @@ export interface EnsureDefaultSubjectResult {
   created: boolean;
 }
 
+/** 在已开启的事务内插一行空 general（不建 vault 目录、不生成 stub 页）。 */
+function insertGeneralSubject(sqlite: ReturnType<typeof getRawDb>): Subject {
+  const now = new Date().toISOString();
+  const subject: Subject = {
+    id: randomUUID(),
+    slug: GENERAL_SUBJECT_SLUG,
+    name: DEFAULT_SUBJECT_NAME,
+    description: '',
+    augmentationLevel: 'standard',
+    createdAt: now,
+    updatedAt: now,
+  };
+  sqlite
+    .prepare(
+      `INSERT INTO subjects (id, slug, name, description, augmentation_level, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      subject.id,
+      subject.slug,
+      subject.name,
+      subject.description,
+      subject.augmentationLevel,
+      subject.createdAt,
+      subject.updatedAt,
+    );
+  return subject;
+}
+
 /**
  * 保证「至少有一个 project」这个不变量：零 project 时建一个 slug 为
- * `general` 的空 project（只插一行 DB，不建 vault 目录、不生成 stub 页，
- * 与 `POST /api/subjects` 手动新建的形态一致）。
+ * `general` 的空 project，形态与 `POST /api/subjects` 手动新建完全一致。
  *
  * 非零时不做任何写入：优先返回 general，general 不存在则返回列表第一个
  * ——「general 缺失」在 general 可删之后是合法状态，不得据此补建。
@@ -115,44 +143,31 @@ export function ensureDefaultSubject(): EnsureDefaultSubjectResult {
   const sqlite = getRawDb();
   const ensure = sqlite.transaction((): EnsureDefaultSubjectResult => {
     const existing = sqlite
+      .prepare(`SELECT id FROM subjects ORDER BY name ASC`)
+      .all() as Array<{ id: string }>;
+    if (existing.length > 0) {
+      return { subject: getFallbackSubject()!, created: false };
+    }
+    return { subject: insertGeneralSubject(sqlite), created: true };
+  });
+  return ensure.immediate();
+}
+
+/**
+ * 保证「**slug 为 general 的行**存在」——与 `ensureDefaultSubject` 不同，
+ * 即使已有其他 project 也会补建。唯一使用方是全局 `/api/reset`：它保留 general 行、
+ * 重建它的 stub 页、并拿它的 id 当 vault staging marker，这三件事都需要具体的 general。
+ */
+export function ensureGeneralSubject(): EnsureDefaultSubjectResult {
+  const sqlite = getRawDb();
+  const ensure = sqlite.transaction((): EnsureDefaultSubjectResult => {
+    const existing = sqlite
       .prepare(`SELECT id FROM subjects WHERE slug = ?`)
       .get(GENERAL_SUBJECT_SLUG) as { id: string } | undefined;
     if (existing) {
       return { subject: getById(existing.id)!, created: false };
     }
-
-    const anyOther = sqlite
-      .prepare(`SELECT id FROM subjects ORDER BY name ASC LIMIT 1`)
-      .get() as { id: string } | undefined;
-    if (anyOther) {
-      return { subject: getById(anyOther.id)!, created: false };
-    }
-
-    const now = new Date().toISOString();
-    const subject: Subject = {
-      id: randomUUID(),
-      slug: GENERAL_SUBJECT_SLUG,
-      name: DEFAULT_SUBJECT_NAME,
-      description: '',
-      augmentationLevel: 'standard',
-      createdAt: now,
-      updatedAt: now,
-    };
-    sqlite
-      .prepare(
-        `INSERT INTO subjects (id, slug, name, description, augmentation_level, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        subject.id,
-        subject.slug,
-        subject.name,
-        subject.description,
-        subject.augmentationLevel,
-        subject.createdAt,
-        subject.updatedAt,
-      );
-    return { subject, created: true };
+    return { subject: insertGeneralSubject(sqlite), created: true };
   });
   return ensure.immediate();
 }
