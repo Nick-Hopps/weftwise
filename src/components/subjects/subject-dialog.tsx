@@ -248,6 +248,7 @@ function EditSubjectBody({
   const queryClient = useQueryClient();
   const router = useRouter();
   const { id: currentSubjectId } = useCurrentSubject();
+  const switchSubject = useSwitchSubject();
 
   const { data: subjects = [] } = useQuery({
     queryKey: SUBJECTS_QUERY_KEY,
@@ -288,9 +289,23 @@ function EditSubjectBody({
 
   const deleteMutation = useMutation({
     mutationFn: deleteSubject,
-    onSuccess: () => {
+    onSuccess: ({ subjectId: deletedId, replacement }) => {
+      // 删掉最后一个 project 时服务端自动补出接任者：先乐观写进列表缓存，
+      // 否则后台 refetch 未回来前 SubjectsBootstrap 会把切换目标当"悬空选择"重置掉。
+      const remaining = queryClient.getQueryData<SubjectListEntry[]>(SUBJECTS_QUERY_KEY) ?? [];
+      const nextList = replacement
+        ? [replacement]
+        : remaining.filter((s) => s.id !== deletedId);
+      queryClient.setQueryData<SubjectListEntry[]>(SUBJECTS_QUERY_KEY, nextList);
       queryClient.invalidateQueries({ queryKey: SUBJECTS_QUERY_KEY });
       onClose();
+
+      // 删的是当前 active project 时必须显式切走：留着悬空的 currentSubjectId
+      // 会让侧栏/图/搜索各自拉空数据。非 active 则维持用户当前所在位置。
+      if (deletedId === currentSubjectId) {
+        const next = replacement ?? nextList[0];
+        if (next) switchSubject({ id: next.id, slug: next.slug }, { navigateTo: '/' });
+      }
     },
     onError: (err: Error) => {
       setError(err.message);
@@ -306,10 +321,6 @@ function EditSubjectBody({
       </>
     );
   }
-
-  const isActive = subject.id === currentSubjectId;
-  // 允许删除非空 subject（级联清理由后端处理）；仅 active 与 general 仍禁删。
-  const canDelete = !isActive && subject.slug !== 'general';
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -392,37 +403,28 @@ function EditSubjectBody({
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-foreground-tertiary">
           {t('subjects.dialog.dangerZone')}
         </p>
-        {canDelete ? (
-          <>
-            {confirmArmed && (
-              <p className="mb-2 text-xs text-danger">
-                {t('subjects.dialog.deleteWarning', { name: subject.name, count: subject.pageCount })}
-              </p>
-            )}
-            <Button
-              intent={confirmArmed ? 'danger' : 'outline'}
-              size="sm"
-              type="button"
-              loading={deleteMutation.isPending}
-              onClick={() => {
-                if (!confirmArmed) {
-                  setConfirmArmed(true);
-                  return;
-                }
-                deleteMutation.mutate(subject.id);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {confirmArmed ? t('subjects.dialog.confirmDelete') : t('subjects.dialog.delete')}
-            </Button>
-          </>
-        ) : (
-          <p className="text-xs text-foreground-tertiary">
-            {subject.slug === 'general'
-              ? t('subjects.dialog.generalProtected')
-              : t('subjects.dialog.activeProtected')}
+        {/* 任何 project 都可删（含 general 与当前 active）：删完为零时服务端补出新 general。 */}
+        {confirmArmed && (
+          <p className="mb-2 text-xs text-danger">
+            {t('subjects.dialog.deleteWarning', { name: subject.name, count: subject.pageCount })}
           </p>
         )}
+        <Button
+          intent={confirmArmed ? 'danger' : 'outline'}
+          size="sm"
+          type="button"
+          loading={deleteMutation.isPending}
+          onClick={() => {
+            if (!confirmArmed) {
+              setConfirmArmed(true);
+              return;
+            }
+            deleteMutation.mutate(subject.id);
+          }}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          {confirmArmed ? t('subjects.dialog.confirmDelete') : t('subjects.dialog.delete')}
+        </Button>
       </div>
     </>
   );

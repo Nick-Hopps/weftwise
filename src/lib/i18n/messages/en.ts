@@ -209,8 +209,6 @@ export const en = {
     'This permanently deletes “{name}” and its {count} pages and all sources. This can’t be undone.',
   'subjects.dialog.confirmDelete': 'Click again to confirm',
   'subjects.dialog.delete': 'Delete subject',
-  'subjects.dialog.generalProtected': 'The general subject can’t be deleted.',
-  'subjects.dialog.activeProtected': 'This subject is currently active. Switch to another subject before deleting.',
   'augmentation.label': 'Augmentation level',
   'augmentation.off.label': 'Off',
   'augmentation.off.helper': 'Faithful only',
