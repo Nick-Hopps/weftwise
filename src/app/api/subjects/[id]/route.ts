@@ -5,7 +5,7 @@ import { SubjectError } from '@/server/db/repos/subjects-repo';
 import { requireAuth, requireCsrf } from '@/server/middleware/auth';
 import { vaultPath } from '@/server/config/env';
 import { commitVaultChanges } from '@/server/git/git-service';
-import { AugmentationLevelSchema } from '@/lib/contracts';
+import { AugmentationLevelSchema, type Subject } from '@/lib/contracts';
 import { acquireVaultLock } from '@/server/wiki/vault-mutex';
 import {
   stageVaultPaths,
@@ -99,6 +99,8 @@ export async function DELETE(request: NextRequest, { params }: SubjectRouteConte
   let staged: ReturnType<typeof stageVaultPaths> | null = null;
   let claim: subjectsRepo.SubjectMaintenanceClaim | null = null;
   let recoveryPending = false;
+  // 删完为零时自动补出的接任 project（仅新建时才有值），交给前端切过去。
+  let replacement: Subject | null = null;
   try {
     // 先在 DB 内检查 active jobs / 入站引用并领取维护权，再移动任何目录。
     claim = subjectsRepo.beginDeleteMaintenance(id);
@@ -115,6 +117,9 @@ export async function DELETE(request: NextRequest, { params }: SubjectRouteConte
     subjectsRepo.deleteWithContents(id, {
       expectedMutationEpoch: claim.mutationEpoch,
     });
+    // 「至少留一个 project」的不变量：仍在 vault 锁内补齐，「零 project」态对前端不可见。
+    const ensured = subjectsRepo.ensureDefaultSubject();
+    if (ensured.created) replacement = ensured.subject;
   } catch (err) {
     let failure = err;
     recoveryPending = err instanceof VaultMaintenanceRestoreError;
@@ -156,5 +161,9 @@ export async function DELETE(request: NextRequest, { params }: SubjectRouteConte
     releaseVault();
   }
 
-  return NextResponse.json({ ok: true, subjectId: id });
+  return NextResponse.json({
+    ok: true,
+    subjectId: id,
+    ...(replacement ? { replacement } : {}),
+  });
 }
